@@ -85,9 +85,17 @@ export const BrowseCard: React.FC<BrowseCardProps> = React.memo(({
                   e.stopPropagation();
                   speakClient(localCard.frontText, frontLang);
                 }}
-                className="absolute top-3 left-3 p-2.5 rounded-full bg-white/90 backdrop-blur-sm text-primary hover:bg-primary hover:text-white transition-all shadow-sm cursor-pointer border border-outline-variant/10"
+                className="absolute top-3 left-3 h-8 px-2 rounded-xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm text-primary hover:bg-primary hover:text-white transition-all shadow-xs cursor-pointer border border-outline-variant/20 flex items-center gap-1 select-none"
+                title={typeof window !== "undefined" && localStorage.getItem("settings_review_voice_target") === "secondary" ? "استمع للصوت الثانوي (2)" : "استمع للصوت الأساسي (1)"}
               >
-                <Volume2 className="w-4.5 h-4.5" />
+                <Volume2 className="w-3.5 h-3.5" />
+                <span className={`w-3.5 h-3.5 rounded text-[9px] font-black flex items-center justify-center ${
+                  typeof window !== "undefined" && localStorage.getItem("settings_review_voice_target") === "secondary"
+                    ? "bg-amber-500 text-slate-950"
+                    : "bg-blue-600 text-white"
+                }`}>
+                  {typeof window !== "undefined" && localStorage.getItem("settings_review_voice_target") === "secondary" ? "2" : "1"}
+                </span>
               </button>
             </div>
             

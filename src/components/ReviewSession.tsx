@@ -1173,18 +1173,25 @@ const StudyCard: React.FC<StudyCardProps> = ({
                 <span>مفهوم تعليمي</span>
               </div>
             )}
-            {/* Audio Buttons - Glassmorphic, neutral and non-distracting over image */}
-            <div className="absolute top-3 left-3 flex items-center gap-1.5 z-30 pointer-events-auto">
+            {/* Audio Buttons with square badge indicator 1 or 2 */}
+            <div className="absolute top-3 left-3 flex items-center gap-1.5 z-30 pointer-events-auto select-none">
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   onPlayPronunciation(localCard.frontText, localCard.frontLang);
                 }}
-                className="p-2.5 rounded-xl bg-black/40 hover:bg-black/60 text-white backdrop-blur-md transition-all shadow-xs cursor-pointer border border-white/20 flex items-center justify-center active:scale-95"
-                title={reviewVoiceTarget === "secondary" ? "استمع للنطق المعتمد (الصوت الثانوي)" : "استمع للنطق المعتمد (الصوت الأساسي)"}
+                className="h-9 px-2.5 rounded-xl bg-black/50 hover:bg-black/70 text-white backdrop-blur-md transition-all shadow-xs cursor-pointer border border-white/20 flex items-center gap-1.5 active:scale-95 group"
+                title={reviewVoiceTarget === "secondary" ? "استمع للنطق المعتمد: الصوت الثانوي (2)" : "استمع للنطق المعتمد: الصوت الأساسي (1)"}
               >
-                <Volume2 className="w-4.5 h-4.5" />
+                <Volume2 className="w-4 h-4 text-white" />
+                <span className={`w-4 h-4 rounded text-[10px] font-black flex items-center justify-center border shadow-xs ${
+                  reviewVoiceTarget === "secondary"
+                    ? "bg-amber-500 text-slate-950 border-amber-300"
+                    : "bg-blue-600 text-white border-blue-400"
+                }`}>
+                  {reviewVoiceTarget === "secondary" ? "2" : "1"}
+                </span>
               </button>
               {onPlaySecondaryPronunciation && (
                 <button
@@ -1193,10 +1200,17 @@ const StudyCard: React.FC<StudyCardProps> = ({
                     e.stopPropagation();
                     onPlaySecondaryPronunciation(localCard.frontText, localCard.frontLang);
                   }}
-                  className="p-2.5 rounded-xl bg-black/40 hover:bg-black/60 text-white/90 backdrop-blur-md transition-all shadow-xs cursor-pointer border border-white/20 flex items-center justify-center relative active:scale-95"
-                  title={reviewVoiceTarget === "secondary" ? "استمع للنطق البديل (الصوت الأساسي)" : "استمع للنطق البديل (الصوت الثانوي)"}
+                  className="h-9 px-2 rounded-xl bg-black/40 hover:bg-black/60 text-white/90 backdrop-blur-md transition-all shadow-xs cursor-pointer border border-white/20 flex items-center gap-1 active:scale-95"
+                  title={reviewVoiceTarget === "secondary" ? "استمع للصوت الأساسي (1)" : "استمع للصوت الثانوي (2)"}
                 >
-                  <Volume2 className="w-4.5 h-4.5" />
+                  <Volume2 className="w-3.5 h-3.5 opacity-80" />
+                  <span className={`w-3.5 h-3.5 rounded text-[9px] font-black flex items-center justify-center border shadow-xs ${
+                    reviewVoiceTarget === "secondary"
+                      ? "bg-blue-600 text-white border-blue-400"
+                      : "bg-amber-500 text-slate-950 border-amber-300"
+                  }`}>
+                    {reviewVoiceTarget === "secondary" ? "1" : "2"}
+                  </span>
                 </button>
               )}
             </div>
@@ -1441,22 +1455,29 @@ const StudyCard: React.FC<StudyCardProps> = ({
                     <X className="w-4.5 h-4.5" />
                   </button>
 
-                  {/* Audio Buttons on Left (ع اليسار) */}
-                  <div className="flex items-center gap-2">
+                  {/* Audio Buttons on Left (ع اليسار) with 1 / 2 badge box */}
+                  <div className="flex items-center gap-2 select-none">
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         onPlayPronunciation(localCard.frontText, localCard.frontLang);
                       }}
-                      className={`p-2.5 rounded-xl transition-all cursor-pointer shadow-3xs flex items-center justify-center ${
+                      className={`h-9 px-2.5 rounded-xl transition-all cursor-pointer shadow-3xs flex items-center gap-1.5 ${
                         isDark
-                          ? "bg-slate-800 hover:bg-slate-700 text-indigo-400 hover:text-indigo-300 border border-slate-700"
+                          ? "bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700"
                           : "bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20"
                       }`}
-                      title={reviewVoiceTarget === "secondary" ? "استمع للنطق المعتمد (الصوت الثانوي)" : "استمع للنطق المعتمد (الصوت الأساسي)"}
+                      title={reviewVoiceTarget === "secondary" ? "استمع للنطق المعتمد: الصوت الثانوي (2)" : "استمع للنطق المعتمد: الصوت الأساسي (1)"}
                     >
-                      <Volume2 className="w-4.5 h-4.5" />
+                      <Volume2 className="w-4 h-4" />
+                      <span className={`w-4 h-4 rounded text-[10px] font-black flex items-center justify-center border shadow-xs ${
+                        reviewVoiceTarget === "secondary"
+                          ? "bg-amber-500 text-slate-950 border-amber-300"
+                          : "bg-blue-600 text-white border-blue-400"
+                      }`}>
+                        {reviewVoiceTarget === "secondary" ? "2" : "1"}
+                      </span>
                     </button>
                     {onPlaySecondaryPronunciation && (
                       <button
@@ -1465,14 +1486,21 @@ const StudyCard: React.FC<StudyCardProps> = ({
                           e.stopPropagation();
                           onPlaySecondaryPronunciation(localCard.frontText, localCard.frontLang);
                         }}
-                        className={`p-2.5 rounded-xl transition-all cursor-pointer shadow-3xs flex items-center justify-center ${
+                        className={`h-9 px-2 rounded-xl transition-all cursor-pointer shadow-3xs flex items-center gap-1 ${
                           isDark
-                            ? "bg-indigo-950 hover:bg-indigo-900 text-indigo-300 hover:text-white border border-indigo-800/60"
+                            ? "bg-indigo-950 hover:bg-indigo-900 text-indigo-300 border border-indigo-800/60"
                             : "bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-700 border border-indigo-200"
                         }`}
-                        title={reviewVoiceTarget === "secondary" ? "استمع للنطق البديل (الصوت الأساسي)" : "استمع للنطق البديل (الصوت الثانوي)"}
+                        title={reviewVoiceTarget === "secondary" ? "استمع للصوت الأساسي (1)" : "استمع للصوت الثانوي (2)"}
                       >
-                        <Volume2 className="w-4.5 h-4.5" />
+                        <Volume2 className="w-3.5 h-3.5 opacity-80" />
+                        <span className={`w-3.5 h-3.5 rounded text-[9px] font-black flex items-center justify-center border shadow-xs ${
+                          reviewVoiceTarget === "secondary"
+                            ? "bg-blue-600 text-white border-blue-400"
+                            : "bg-amber-500 text-slate-950 border-amber-300"
+                        }`}>
+                          {reviewVoiceTarget === "secondary" ? "1" : "2"}
+                        </span>
                       </button>
                     )}
                   </div>
@@ -5152,8 +5180,24 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           }}
                           hideFront={hideFront}
                           hideBack={hideBack}
-                          onPlayPronunciation={(t, l) => playPrimaryPronunciation(t, l)}
-                          onPlaySecondaryPronunciation={isSecondaryAudioEnabled ? playSecondaryPronunciation : undefined}
+                          onPlayPronunciation={(t, l) => {
+                            if (reviewVoiceTarget === "secondary") {
+                              playSecondaryPronunciation(t, l);
+                            } else {
+                              playPrimaryPronunciation(t, l);
+                            }
+                          }}
+                          onPlaySecondaryPronunciation={
+                            isSecondaryAudioEnabled 
+                              ? (t, l) => {
+                                  if (reviewVoiceTarget === "secondary") {
+                                    playPrimaryPronunciation(t, l);
+                                  } else {
+                                    playSecondaryPronunciation(t, l);
+                                  }
+                                }
+                              : undefined
+                          }
                           getSafeImageStyle={getSafeImageStyle}
                           onClassicKnow={handleClassicKnow}
                           showPluralOverride={classicShowPlural}
