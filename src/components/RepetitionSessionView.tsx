@@ -175,34 +175,204 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
     const loadAudio = async () => {
       try {
         const langShort = frontLang.toLowerCase().split("-")[0].split("_")[0];
+        const defaultPrimary = langShort === "de" ? "de_DE-thorsten-medium" : langShort === "ar" ? "ar_JO-kareem-medium" : "en_US-lessac-medium";
         const voiceKey = reviewVoiceTarget === "secondary"
           ? (localStorage.getItem(`settings_secondary_piper_model_${langShort}`) || localStorage.getItem("settings_secondary_piper_model") || "google")
-          : (localStorage.getItem(`settings_primary_piper_model_${langShort}`) || localStorage.getItem("settings_primary_piper_model") || (langShort === "de" ? "de_DE-thorsten-medium" : "en_US-lessac-medium"));
+          : (localStorage.getItem(`settings_primary_piper_model_${langShort}`) || localStorage.getItem("settings_primary_piper_model") || defaultPrimary);
 
         let url = "";
+        let foundBlob: Blob | null = null;
 
-        // Check if it's Gradio
-        const isGradioVoice = voiceKey.startsWith("gradio:") || voiceKey.startsWith("gradio_") || ["ryan", "serena", "vivian", "aiden", "eric", "dylan", "uncle_fu", "ono_anna", "sohee"].includes(voiceKey.toLowerCase());
+        // 1. TIER 1: Check if card has explicit attached audio URL (card.frontAudioUrl)
+        if (card.frontAudioUrl && card.frontAudioUrl.trim()) {
+          try {
+            const resp = await fetch(card.frontAudioUrl);
+            if (resp.ok) {
+              const b = await resp.blob();
+              if (b && b.size > 100) {
+                foundBlob = b;
+                url = URL.createObjectURL(b);
+              }
+            }
+          } catch (e) {
+            url = card.frontAudioUrl;
+          }
+        }
 
-        if (isGradioVoice) {
-          const gradioUrl = localStorage.getItem("settings_gradio_tts_url") || "http://192.168.0.159:7860";
-          const blob = await fetchGradioAudioBlob(frontText, voiceKey.replace("gradio:", ""), frontLang, gradioUrl);
-          if (blob && !isCancelled) {
-            setAudioBlob(blob);
-            url = URL.createObjectURL(blob);
-            const { peaks: realPeaks, duration: realDuration } = await extractPeaksFromBlob(blob, 90);
-            if (!isCancelled) {
-              if (realPeaks.length > 0) setWavePeaks(realPeaks);
-              if (realDuration > 0) setDuration(realDuration);
+        // 2. TIER 2: Check memory cache (ttsCache)
+        if (!url && !foundBlob) {
+          const cacheKeys = [
+            `${frontText}_${frontLang}_${voiceKey}`,
+            `${frontText}_${frontLang}`,
+            `${frontText}_${langShort}`,
+            `gradio:${voiceKey.replace(/^gradio[:_]/i, "")}_${frontText}_${frontLang}`,
+            `${frontText}_${frontLang}_gradio:${voiceKey.replace(/^gradio[:_]/i, "")}`
+          ];
+
+          for (const k of cacheKeys) {
+            if (ttsCache[k]) {
+              const cached = ttsCache[k];
+              try {
+                const resp = await fetch(cached);
+                if (resp.ok) {
+                  const b = await resp.blob();
+                  if (b && b.size > 100) {
+                    foundBlob = b;
+                    url = cached;
+                    break;
+                  }
+                }
+              } catch (e) {
+                url = cached;
+                break;
+              }
             }
           }
         }
 
-        if (!url) {
+        // 3. TIER 3: Check Browser CacheStorage (tts-audio-cache-v1 & anki-voice-cache-v1)
+        // This instantly retrieves audio downloaded via "تنزيل الصوتيات" or cached during Face/Back review!
+        if (!url && !foundBlob && typeof window !== "undefined" && "caches" in window) {
+          const cacheNames = ["tts-audio-cache-v1", "anki-voice-cache-v1"];
+          for (const cName of cacheNames) {
+            if (url) break;
+            try {
+              const cache = await caches.open(cName);
+              // Direct URL lookup
+              const directUrls = [
+                `/api/tts?text=${encodeURIComponent(frontText)}&lang=${frontLang}&voice=${encodeURIComponent(voiceKey)}`,
+                `/api/tts?text=${encodeURIComponent(frontText)}&lang=${frontLang}`,
+                `/api/tts?text=${encodeURIComponent(frontText)}&lang=${langShort}`,
+                `/api/tts?text=${encodeURIComponent(frontText)}`
+              ];
+
+              for (const dUrl of directUrls) {
+                const matched = await cache.match(dUrl);
+                if (matched && matched.ok) {
+                  const b = await matched.blob();
+                  if (b && b.size > 100) {
+                    foundBlob = b;
+                    url = URL.createObjectURL(b);
+                    // Populate memory cache
+                    ttsCache[`${frontText}_${frontLang}_${voiceKey}`] = url;
+                    ttsCache[`${frontText}_${frontLang}`] = url;
+                    break;
+                  }
+                }
+              }
+
+              // If direct match didn't find, scan keys for matching text query
+              if (!url) {
+                const keys = await cache.keys();
+                const encodedText = encodeURIComponent(frontText);
+                const matchedReq = keys.find(req => 
+                  req.url.includes(`text=${encodedText}`) ||
+                  req.url.includes(`text=${frontText}`) ||
+                  (req.url.includes(encodedText) && (req.url.includes(frontLang) || req.url.includes(langShort)))
+                );
+                if (matchedReq) {
+                  const matched = await cache.match(matchedReq);
+                  if (matched && matched.ok) {
+                    const b = await matched.blob();
+                    if (b && b.size > 100) {
+                      foundBlob = b;
+                      url = URL.createObjectURL(b);
+                      ttsCache[`${frontText}_${frontLang}_${voiceKey}`] = url;
+                      ttsCache[`${frontText}_${frontLang}`] = url;
+                      break;
+                    }
+                  }
+                }
+              }
+            } catch (cErr) {
+              console.warn(`Error checking cache ${cName}:`, cErr);
+            }
+          }
+        }
+
+        // 4. TIER 4: If not in cache, synthesize according to user's EXACT configured engine
+        const isGradioVoice = voiceKey.startsWith("gradio:") || voiceKey.startsWith("gradio_") || ["ryan", "serena", "vivian", "aiden", "eric", "dylan", "uncle_fu", "ono_anna", "sohee"].includes(voiceKey.toLowerCase());
+        const ttsExecutionMode = localStorage.getItem("settings_tts_execution_mode") || "server";
+
+        // If user explicitly configured Gradio engine
+        if (!url && !foundBlob && isGradioVoice) {
+          const gradioUrl = localStorage.getItem("settings_gradio_tts_url") || "http://192.168.0.159:7860";
+          const voiceName = voiceKey.replace(/^gradio[:_]/i, "").trim() || "ryan";
+          const customGradioLang = reviewVoiceTarget === "secondary"
+            ? localStorage.getItem(`settings_secondary_gradio_lang_${langShort}`)
+            : localStorage.getItem(`settings_primary_gradio_lang_${langShort}`);
+          const targetGradioLang = customGradioLang || frontLang;
+          const blob = await fetchGradioAudioBlob(frontText, voiceName, targetGradioLang, gradioUrl);
+          if (blob && blob.size > 100) {
+            foundBlob = blob;
+            url = URL.createObjectURL(blob);
+            ttsCache[`${frontText}_${frontLang}_${voiceKey}`] = url;
+            ttsCache[`${frontText}_${frontLang}`] = url;
+            if (typeof window !== "undefined" && "caches" in window) {
+              try {
+                const cache = await caches.open("tts-audio-cache-v1");
+                await cache.put(`/api/tts?text=${encodeURIComponent(frontText)}&lang=${frontLang}&voice=${encodeURIComponent(voiceKey)}`, new Response(blob.slice(0), {
+                  headers: { "Content-Type": blob.type || "audio/wav" }
+                }));
+              } catch (e) {}
+            }
+          }
+        }
+
+        // If user explicitly configured local Piper WASM execution mode
+        if (!url && !foundBlob && !isGradioVoice && ttsExecutionMode === "local") {
+          try {
+            const piperWeb = await import("@mintplex-labs/piper-tts-web");
+            if (piperWeb?.TtsSession?.WASM_LOCATIONS) {
+              piperWeb.TtsSession.WASM_LOCATIONS.onnxWasm = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/";
+            }
+            let targetVoiceId = (voiceKey || "").replace(/\.onnx$/, "").trim();
+            if (!targetVoiceId || targetVoiceId === "webspeech" || targetVoiceId === "local" || targetVoiceId === "google") {
+              if (langShort === "de") targetVoiceId = "de_DE-thorsten-medium";
+              else if (langShort === "ar") targetVoiceId = "ar_JO-kareem-medium";
+              else targetVoiceId = "en_US-lessac-medium";
+            }
+            if (piperWeb?.TtsSession) {
+              piperWeb.TtsSession._instance = null;
+            }
+            const blob = await piperWeb.predict({
+              text: frontText,
+              voiceId: targetVoiceId as any
+            });
+            if (blob && blob.size > 100) {
+              foundBlob = blob;
+              url = URL.createObjectURL(blob);
+              ttsCache[`${frontText}_${frontLang}_${voiceKey}`] = url;
+              ttsCache[`${frontText}_${frontLang}`] = url;
+              if (typeof window !== "undefined" && "caches" in window) {
+                try {
+                  const cache = await caches.open("tts-audio-cache-v1");
+                  await cache.put(`/api/tts?text=${encodeURIComponent(frontText)}&lang=${frontLang}&voice=${encodeURIComponent(voiceKey)}`, new Response(blob.slice(0), {
+                    headers: { "Content-Type": "audio/wav" }
+                  }));
+                } catch (e) {}
+              }
+            }
+          } catch (piperErr) {
+            console.warn("Local Piper generation error:", piperErr);
+          }
+        }
+
+        // Standard preloadTTS / Server API TTS fallback
+        if (!url && !foundBlob) {
           url = await preloadTTS(frontText, frontLang, voiceKey);
         }
 
         if (isCancelled) return;
+
+        if (foundBlob) {
+          setAudioBlob(foundBlob);
+          const { peaks: realPeaks, duration: realDuration } = await extractPeaksFromBlob(foundBlob, 90);
+          if (!isCancelled) {
+            if (realPeaks.length > 0) setWavePeaks(realPeaks);
+            if (realDuration > 0) setDuration(realDuration);
+          }
+        }
 
         if (url) {
           setAudioUrl(url);
@@ -215,22 +385,24 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
             }
           });
 
-          // Try to fetch blob for accurate waveform peaks and exact duration
-          try {
-            const resp = await fetch(url);
-            if (resp.ok) {
-              const blob = await resp.blob();
-              if (!isCancelled) {
-                setAudioBlob(blob);
-                const { peaks: realPeaks, duration: realDuration } = await extractPeaksFromBlob(blob, 90);
-                if (!isCancelled) {
-                  if (realPeaks.length > 0) setWavePeaks(realPeaks);
-                  if (realDuration > 0) setDuration(realDuration);
+          // If blob wasn't extracted yet, fetch from url to get exact peaks
+          if (!foundBlob) {
+            try {
+              const resp = await fetch(url);
+              if (resp.ok) {
+                const blob = await resp.blob();
+                if (!isCancelled && blob && blob.size > 100) {
+                  setAudioBlob(blob);
+                  const { peaks: realPeaks, duration: realDuration } = await extractPeaksFromBlob(blob, 90);
+                  if (!isCancelled) {
+                    if (realPeaks.length > 0) setWavePeaks(realPeaks);
+                    if (realDuration > 0) setDuration(realDuration);
+                  }
                 }
               }
+            } catch (blobErr) {
+              console.warn("Could not fetch blob for waveform visualization:", blobErr);
             }
-          } catch (blobErr) {
-            console.warn("Could not fetch blob for waveform visualization:", blobErr);
           }
         }
       } catch (err) {

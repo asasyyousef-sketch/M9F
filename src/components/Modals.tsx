@@ -976,6 +976,25 @@ export const playPiperLocalWasm = async (
     updateProgress(5, "فك وتجهيز الإشارة الصوتية الخام WAV");
     stopActiveAudio();
     const objectUrl = URL.createObjectURL(audioBlob);
+
+    // Save generated Piper audio to in-memory ttsCache and persistent CacheStorage for instant reuse in Repetition & Face/Back modes
+    const cleanCacheKey = voiceModel ? `${cleanText}_${lang}_${voiceModel}` : `${cleanText}_${lang}`;
+    ttsCache[cleanCacheKey] = objectUrl;
+    ttsCache[`${cleanText}_${lang}_${targetVoiceId}`] = objectUrl;
+    ttsCache[`${cleanText}_${lang}`] = objectUrl;
+
+    if (typeof window !== "undefined" && "caches" in window) {
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        const ttsUrl = `/api/tts?text=${encodeURIComponent(cleanText)}&lang=${lang}&voice=${encodeURIComponent(voiceModel || targetVoiceId)}`;
+        await cache.put(ttsUrl, new Response(audioBlob.slice(0), {
+          headers: { "Content-Type": "audio/wav" }
+        }));
+      } catch (cErr) {
+        console.warn("Could not cache Piper local audio to CacheStorage:", cErr);
+      }
+    }
+
     const audio = new Audio(objectUrl);
     currentActiveAudio = audio;
 
@@ -983,12 +1002,10 @@ export const playPiperLocalWasm = async (
     updateProgress(6, "تشغيل الصوت المولد عبر سماعة الجهاز");
 
     audio.onended = () => {
-      URL.revokeObjectURL(objectUrl);
       if (onEnd) onEnd();
     };
 
     audio.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
       const errStr = `خطأ في مشغل الصوت بالمتصفح عند تشغيل الملف المولد (${targetVoiceId})`;
       if (onError) onError(errStr);
     };
