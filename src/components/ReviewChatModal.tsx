@@ -820,16 +820,16 @@ const ChatImageCard: React.FC<{
     );
   }
 
-  // 2. Medium Layout (Aspect 16:9 contextual illustration)
+  // 2. Medium Layout (Aspect 4:3 balanced contextual illustration)
   if (size === "medium") {
     const speakTargetText = item.keyword || item.caption || item.query;
     return (
       <div
-        className="w-full my-2.5 rounded-2xl overflow-hidden border border-slate-700/80 bg-slate-900/90 shadow-md group transition-all select-none"
+        className="w-full max-w-md mx-auto my-2.5 rounded-2xl overflow-hidden border border-slate-700/80 bg-slate-900/90 shadow-md group transition-all select-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div
-          className="relative w-full h-44 sm:h-52 bg-slate-950/90 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing select-none"
+          className="relative w-full aspect-[4/3] max-h-[280px] bg-slate-950/90 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing select-none"
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={(e) => {
             e.stopPropagation();
@@ -900,15 +900,15 @@ const ChatImageCard: React.FC<{
     );
   }
 
-  // 3. Large Layout (Full Hero Image with rich caption and audio)
+  // 3. Large Layout (Balanced 4:3 Proportion Hero Image with rich caption and audio)
   const speakTargetText = item.keyword || item.caption || item.query;
   return (
     <div
-      className="w-full my-3 rounded-2xl overflow-hidden border border-slate-700/80 bg-slate-900/90 shadow-xl group transition-all select-none"
+      className="w-full max-w-lg mx-auto my-3 rounded-2xl overflow-hidden border border-slate-700/80 bg-slate-900/90 shadow-xl group transition-all select-none"
       onClick={(e) => e.stopPropagation()}
     >
       <div
-        className="relative w-full h-64 sm:h-80 bg-slate-950/90 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing select-none"
+        className="relative w-full aspect-[4/3] max-h-[380px] bg-slate-950/90 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing select-none"
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => {
           e.stopPropagation();
@@ -1466,15 +1466,10 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
     localStorage.setItem("settings_review_chat_model", selectedModel);
   }, [selectedModel]);
 
-  // Save voice selection and sync with global voice if applicable
+  // Save voice selection purely for Chat without touching global card settings
   useEffect(() => {
     localStorage.setItem("settings_review_chat_voice", selectedVoice);
-    if (selectedVoice !== "default") {
-      const cardLang = (card.frontLang || "de").toLowerCase().split("-")[0].split("_")[0];
-      localStorage.setItem(`settings_primary_piper_model_${cardLang}`, selectedVoice);
-      localStorage.setItem("settings_primary_piper_model", selectedVoice);
-    }
-  }, [selectedVoice, card.frontLang]);
+  }, [selectedVoice]);
 
   useEffect(() => {
     localStorage.setItem("settings_review_chat_length", responseLength);

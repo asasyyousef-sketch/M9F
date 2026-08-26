@@ -396,12 +396,15 @@ export const fetchAudioBlob = async (text: string, lang: string, voice?: string)
   if (!cleanText) return null;
 
   let effectiveVoice = voice;
+  const langShort = (lang || "de").toLowerCase().split("-")[0].split("_")[0];
   if (!effectiveVoice) {
-    const langShort = (lang || "de").toLowerCase().split("-")[0].split("_")[0];
-    const defaultPrimary = langShort === "de" ? "de_DE-thorsten-medium" : langShort === "ar" ? "ar_JO-kareem-medium" : "en_US-lessac-medium";
-    effectiveVoice = localStorage.getItem(`settings_primary_piper_model_${langShort}`) || 
-                     localStorage.getItem("settings_primary_piper_model") || 
-                     defaultPrimary;
+    const reviewVoiceTarget = localStorage.getItem("settings_review_voice_target") || "primary";
+    if (reviewVoiceTarget === "secondary") {
+      effectiveVoice = localStorage.getItem(`settings_secondary_piper_model_${langShort}`) || "google";
+    } else {
+      const defaultPrimary = langShort === "de" ? "de_DE-thorsten-medium" : langShort === "ar" ? "ar_JO-kareem-medium" : "en_US-lessac-medium";
+      effectiveVoice = localStorage.getItem(`settings_primary_piper_model_${langShort}`) || defaultPrimary;
+    }
   }
 
   if (effectiveVoice === "none" || effectiveVoice === "off" || effectiveVoice === "disabled") {
@@ -453,12 +456,15 @@ export const preloadTTS = async (text: string, lang: string, voice?: string): Pr
   if (!cleanText) return "";
 
   let effectiveVoice = voice;
+  const langShort = (lang || "de").toLowerCase().split("-")[0].split("_")[0];
   if (!effectiveVoice) {
-    const langShort = (lang || "de").toLowerCase().split("-")[0].split("_")[0];
-    const defaultPrimary = langShort === "de" ? "de_DE-thorsten-medium" : langShort === "ar" ? "ar_JO-kareem-medium" : "en_US-lessac-medium";
-    effectiveVoice = localStorage.getItem(`settings_primary_piper_model_${langShort}`) || 
-                     localStorage.getItem("settings_primary_piper_model") || 
-                     defaultPrimary;
+    const reviewVoiceTarget = localStorage.getItem("settings_review_voice_target") || "primary";
+    if (reviewVoiceTarget === "secondary") {
+      effectiveVoice = localStorage.getItem(`settings_secondary_piper_model_${langShort}`) || "google";
+    } else {
+      const defaultPrimary = langShort === "de" ? "de_DE-thorsten-medium" : langShort === "ar" ? "ar_JO-kareem-medium" : "en_US-lessac-medium";
+      effectiveVoice = localStorage.getItem(`settings_primary_piper_model_${langShort}`) || defaultPrimary;
+    }
   }
 
   if (effectiveVoice === "none" || effectiveVoice === "off" || effectiveVoice === "disabled") {
@@ -1119,23 +1125,17 @@ export const speakClient = async (text: string, lang: string, voice?: string) =>
   if (!cleanText) return;
   stopActiveAudio();
 
-  // Retrieve TTS execution mode (default: "local" for client-side hardware generation)
-  const ttsExecutionMode = localStorage.getItem("settings_tts_execution_mode") || "local";
+  const langShort = (lang || "de").toLowerCase().split("-")[0].split("_")[0];
+  const reviewVoiceTarget = localStorage.getItem("settings_review_voice_target") || "primary";
 
   // Dynamically resolve voice model if not explicitly passed
   let effectiveVoice = voice;
   if (!effectiveVoice) {
-    const reviewVoiceTarget = localStorage.getItem("settings_review_voice_target") || "primary";
-    const langShort = (lang || "de").toLowerCase().split("-")[0].split("_")[0];
     if (reviewVoiceTarget === "secondary") {
-      effectiveVoice = localStorage.getItem(`settings_secondary_piper_model_${langShort}`) || 
-                       localStorage.getItem("settings_secondary_piper_model") || 
-                       "google";
+      effectiveVoice = localStorage.getItem(`settings_secondary_piper_model_${langShort}`) || "google";
     } else {
       const defaultPrimary = langShort === "de" ? "de_DE-thorsten-medium" : langShort === "ar" ? "ar_JO-kareem-medium" : "en_US-lessac-medium";
-      effectiveVoice = localStorage.getItem(`settings_primary_piper_model_${langShort}`) || 
-                       localStorage.getItem("settings_primary_piper_model") || 
-                       defaultPrimary;
+      effectiveVoice = localStorage.getItem(`settings_primary_piper_model_${langShort}`) || defaultPrimary;
     }
   }
 
@@ -1148,13 +1148,54 @@ export const speakClient = async (text: string, lang: string, voice?: string) =>
     effectiveVoice.startsWith("gradio_") ||
     ["ryan", "serena", "vivian", "aiden", "eric", "dylan", "uncle_fu", "ono_anna", "sohee"].includes(effectiveVoice.toLowerCase());
 
+  const cacheKey = effectiveVoice ? `${cleanText}_${lang}_${effectiveVoice}` : `${cleanText}_${lang}`;
+  const voiceParam = effectiveVoice ? `&voice=${encodeURIComponent(effectiveVoice)}` : "";
+  const baseUrl = `/api/tts?text=${encodeURIComponent(cleanText)}&lang=${lang}${voiceParam}`;
+
+  // 1. Check in-memory ttsCache first (instant playback for previously generated/regenerated audio)
+  const memoryCached = ttsCache[cacheKey] || ttsCache[`${cleanText}_${langShort}_${effectiveVoice}`] || ttsCache[`${cleanText}_${lang}`];
+  if (memoryCached) {
+    try {
+      const audio = new Audio(memoryCached);
+      currentActiveAudio = audio;
+      await audio.play();
+      return;
+    } catch (e) {
+      console.warn("Memory cached audio play failed, continuing:", e);
+    }
+  }
+
+  // 2. Check persistent Browser CacheStorage
+  if ("caches" in window) {
+    try {
+      const cache = await caches.open(CACHE_NAME);
+      const cachedResponse = await cache.match(baseUrl);
+      if (cachedResponse && cachedResponse.ok) {
+        const cType = cachedResponse.headers.get("content-type") || "";
+        if (cType.includes("audio")) {
+          const blob = await cachedResponse.blob();
+          if (blob.size > 100) {
+            const objectUrl = URL.createObjectURL(blob);
+            ttsCache[cacheKey] = objectUrl;
+            const audio = new Audio(objectUrl);
+            currentActiveAudio = audio;
+            await audio.play();
+            return;
+          } else {
+            await cache.delete(baseUrl);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to match in caches for play:", err);
+    }
+  }
+
   const gradioUrl = localStorage.getItem("settings_gradio_tts_url") || "http://192.168.0.159:7860";
 
-  // 1. If it is an external Gradio Qwen3-TTS voice, strictly route to Gradio engine
+  // 3. If it is an external Gradio Qwen3-TTS voice
   if (isGradioVoice) {
     const gradioVoiceName = effectiveVoice.replace(/^gradio[:_]/i, "").trim() || "ryan";
-    const langShort = (lang || "de").toLowerCase().split("-")[0].split("_")[0];
-    const reviewVoiceTarget = localStorage.getItem("settings_review_voice_target") || "primary";
     const customGradioLang = reviewVoiceTarget === "secondary"
       ? localStorage.getItem(`settings_secondary_gradio_lang_${langShort}`)
       : localStorage.getItem(`settings_primary_gradio_lang_${langShort}`);
@@ -1166,7 +1207,10 @@ export const speakClient = async (text: string, lang: string, voice?: string) =>
     return;
   }
 
-  // 2. Handle local client-side Piper synthesis directly in browser
+  // 4. Retrieve TTS execution mode (default: "local" for client-side hardware generation)
+  const ttsExecutionMode = localStorage.getItem("settings_tts_execution_mode") || "local";
+
+  // Handle local client-side Piper synthesis directly in browser
   if (ttsExecutionMode === "local" || effectiveVoice === "webspeech" || effectiveVoice === "browser_speech" || effectiveVoice === "local") {
     if (effectiveVoice === "webspeech" || effectiveVoice === "browser_speech") {
       playBrowserSynthesis(cleanText, lang);
@@ -1176,35 +1220,8 @@ export const speakClient = async (text: string, lang: string, voice?: string) =>
     return;
   }
 
-  // 3. Fallback server-side TTS for Piper / Google
-  const cacheKey = effectiveVoice ? `${cleanText}_${lang}_${effectiveVoice}` : `${cleanText}_${lang}`;
+  // 5. Fallback server-side TTS for Piper / Google
   let cachedUrl = ttsCache[cacheKey];
-
-  const voiceParam = effectiveVoice ? `&voice=${encodeURIComponent(effectiveVoice)}` : "";
-  const baseUrl = `/api/tts?text=${encodeURIComponent(cleanText)}&lang=${lang}${voiceParam}`;
-
-  if (!cachedUrl && "caches" in window) {
-    try {
-      const cache = await caches.open(CACHE_NAME);
-      const cachedResponse = await cache.match(baseUrl);
-      if (cachedResponse && cachedResponse.ok) {
-        const cType = cachedResponse.headers.get("content-type") || "";
-        if (cType.includes("audio")) {
-          const blob = await cachedResponse.blob();
-          if (blob.size > 100) {
-            cachedUrl = URL.createObjectURL(blob);
-            ttsCache[cacheKey] = cachedUrl;
-          } else {
-            await cache.delete(baseUrl);
-          }
-        } else {
-          await cache.delete(baseUrl);
-        }
-      }
-    } catch (err) {
-      console.warn("Failed to match in caches for play:", err);
-    }
-  }
 
   const playDirectNetwork = () => {
     const networkUrl = `${baseUrl}&_t=${Date.now()}`;
@@ -4544,6 +4561,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     () => localStorage.getItem("settings_primary_piper_model_en") || "en_US-lessac-medium"
   );
 
+  // Active Voice Target (Primary vs Secondary)
+  const [reviewVoiceTarget, setReviewVoiceTarget] = useState<"primary" | "secondary">(
+    () => (localStorage.getItem("settings_review_voice_target") as "primary" | "secondary") || "primary"
+  );
+
   // Secondary Voice Model states & Enable toggle for review cards
   const [enableSecondaryAudioReview, setEnableSecondaryAudioReview] = useState<boolean>(
     () => localStorage.getItem("settings_enable_secondary_audio_review") === "true"
@@ -4779,7 +4801,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       setPrimaryModelEn(modelId);
       localStorage.setItem("settings_primary_piper_model_en", modelId);
     }
-    localStorage.setItem("settings_primary_piper_model", modelId);
     setDownloadSuccessMsg(`تم تعيين الصوت (${modelId}) كصوت افتراضي أساسي لنطق بطاقات اللغة (${langKey.toUpperCase()})!`);
   };
 
@@ -4795,7 +4816,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       setSecondaryModelEn(modelId);
       localStorage.setItem("settings_secondary_piper_model_en", modelId);
     }
-    localStorage.setItem("settings_secondary_piper_model", modelId);
     setDownloadSuccessMsg(`تم تعيين الصوت الثانوي (${modelId}) لنطق بطاقات اللغة (${langKey.toUpperCase()})!`);
   };
 
@@ -5412,6 +5432,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       setPrimaryModelAr(localStorage.getItem("settings_primary_piper_model_ar") || "ar_JO-kareem-medium");
       setPrimaryModelEn(localStorage.getItem("settings_primary_piper_model_en") || "en_US-lessac-medium");
 
+      setReviewVoiceTarget((localStorage.getItem("settings_review_voice_target") as "primary" | "secondary") || "primary");
       setEnableSecondaryAudioReview(localStorage.getItem("settings_enable_secondary_audio_review") === "true");
       setSecondaryModelDe(localStorage.getItem("settings_secondary_piper_model_de") || "google");
       setSecondaryModelAr(localStorage.getItem("settings_secondary_piper_model_ar") || "google");
@@ -5548,6 +5569,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     localStorage.setItem("settings_primary_piper_model_de", primaryModelDe);
     localStorage.setItem("settings_primary_piper_model_ar", primaryModelAr);
     localStorage.setItem("settings_primary_piper_model_en", primaryModelEn);
+    localStorage.setItem("settings_review_voice_target", reviewVoiceTarget);
     localStorage.setItem("settings_enable_secondary_audio_review", String(enableSecondaryAudioReview));
     localStorage.setItem("settings_secondary_piper_model_de", secondaryModelDe);
     localStorage.setItem("settings_secondary_piper_model_ar", secondaryModelAr);
@@ -6571,6 +6593,57 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                         </div>
                       );
                     })}
+                  </div>
+                </div>
+              </div>
+
+              {/* ACTIVE REVIEW VOICE TARGET SWITCHER (PRIMARY VS SECONDARY) */}
+              <div className="p-4 rounded-2xl border border-primary/30 bg-primary/5 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="font-extrabold text-sm text-on-surface flex items-center gap-2">
+                      <Volume2 className="w-4.5 h-4.5 text-primary" />
+                      <span>الصوت النشط المعتمد للبطاقات (Active Card Voice)</span>
+                    </h4>
+                    <p className="text-xs text-on-surface-variant mt-0.5">
+                      اختر ما إذا كان زر السماعة في البطاقات ينطق بالصوت الأساسي أم بالصوت الثانوي المحدد:
+                    </p>
+                  </div>
+                  <div className="flex items-center p-1 rounded-xl bg-surface-container border border-outline-variant/60 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReviewVoiceTarget("primary");
+                        localStorage.setItem("settings_review_voice_target", "primary");
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                        reviewVoiceTarget === "primary"
+                          ? "bg-amber-500 text-white shadow-sm font-extrabold"
+                          : "text-on-surface hover:bg-surface-container-high"
+                      }`}
+                    >
+                      <Star className="w-3.5 h-3.5" />
+                      <span>الصوت الأساسي (Primary)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReviewVoiceTarget("secondary");
+                        localStorage.setItem("settings_review_voice_target", "secondary");
+                        if (!enableSecondaryAudioReview) {
+                          setEnableSecondaryAudioReview(true);
+                          localStorage.setItem("settings_enable_secondary_audio_review", "true");
+                        }
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                        reviewVoiceTarget === "secondary"
+                          ? "bg-indigo-600 text-white shadow-sm font-extrabold"
+                          : "text-on-surface hover:bg-surface-container-high"
+                      }`}
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                      <span>الصوت الثانوي (Secondary)</span>
+                    </button>
                   </div>
                 </div>
               </div>

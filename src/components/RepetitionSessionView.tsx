@@ -385,16 +385,19 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
         const langShort = frontLang.toLowerCase().split("-")[0].split("_")[0];
         const defaultPrimary = langShort === "de" ? "de_DE-thorsten-medium" : langShort === "ar" ? "ar_JO-kareem-medium" : "en_US-lessac-medium";
         const voiceKey = reviewVoiceTarget === "secondary"
-          ? (localStorage.getItem(`settings_secondary_piper_model_${langShort}`) || localStorage.getItem("settings_secondary_piper_model") || "google")
-          : (localStorage.getItem(`settings_primary_piper_model_${langShort}`) || localStorage.getItem("settings_primary_piper_model") || defaultPrimary);
+          ? (localStorage.getItem(`settings_secondary_piper_model_${langShort}`) || "google")
+          : (localStorage.getItem(`settings_primary_piper_model_${langShort}`) || defaultPrimary);
 
         let url = "";
         let foundBlob: Blob | null = null;
 
-        // 1. TIER 1: Check if card has explicit attached audio URL (card.frontAudioUrl)
-        if (card.frontAudioUrl && card.frontAudioUrl.trim()) {
+        // 1. TIER 1: Check if card has explicit attached audio URL or saved regenerated audio
+        const savedCardAudio = card.id ? (localStorage.getItem(`card_audio_${card.id}_${voiceKey}`) || localStorage.getItem(`card_audio_${card.id}`)) : null;
+        const candidateUrl = (card.frontAudioUrl && card.frontAudioUrl.trim()) ? card.frontAudioUrl : (savedCardAudio || "");
+
+        if (candidateUrl) {
           try {
-            const resp = await fetch(card.frontAudioUrl);
+            const resp = await fetch(candidateUrl);
             if (resp.ok) {
               const b = await resp.blob();
               if (b && b.size > 100) {
@@ -403,7 +406,7 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
               }
             }
           } catch (e) {
-            url = card.frontAudioUrl;
+            url = candidateUrl;
           }
         }
 
@@ -411,6 +414,7 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
         if (!url && !foundBlob) {
           const cacheKeys = [
             `${frontText}_${frontLang}_${voiceKey}`,
+            `${frontText}_${langShort}_${voiceKey}`,
             `${frontText}_${frontLang}`,
             `${frontText}_${langShort}`,
             `gradio:${voiceKey.replace(/^gradio[:_]/i, "")}_${frontText}_${frontLang}`,
@@ -446,12 +450,12 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
             if (url) break;
             try {
               const cache = await caches.open(cName);
-              // Direct URL lookup
+              // Direct URL lookup strictly matching the specific voice
               const directUrls = [
                 `/api/tts?text=${encodeURIComponent(frontText)}&lang=${frontLang}&voice=${encodeURIComponent(voiceKey)}`,
+                `/api/tts?text=${encodeURIComponent(frontText)}&lang=${langShort}&voice=${encodeURIComponent(voiceKey)}`,
                 `/api/tts?text=${encodeURIComponent(frontText)}&lang=${frontLang}`,
-                `/api/tts?text=${encodeURIComponent(frontText)}&lang=${langShort}`,
-                `/api/tts?text=${encodeURIComponent(frontText)}`
+                `/api/tts?text=${encodeURIComponent(frontText)}&lang=${langShort}`
               ];
 
               for (const dUrl of directUrls) {
@@ -469,14 +473,13 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
                 }
               }
 
-              // If direct match didn't find, scan keys for matching text query
+              // If direct match didn't find, scan keys strictly matching text AND voice
               if (!url) {
                 const keys = await cache.keys();
                 const encodedText = encodeURIComponent(frontText);
                 const matchedReq = keys.find(req => 
-                  req.url.includes(`text=${encodedText}`) ||
-                  req.url.includes(`text=${frontText}`) ||
-                  (req.url.includes(encodedText) && (req.url.includes(frontLang) || req.url.includes(langShort)))
+                  (req.url.includes(encodedText) || req.url.includes(frontText)) &&
+                  (req.url.includes(encodeURIComponent(voiceKey)) || req.url.includes(voiceKey) || (!req.url.includes("voice=") && (req.url.includes(frontLang) || req.url.includes(langShort))))
                 );
                 if (matchedReq) {
                   const matched = await cache.match(matchedReq);
@@ -765,11 +768,35 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
         setCurrentTime(0);
         setLastSeekPoint(0);
 
+        // Populate memory cache so folder / browse card instantly plays this exact regenerated audio
+        ttsCache[`${frontText}_${frontLang}_${voiceKey}`] = newUrl;
+        ttsCache[`${frontText}_${frontLang}`] = newUrl;
+        ttsCache[`${frontText}_${langShort}`] = newUrl;
+
+        // Persist to card-specific storage
+        if (card.id) {
+          localStorage.setItem(`card_audio_${card.id}`, newUrl);
+          localStorage.setItem(`card_audio_${card.id}_${voiceKey}`, newUrl);
+        }
+
         if (newBlob) {
           setAudioBlob(newBlob);
           const { peaks: realPeaks, duration: realDuration } = await extractPeaksFromBlob(newBlob, 90);
           if (realPeaks.length > 0) setWavePeaks(realPeaks);
           if (realDuration > 0) setDuration(realDuration);
+
+          // Save to persistent CacheStorage
+          if (typeof window !== "undefined" && "caches" in window) {
+            try {
+              const cache = await caches.open("tts-audio-cache-v1");
+              const headers = { "Content-Type": newBlob.type || "audio/wav" };
+              await cache.put(`/api/tts?text=${encodeURIComponent(frontText)}&lang=${frontLang}&voice=${encodeURIComponent(voiceKey)}`, new Response(newBlob.slice(0), { headers }));
+              await cache.put(`/api/tts?text=${encodeURIComponent(frontText)}&lang=${frontLang}`, new Response(newBlob.slice(0), { headers }));
+              await cache.put(`/api/tts?text=${encodeURIComponent(frontText)}&lang=${langShort}`, new Response(newBlob.slice(0), { headers }));
+            } catch (cErr) {
+              console.warn("Could not save regenerated audio to persistent cache:", cErr);
+            }
+          }
         } else {
           try {
             const resp = await fetch(newUrl);
@@ -779,6 +806,17 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
               const { peaks: realPeaks, duration: realDuration } = await extractPeaksFromBlob(b, 90);
               if (realPeaks.length > 0) setWavePeaks(realPeaks);
               if (realDuration > 0) setDuration(realDuration);
+
+              // Save fetched blob to persistent CacheStorage
+              if (typeof window !== "undefined" && "caches" in window && b && b.size > 100) {
+                try {
+                  const cache = await caches.open("tts-audio-cache-v1");
+                  const headers = { "Content-Type": b.type || "audio/wav" };
+                  await cache.put(`/api/tts?text=${encodeURIComponent(frontText)}&lang=${frontLang}&voice=${encodeURIComponent(voiceKey)}`, new Response(b.slice(0), { headers }));
+                  await cache.put(`/api/tts?text=${encodeURIComponent(frontText)}&lang=${frontLang}`, new Response(b.slice(0), { headers }));
+                  await cache.put(`/api/tts?text=${encodeURIComponent(frontText)}&lang=${langShort}`, new Response(b.slice(0), { headers }));
+                } catch (cErr) {}
+              }
             }
           } catch (e) {}
         }
