@@ -24,11 +24,17 @@ import {
   Layers,
   HelpCircle,
   Clock,
-  Loader2
+  Loader2,
+  Bot,
+  MessageSquare,
+  ChevronLeft,
+  ChevronRight,
+  Image as ImageIcon
 } from "lucide-react";
-import { Flashcard, getSafeImageStyle } from "../types";
-import { preloadTTS, preloadImage, playPiperLocalWasm, fetchGradioAudioBlob, ttsCache } from "./Modals";
-import { getSharedAudioContext } from "./ReviewSession";
+import { Flashcard, getSafeImageStyle, getCardSearchQuery } from "../types";
+import { preloadTTS, preloadImage, playPiperLocalWasm, fetchGradioAudioBlob, ttsCache, speakClient } from "./Modals";
+import { getSharedAudioContext, ImageWithSkeleton, brokenImagesSet, ddgImagesCache } from "./ReviewSession";
+import { ReviewChatModal } from "./ReviewChatModal";
 
 interface RepetitionSessionViewProps {
   card: Flashcard;
@@ -41,6 +47,15 @@ interface RepetitionSessionViewProps {
   isSecondaryAudioEnabled?: boolean;
   reviewVoiceTarget?: "primary" | "secondary";
   onToggleVoiceTarget?: () => void;
+  onOpenChat?: () => void;
+  previousCards?: Flashcard[];
+  nextCards?: Flashcard[];
+  folderInfo?: {
+    name?: string;
+    description?: string;
+    targetLanguage?: string;
+    sourceLanguage?: string;
+  };
 }
 
 export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
@@ -53,7 +68,11 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
   onRepeat,
   isSecondaryAudioEnabled,
   reviewVoiceTarget = "primary",
-  onToggleVoiceTarget
+  onToggleVoiceTarget,
+  onOpenChat,
+  previousCards = [],
+  nextCards = [],
+  folderInfo
 }) => {
   // Audio state
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -72,10 +91,17 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
   const [lastSeekPoint, setLastSeekPoint] = useState<number>(0);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [isRegeneratingAudio, setIsRegeneratingAudio] = useState<boolean>(false);
+  const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
 
   // Waveform Peaks Data
   const [wavePeaks, setWavePeaks] = useState<number[]>([]);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
+
+  // Image candidates and error handling state
+  const [extraImages, setExtraImages] = useState<string[]>([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState<number>(0);
+  const [isLoadingImages, setIsLoadingImages] = useState<boolean>(false);
+  const [imagePage, setImagePage] = useState<number>(1);
 
   // References
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -84,6 +110,188 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
   const wasPlayingBeforeDragRef = useRef<boolean>(false);
   const animFrameRef = useRef<number | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Image swipe references
+  const imgTouchStartX = useRef<number | null>(null);
+  const imgMouseStartX = useRef<number | null>(null);
+  const isImgMouseDown = useRef<boolean>(false);
+
+  // Image fetch & error handling
+  const fetchDdgImages = useCallback(async (query: string, pageNum: number, isInitial: boolean) => {
+    if (!query) return;
+
+    if (isInitial && ddgImagesCache[query]) {
+      const cachedUrls = ddgImagesCache[query].filter(url => !brokenImagesSet.has(url));
+      setExtraImages(prev => {
+        const combined = [...prev];
+        cachedUrls.forEach((url: string) => {
+          if (url && !combined.includes(url) && !brokenImagesSet.has(url)) {
+            combined.push(url);
+          }
+        });
+        return combined;
+      });
+      return;
+    }
+
+    setIsLoadingImages(true);
+    try {
+      const res = await fetch(`/api/images?q=${encodeURIComponent(query)}&page=${pageNum}&provider=duckduckgo`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.hits && data.hits.length > 0) {
+          const newImageUrls = data.hits.slice(0, 10)
+            .map((h: any) => h.largeImageURL || h.webformatURL || h.image || h.url)
+            .filter((url: string) => typeof url === "string" && url.startsWith("http") && !brokenImagesSet.has(url));
+
+          if (isInitial) {
+            ddgImagesCache[query] = newImageUrls;
+          }
+
+          // Preload in background
+          newImageUrls.forEach((url: string) => {
+            preloadImage(url).catch(() => {
+              brokenImagesSet.add(url);
+            });
+          });
+
+          setExtraImages(prev => {
+            const combined = [...prev];
+            newImageUrls.forEach((url: string) => {
+              if (url && !combined.includes(url) && !brokenImagesSet.has(url)) {
+                combined.push(url);
+              }
+            });
+            return combined;
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to fetch candidate images in repetition mode:", err);
+    } finally {
+      setIsLoadingImages(false);
+    }
+  }, []);
+
+  const handleImageError = useCallback((failedUrl: string) => {
+    if (!failedUrl) return;
+    brokenImagesSet.add(failedUrl);
+
+    setExtraImages(prev => {
+      const filtered = prev.filter(url => url !== failedUrl && !brokenImagesSet.has(url));
+
+      // If remaining images are low, fetch next batch seamlessly in background
+      if (filtered.length < 3) {
+        const nextPage = imagePage + 1;
+        setImagePage(nextPage);
+        const qTerm = getCardSearchQuery(card);
+        if (qTerm) fetchDdgImages(qTerm, nextPage, false);
+      }
+
+      setCurrentImageIndex(prevIndex => {
+        if (prevIndex >= filtered.length) {
+          return Math.max(0, filtered.length - 1);
+        }
+        return prevIndex;
+      });
+
+      return filtered;
+    });
+  }, [card, imagePage, fetchDdgImages]);
+
+  // Synchronize image candidates on card change
+  useEffect(() => {
+    const initialList: string[] = (card.frontImage && !brokenImagesSet.has(card.frontImage)) ? [card.frontImage] : [];
+
+    try {
+      const rawAuto = localStorage.getItem(`auto_images_${card.id}`);
+      if (rawAuto) {
+        const parsedAuto = JSON.parse(rawAuto);
+        if (Array.isArray(parsedAuto)) {
+          parsedAuto.forEach((url: string) => {
+            if (url && typeof url === "string" && !initialList.includes(url) && !brokenImagesSet.has(url)) {
+              initialList.push(url);
+            }
+          });
+        }
+      }
+    } catch (e) {}
+
+    if (Array.isArray(card.autoImageCandidates)) {
+      card.autoImageCandidates.forEach((url: string) => {
+        if (url && typeof url === "string" && !initialList.includes(url) && !brokenImagesSet.has(url)) {
+          initialList.push(url);
+        }
+      });
+    }
+
+    setExtraImages(initialList);
+    setCurrentImageIndex(0);
+    setImagePage(1);
+
+    if (initialList.length < 2) {
+      const qTerm = getCardSearchQuery(card);
+      if (qTerm) fetchDdgImages(qTerm, 1, true);
+    }
+  }, [card.id, card.frontImage, card.frontText, fetchDdgImages]);
+
+  const handlePrevImage = useCallback((e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (currentImageIndex > 0) {
+      setCurrentImageIndex(prev => prev - 1);
+    }
+  }, [currentImageIndex]);
+
+  const handleNextImage = useCallback((e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (currentImageIndex < extraImages.length - 1) {
+      const nextIdx = currentImageIndex + 1;
+      setCurrentImageIndex(nextIdx);
+
+      if (nextIdx >= extraImages.length - 1 && !isLoadingImages) {
+        const nextPage = imagePage + 1;
+        setImagePage(nextPage);
+        const qTerm = getCardSearchQuery(card);
+        if (qTerm) fetchDdgImages(qTerm, nextPage, false);
+      }
+    }
+  }, [currentImageIndex, extraImages.length, isLoadingImages, imagePage, card, fetchDdgImages]);
+
+  const handleImgTouchStart = (e: React.TouchEvent) => {
+    imgTouchStartX.current = e.touches[0].clientX;
+  };
+
+  const handleImgTouchEnd = (e: React.TouchEvent) => {
+    if (imgTouchStartX.current === null) return;
+    const diffX = e.changedTouches[0].clientX - imgTouchStartX.current;
+    if (Math.abs(diffX) > 40) {
+      if (diffX > 0) {
+        handlePrevImage();
+      } else {
+        handleNextImage();
+      }
+    }
+    imgTouchStartX.current = null;
+  };
+
+  const handleImgMouseDown = (e: React.MouseEvent) => {
+    imgMouseStartX.current = e.clientX;
+    isImgMouseDown.current = true;
+  };
+
+  const handleImgMouseUp = (e: React.MouseEvent) => {
+    if (!isImgMouseDown.current || imgMouseStartX.current === null) return;
+    const diffX = e.clientX - imgMouseStartX.current;
+    if (Math.abs(diffX) > 40) {
+      if (diffX > 0) {
+        handlePrevImage();
+      } else {
+        handleNextImage();
+      }
+    }
+    imgMouseStartX.current = null;
+    isImgMouseDown.current = false;
+  };
 
   // Helper to format time (e.g. "00:01.4")
   const formatTime = (seconds: number) => {
@@ -832,6 +1040,18 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [togglePlayPause, replayFromMarker, onNext, onPrev, onRepeat, onKnow]);
 
+  // Saved chat messages count for current card
+  const savedChatCount = useMemo(() => {
+    try {
+      const saved = localStorage.getItem(`review_chat_history_${card.id}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed.length;
+      }
+    } catch (e) {}
+    return 0;
+  }, [card.id, isChatOpen]);
+
   // Article color detection
   const detectedArticle = useMemo(() => {
     if (card.correctArticle && (card.correctArticle.toLowerCase() === "der" || card.correctArticle.toLowerCase() === "die" || card.correctArticle.toLowerCase() === "das")) {
@@ -896,19 +1116,69 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
 
       {/* Main 50% / 50% Split Screen Layout */}
       <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch min-h-[480px] lg:min-h-[540px]">
-        {/* HALF 1 (50%): Image Screen Container - strictly rounded-none */}
-        <div className="w-full h-full min-h-[300px] md:min-h-[480px] bg-slate-950 border-2 border-slate-800 rounded-none relative overflow-hidden flex flex-col justify-between p-4 group">
-          {card.frontImage ? (
+        {/* HALF 1 (50%): Image Screen Container - strictly rounded-none with Auto-Skip on broken/blocked images & candidate carousel */}
+        <div 
+          className="w-full h-full min-h-[300px] md:min-h-[480px] bg-slate-950 border-2 border-slate-800 rounded-none relative overflow-hidden flex flex-col justify-between p-4 group select-none cursor-grab active:cursor-grabbing"
+          onTouchStart={handleImgTouchStart}
+          onTouchEnd={handleImgTouchEnd}
+          onMouseDown={handleImgMouseDown}
+          onMouseUp={handleImgMouseUp}
+        >
+          {extraImages.length > 0 && extraImages[currentImageIndex] ? (
             <div className="absolute inset-0 w-full h-full overflow-hidden flex items-center justify-center bg-black/40">
-              <img
-                src={card.frontImage}
+              <ImageWithSkeleton
+                src={extraImages[currentImageIndex]}
                 alt={card.frontText}
-                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                style={getSafeImageStyle(card.frontImagePosition)}
+                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 select-none pointer-events-none"
+                style={currentImageIndex === 0 && card.frontImage ? getSafeImageStyle(card.frontImagePosition) : { objectFit: "cover" }}
                 referrerPolicy="no-referrer"
+                loading="eager"
+                fetchPriority="high"
+                onError={handleImageError}
               />
               {/* Dark gradient overlay for readability */}
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30 pointer-events-none" />
+
+              {/* Navigation arrows (appear on hover or touch) */}
+              {extraImages.length > 1 && (
+                <>
+                  {currentImageIndex > 0 && (
+                    <button
+                      type="button"
+                      onClick={handlePrevImage}
+                      className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-none bg-black/60 hover:bg-black/85 text-white flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 z-20 border border-white/20 cursor-pointer active:scale-95"
+                      title="الصورة السابقة"
+                    >
+                      <ChevronLeft className="w-5 h-5" />
+                    </button>
+                  )}
+                  {currentImageIndex < extraImages.length - 1 && (
+                    <button
+                      type="button"
+                      onClick={handleNextImage}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-none bg-black/60 hover:bg-black/85 text-white flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 z-20 border border-white/20 cursor-pointer active:scale-95"
+                      title="الصورة التالية"
+                    >
+                      <ChevronRight className="w-5 h-5" />
+                    </button>
+                  )}
+                </>
+              )}
+
+              {/* Micro counter indicator & search spinner */}
+              <div className="absolute bottom-3 right-3 flex items-center gap-1.5 z-20 pointer-events-none select-none bg-black/60 backdrop-blur-md text-[11px] text-white/95 px-2.5 py-1 rounded-none font-mono border border-white/10 shadow-sm">
+                {isLoadingImages && (
+                  <RefreshCw className="w-3 h-3 animate-spin text-purple-400" />
+                )}
+                <span>
+                  {`${currentImageIndex + 1}/${extraImages.length}`}
+                </span>
+              </div>
+            </div>
+          ) : isLoadingImages ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-slate-950">
+              <RefreshCw className="w-8 h-8 text-purple-400 animate-spin mb-3" />
+              <p className="text-xs font-mono font-bold text-slate-400">جاري فحص وتجهيز الصور التوضيحية...</p>
             </div>
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-gradient-to-br from-slate-900 via-purple-950/40 to-slate-900">
@@ -1068,6 +1338,31 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
                     title="نسخ النص"
                   >
                     {isCopied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                  </button>
+
+                  {/* 10. AI Chat / Discussion Tutor Button (Matches Face & Back mode) */}
+                  <button
+                    onClick={() => {
+                      if (onOpenChat) {
+                        onOpenChat();
+                      } else {
+                        setIsChatOpen(true);
+                      }
+                    }}
+                    className={`w-8 h-8 border rounded-none flex items-center justify-center transition-all cursor-pointer relative shadow-sm ${
+                      savedChatCount > 0
+                        ? "bg-indigo-900/80 hover:bg-indigo-850 text-indigo-200 border-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.4)]"
+                        : "bg-indigo-950/60 hover:bg-indigo-900/70 text-indigo-400 border-indigo-600/40 hover:border-indigo-500/70"
+                    }`}
+                    title={savedChatCount > 0 ? `محادثات البطاقة (${savedChatCount} رسائل محفوظة) - مناقشة واستفسار بالذكاء الاصطناعي` : "مناقشة واستفسار بالذكاء الاصطناعي والمصحح اللغوي (محادثة الكرت AI)"}
+                  >
+                    <Bot className="w-4 h-4 text-indigo-300" />
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-none bg-indigo-500 animate-pulse" />
+                    {savedChatCount > 0 && (
+                      <span className="absolute -bottom-1 -right-1 px-1 bg-indigo-600 text-[9px] font-bold text-white leading-none rounded-none border border-indigo-400 shadow-xs">
+                        {savedChatCount}
+                      </span>
+                    )}
                   </button>
                 </div>
 
@@ -1229,6 +1524,27 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Interactive AI Review Mode Chat & Corrector Modal */}
+      {isChatOpen && (
+        <ReviewChatModal
+          isOpen={isChatOpen}
+          onClose={() => setIsChatOpen(false)}
+          card={card}
+          previousCards={previousCards || []}
+          nextCards={nextCards || []}
+          folderInfo={folderInfo}
+          onPlayPronunciation={(text, lang) => {
+            if (reviewVoiceTarget === "secondary") {
+              const langShort = (lang || card.frontLang || "de").toLowerCase().split("-")[0];
+              const secVoice = localStorage.getItem(`settings_secondary_piper_model_${langShort}`) || localStorage.getItem("settings_secondary_piper_model") || "google";
+              speakClient(text, lang || card.frontLang || "de", secVoice);
+            } else {
+              speakClient(text, lang || card.frontLang || "de");
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

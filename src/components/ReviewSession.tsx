@@ -5083,6 +5083,15 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     isSecondaryAudioEnabled={isSecondaryAudioEnabled}
                     reviewVoiceTarget={reviewVoiceTarget}
                     onToggleVoiceTarget={() => setReviewVoiceTarget(prev => prev === "primary" ? "secondary" : "primary")}
+                    previousCards={surroundingPrevCards}
+                    nextCards={surroundingNextCards}
+                    folderInfo={{
+                      name: derivedFolder?.name || "مجموعة البطاقات",
+                      description: derivedFolder?.description || "",
+                      targetLanguage: currentCard.frontLang || derivedFolder?.frontLang || "de",
+                      sourceLanguage: currentCard.backLang || derivedFolder?.backLang || "ar"
+                    }}
+                    onOpenChat={() => setIsReviewChatOpen(true)}
                   />
                 </div>
               )}
