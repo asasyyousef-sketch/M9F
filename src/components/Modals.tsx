@@ -249,7 +249,8 @@ export const fetchGradioAudioBlob = async (
   text: string,
   voiceId: string = "ryan",
   langCode: string = "de",
-  customServerUrl?: string
+  customServerUrl?: string,
+  bypassCache: boolean = false
 ): Promise<Blob | null> => {
   const cleanText = stripEmojis(text);
   if (!cleanText) return null;
@@ -272,7 +273,7 @@ export const fetchGradioAudioBlob = async (
   else if (targetLang.startsWith("pt") || targetLang.includes("portuguese")) targetLang = "portuguese";
   else targetLang = "german";
 
-  const dedupeKey = `${normalizedUrl}|${cleanVoice}|${targetLang}|${cleanText}`;
+  const dedupeKey = `${normalizedUrl}|${cleanVoice}|${targetLang}|${cleanText}|${Boolean(bypassCache)}`;
   if (gradioInFlightRequests.has(dedupeKey)) {
     return gradioInFlightRequests.get(dedupeKey)!;
   }
@@ -287,8 +288,9 @@ export const fetchGradioAudioBlob = async (
     const endpoint = `${normalizedUrl}/gradio_api/call/generate`;
 
     try {
+      // Must send strictly 5 parameters to match Gradio event handler: [text, voice, lang, instruct, bypass_cache]
       const postPayload = {
-        data: [cleanText, cleanVoice, targetLang, null]
+        data: [cleanText, cleanVoice, targetLang, null, Boolean(bypassCache)]
       };
 
       const directRes = await fetch(endpoint, {
@@ -367,7 +369,8 @@ export const fetchGradioAudioBlob = async (
             text: cleanText,
             voice: cleanVoice,
             lang: targetLang,
-            serverUrl: normalizedUrl
+            serverUrl: normalizedUrl,
+            bypassCache: Boolean(bypassCache)
           }),
           signal: AbortSignal.timeout(dynamicTimeoutMs + 30000)
         });
@@ -1032,7 +1035,8 @@ export const playGradioClientAudio = async (
   text: string,
   voiceId: string = "ryan",
   langCode: string = "de",
-  customServerUrl?: string
+  customServerUrl?: string,
+  bypassCache: boolean = false
 ): Promise<{ ok: boolean; error?: string }> => {
   stopActiveAudio();
   const cleanText = stripEmojis(text);
@@ -1052,19 +1056,21 @@ export const playGradioClientAudio = async (
     `${cleanText}_${langShort}_${cleanVoice}`
   ];
 
-  // 1. Check in-memory ttsCache first
-  for (const k of cacheKeys) {
-    if (ttsCache[k]) {
-      try {
-        const audio = new Audio(ttsCache[k]);
-        currentActiveAudio = audio;
-        await audio.play();
-        return { ok: true };
-      } catch (e) {}
+  // 1. Check in-memory ttsCache first (only if not bypassing cache)
+  if (!bypassCache) {
+    for (const k of cacheKeys) {
+      if (ttsCache[k]) {
+        try {
+          const audio = new Audio(ttsCache[k]);
+          currentActiveAudio = audio;
+          await audio.play();
+          return { ok: true };
+        } catch (e) {}
+      }
     }
   }
 
-  // 2. Check persistent Cache Storage
+  // 2. Check persistent Cache Storage (only if not bypassing cache)
   const cacheUrls = [
     `/api/tts?text=${encodeURIComponent(cleanText)}&lang=${langCode}&voice=${encodeURIComponent(`gradio:${cleanVoice}`)}&gradioUrl=${encodeURIComponent(serverUrl)}`,
     `/api/tts?text=${encodeURIComponent(cleanText)}&lang=${langShort}&voice=${encodeURIComponent(`gradio:${cleanVoice}`)}&gradioUrl=${encodeURIComponent(serverUrl)}`,
@@ -1072,7 +1078,7 @@ export const playGradioClientAudio = async (
     `/api/tts?text=${encodeURIComponent(cleanText)}&lang=${langShort}&voice=${encodeURIComponent(cleanVoice)}`
   ];
 
-  if ("caches" in window) {
+  if (!bypassCache && "caches" in window) {
     try {
       const cache = await caches.open(CACHE_NAME);
       for (const curl of cacheUrls) {
@@ -1094,7 +1100,7 @@ export const playGradioClientAudio = async (
     }
   }
 
-  const blob = await fetchGradioAudioBlob(cleanText, cleanVoice, langCode, serverUrl);
+  const blob = await fetchGradioAudioBlob(cleanText, cleanVoice, langCode, serverUrl, bypassCache);
   if (blob && blob.size > 100) {
     const objectUrl = URL.createObjectURL(blob);
     cacheKeys.forEach(k => { ttsCache[k] = objectUrl; });
