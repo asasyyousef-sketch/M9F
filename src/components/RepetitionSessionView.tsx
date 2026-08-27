@@ -781,16 +781,17 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
         const customGradioLang = reviewVoiceTarget === "secondary"
           ? (localStorage.getItem(`settings_secondary_gradio_lang_${langShort}`) || frontLang)
           : (localStorage.getItem(`settings_primary_gradio_lang_${langShort}`) || frontLang);
-        newBlob = await fetchGradioAudioBlob(frontText, voiceName, customGradioLang, gradioUrl);
+        // Force new sample generation on external Gradio server (bypassCache = true -> sends 5th element true)
+        newBlob = await fetchGradioAudioBlob(frontText, voiceName, customGradioLang, gradioUrl, true);
         if (newBlob) {
           newUrl = URL.createObjectURL(newBlob);
         }
       }
 
       if (!newUrl) {
-        // Fetch fresh audio from API with nocache timestamp parameter
+        // Fetch fresh audio from API with nocache and bypassCache parameters
         const voiceParam = voiceKey ? `&voice=${encodeURIComponent(voiceKey)}` : "";
-        const url = `/api/tts?text=${encodeURIComponent(frontText)}&lang=${frontLang}${voiceParam}&_nocache=${Date.now()}`;
+        const url = `/api/tts?text=${encodeURIComponent(frontText)}&lang=${frontLang}${voiceParam}&bypassCache=true&_nocache=${Date.now()}`;
         const res = await fetch(url);
         if (res.ok) {
           newBlob = await res.blob();

@@ -2933,7 +2933,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
     const lang = (req.query.lang as string || "en").toLowerCase();
     const requestedVoice = (req.query.voice || req.query.model) as string;
     const gradioServerUrl = (req.query.gradioUrl as string) || "http://192.168.0.159:7860";
-    const bypassCache = req.query.bypassCache === "true" || req.query.regenerate === "true";
+    const bypassCache = req.query.bypassCache === "true" || req.query.regenerate === "true" || req.query.force_new === "true" || !!req.query._nocache || req.query.nocache === "true";
 
     if (!text || !text.trim()) {
       return res.status(400).json({ error: "Text is required" });
