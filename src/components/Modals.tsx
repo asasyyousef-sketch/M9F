@@ -3966,6 +3966,7 @@ export const ReviewSetupModal: React.FC<ReviewSetupModalProps> = ({
   };
 
   const reviewMethods: { value: ReviewMethod; label: string; icon: string; desc: string }[] = [
+    { value: "spoken_challenge", label: "تحدي التحدث والنطق (AI)", icon: "auto_awesome", desc: "تحليل المجلد وصياغة تحديات نطق وتحدث تفاعلية بالذكاء الاصطناعي مع مؤقت وصور" },
     { value: "repetition", label: "وضع الترديد (Waveform)", icon: "graphic_eq", desc: "ترديد وتكرار مقطع الصوت مع موجات صوتية تفاعلية وشاشة منقسمة" },
     { value: "classic", label: "وجه وخلف (كلاسيكي)", icon: "style", desc: "بطاقات فلاشية ثلاثية الأبعاد تقليدية" },
     { value: "write", label: "كتابة", icon: "edit_note", desc: "اكتب الترجمة أو الإجابة باليد" },
@@ -3983,6 +3984,12 @@ export const ReviewSetupModal: React.FC<ReviewSetupModalProps> = ({
   };
 
   const reviewMethodsList: { value: ReviewMethod; label: string; iconElement: React.ReactNode; desc: string }[] = [
+    {
+      value: "spoken_challenge",
+      label: "تحدي التحدث والنطق (AI)",
+      iconElement: <Sparkles className="w-5 h-5 text-purple-600 group-hover:text-purple-700 shrink-0 transition-colors" />,
+      desc: "تحليل المجلد وصياغة تحديات نطق وتحدث تفاعلية بالذكاء الاصطناعي مع مؤقت وصور"
+    },
     {
       value: "repetition",
       label: "وضع الترديد",

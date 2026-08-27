@@ -67,7 +67,19 @@ export function getCardSearchQuery(
   }
 }
 
-export type ReviewMethod = 'challenge' | 'write' | 'listen' | 'article' | 'match' | 'classic' | 'puzzles' | 'repetition';
+export type ReviewMethod = 'challenge' | 'write' | 'listen' | 'article' | 'match' | 'classic' | 'puzzles' | 'repetition' | 'spoken_challenge';
+
+export interface SpeakingChallengeItem {
+  id: number | string;
+  arabic_prompt: string;      // ما يطلب من المستخدم قوله بالعربي
+  target_german: string;      // الجملة الأصلية بالألماني
+  estimated_seconds: number;  // الزمن المقدر للقول بالثواني
+  image_prompt: string;       // وصف توليد/بحث الصورة
+  imageUrl?: string;          // رابط الصورة المحملة
+  cefr_level: string;         // المستوى اللغوي (A1, A2, B1, ...)
+  grammar_focus: string;      // القاعدة اللغوية المستهدفة
+  vocab_focus: string[];      // الكلمات والمفردات المستهدفة من المجلد
+}
 
 export interface ReviewSessionState {
   method: ReviewMethod;

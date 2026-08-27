@@ -6,6 +6,7 @@ import { speakClient, preloadTTS, ttsCache, stopActiveAudio, fadeAndStopAudio, p
 import { motion, AnimatePresence, MotionConfig } from "motion/react";
 import { ReviewChatModal } from "./ReviewChatModal";
 import { RepetitionSessionView } from "./RepetitionSessionView";
+import { SpokenChallengeSessionView } from "./SpokenChallengeSessionView";
 
 export const globallyLoadedImages = new Set<string>();
 let sharedAudioCtx: AudioContext | null = null;
@@ -1685,6 +1686,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   onCompleteChainStep
 }) => {
   const methodArabicLabels: Record<ReviewMethod, string> = {
+    spoken_challenge: "تحدي التحدث والنطق (AI)",
     repetition: "وضع الترديد",
     classic: "وجه وخلف",
     write: "كتابة",
@@ -5097,6 +5099,20 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                 </div>
               )}
               
+              {/* 0.0 SPOKEN RECALL & REPETITION CHALLENGE MODE */}
+              {method === "spoken_challenge" && (
+                <div className="w-full flex flex-col items-center">
+                  <SpokenChallengeSessionView
+                    cards={sessionCards}
+                    folderName={derivedFolder?.name || "مجموعة البطاقات"}
+                    onClose={onClose}
+                    onFinish={(score, total) => {
+                      // Handled by component summary or close
+                    }}
+                  />
+                </div>
+              )}
+
               {/* 0. REPETITION / WAVEFORM ECHO & SHADOWING MODE */}
               {method === "repetition" && currentCard && (
                 <div className="w-full flex flex-col items-center">

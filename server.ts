@@ -318,6 +318,72 @@ async function startServer() {
     }
   });
 
+  // Robust, multi-layer JSON parser & extractor that safely handles markdown blocks, trailing commentary, truncated tokens, and malformed characters
+  function safeExtractAndParseJSON<T = any>(rawText: string, fallback: T): T {
+    if (!rawText || typeof rawText !== "string") return fallback;
+    const trimmed = rawText.trim();
+    if (!trimmed) return fallback;
+
+    // Layer 1: Direct JSON.parse
+    try {
+      return JSON.parse(trimmed) as T;
+    } catch (_) {}
+
+    // Layer 2: Clean markdown codeblocks (e.g. ```json ... ``` or ``` ...)
+    let cleaned = trimmed
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+
+    try {
+      return JSON.parse(cleaned) as T;
+    } catch (_) {}
+
+    // Layer 3: Extract outermost Array [ ... ]
+    const firstOpenBracket = cleaned.indexOf("[");
+    const lastCloseBracket = cleaned.lastIndexOf("]");
+    if (firstOpenBracket !== -1 && lastCloseBracket > firstOpenBracket) {
+      const arraySubstring = cleaned.substring(firstOpenBracket, lastCloseBracket + 1);
+      try {
+        return JSON.parse(arraySubstring) as T;
+      } catch (_) {
+        try {
+          const cleanedArray = arraySubstring.replace(/,\s*([\]}])/g, "$1");
+          return JSON.parse(cleanedArray) as T;
+        } catch (_) {}
+      }
+    }
+
+    // Layer 4: Extract outermost Object { ... }
+    const firstOpenBrace = cleaned.indexOf("{");
+    const lastCloseBrace = cleaned.lastIndexOf("}");
+    if (firstOpenBrace !== -1 && lastCloseBrace > firstOpenBrace) {
+      const objectSubstring = cleaned.substring(firstOpenBrace, lastCloseBrace + 1);
+      try {
+        return JSON.parse(objectSubstring) as T;
+      } catch (_) {
+        try {
+          const cleanedObject = objectSubstring.replace(/,\s*([\]}])/g, "$1");
+          return JSON.parse(cleanedObject) as T;
+        } catch (_) {}
+      }
+    }
+
+    // Layer 5: Fallback for partially completed / truncated arrays
+    if (firstOpenBracket !== -1) {
+      let partial = cleaned.substring(firstOpenBracket);
+      const lastBrace = partial.lastIndexOf("}");
+      if (lastBrace !== -1) {
+        try {
+          const repaired = partial.substring(0, lastBrace + 1).replace(/,\s*$/, "") + "]";
+          return JSON.parse(repaired) as T;
+        } catch (_) {}
+      }
+    }
+
+    return fallback;
+  }
+
   // API Route - Generate AI Persona details & image query automatically
   app.post("/api/generate-persona-ai", async (req, res) => {
     try {
@@ -367,13 +433,17 @@ async function startServer() {
       });
 
       const outputText = response.text || "";
-      let personaData: any = {};
-      try {
-        personaData = JSON.parse(outputText);
-      } catch (err) {
-        const clean = outputText.replace(/```json/g, "").replace(/```/g, "").trim();
-        personaData = JSON.parse(clean);
-      }
+      const personaData = safeExtractAndParseJSON(outputText, {
+        name: "شخصية تفاعلية",
+        job: "متحدث ألماني",
+        age: "25 سنة",
+        origin: "برلين، ألمانيا",
+        relationship: "",
+        toneStyle: "طبيعي وودود",
+        backgroundTopics: "المحادثة اليومية والحياة في ألمانيا",
+        emoji: "🎭",
+        imageSearchQuery: `${prompt} portrait photo`
+      });
 
       // Automatically search for a matching portrait image on DuckDuckGo using imageSearchQuery
       let avatarUrl = personaData.emoji || "🎭";
@@ -439,6 +509,255 @@ async function startServer() {
     } catch (error: any) {
       console.error("Error generating persona AI:", error);
       return res.status(500).json({ error: error.message || "حدث خطأ أثناء توليد الشخصية بالذكاء الاصطناعي." });
+    }
+  });
+
+  // API Route - Generate Spoken Recall & Repetition Challenges from Flashcard Deck
+  app.post("/api/generate-spoken-challenges", async (req, res) => {
+    try {
+      const {
+        cards = [],
+        deck_title = "مجلد البطاقات",
+        requested_count = 5,
+        selectedModel = "gemini-3.6-flash",
+        userApiKey,
+        geminiApiKey,
+        customApiKey,
+        groqApiKey
+      } = req.body;
+
+      if (!cards || !Array.isArray(cards) || cards.length === 0) {
+        return res.status(400).json({ error: "لا توجد بطاقات في المجلد لتحليلها وإنشاء التحديات." });
+      }
+
+      const effectiveGeminiKey =
+        (userApiKey && userApiKey.trim()) ||
+        (geminiApiKey && geminiApiKey.trim()) ||
+        (customApiKey && customApiKey.trim()) ||
+        process.env.GEMINI_API_KEY ||
+        "";
+
+      const effectiveGroqKey =
+        (groqApiKey && groqApiKey.trim()) ||
+        process.env.GROQ_API_KEY ||
+        "";
+
+      const targetModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
+      const isGroq = targetModel.includes("groq") || targetModel === "groq-llama-3.3-70b" || targetModel === "grok-2";
+
+      if (isGroq && !effectiveGroqKey && !effectiveGeminiKey) {
+        return res.status(400).json({ error: "يرجى توفير مفتاح Groq API أو Gemini API في الإعدادات للمتابعة." });
+      }
+      if (!isGroq && !effectiveGeminiKey) {
+        return res.status(400).json({ error: "مفتاح Gemini API غير متوفر. يرجى توفير مفتاح في الإعدادات." });
+      }
+
+      // Prepare simplified deck cards representation for prompt
+      const simplifiedCards = cards.slice(0, 100).map((c: any) => ({
+        german: c.frontText || c.german || "",
+        arabic: c.backText || c.translationHint || c.arabic || "",
+        article: c.correctArticle || "",
+        plural: c.pluralText || ""
+      }));
+
+      const countNum = Math.min(Math.max(parseInt(String(requested_count), 10) || 5, 1), 30);
+
+      const systemInstruction = `You are an expert German Language Pedagogy & AI Tutor.
+Your task is to analyze a deck of language learning flashcards, evaluate the vocabulary, grammar patterns, and CEFR level (A1/A2/B1/B2), and generate an interactive "Spoken Recall & Repetition Challenge" for the user.
+
+### GOAL:
+Generate exactly ${countNum} speaking challenges derived directly from the provided flashcard deck content. Each challenge prompts the user in Arabic to formulate or say a specific sentence in German before the timer expires.
+
+### INSTRUCTIONS & RULES:
+1. Content Analysis: Formulate sentences that naturally combine words and grammar rules present in the deck.
+2. Arabic Directive (arabic_prompt): Provide a clear instruction in Arabic specifying what the user needs to say or answer in German (e.g., "قل: أنا أشرب الماء الآن", "أجب بالنفي: هل تريد قهوة؟", "قل أنك ذاهب إلى الطبيب غداً").
+3. Target German Sentence (target_german): The exact grammatically correct German sentence.
+4. Speaking Time Estimate (estimated_seconds): Realistic speaking time in seconds (4 to 12 seconds).
+5. Visual Image Prompt (image_prompt): Concise English prompt for illustration (e.g., "A person drinking fresh water").
+6. Grammar & Vocab Metadata: Highlight grammar rule (grammar_focus) and key words (vocab_focus).
+
+### OUTPUT FORMAT:
+Respond ONLY with a valid JSON array of objects following this schema (No markdown fences, no explanatory text outside the JSON):
+[
+  {
+    "id": 1,
+    "arabic_prompt": "قل: أنا أشرب الماء الآن",
+    "target_german": "Ich trinke jetzt Wasser",
+    "estimated_seconds": 6,
+    "image_prompt": "A person drinking a glass of fresh water, flat vector style",
+    "cefr_level": "A1",
+    "grammar_focus": "Präsens - Regelmäßige Verben",
+    "vocab_focus": ["trinken", "das Wasser", "jetzt"]
+  }
+]`;
+
+      const userPromptText = `Deck Title: "${deck_title}"
+Cards count: ${simplifiedCards.length}
+Requested challenges count: ${countNum}
+Flashcards:
+${JSON.stringify(simplifiedCards, null, 2)}`;
+
+      let outputText = "";
+
+      // 1. If Groq model is selected and Groq key exists
+      if (isGroq && effectiveGroqKey) {
+        try {
+          const resGroq = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${effectiveGroqKey}`
+            },
+            body: JSON.stringify({
+              model: "llama-3.3-70b-versatile",
+              messages: [
+                { role: "system", content: systemInstruction },
+                { role: "user", content: userPromptText }
+              ],
+              response_format: { type: "json_object" },
+              temperature: 0.3
+            })
+          });
+
+          if (resGroq.ok) {
+            const dataGroq = await resGroq.json();
+            outputText = dataGroq?.choices?.[0]?.message?.content || "";
+          }
+        } catch (groqErr) {
+          console.warn("Groq attempt for spoken challenges failed, falling back to Gemini:", groqErr);
+        }
+      }
+
+      // 2. If Gemini or fallback
+      if (!outputText && effectiveGeminiKey) {
+        const geminiModel = isGroq ? "gemini-3.6-flash" : targetModel;
+        const ai = new GoogleGenAI({
+          apiKey: effectiveGeminiKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build'
+            }
+          }
+        });
+
+        const response = await ai.models.generateContent({
+          model: geminiModel,
+          contents: `${systemInstruction}\n\n${userPromptText}`,
+          config: {
+            responseMimeType: "application/json"
+          }
+        });
+
+        outputText = response.text || "";
+      }
+
+      // Safe multi-tier JSON Extraction
+      let parsedChallenges: any[] = safeExtractAndParseJSON<any[]>(outputText, []);
+
+      if (!Array.isArray(parsedChallenges)) {
+        if (parsedChallenges && typeof parsedChallenges === "object") {
+          if (Array.isArray((parsedChallenges as any).challenges)) {
+            parsedChallenges = (parsedChallenges as any).challenges;
+          } else if (Array.isArray((parsedChallenges as any).items)) {
+            parsedChallenges = (parsedChallenges as any).items;
+          } else {
+            parsedChallenges = [parsedChallenges];
+          }
+        } else {
+          parsedChallenges = [];
+        }
+      }
+
+      // If AI parsing was completely empty or failed, synthesize fallback items directly from the deck cards
+      if (parsedChallenges.length === 0) {
+        parsedChallenges = simplifiedCards.slice(0, countNum).map((c, i) => ({
+          id: i + 1,
+          arabic_prompt: c.arabic ? `قل بالألمانية: "${c.arabic}"` : `تحدث عن: "${c.german}"`,
+          target_german: c.article ? `${c.article} ${c.german}` : c.german,
+          estimated_seconds: Math.max(Math.min(c.german.split(" ").length * 2 + 3, 10), 4),
+          image_prompt: `${c.german} educational illustration`,
+          cefr_level: "A1",
+          grammar_focus: c.article ? `أداة التعريف ${c.article}` : "مفردات وسياق",
+          vocab_focus: [c.german]
+        }));
+      }
+
+      // Fetch images for each challenge in parallel
+      const enrichedChallenges = await Promise.all(
+        parsedChallenges.slice(0, countNum).map(async (item: any, idx: number) => {
+          const query = item.image_prompt || `${item.target_german || "German language"} illustration`;
+          let imageUrl = "";
+
+          try {
+            const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}`;
+            const pageRes = await fetch(searchUrl, {
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9,ar;q=0.8"
+              }
+            });
+            if (pageRes.ok) {
+              const html = await pageRes.text();
+              const match = html.match(/vqd=['"]?([^'"&]+)/) || html.match(/vqd=([0-9-]+)/);
+              if (match && match[1]) {
+                const vqd = match[1];
+                const imgApiUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,`;
+                const imgRes = await fetch(imgApiUrl, {
+                  headers: {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                    "Referer": "https://duckduckgo.com/"
+                  }
+                });
+                if (imgRes.ok) {
+                  const data = await imgRes.json();
+                  if (data.results && Array.isArray(data.results) && data.results.length > 0) {
+                    const firstValid = data.results.find((it: any) => it.image && it.image.startsWith("http"));
+                    if (firstValid) {
+                      imageUrl = firstValid.image;
+                    }
+                  }
+                }
+              }
+            }
+          } catch (imgErr) {
+            console.warn("DuckDuckGo image search error for challenge:", imgErr);
+          }
+
+          if (!imageUrl) {
+            const defaultUnsplash = [
+              "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=600&q=80",
+              "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&w=600&q=80",
+              "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&w=600&q=80",
+              "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?auto=format&fit=crop&w=600&q=80",
+              "https://images.unsplash.com/photo-1546410531-bb4caa6b424d?auto=format&fit=crop&w=600&q=80"
+            ];
+            imageUrl = defaultUnsplash[idx % defaultUnsplash.length];
+          }
+
+          return {
+            id: item.id || idx + 1,
+            arabic_prompt: String(item.arabic_prompt || "قل هذه الجملة بالألمانية:"),
+            target_german: String(item.target_german || "").trim(),
+            estimated_seconds: Math.max(parseInt(String(item.estimated_seconds), 10) || 6, 3),
+            image_prompt: String(item.image_prompt || query),
+            imageUrl: imageUrl,
+            cefr_level: String(item.cefr_level || "A1"),
+            grammar_focus: String(item.grammar_focus || "عام"),
+            vocab_focus: Array.isArray(item.vocab_focus) ? item.vocab_focus.map(String) : []
+          };
+        })
+      );
+
+      return res.json({
+        success: true,
+        deck_title: deck_title,
+        challenges: enrichedChallenges
+      });
+    } catch (error: any) {
+      console.error("Error generating spoken challenges:", error);
+      return res.status(500).json({
+        error: error.message || "حدث خطأ أثناء تحليل المجلد وتوليد التحديات الصوتية."
+      });
     }
   });
 
