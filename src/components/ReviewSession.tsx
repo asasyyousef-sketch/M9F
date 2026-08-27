@@ -8402,8 +8402,14 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
             targetLanguage: currentCard.frontLang || derivedFolder?.frontLang || "de",
             sourceLanguage: currentCard.backLang || derivedFolder?.backLang || "ar"
           }}
-          onPlayPronunciation={(text, lang) => {
-            playPronunciation(text, lang || currentCard.frontLang || "de");
+          onPlayPronunciation={(text, lang, voice) => {
+            if (voice) {
+              speakClient(text, lang || currentCard.frontLang || "de", voice);
+            } else if (reviewVoiceTarget === "secondary") {
+              playSecondaryPronunciation(text, lang || currentCard.frontLang || "de");
+            } else {
+              playPrimaryPronunciation(text, lang || currentCard.frontLang || "de");
+            }
           }}
         />
       )}

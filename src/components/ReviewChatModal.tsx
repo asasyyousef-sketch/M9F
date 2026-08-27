@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Flashcard, Folder } from "../types";
+import { speakClient } from "./Modals";
 
 export interface ReviewChatMessage {
   id: string;
@@ -48,7 +49,7 @@ interface ReviewChatModalProps {
     targetLanguage?: string;
     sourceLanguage?: string;
   };
-  onPlayPronunciation?: (text: string, lang?: string) => void;
+  onPlayPronunciation?: (text: string, lang?: string, voice?: string) => void;
 }
 
 const AVAILABLE_MODELS = [
@@ -67,20 +68,37 @@ const AVAILABLE_MODELS = [
 ];
 
 const AVAILABLE_VOICES = [
-  { id: "default", name: "الصوت الافتراضي للمنظومة", flag: "⚙️", desc: "يتبع الصوت الأساسي المحدد في إعدادات التطبيق" },
+  { id: "default", name: "الصوت الافتراضي (حسب البطاقة)", flag: "⚙️", desc: "يتبع الصوت الأساسي أو الثانوي المحدد للبطاقة الحالية" },
   { id: "google", name: "Google Translate TTS", flag: "⚡", desc: "خدمة نطق سريعة ومباشرة من جوجل" },
   { id: "webspeech", name: "Web Speech API", flag: "🌐", desc: "محرك نطق المتصفح الداخلي المباشر" },
   // German Piper Voices
-  { id: "de_DE-thorsten-medium", name: "🇩🇪 Thorsten (ألماني - متوسط)", flag: "🇩🇪", desc: "صوت ألماني نقي عالي الدقة والوضوح" },
+  { id: "de_DE-thorsten-medium", name: "🇩🇪 Thorsten (ألماني - رجالي)", flag: "🇩🇪", desc: "صوت ألماني نقي عالي الدقة والوضوح" },
   { id: "de_DE-thorsten_emotional-medium", name: "🇩🇪 Thorsten Emotional (ألماني - معبر)", flag: "🇩🇪", desc: "نبرة معبرة طبيعية للمحادثات" },
   { id: "de_DE-ramona-medium", name: "🇩🇪 Ramona (ألماني - أنثوي)", flag: "🇩🇪", desc: "صوت نسائي ألماني واضح" },
+  { id: "de_DE-amany-medium", name: "🇩🇪 Amany (ألماني - أنثوي)", flag: "🇩🇪", desc: "صوت نسائي ألماني مميز" },
   { id: "de_DE-kerstin-low", name: "🇩🇪 Kerstin (ألماني - خفيف)", flag: "🇩🇪", desc: "صوت نسائي ألماني خفيف وسريع" },
+  { id: "de_DE-pavoque-low", name: "🇩🇪 Pavoque (ألماني)", flag: "🇩🇪", desc: "صوت ألماني خفيف" },
   // English Piper Voices
   { id: "en_US-lessac-medium", name: "🇺🇸 Lessac (إنجليزي - أنثوي)", flag: "🇺🇸", desc: "صوت إنجليزي أمريكي قياسي عالي النقاء" },
   { id: "en_US-ryan-medium", name: "🇺🇸 Ryan (إنجليزي - رجالي)", flag: "🇺🇸", desc: "صوت إنجليزي رجالي متزن" },
+  { id: "en_US-amy-medium", name: "🇺🇸 Amy (إنجليزي - أنثوي)", flag: "🇺🇸", desc: "صوت إنجليزي أمريكي أنثوي واضح" },
+  { id: "en_US-danny-low", name: "🇺🇸 Danny (إنجليزي - رجالي)", flag: "🇺🇸", desc: "صوت إنجليزي رجالي سريع" },
   { id: "en_GB-alan-medium", name: "🇬🇧 Alan (إنجليزي بريطاني)", flag: "🇬🇧", desc: "نبرة بريطانية مميزة ودقيقة" },
-  // Arabic Piper Voice
-  { id: "ar_JO-kareem-medium", name: "🇯🇴 Kareem (عربي)", flag: "🇯🇴", desc: "صوت عربي فصيح واضح المخارج" }
+  { id: "en_GB-southern_english_female-low", name: "🇬🇧 Southern English (بريطاني)", flag: "🇬🇧", desc: "لهجة بريطانية جنوبية" },
+  // Arabic Piper Voices
+  { id: "ar_JO-kareem-medium", name: "🇯🇴 Kareem (عربي - فصيح)", flag: "🇯🇴", desc: "صوت عربي فصيح واضح المخارج" },
+  { id: "ar_AR-fahad-medium", name: "🇸🇦 Fahad (عربي)", flag: "🇸🇦", desc: "صوت عربي خليجي متزن" },
+  // Other Piper Languages
+  { id: "fr_FR-siwis-medium", name: "🇫🇷 Siwis (فرنسي)", flag: "🇫🇷", desc: "صوت فرنسي عالي الوضوح" },
+  { id: "es_ES-carlfm-medium", name: "🇪🇸 Carlfm (إسباني)", flag: "🇪🇸", desc: "صوت إسباني متقن" },
+  { id: "tr_TR-dfki-medium", name: "🇹🇷 Dfki (تركي)", flag: "🇹🇷", desc: "صوت تركي واضح" },
+  // Gradio TTS Models
+  { id: "gradio:ryan", name: "🚀 Gradio: Ryan (رجالي متقدم)", flag: "🚀", desc: "نطق عالي الواقعية عبر خادم Gradio الخارجي" },
+  { id: "gradio:serena", name: "🚀 Gradio: Serena (أنثوي متقدم)", flag: "🚀", desc: "نطق أنثوي واقعي عبر خادم Gradio الخارجي" },
+  { id: "gradio:vivian", name: "🚀 Gradio: Vivian (أنثوي)", flag: "🚀", desc: "صوت أنثوي عبر خادم Gradio الخارجي" },
+  { id: "gradio:aiden", name: "🚀 Gradio: Aiden (رجالي)", flag: "🚀", desc: "صوت رجالي عبر خادم Gradio الخارجي" },
+  { id: "gradio:eric", name: "🚀 Gradio: Eric (رجالي)", flag: "🚀", desc: "صوت رجالي عبر خادم Gradio الخارجي" },
+  { id: "gradio:dylan", name: "🚀 Gradio: Dylan (رجالي)", flag: "🚀", desc: "صوت رجالي عبر خادم Gradio الخارجي" }
 ];
 
 // Interactive Quoted Span with Floating Bubble Tooltip (ONLY for quoted text!)
@@ -1510,6 +1528,23 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
     }
   }, [isOpen]);
 
+  // Dedicated Chat Audio Player that respects selectedVoice from chat settings
+  const handlePlayChatVoice = (text: string, customLang?: string) => {
+    const cleanText = text.trim();
+    if (!cleanText) return;
+    const lang = customLang || card.frontLang || folderInfo?.targetLanguage || "de";
+    
+    if (selectedVoice && selectedVoice !== "default") {
+      // User explicitly picked a voice for the chat (e.g. Thorsten Emotional, Ramona, Ryan, Google, Gradio, etc.)
+      speakClient(cleanText, lang, selectedVoice);
+    } else if (onPlayPronunciation) {
+      // Fall back to card's active voice target (primary or secondary)
+      onPlayPronunciation(cleanText, lang);
+    } else {
+      speakClient(cleanText, lang);
+    }
+  };
+
   const handleSendMessage = async (textToSend?: string, forceImages?: boolean) => {
     const query = (textToSend !== undefined ? textToSend : inputMessage).trim();
     if (!query || isLoading) return;
@@ -2123,17 +2158,9 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          if (onPlayPronunciation) {
-                            onPlayPronunciation(activeLightbox.keyword!, card.frontLang || "de");
-                          } else {
-                            try {
-                              window.speechSynthesis.cancel();
-                              const u = new SpeechSynthesisUtterance(activeLightbox.keyword!);
-                              window.speechSynthesis.speak(u);
-                            } catch (e) {}
-                          }
+                          handlePlayChatVoice(activeLightbox.keyword!, card.frontLang || "de");
                         }}
-                        className="flex items-center gap-1.5 font-bold font-sans text-indigo-300 hover:text-white bg-indigo-950/80 border border-indigo-500/40 px-3 py-1.5 rounded-xl transition-colors cursor-pointer active:scale-95"
+                        className="flex items-center gap-1.5 font-bold font-sans text-indigo-300 hover:text-white bg-indigo-950/80 border border-indigo-500/40 px-3 py-1.5 rounded-xl transition-colors cursor-pointer active:scale-95 shadow-xs"
                       >
                         <span>{activeLightbox.keyword}</span>
                         <Volume2 className="w-3.5 h-3.5 text-indigo-400" />
@@ -2365,15 +2392,7 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
                         <FormattedChatMessage
                           text={msg.content}
                           onSpeak={(txt) => {
-                            if (onPlayPronunciation) {
-                              onPlayPronunciation(txt, card.frontLang || "de");
-                            } else {
-                              try {
-                                window.speechSynthesis.cancel();
-                                const u = new SpeechSynthesisUtterance(txt);
-                                window.speechSynthesis.speak(u);
-                              } catch (e) {}
-                            }
+                            handlePlayChatVoice(txt, card.frontLang || "de");
                           }}
                           onCopy={(txt) => {
                             navigator.clipboard.writeText(txt);
@@ -2673,20 +2692,56 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
                         <Volume2 className="w-4 h-4 text-emerald-400" />
                         <span>صوت محرك النطق (Voice Model):</span>
                       </span>
-                    </label>
-                    <div className="relative">
-                      <select
-                        value={selectedVoice}
-                        onChange={(e) => setSelectedVoice(e.target.value)}
-                        className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-950 text-slate-100 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none font-semibold cursor-pointer appearance-none pl-8"
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const sample = (card.frontLang === "ar" || folderInfo?.targetLanguage === "ar")
+                            ? "مرحباً! هذا اختبار للنطق الصوتي المحدد في المحادثة"
+                            : ((card.frontLang === "en" || folderInfo?.targetLanguage === "en")
+                              ? "Hello! This is a test for the AI chat voice"
+                              : "Hallo! Das ist ein Hörtest für die Chat-Stimme");
+                          handlePlayChatVoice(sample, card.frontLang || folderInfo?.targetLanguage || "de");
+                        }}
+                        className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-950/60 border border-emerald-800/50 cursor-pointer active:scale-95 transition-all shadow-xs"
+                        title="استمع لتجربة الصوت المحدد حالياً"
                       >
-                        {AVAILABLE_VOICES.map((v) => (
-                          <option key={v.id} value={v.id}>
-                            {v.flag} {v.name}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <Volume2 className="w-3 h-3" />
+                        <span>تجربة الصوت</span>
+                      </button>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <select
+                          value={selectedVoice}
+                          onChange={(e) => {
+                            setSelectedVoice(e.target.value);
+                            localStorage.setItem("settings_review_chat_voice", e.target.value);
+                          }}
+                          className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-950 text-slate-100 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none font-semibold cursor-pointer appearance-none pl-8"
+                        >
+                          {AVAILABLE_VOICES.map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.flag} {v.name}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const sample = (card.frontLang === "ar" || folderInfo?.targetLanguage === "ar")
+                            ? "مرحباً! تجربة الصوت"
+                            : ((card.frontLang === "en" || folderInfo?.targetLanguage === "en")
+                              ? "Hello! Voice test"
+                              : "Hallo! Sprachtest");
+                          handlePlayChatVoice(sample, card.frontLang || folderInfo?.targetLanguage || "de");
+                        }}
+                        className="p-2.5 rounded-xl bg-slate-800 hover:bg-emerald-600/30 text-slate-200 hover:text-emerald-300 border border-slate-700 hover:border-emerald-500/50 cursor-pointer transition-all active:scale-95 shrink-0"
+                        title="استمع لتجربة الصوت"
+                      >
+                        <Volume2 className="w-4 h-4" />
+                      </button>
                     </div>
                     <p className="text-[11px] text-slate-400 mt-1">
                       {AVAILABLE_VOICES.find(v => v.id === selectedVoice)?.desc}

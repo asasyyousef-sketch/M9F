@@ -1153,7 +1153,9 @@ export const speakClient = async (text: string, lang: string, voice?: string) =>
   const baseUrl = `/api/tts?text=${encodeURIComponent(cleanText)}&lang=${lang}${voiceParam}`;
 
   // 1. Check in-memory ttsCache first (instant playback for previously generated/regenerated audio)
-  const memoryCached = ttsCache[cacheKey] || ttsCache[`${cleanText}_${langShort}_${effectiveVoice}`] || ttsCache[`${cleanText}_${lang}`];
+  const memoryCached = effectiveVoice
+    ? (ttsCache[cacheKey] || ttsCache[`${cleanText}_${langShort}_${effectiveVoice}`])
+    : ttsCache[`${cleanText}_${lang}`];
   if (memoryCached) {
     try {
       const audio = new Audio(memoryCached);

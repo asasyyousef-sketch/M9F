@@ -1597,8 +1597,10 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
           previousCards={previousCards || []}
           nextCards={nextCards || []}
           folderInfo={folderInfo}
-          onPlayPronunciation={(text, lang) => {
-            if (reviewVoiceTarget === "secondary") {
+          onPlayPronunciation={(text, lang, voice) => {
+            if (voice) {
+              speakClient(text, lang || card.frontLang || "de", voice);
+            } else if (reviewVoiceTarget === "secondary") {
               const langShort = (lang || card.frontLang || "de").toLowerCase().split("-")[0];
               const secVoice = localStorage.getItem(`settings_secondary_piper_model_${langShort}`) || localStorage.getItem("settings_secondary_piper_model") || "google";
               speakClient(text, lang || card.frontLang || "de", secVoice);
