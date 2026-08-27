@@ -1192,13 +1192,29 @@ const FormattedText: React.FC<{
 };
 
 // Constant list of all available AI models
-const ALL_AVAILABLE_MODELS = [
-  { key: "gemini-2.5-flash", name: "Gemini 2.5 Flash ⚡", desc: "أحدث معالجة ذكية ومستقرة (موصى به)", badge: "موصى به" },
-  { key: "gemini-2.5-pro", name: "Gemini 2.5 Pro 💎", desc: "تحليل لغوي وبلاغي عميق جداً", badge: "تحليل عميق" },
-  { key: "gemini-1.5-flash", name: "Gemini 1.5 Flash ⚡", desc: "نموذج فلاش القياسي السريع", badge: "مستقر" },
-  { key: "gemini-1.5-pro", name: "Gemini 1.5 Pro 💎", desc: "سياق واسع وفهم دقيق للجمل", badge: "سياق كبير" },
-  { key: "groq-llama-3.3-70b", name: "Groq Llama 3.3 70B 🚀", desc: "محرك جروك الفائق في السرعة والتصحيح", badge: "فائق السرعة" },
-  { key: "grok-2", name: "Grok 2 🤖", desc: "أسلوب تفاعلي وحوار طبيعي", badge: "تفاعلي" }
+export interface AIModelOption {
+  key: string;
+  name: string;
+  desc: string;
+  badge: string;
+  group?: "high_quota" | "general";
+}
+
+export const ALL_AVAILABLE_MODELS: AIModelOption[] = [
+  // High Quota Models (500 RPD)
+  { key: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite ⚡ (500 RPD)", desc: "سريع مع 500 طلب يومياً", badge: "500 RPD", group: "high_quota" },
+  { key: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite ⚡ (500 RPD)", desc: "خفيف واقتصادي مع 500 طلب يومياً", badge: "500 RPD", group: "high_quota" },
+  { key: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite ⚡ (10 RPM)", desc: "خفيف وعالي الاستجابة", badge: "10 RPM", group: "high_quota" },
+  // General & Advanced Models
+  { key: "gemini-3.6-flash", name: "Gemini 3.6 Flash ⚡", desc: "أحدث معالجة ذكية ومستقرة (موصى به)", badge: "موصى به", group: "general" },
+  { key: "gemini-3.5-flash", name: "Gemini 3.5 Flash ⚡", desc: "نموذج فلاش فائق الاستقرار", badge: "مستقر", group: "general" },
+  { key: "gemini-3.7-flash", name: "Gemini 3.7 Flash ⚡", desc: "تفكير متقدم واستنتاج تحليلي", badge: "تفكير متقدم", group: "general" },
+  { key: "groq-llama-3.3-70b", name: "Groq Llama 3.3 70B 🚀", desc: "محرك جروك الفائق في السرعة والتصحيح", badge: "فائق السرعة", group: "general" },
+  { key: "grok-2", name: "Grok 2 🤖", desc: "أسلوب تفاعلي وحوار طبيعي", badge: "تفاعلي", group: "general" },
+  { key: "gemini-2.5-flash", name: "Gemini 2.5 Flash ⚡", desc: "نموذج فلاش القياسي السريع", badge: "خفيف وسريع", group: "general" },
+  { key: "gemini-2.5-pro", name: "Gemini 2.5 Pro 💎", desc: "تحليل لغوي وبلاغي عميق جداً", badge: "تحليل عميق", group: "general" },
+  { key: "gemini-1.5-pro", name: "Gemini 1.5 Pro 💎", desc: "سياق واسع وفهم دقيق للجمل", badge: "سياق كبير", group: "general" },
+  { key: "gemini-1.5-flash", name: "Gemini 1.5 Flash ⚡", desc: "نموذج فلاش القياسي الكلاسيكي", badge: "مستقر", group: "general" }
 ];
 
 // Interactive Exercise Checklist Widget Component
@@ -2388,6 +2404,8 @@ export const AICorrectorWorkspace: React.FC<AICorrectorWorkspaceProps> = ({
         return "Gemini 3.1 Flash Lite ⚡";
       case "gemini-2.5-flash-lite":
         return "Gemini 2.5 Flash Lite ⚡";
+      case "gemini-3.7-flash":
+        return "Gemini 3.7 Flash ⚡";
       case "gemini-3.5-flash":
         return "Gemini 3.5 Flash ⚡";
       case "groq-llama-3.3-70b":
@@ -2396,10 +2414,14 @@ export const AICorrectorWorkspace: React.FC<AICorrectorWorkspaceProps> = ({
       case "grok-2":
       case "grok":
         return "Grok 2 🤖";
+      case "gemini-2.5-pro":
+        return "Gemini 2.5 Pro 💎";
       case "gemini-2.5-flash":
         return "Gemini 2.5 Flash ⚡";
       case "gemini-1.5-pro":
         return "Gemini 1.5 Pro 💎";
+      case "gemini-1.5-flash":
+        return "Gemini 1.5 Flash ⚡";
       case "gemini-3.6-flash":
       default:
         return "Gemini 3.6 Flash ⚡";

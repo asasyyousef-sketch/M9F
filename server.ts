@@ -324,10 +324,39 @@ async function startServer() {
     const trimmed = rawText.trim();
     if (!trimmed) return fallback;
 
+    // Helper to safely unwrap or cast result based on expected fallback type
+    const sanitizeResult = (parsed: any): T => {
+      if (parsed === null || parsed === undefined) return fallback;
+      if (Array.isArray(fallback)) {
+        if (Array.isArray(parsed)) return parsed as T;
+        if (parsed && typeof parsed === "object") {
+          if (Array.isArray(parsed.challenges)) return parsed.challenges as T;
+          if (Array.isArray(parsed.cards)) return parsed.cards as T;
+          if (Array.isArray(parsed.items)) return parsed.items as T;
+          if (Array.isArray(parsed.data)) return parsed.data as T;
+          if (Array.isArray(parsed.result)) return parsed.result as T;
+          return [parsed] as T;
+        }
+        return fallback;
+      }
+      return parsed as T;
+    };
+
     // Layer 1: Direct JSON.parse
     try {
-      return JSON.parse(trimmed) as T;
-    } catch (_) {}
+      return sanitizeResult(JSON.parse(trimmed));
+    } catch (err: any) {
+      // If error specifies a position (e.g., "Unexpected non-whitespace character after JSON at position 8637")
+      const posMatch = err?.message?.match(/position\s+(\d+)/i);
+      if (posMatch && posMatch[1]) {
+        const pos = parseInt(posMatch[1], 10);
+        if (pos > 0 && pos < trimmed.length) {
+          try {
+            return sanitizeResult(JSON.parse(trimmed.substring(0, pos).trim()));
+          } catch (_) {}
+        }
+      }
+    }
 
     // Layer 2: Clean markdown codeblocks (e.g. ```json ... ``` or ``` ...)
     let cleaned = trimmed
@@ -336,49 +365,143 @@ async function startServer() {
       .trim();
 
     try {
-      return JSON.parse(cleaned) as T;
-    } catch (_) {}
+      return sanitizeResult(JSON.parse(cleaned));
+    } catch (err: any) {
+      const posMatch = err?.message?.match(/position\s+(\d+)/i);
+      if (posMatch && posMatch[1]) {
+        const pos = parseInt(posMatch[1], 10);
+        if (pos > 0 && pos < cleaned.length) {
+          try {
+            return sanitizeResult(JSON.parse(cleaned.substring(0, pos).trim()));
+          } catch (_) {}
+        }
+      }
+    }
 
-    // Layer 3: Extract outermost Array [ ... ]
+    // Layer 3: Balanced delimiter extractor with string escape & quote awareness
+    // Finds the first '{' or '[' and tracks exact nesting depth ignoring string contents
+    const findBalancedJson = (str: string): string | null => {
+      const firstOpenObj = str.indexOf("{");
+      const firstOpenArr = str.indexOf("[");
+
+      let startIndex = -1;
+      if (firstOpenObj !== -1 && firstOpenArr !== -1) {
+        startIndex = Math.min(firstOpenArr, firstOpenObj);
+      } else if (firstOpenArr !== -1) {
+        startIndex = firstOpenArr;
+      } else if (firstOpenObj !== -1) {
+        startIndex = firstOpenObj;
+      }
+
+      if (startIndex === -1) return null;
+
+      const stack: string[] = [];
+      let inString = false;
+      let isEscaped = false;
+
+      for (let i = startIndex; i < str.length; i++) {
+        const char = str[i];
+
+        if (isEscaped) {
+          isEscaped = false;
+          continue;
+        }
+
+        if (char === "\\") {
+          isEscaped = true;
+          continue;
+        }
+
+        if (char === '"') {
+          inString = !inString;
+          continue;
+        }
+
+        if (!inString) {
+          if (char === "{" || char === "[") {
+            stack.push(char);
+          } else if (char === "}") {
+            if (stack.length > 0 && stack[stack.length - 1] === "{") {
+              stack.pop();
+              if (stack.length === 0) {
+                return str.substring(startIndex, i + 1);
+              }
+            }
+          } else if (char === "]") {
+            if (stack.length > 0 && stack[stack.length - 1] === "[") {
+              stack.pop();
+              if (stack.length === 0) {
+                return str.substring(startIndex, i + 1);
+              }
+            }
+          }
+        }
+      }
+
+      return null;
+    };
+
+    const balancedJson = findBalancedJson(cleaned) || findBalancedJson(trimmed);
+    if (balancedJson) {
+      try {
+        return sanitizeResult(JSON.parse(balancedJson));
+      } catch (_) {
+        try {
+          const trailingCommaCleaned = balancedJson.replace(/,\s*([\]}])/g, "$1");
+          return sanitizeResult(JSON.parse(trailingCommaCleaned));
+        } catch (_) {}
+      }
+    }
+
+    // Layer 4: Outermost Array [ ... ]
     const firstOpenBracket = cleaned.indexOf("[");
     const lastCloseBracket = cleaned.lastIndexOf("]");
     if (firstOpenBracket !== -1 && lastCloseBracket > firstOpenBracket) {
       const arraySubstring = cleaned.substring(firstOpenBracket, lastCloseBracket + 1);
       try {
-        return JSON.parse(arraySubstring) as T;
+        return sanitizeResult(JSON.parse(arraySubstring));
       } catch (_) {
         try {
           const cleanedArray = arraySubstring.replace(/,\s*([\]}])/g, "$1");
-          return JSON.parse(cleanedArray) as T;
+          return sanitizeResult(JSON.parse(cleanedArray));
         } catch (_) {}
       }
     }
 
-    // Layer 4: Extract outermost Object { ... }
+    // Layer 5: Outermost Object { ... }
     const firstOpenBrace = cleaned.indexOf("{");
     const lastCloseBrace = cleaned.lastIndexOf("}");
     if (firstOpenBrace !== -1 && lastCloseBrace > firstOpenBrace) {
       const objectSubstring = cleaned.substring(firstOpenBrace, lastCloseBrace + 1);
       try {
-        return JSON.parse(objectSubstring) as T;
+        return sanitizeResult(JSON.parse(objectSubstring));
       } catch (_) {
         try {
           const cleanedObject = objectSubstring.replace(/,\s*([\]}])/g, "$1");
-          return JSON.parse(cleanedObject) as T;
+          return sanitizeResult(JSON.parse(cleanedObject));
         } catch (_) {}
       }
     }
 
-    // Layer 5: Fallback for partially completed / truncated arrays
+    // Layer 6: Fallback for partially completed / truncated arrays
     if (firstOpenBracket !== -1) {
-      let partial = cleaned.substring(firstOpenBracket);
+      const partial = cleaned.substring(firstOpenBracket);
       const lastBrace = partial.lastIndexOf("}");
       if (lastBrace !== -1) {
         try {
           const repaired = partial.substring(0, lastBrace + 1).replace(/,\s*$/, "") + "]";
-          return JSON.parse(repaired) as T;
+          return sanitizeResult(JSON.parse(repaired));
         } catch (_) {}
       }
+    }
+
+    // Layer 7: Fallback for partially completed / truncated objects
+    if (firstOpenBrace !== -1) {
+      const partial = cleaned.substring(firstOpenBrace);
+      try {
+        const repaired = partial.replace(/,\s*$/, "") + "}";
+        return sanitizeResult(JSON.parse(repaired));
+      } catch (_) {}
     }
 
     return fallback;
@@ -630,25 +753,46 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
 
       // 2. If Gemini or fallback
       if (!outputText && effectiveGeminiKey) {
-        const geminiModel = isGroq ? "gemini-3.6-flash" : targetModel;
-        const ai = new GoogleGenAI({
-          apiKey: effectiveGeminiKey,
-          httpOptions: {
-            headers: {
-              'User-Agent': 'aistudio-build'
-            }
-          }
-        });
+        const modelCandidates = [
+          isGroq ? "gemini-3.6-flash" : targetModel,
+          "gemini-3.6-flash",
+          "gemini-3.5-flash",
+          "gemini-2.5-flash",
+          "gemini-1.5-flash"
+        ];
+        const validCandidates = Array.from(new Set(modelCandidates.filter(Boolean)));
+        let lastErr: any = null;
 
-        const response = await ai.models.generateContent({
-          model: geminiModel,
-          contents: `${systemInstruction}\n\n${userPromptText}`,
-          config: {
-            responseMimeType: "application/json"
-          }
-        });
+        for (const modelToTry of validCandidates) {
+          try {
+            const ai = new GoogleGenAI({
+              apiKey: effectiveGeminiKey,
+              httpOptions: {
+                headers: {
+                  'User-Agent': 'aistudio-build'
+                }
+              }
+            });
 
-        outputText = response.text || "";
+            const response = await ai.models.generateContent({
+              model: modelToTry,
+              contents: `${systemInstruction}\n\n${userPromptText}`,
+              config: {
+                responseMimeType: "application/json"
+              }
+            });
+
+            outputText = response.text || "";
+            if (outputText && outputText.trim()) break;
+          } catch (modelErr: any) {
+            lastErr = modelErr;
+            console.warn(`[Spoken Challenge] Model ${modelToTry} attempt failed: ${modelErr?.message || modelErr}. Trying next available fallback model...`);
+          }
+        }
+
+        if (!outputText && lastErr) {
+          throw lastErr;
+        }
       }
 
       // Safe multi-tier JSON Extraction
@@ -2484,7 +2628,8 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
     voice: string = "ryan",
     lang: string = "german",
     serverUrl: string = "http://192.168.0.159:7860",
-    speed: number = 1.0
+    speed: number = 1.0,
+    bypassCache: boolean = false
   ): Promise<{ buffer: Buffer; mimeType: string }> {
     const normalizedUrl = serverUrl.replace(/\/+$/, "");
     const cleanVoice = voice.replace(/^gradio[:_]/i, "").trim() || "ryan";
@@ -2518,9 +2663,10 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
     let sseAttempted = false;
 
     try {
-      // 1. POST request with strictly 4 elements: [text, voice, lang, instruct]
+      // 1. POST request with strictly 5 elements: [text, voice, lang, instruct, bypass_cache]
+      // Element 5: false = serve from cache if available (much faster), true = regenerate new sample and overwrite cache
       const postPayload = {
-        data: [text, cleanVoice, cleanLang, null]
+        data: [text, cleanVoice, cleanLang, null, Boolean(bypassCache)]
       };
 
       const postRes = await fetch(generateEndpoint, {
@@ -2608,6 +2754,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       try {
         const fallbackEndpoint = `${normalizedUrl}/run/predict`;
         const payloadVariations = [
+          { fn_index: 0, data: [text, cleanVoice, cleanLang, null, Boolean(bypassCache)] },
           { fn_index: 0, data: [text, cleanVoice, cleanLang, null] },
           { fn_index: 0, data: [text, cleanVoice, cleanLang] }
         ];
@@ -2748,15 +2895,29 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
 
   // Endpoint: Direct POST to generate Gradio TTS Audio
   app.post("/api/tts/gradio/generate", express.json(), async (req, res) => {
-    const { text, voice = "ryan", lang = "german", serverUrl = "http://192.168.0.159:7860", speed = 1.0 } = req.body || {};
+    const {
+      text,
+      voice = "ryan",
+      lang = "german",
+      serverUrl = "http://192.168.0.159:7860",
+      speed = 1.0,
+      bypassCache = false,
+      regenerate = false
+    } = req.body || {};
     if (!text || !text.trim()) {
       return res.status(400).json({ error: "Text is required" });
     }
 
+    const forceBypass = Boolean(bypassCache || regenerate);
+
     try {
-      const result = await generateGradioTtsAudio(text.trim(), voice, lang, serverUrl, speed);
+      const result = await generateGradioTtsAudio(text.trim(), voice, lang, serverUrl, speed, forceBypass);
       res.setHeader("Content-Type", result.mimeType || "audio/wav");
-      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      if (!forceBypass) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      } else {
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      }
       return res.send(result.buffer);
     } catch (err: any) {
       console.error("Gradio TTS Generation Error:", err);
@@ -2772,6 +2933,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
     const lang = (req.query.lang as string || "en").toLowerCase();
     const requestedVoice = (req.query.voice || req.query.model) as string;
     const gradioServerUrl = (req.query.gradioUrl as string) || "http://192.168.0.159:7860";
+    const bypassCache = req.query.bypassCache === "true" || req.query.regenerate === "true";
 
     if (!text || !text.trim()) {
       return res.status(400).json({ error: "Text is required" });
@@ -2804,10 +2966,16 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
             cleanText,
             gradioVoiceName,
             lang,
-            gradioServerUrl
+            gradioServerUrl,
+            1.0,
+            bypassCache
           );
           res.setHeader("Content-Type", gradioResult.mimeType || "audio/wav");
-          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+          if (!bypassCache) {
+            res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+          } else {
+            res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+          }
           return res.send(gradioResult.buffer);
         } catch (gradioErr: any) {
           console.error("Gradio TTS fetch failed:", gradioErr?.message);
@@ -3378,7 +3546,7 @@ ${transcriptText.trim()}
           throw new Error("تلقينا رداً فارغاً من خوادم Groq.");
         }
 
-        generatedData = JSON.parse(responseText.trim());
+        generatedData = safeExtractAndParseJSON(responseText, { folder: {}, cards: [] });
         const usage = chatResult?.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
         
         const groqRateLimits = {
@@ -3488,7 +3656,7 @@ ${transcriptText.trim()}
           throw new Error("Empty response from Gemini API");
         }
 
-        generatedData = JSON.parse(responseText.trim());
+        generatedData = safeExtractAndParseJSON(responseText, { folder: {}, cards: [] });
         if (generatedData && Array.isArray(generatedData.cards)) {
           generatedData.cards = generatedData.cards.map(sanitizeCardArticleAndPlural);
         }
@@ -3738,7 +3906,7 @@ ${transcriptText.trim()}
           throw new Error("تلقينا رداً فارغاً من خوادم Groq.");
         }
 
-        generatedData = JSON.parse(responseText.trim());
+        generatedData = safeExtractAndParseJSON(responseText, { cards: [] });
         const usage = chatResult?.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
         
         const groqRateLimits = {
@@ -3837,7 +4005,7 @@ ${transcriptText.trim()}
           throw new Error("No response text received from Gemini");
         }
 
-        generatedData = JSON.parse(responseText.trim());
+        generatedData = safeExtractAndParseJSON(responseText, { cards: [] });
         const usageMetadata = response.usageMetadata || { promptTokenCount: 0, candidatesTokenCount: 0, totalTokenCount: 0 };
         
         let geminiRateLimits: any = null;
@@ -4398,7 +4566,7 @@ ${
 
         if (!responseText) throw new Error("لم يتم تلقي استجابة من الذكاء الاصطناعي للشخصية");
 
-        const personaReply = cleanBrTagsFromObj(JSON.parse(responseText.trim()));
+        const personaReply: any = cleanBrTagsFromObj(safeExtractAndParseJSON<any>(responseText, { personaName: "", replyText: "", imageSearchQueries: [] }));
 
         // Handle initial auto-start greeting prompt: mark step 0 (Persona opening step) as completed (isCompleted: true)
         const isInitialGreetingPrompt = text && (text.includes("[بدء تمرين السيناريو تلقائياً]") || text.includes("ابدأ تمرين السيناريو"));
@@ -4507,7 +4675,7 @@ ${
 
         if (!responseText) throw new Error("لم يتم تلقي استجابة من الذكاء الاصطناعي");
 
-        const chatReply = cleanBrTagsFromObj(JSON.parse(responseText.trim()));
+        const chatReply = cleanBrTagsFromObj(safeExtractAndParseJSON(responseText, { title: "إجابة وتوضيح لغوي 💬", replyText: responseText }));
         return res.json({ success: true, sendMode: "chat", chatReply, aiModelName: usedModelDisplay });
       }
 
@@ -4593,7 +4761,19 @@ ${
         throw new Error("لم يتم تلقي استجابة من الذكاء الاصطناعي");
       }
 
-      const analysis = cleanBrTagsFromObj(JSON.parse(responseText.trim()));
+      const analysis = cleanBrTagsFromObj(safeExtractAndParseJSON(responseText, {
+        score: 85,
+        gradeLabel: "تقييم أولي 💡",
+        originalText: promptText,
+        correctedText: promptText,
+        hasErrors: false,
+        corrections: [],
+        nativeVersion: promptText,
+        improvedExpressionText: promptText,
+        improvedExpressionExplanationAr: "لا توجد تعديلات إضافية",
+        positiveFeedbackAr: "محاولة جيدة",
+        grammarSummaryAr: ""
+      }));
       return res.json({ success: true, sendMode: "correct", analysis, aiModelName: usedModelDisplay });
     } catch (err: any) {
       console.error("AI Corrector failed:", err);
@@ -4677,7 +4857,7 @@ ${
             const chatResult = await response.json();
             const responseText = chatResult?.choices?.[0]?.message?.content || "";
             if (responseText.trim()) {
-              generatedCardData = JSON.parse(responseText.trim());
+              generatedCardData = safeExtractAndParseJSON(responseText, null);
             }
           }
         } catch (groqErr) {
@@ -4713,7 +4893,7 @@ ${
           });
 
           if (response.text) {
-            generatedCardData = JSON.parse(response.text.trim());
+            generatedCardData = safeExtractAndParseJSON(response.text, null);
           }
         } catch (gemErr) {
           console.warn("Gemini card generation failed, trying fallback:", gemErr);
@@ -4744,7 +4924,7 @@ ${
             const chatResult = await response.json();
             const responseText = chatResult?.choices?.[0]?.message?.content || "";
             if (responseText.trim()) {
-              generatedCardData = JSON.parse(responseText.trim());
+              generatedCardData = safeExtractAndParseJSON(responseText, null);
             }
           }
         } catch (groqErr) {
@@ -5038,7 +5218,12 @@ ${
         });
       }
 
-      const generatedData = JSON.parse(responseText.trim());
+      const generatedData = safeExtractAndParseJSON(responseText, {
+        exerciseTitle: `تمرين: ${exerciseContext.slice(0, 30)}...`,
+        userRole: "المتحدث الرئيسي",
+        personas: [],
+        checklist: []
+      });
       const defaultAvatarEmojis = ["🏨", "👨‍💼", "👩‍⚕️", "👨‍🍳", "👮‍♂️", "👨‍🏫", "👩‍💻", "🎭", "🏬", "✈️"];
       const sanitizedPersonas = (generatedData.personas || []).map((p: any, idx: number) => {
         let av = p.avatar ? String(p.avatar).trim() : "";

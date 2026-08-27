@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { Flashcard, SpeakingChallengeItem } from "../types";
 import { preloadImage, speakClient, playPiperLocalWasm, fetchGradioAudioBlob } from "./Modals";
+import { ALL_AVAILABLE_MODELS } from "./AICorrectorWorkspace";
 import { motion, AnimatePresence } from "motion/react";
 
 interface SpokenChallengeSessionViewProps {
@@ -426,23 +427,29 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
             </label>
             <select
               value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedModel(val);
+                try {
+                  localStorage.setItem("spoken_challenge_selected_model", val);
+                  localStorage.setItem("ai_corrector_selected_model", val);
+                } catch (err) {}
+              }}
               className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer shadow-xs"
             >
               <optgroup label="🔥 الموديلات ذات الطلبات الكثيرة (500 RPD)">
-                <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite ⚡ (500 RPD)</option>
-                <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite ⚡ (500 RPD)</option>
-                <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite ⚡ (10 RPM)</option>
+                {ALL_AVAILABLE_MODELS.filter((m) => m.group === "high_quota").map((m) => (
+                  <option key={m.key} value={m.key}>
+                    {m.name}
+                  </option>
+                ))}
               </optgroup>
               <optgroup label="✨ النماذج العامة والمتقدمة">
-                <option value="gemini-3.6-flash">Gemini 3.6 Flash ⚡ (أحدث معالجة - موصى به)</option>
-                <option value="gemini-3.5-flash">Gemini 3.5 Flash ⚡ (مستقر)</option>
-                <option value="gemini-3.7-flash">Gemini 3.7 Flash ⚡ (تفكير متقدم)</option>
-                <option value="groq-llama-3.3-70b">Groq Llama 3.3 70B 🚀 (فائق السرعة)</option>
-                <option value="grok-2">Grok 2 🤖 (تفاعلي)</option>
-                <option value="gemini-2.5-flash">Gemini 2.5 Flash ⚡ (خفيف - سريع)</option>
-                <option value="gemini-2.5-pro">Gemini 2.5 Pro 💎 (تحليل عميق)</option>
-                <option value="gemini-1.5-pro">Gemini 1.5 Pro 💎 (تحليل عميق)</option>
+                {ALL_AVAILABLE_MODELS.filter((m) => m.group !== "high_quota").map((m) => (
+                  <option key={m.key} value={m.key}>
+                    {m.name}
+                  </option>
+                ))}
               </optgroup>
             </select>
           </div>
