@@ -648,29 +648,45 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   };
 
-  // Media Player control handlers
-  const activeMediaElement = currentFile?.type === "video" ? videoRef.current : audioRef.current;
+  // Media Player element getter & control handlers
+  const getMediaElement = () => (currentFile?.type === "video" ? videoRef.current : audioRef.current);
 
   const togglePlay = () => {
-    if (!activeMediaElement) return;
+    const el = getMediaElement();
+    if (!el) return;
     if (isPlaying) {
-      activeMediaElement.pause();
+      el.pause();
     } else {
-      activeMediaElement.play().catch(console.error);
+      el.play().catch(console.error);
     }
   };
 
   const handleSeek = (newTime: number) => {
-    if (!activeMediaElement) return;
-    const boundedTime = Math.max(0, Math.min(newTime, duration || Infinity));
-    activeMediaElement.currentTime = boundedTime;
+    const el = getMediaElement();
+    if (!el) return;
+    const totalDuration = duration || el.duration || 0;
+    const boundedTime = Math.max(0, Math.min(newTime, totalDuration > 0 ? totalDuration : Infinity));
+    el.currentTime = boundedTime;
     setCurrentTime(boundedTime);
   };
 
+  const handleProgressBarClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const clickFraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const el = getMediaElement();
+    const totalDuration = duration || el?.duration || 0;
+    if (totalDuration > 0) {
+      handleSeek(clickFraction * totalDuration);
+    }
+  };
+
   const skipSeconds = (seconds: number) => {
-    if (!activeMediaElement) return;
-    const target = Math.min(Math.max(0, activeMediaElement.currentTime + seconds), duration || Infinity);
-    activeMediaElement.currentTime = target;
+    const el = getMediaElement();
+    if (!el) return;
+    const totalDuration = duration || el.duration || Infinity;
+    const target = Math.min(Math.max(0, el.currentTime + seconds), totalDuration);
+    el.currentTime = target;
     setCurrentTime(target);
   };
 
@@ -821,12 +837,16 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         toggleMute();
       } else if (e.key === "f" || e.key === "F") {
         handleToggleFullscreen();
+      } else if (e.key === "Escape") {
+        if (isImmersiveMode) {
+          setIsImmersiveMode(false);
+        }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPlaying, isMuted, currentFile]);
+  }, [isPlaying, isMuted, currentFile, isImmersiveMode]);
 
   // Copy full transcript text
   const handleCopyTranscript = () => {
@@ -1058,9 +1078,19 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         {/* ACTIVE MEDIA & SUBTITLES WORKSPACE (Like YouTube Player) */}
         {/* ======================================================== */}
         {currentFile && (
-          <section className="bg-slate-900 rounded-2xl p-4 sm:p-5 text-white shadow-2xl border border-slate-800 overflow-hidden">
+          <section
+            className={
+              isImmersiveMode
+                ? "fixed inset-0 z-50 bg-black flex flex-col h-screen w-screen p-3 sm:p-4 overflow-hidden text-white animate-fadeIn"
+                : "bg-slate-900 rounded-2xl p-4 sm:p-5 text-white shadow-2xl border border-slate-800 overflow-hidden"
+            }
+          >
             {/* Top Bar of Active Media */}
-            <div className="flex flex-wrap items-center justify-between gap-3 pb-3.5 border-b border-slate-800/80 mb-4">
+            <div
+              className={`flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800/80 mb-3 shrink-0 ${
+                isImmersiveMode ? "bg-slate-950/90 px-3 py-2 rounded-xl border border-slate-800" : ""
+              }`}
+            >
               <div className="flex items-center gap-2.5 min-w-0">
                 <span
                   className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider shrink-0 ${
@@ -1071,6 +1101,12 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                 >
                   {currentFile.type === "video" ? "🎬 فيديو" : "🎵 صوت"}
                 </span>
+
+                {isImmersiveMode && (
+                  <span className="hidden sm:inline-block px-2.5 py-0.5 rounded-lg bg-linear-to-r from-purple-600/40 to-blue-600/40 border border-purple-500/40 text-purple-200 text-[11px] font-black">
+                    📺 وضع التكبير السينمائي
+                  </span>
+                )}
 
                 {editingId === currentFile.id ? (
                   <div className="flex items-center gap-1.5">
@@ -1083,13 +1119,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     />
                     <button
                       onClick={() => handleSaveRename(currentFile.id)}
-                      className="p-1 bg-blue-600 hover:bg-blue-500 rounded-lg text-white"
+                      className="p-1 bg-blue-600 hover:bg-blue-500 rounded-lg text-white cursor-pointer"
                     >
                       <Check className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => setEditingId(null)}
-                      className="p-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400"
+                      className="p-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 cursor-pointer"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -1099,13 +1135,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     <h2 className="text-sm sm:text-base font-bold text-slate-100 truncate">
                       {currentFile.title}
                     </h2>
-                    <button
-                      onClick={(e) => handleStartRename(currentFile, e)}
-                      className="text-slate-400 hover:text-white p-1 transition-colors cursor-pointer"
-                      title="تعديل الاسم"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
+                    {!isImmersiveMode && (
+                      <button
+                        onClick={(e) => handleStartRename(currentFile, e)}
+                        className="text-slate-400 hover:text-white p-1 transition-colors cursor-pointer"
+                        title="تعديل الاسم"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1131,7 +1169,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     ))}
                   </select>
 
-                  {activeTrack && (
+                  {activeTrack && !isImmersiveMode && (
                     <button
                       onClick={(e) => handleDeleteSubtitleTrack(activeTrack.id, e)}
                       className="text-slate-400 hover:text-rose-400 p-0.5 transition-colors cursor-pointer mr-1"
@@ -1167,7 +1205,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
                     <button
                       onClick={() => setShowDualSubtitles(!showDualSubtitles)}
-                      className={`p-1 rounded-lg text-[10px] font-bold transition-all ${
+                      className={`p-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
                         showDualSubtitles ? "bg-emerald-600/40 text-emerald-300" : "bg-slate-750 text-slate-400"
                       }`}
                       title={showDualSubtitles ? "إخفاء الترجمة المزدوجة" : "إظهار الترجمة المزدوجة"}
@@ -1189,15 +1227,16 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   </button>
                 )}
 
-                {/* Subtitle Upload / Add Button */}
-                <button
-                  onClick={() => setShowSubtitleUploadModal(true)}
-                  className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1"
-                  title="رفع أو كتابة ترجمة يدوية"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">إضافة ترجمة</span>
-                </button>
+                {!isImmersiveMode && (
+                  <button
+                    onClick={() => setShowSubtitleUploadModal(true)}
+                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1"
+                    title="رفع أو كتابة ترجمة يدوية"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">إضافة ترجمة</span>
+                  </button>
+                )}
 
                 {/* Gradio Local STT Server Button */}
                 <button
@@ -1209,15 +1248,26 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   <span>تفريغ Gradio 🇩🇪</span>
                 </button>
 
-                {/* Immersive Theater Mode Button (وضع تكبير الشاشة الفائق) */}
-                <button
-                  onClick={() => setIsImmersiveMode(true)}
-                  className="px-3 py-1.5 bg-linear-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-xl text-xs font-black shadow-md transition-all cursor-pointer flex items-center gap-1.5"
-                  title="وضع تكبير الشاشة الأقصى (فيديو كبير + تحكم مبسط + لوحة جانبية متحركة)"
-                >
-                  <Expand className="w-3.5 h-3.5" />
-                  <span>وضع التكبير السينمائي 📺</span>
-                </button>
+                {/* Immersive Theater Mode Button / Exit Button */}
+                {isImmersiveMode ? (
+                  <button
+                    onClick={() => setIsImmersiveMode(false)}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-black shadow-lg transition-all cursor-pointer flex items-center gap-1.5 border border-purple-400"
+                    title="الخروج من وضع التكبير (Esc)"
+                  >
+                    <Shrink className="w-3.5 h-3.5" />
+                    <span>خروج من التكبير (Esc)</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setIsImmersiveMode(true)}
+                    className="px-3 py-1.5 bg-linear-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-xl text-xs font-black shadow-md transition-all cursor-pointer flex items-center gap-1.5"
+                    title="وضع تكبير الشاشة الأقصى (فيديو كبير + تحكم مبسط + لوحة جانبية متحركة)"
+                  >
+                    <Expand className="w-3.5 h-3.5" />
+                    <span>وضع التكبير السينمائي 📺</span>
+                  </button>
+                )}
 
                 {/* Toggle Transcript View Button */}
                 <button
@@ -1227,45 +1277,71 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       ? "bg-blue-600 text-white shadow-sm"
                       : "bg-slate-800 text-slate-300 hover:text-white"
                   }`}
-                  title="لوحة التفريغ النصي والترجمة مثل اليوتيوب"
+                  title={isImmersiveMode ? "إظهار / إخفاء النافذة الجانبية للجمل للتكبير الكلي" : "لوحة التفريغ النصي والترجمة مثل اليوتيوب"}
                 >
                   <FileText className="w-3.5 h-3.5" />
-                  <span>تفريغ اليوتيوب</span>
+                  <span>{showTranscriptPanel ? (isImmersiveMode ? "إخفاء لوحة الجمل" : "إخفاء التفريغ") : (isImmersiveMode ? "إظهار لوحة الجمل" : "تفريغ اليوتيوب")}</span>
                 </button>
 
-                <a
-                  href={`/api/media/download/${currentFile.id}`}
-                  className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
-                  title="تحميل المقطع الأصلي"
-                >
-                  <Download className="w-4 h-4" />
-                </a>
+                {!isImmersiveMode && (
+                  <>
+                    <a
+                      href={`/api/media/download/${currentFile.id}`}
+                      className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
+                      title="تحميل المقطع الأصلي"
+                    >
+                      <Download className="w-4 h-4" />
+                    </a>
 
-                <button
-                  onClick={() => {
-                    setCurrentFile(null);
-                    setIsPlaying(false);
-                  }}
-                  className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
-                  title="إغلاق المشغل"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                    <button
+                      onClick={() => {
+                        setCurrentFile(null);
+                        setIsPlaying(false);
+                      }}
+                      className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                      title="إغلاق المشغل"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
-            {/* Split Grid: Player View (Left/Center) + YouTube Transcript Panel (Right) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Split Grid / Flex: Player View + Transcript Panel */}
+            <div
+              className={
+                isImmersiveMode
+                  ? "flex-1 flex overflow-hidden gap-3.5 min-h-0 relative"
+                  : "grid grid-cols-1 lg:grid-cols-12 gap-5"
+              }
+            >
               {/* Media Player Column */}
-              <div className={`${showTranscriptPanel ? "lg:col-span-7 xl:col-span-8" : "lg:col-span-12"} space-y-4`}>
+              <div
+                className={
+                  isImmersiveMode
+                    ? "flex-1 flex flex-col min-w-0 min-h-0 space-y-2.5 justify-between"
+                    : `${showTranscriptPanel ? "lg:col-span-7 xl:col-span-8" : "lg:col-span-12"} space-y-4`
+                }
+              >
                 {/* VIDEO OR AUDIO STAGE */}
-                <div className="relative rounded-2xl bg-black overflow-hidden flex items-center justify-center min-h-[260px] sm:min-h-[380px] group border border-slate-800 shadow-inner">
+                <div
+                  className={
+                    isImmersiveMode
+                      ? "flex-1 relative rounded-2xl bg-black overflow-hidden flex items-center justify-center min-h-0 group border border-slate-800/80 shadow-2xl"
+                      : "relative rounded-2xl bg-black overflow-hidden flex items-center justify-center min-h-[260px] sm:min-h-[380px] group border border-slate-800 shadow-inner"
+                  }
+                >
                   {currentFile.type === "video" ? (
                     <>
                       <video
                         ref={videoRef}
                         src={`/api/media/stream/${currentFile.filename}`}
-                        className="w-full max-h-[500px] object-contain"
+                        className={
+                          isImmersiveMode
+                            ? "w-full h-full object-contain cursor-pointer"
+                            : "w-full max-h-[500px] object-contain cursor-pointer"
+                        }
                         playsInline
                         onClick={togglePlay}
                       />
@@ -1273,21 +1349,29 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       {/* Video Subtitles Overlay (Supports Dual Subtitles: German + Arabic) */}
                       {showSubtitlesOverlay && (currentCue || (showDualSubtitles && currentSecondaryCue)) && (
                         <div
-                          className="absolute bottom-10 inset-x-0 flex flex-col items-center justify-center gap-1.5 px-4 pointer-events-none z-20 transition-all duration-150 animate-fadeIn"
+                          className={`absolute ${
+                            isImmersiveMode ? "bottom-12" : "bottom-8"
+                          } inset-x-0 flex flex-col items-center justify-center gap-2 px-4 pointer-events-none z-20 transition-all duration-150 animate-fadeIn`}
                         >
                           {/* Primary Subtitle (German / Original) */}
                           {currentCue && (
                             <div
-                              className={`max-w-[90%] text-center rounded-xl transition-all leading-relaxed font-sans shadow-lg ${subtitleStyleClass} ${subtitleFontSizeClass}`}
+                              className={`max-w-[90%] text-center rounded-2xl transition-all leading-relaxed font-sans shadow-2xl ${subtitleStyleClass} ${
+                                isImmersiveMode ? "text-base sm:text-xl md:text-2xl font-bold px-5 py-2.5" : subtitleFontSizeClass
+                              }`}
                             >
-                              <span className="font-semibold">{currentCue.text}</span>
+                              <span className="font-bold">{currentCue.text}</span>
                             </div>
                           )}
 
                           {/* Secondary Subtitle (Arabic / Translated with Gemini) */}
                           {showDualSubtitles && currentSecondaryCue && (
                             <div
-                              className="max-w-[90%] text-center rounded-xl transition-all leading-relaxed font-sans shadow-lg bg-emerald-950/85 text-emerald-200 border border-emerald-500/50 px-3.5 py-1 text-sm font-bold"
+                              className={`max-w-[90%] text-center rounded-2xl transition-all leading-relaxed font-sans shadow-2xl bg-emerald-950/90 text-emerald-200 border border-emerald-500/60 font-bold ${
+                                isImmersiveMode
+                                  ? "text-sm sm:text-base md:text-lg px-4 py-1.5"
+                                  : "text-sm px-3.5 py-1"
+                              }`}
                             >
                               <span>{currentSecondaryCue.text}</span>
                             </div>
@@ -1297,15 +1381,21 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     </>
                   ) : (
                     /* Audio Aesthetic Stage */
-                    <div className="w-full py-10 px-6 flex flex-col items-center justify-center gap-5 relative bg-linear-to-b from-slate-900 via-slate-900/90 to-slate-950">
+                    <div
+                      className={`w-full ${
+                        isImmersiveMode ? "h-full justify-center" : "py-10"
+                      } px-6 flex flex-col items-center justify-center gap-5 relative bg-linear-to-b from-slate-900 via-slate-900/90 to-slate-950`}
+                    >
                       <audio
                         ref={audioRef}
                         src={`/api/media/stream/${currentFile.filename}`}
                       />
 
-                      {/* Rotating Vinyl Vinyl Record Graphic */}
+                      {/* Rotating Vinyl Record Graphic */}
                       <div
-                        className={`w-32 h-32 rounded-full border-4 border-slate-700/80 bg-linear-to-tr from-purple-600 via-indigo-600 to-blue-600 flex items-center justify-center shadow-xl shadow-purple-500/20 transition-transform ${
+                        className={`${
+                          isImmersiveMode ? "w-36 h-36" : "w-32 h-32"
+                        } rounded-full border-4 border-slate-700/80 bg-linear-to-tr from-purple-600 via-indigo-600 to-blue-600 flex items-center justify-center shadow-xl shadow-purple-500/20 transition-transform ${
                           isPlaying ? "animate-spin" : ""
                         }`}
                         style={{ animationDuration: "8s" }}
@@ -1322,11 +1412,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
                       {/* Audio Karaoke Subtitle Box (Supports Dual Subtitles) */}
                       {showSubtitlesOverlay && (
-                        <div className="w-full max-w-lg mt-2 min-h-[64px] flex flex-col items-center justify-center gap-1.5">
+                        <div className="w-full max-w-lg mt-2 min-h-[64px] flex flex-col items-center justify-center gap-2">
                           {currentCue || (showDualSubtitles && currentSecondaryCue) ? (
                             <>
                               {currentCue && (
-                                <div className={`text-center rounded-2xl transition-all leading-relaxed font-sans shadow-lg ${subtitleStyleClass} ${subtitleFontSizeClass}`}>
+                                <div
+                                  className={`text-center rounded-2xl transition-all leading-relaxed font-sans shadow-lg ${subtitleStyleClass} ${
+                                    isImmersiveMode ? "text-lg font-bold px-4 py-2" : subtitleFontSizeClass
+                                  }`}
+                                >
                                   <span className="font-bold">{currentCue.text}</span>
                                 </div>
                               )}
@@ -1348,18 +1442,16 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                 </div>
 
                 {/* Player Timeline & Controls Bar */}
-                <div className="bg-slate-800/80 border border-slate-700/70 rounded-2xl p-4 space-y-3.5">
+                <div
+                  className={`bg-slate-800/90 border border-slate-700/80 rounded-2xl ${
+                    isImmersiveMode ? "p-3 space-y-2.5" : "p-4 space-y-3.5"
+                  }`}
+                >
                   {/* Time Progress Bar */}
                   <div className="space-y-1">
                     <div
                       ref={progressBarRef}
-                      onClick={(e) => {
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        const clickPos = (e.clientX - rect.left) / rect.width;
-                        // RTL direction calculation
-                        const rtlPos = 1 - clickPos;
-                        handleSeek(rtlPos * duration);
-                      }}
+                      onClick={handleProgressBarClick}
                       className="w-full h-2.5 bg-slate-700 hover:h-3.5 rounded-full cursor-pointer transition-all relative overflow-hidden group"
                     >
                       <div
@@ -1395,16 +1487,30 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       {showSubtitlesOverlay && (
                         <div className="flex items-center bg-slate-700/80 border border-slate-600/70 rounded-xl p-1 text-xs">
                           <button
-                            onClick={() => setSubtitleFontSize(prev => prev === "sm" ? "md" : prev === "md" ? "lg" : prev === "lg" ? "xl" : "sm")}
-                            className="px-2 py-0.5 text-[10px] font-bold text-slate-300 hover:text-white"
+                            onClick={() =>
+                              setSubtitleFontSize((prev) =>
+                                prev === "sm" ? "md" : prev === "md" ? "lg" : prev === "lg" ? "xl" : "sm"
+                              )
+                            }
+                            className="px-2 py-0.5 text-[10px] font-bold text-slate-300 hover:text-white cursor-pointer"
                             title="تغيير حجم خط الترجمة"
                           >
                             خط: {subtitleFontSize.toUpperCase()}
                           </button>
                           <span className="text-slate-500">|</span>
                           <button
-                            onClick={() => setSubtitleStyle(prev => prev === "black" ? "yellow" : prev === "yellow" ? "transparent" : prev === "transparent" ? "outline" : "black")}
-                            className="px-2 py-0.5 text-[10px] font-bold text-slate-300 hover:text-white"
+                            onClick={() =>
+                              setSubtitleStyle((prev) =>
+                                prev === "black"
+                                  ? "yellow"
+                                  : prev === "yellow"
+                                  ? "transparent"
+                                  : prev === "transparent"
+                                  ? "outline"
+                                  : "black"
+                              )
+                            }
+                            className="px-2 py-0.5 text-[10px] font-bold text-slate-300 hover:text-white cursor-pointer"
                             title="تغيير ستايل الترجمة"
                           >
                             🎨
@@ -1461,7 +1567,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
                       <button
                         onClick={togglePlay}
-                        className="w-12 h-12 rounded-2xl bg-linear-to-tr from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white flex items-center justify-center shadow-lg shadow-blue-500/30 transition-transform active:scale-95 cursor-pointer"
+                        className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-linear-to-tr from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white flex items-center justify-center shadow-lg shadow-blue-500/30 transition-transform active:scale-95 cursor-pointer"
                         title={isPlaying ? "إيقاف مؤقت (Space)" : "تشغيل (Space)"}
                       >
                         {isPlaying ? (
@@ -1532,13 +1638,19 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
               {/* YOUTUBE-STYLE INTERACTIVE TRANSCRIPT / SUBTITLE PANEL */}
               {/* ======================================================== */}
               {showTranscriptPanel && (
-                <div className="lg:col-span-5 xl:col-span-4 bg-slate-800/90 border border-slate-700/90 rounded-2xl flex flex-col h-[480px] lg:h-[580px] overflow-hidden shadow-lg animate-fadeIn">
+                <div
+                  className={
+                    isImmersiveMode
+                      ? "w-80 sm:w-96 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col h-full z-20 shrink-0 shadow-2xl overflow-hidden animate-slideLeft"
+                      : "lg:col-span-5 xl:col-span-4 bg-slate-800/90 border border-slate-700/90 rounded-2xl flex flex-col h-[480px] lg:h-[580px] overflow-hidden shadow-lg animate-fadeIn"
+                  }
+                >
                   {/* Panel Header */}
-                  <div className="p-3.5 border-b border-slate-700/80 bg-slate-800 flex items-center justify-between shrink-0">
+                  <div className="p-3 border-b border-slate-700/80 bg-slate-800 flex items-center justify-between shrink-0">
                     <div className="flex items-center gap-2">
                       <FileText className="w-4 h-4 text-blue-400" />
                       <span className="text-xs font-black text-slate-100">
-                        التفريغ والترجمة ({activeCues.length} مقطع)
+                        الجمل والتفريغ ({activeCues.length} مقطع)
                       </span>
                     </div>
 
@@ -1560,17 +1672,21 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       <button
                         onClick={handleCopyTranscript}
                         disabled={activeCues.length === 0}
-                        className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer"
+                        className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer disabled:opacity-30"
                         title="نسخ النص كاملاً"
                       >
-                        {copiedTranscript ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        {copiedTranscript ? (
+                          <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5" />
+                        )}
                       </button>
 
                       {/* Export Subtitle Dropdown */}
                       <div className="relative group">
                         <button
                           disabled={activeCues.length === 0}
-                          className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer"
+                          className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer disabled:opacity-30"
                           title="تصدير وتحميل ملف الترجمة"
                         >
                           <Download className="w-3.5 h-3.5" />
@@ -1596,6 +1712,16 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           </button>
                         </div>
                       </div>
+
+                      {isImmersiveMode && (
+                        <button
+                          onClick={() => setShowTranscriptPanel(false)}
+                          className="p-1 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg cursor-pointer ml-1"
+                          title="إغلاق اللوحة الجانبية للتكبير الكلي"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1613,7 +1739,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       {subtitleSearchQuery && (
                         <button
                           onClick={() => setSubtitleSearchQuery("")}
-                          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
                         >
                           <X className="w-3 h-3" />
                         </button>
@@ -1624,7 +1750,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   {/* Cues List */}
                   <div
                     ref={transcriptContainerRef}
-                    className="flex-1 overflow-y-auto p-2.5 space-y-1.5 divide-y divide-slate-800/40"
+                    className="flex-1 overflow-y-auto p-2 space-y-1.5"
                   >
                     {activeCues.length === 0 ? (
                       <div className="h-full flex flex-col items-center justify-center p-6 text-center text-slate-400 gap-3">
@@ -1654,6 +1780,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     ) : (
                       filteredCues.map((cue) => {
                         const isCurrent = currentCue?.id === cue.id;
+                        // Find matching secondary cue (Gemini Arabic translation)
+                        const matchingSec = secondaryCues.find(
+                          (sc) =>
+                            (sc.startTime >= cue.startTime - 0.5 && sc.startTime <= cue.endTime + 0.5) ||
+                            (sc.endTime >= cue.startTime - 0.5 && sc.endTime <= cue.endTime + 0.5) ||
+                            (cue.startTime >= sc.startTime - 0.5 && cue.startTime <= sc.endTime + 0.5)
+                        );
 
                         return (
                           <div
@@ -1662,8 +1795,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                             onClick={() => handleSeek(cue.startTime)}
                             className={`p-2.5 rounded-xl transition-all duration-150 flex items-start gap-2.5 cursor-pointer group ${
                               isCurrent
-                                ? "bg-blue-600/25 border border-blue-500/60 text-white shadow-md ring-1 ring-blue-500/30"
-                                : "hover:bg-slate-700/60 text-slate-300 hover:text-white"
+                                ? "bg-blue-600/30 border border-blue-500/70 text-white shadow-md ring-1 ring-blue-500/30"
+                                : "hover:bg-slate-800 text-slate-300 hover:text-white"
                             }`}
                           >
                             {/* Timestamp Badge (Click to jump) */}
@@ -1672,10 +1805,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                                 e.stopPropagation();
                                 handleSeek(cue.startTime);
                               }}
-                              className={`px-2 py-0.5 rounded-md text-[11px] font-mono font-bold shrink-0 transition-colors ${
+                              className={`px-2 py-0.5 rounded-md text-[11px] font-mono font-bold shrink-0 transition-colors cursor-pointer ${
                                 isCurrent
                                   ? "bg-blue-600 text-white"
-                                  : "bg-slate-900 text-blue-400 group-hover:bg-blue-950"
+                                  : "bg-slate-950 text-blue-400 group-hover:bg-blue-950"
                               }`}
                               title="اضغط للانتقال لهذا التوقيت"
                             >
@@ -1683,32 +1816,39 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                             </button>
 
                             {/* Text Content */}
-                            <div className="flex-1 min-w-0">
+                            <div className="flex-1 min-w-0 space-y-1">
                               <p className={`text-xs leading-relaxed font-sans ${isCurrent ? "font-bold text-white" : ""}`}>
                                 {cue.text}
                               </p>
+                              {showDualSubtitles && matchingSec && (
+                                <p className="text-[11px] text-emerald-300 font-semibold border-t border-slate-700/60 pt-1">
+                                  {matchingSec.text}
+                                </p>
+                              )}
                             </div>
 
                             {/* Cue Edit/Delete Tools on Hover */}
-                            <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 shrink-0 transition-opacity">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingCue(cue);
-                                }}
-                                className="p-1 hover:bg-slate-600 text-slate-400 hover:text-white rounded-md"
-                                title="تعديل هذا المقطع"
-                              >
-                                <Edit2 className="w-3 h-3" />
-                              </button>
-                              <button
-                                onClick={(e) => handleDeleteCue(cue.id, e)}
-                                className="p-1 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-md"
-                                title="حذف"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </div>
+                            {!isImmersiveMode && (
+                              <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 shrink-0 transition-opacity">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingCue(cue);
+                                  }}
+                                  className="p-1 hover:bg-slate-700 text-slate-400 hover:text-white rounded-md cursor-pointer"
+                                  title="تعديل هذا المقطع"
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={(e) => handleDeleteCue(cue.id, e)}
+                                  className="p-1 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-md cursor-pointer"
+                                  title="حذف"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
                           </div>
                         );
                       })
@@ -1716,15 +1856,17 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   </div>
 
                   {/* Panel Footer / Quick Add Cue at time */}
-                  <div className="p-2.5 border-t border-slate-700/80 bg-slate-800 flex items-center justify-between shrink-0">
-                    <button
-                      onClick={handleAddNewCueAtCurrentTime}
-                      className="w-full py-1.5 px-3 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5 text-blue-400" />
-                      <span>إضافة سطر عند التوقيت الحالي ({formatSecondsToTime(currentTime)})</span>
-                    </button>
-                  </div>
+                  {!isImmersiveMode && (
+                    <div className="p-2.5 border-t border-slate-700/80 bg-slate-800 flex items-center justify-between shrink-0">
+                      <button
+                        onClick={handleAddNewCueAtCurrentTime}
+                        className="w-full py-1.5 px-3 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5 text-blue-400" />
+                        <span>إضافة سطر عند التوقيت الحالي ({formatSecondsToTime(currentTime)})</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2558,279 +2700,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ======================================================== */}
-      {/* IMMERSIVE THEATER MODE (وضع تكبير الشاشة الفائق) */}
-      {/* ======================================================== */}
-      {isImmersiveMode && currentFile && (
-        <div className="fixed inset-0 z-50 bg-black flex flex-col overflow-hidden animate-fadeIn select-none">
-          {/* Immersive Top Bar */}
-          <div className="h-12 bg-slate-950/90 border-b border-slate-800/80 px-4 flex items-center justify-between z-30 shrink-0">
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-black bg-gradient-to-r from-purple-500 to-blue-500 text-white px-2.5 py-0.5 rounded-lg">
-                وضع التكبير السينمائي
-              </span>
-              <h2 className="text-xs sm:text-sm font-bold text-white truncate max-w-xs sm:max-w-md">
-                {currentFile.title}
-              </h2>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {/* Dual Subtitles Quick Toggle */}
-              {currentFile.subtitles && currentFile.subtitles.length > 1 && (
-                <button
-                  onClick={() => setShowDualSubtitles(!showDualSubtitles)}
-                  className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                    showDualSubtitles ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400"
-                  }`}
-                  title="تفعيل أو إلغاء الترجمة المزدوجة"
-                >
-                  <Split className="w-3.5 h-3.5" />
-                  <span>ترجمة مزدوجة {showDualSubtitles ? "مفعلة ✓" : "معطلة"}</span>
-                </button>
-              )}
-
-              {/* Toggle Side Subtitle Panel */}
-              <button
-                onClick={() => setShowImmersiveSideDrawer(!showImmersiveSideDrawer)}
-                className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                  showImmersiveSideDrawer
-                    ? "bg-blue-600 text-white shadow-sm"
-                    : "bg-slate-800 text-slate-400 hover:text-white"
-                }`}
-                title="إظهار / إخفاء النافذة الجانبية للجمل المتحركة للتكبير الكلي"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span>{showImmersiveSideDrawer ? "إخفاء لوحة الجمل" : "إظهار لوحة الجمل"}</span>
-              </button>
-
-              {/* Exit Immersive Theater Mode */}
-              <button
-                onClick={() => setIsImmersiveMode(false)}
-                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
-                title="الخروج من وضع التكبير (Esc)"
-              >
-                <Shrink className="w-3.5 h-3.5" />
-                <span>خروج</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Immersive Main Body */}
-          <div className="flex-1 flex overflow-hidden relative">
-            {/* Video Canvas Stage (Huge & Dominant) */}
-            <div className="flex-1 flex flex-col bg-black relative min-w-0 justify-center items-center">
-              <div className="relative w-full h-full flex items-center justify-center p-2 sm:p-4">
-                {currentFile.type === "video" ? (
-                  <>
-                    <video
-                      ref={videoRef}
-                      src={`/api/media/stream/${currentFile.filename}`}
-                      className="w-full h-full object-contain cursor-pointer"
-                      playsInline
-                      onClick={togglePlay}
-                    />
-
-                    {/* Immersive Subtitles Overlay (Dual Subtitles support) */}
-                    {showSubtitlesOverlay && (currentCue || (showDualSubtitles && currentSecondaryCue)) && (
-                      <div
-                        className="absolute bottom-16 inset-x-0 flex flex-col items-center justify-center gap-2 px-6 pointer-events-none z-20 transition-all duration-150 animate-fadeIn"
-                      >
-                        {/* Primary Subtitle (German / Original) */}
-                        {currentCue && (
-                          <div
-                            className={`max-w-[90%] text-center rounded-2xl transition-all leading-relaxed font-sans shadow-2xl ${subtitleStyleClass} ${subtitleFontSizeClass}`}
-                          >
-                            <span className="font-bold text-base sm:text-xl md:text-2xl drop-shadow-md">{currentCue.text}</span>
-                          </div>
-                        )}
-
-                        {/* Secondary Subtitle (Arabic / Gemini Translated) */}
-                        {showDualSubtitles && currentSecondaryCue && (
-                          <div
-                            className="max-w-[90%] text-center rounded-2xl transition-all leading-relaxed font-sans shadow-2xl bg-emerald-950/90 text-emerald-200 border border-emerald-500/60 px-5 py-2 text-sm sm:text-base md:text-lg font-black"
-                          >
-                            <span>{currentSecondaryCue.text}</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  /* Audio Stage in Immersive View */
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-6 relative bg-linear-to-b from-slate-950 via-slate-900 to-black">
-                    <audio
-                      ref={audioRef}
-                      src={`/api/media/stream/${currentFile.filename}`}
-                    />
-                    <div
-                      className={`w-40 h-40 rounded-full border-4 border-slate-700 bg-linear-to-tr from-purple-600 via-indigo-600 to-blue-600 flex items-center justify-center shadow-2xl transition-transform ${
-                        isPlaying ? "animate-spin" : ""
-                      }`}
-                      style={{ animationDuration: "8s" }}
-                    >
-                      <Music className="w-12 h-12 text-white" />
-                    </div>
-
-                    <div className="text-center">
-                      <p className="font-black text-white text-lg">{currentFile.title}</p>
-                      <p className="text-xs text-slate-400">{currentFile.originalName}</p>
-                    </div>
-
-                    {/* Audio Karaoke Subtitle Box in Immersive */}
-                    {showSubtitlesOverlay && (
-                      <div className="w-full max-w-2xl px-4 flex flex-col items-center justify-center gap-2">
-                        {currentCue && (
-                          <div className={`text-center rounded-2xl leading-relaxed font-sans shadow-xl ${subtitleStyleClass} ${subtitleFontSizeClass}`}>
-                            <span className="font-bold text-lg">{currentCue.text}</span>
-                          </div>
-                        )}
-                        {showDualSubtitles && currentSecondaryCue && (
-                          <div className="text-center rounded-2xl leading-relaxed font-sans shadow-xl bg-emerald-950/90 text-emerald-200 border border-emerald-500/60 px-5 py-2 text-base font-bold">
-                            <span>{currentSecondaryCue.text}</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Minimal Bottom Control Bar for Immersive Theater Mode */}
-              <div className="w-full bg-gradient-to-t from-black via-black/90 to-transparent p-3 sm:p-4 z-30 shrink-0 space-y-2">
-                {/* Progress bar */}
-                <div
-                  ref={progressBarRef}
-                  onClick={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const clickPos = (e.clientX - rect.left) / rect.width;
-                    const rtlPos = 1 - clickPos;
-                    handleSeek(rtlPos * duration);
-                  }}
-                  className="w-full h-2 bg-slate-800 hover:h-3 rounded-full cursor-pointer transition-all relative overflow-hidden"
-                >
-                  <div
-                    className="h-full bg-linear-to-r from-blue-500 via-indigo-500 to-purple-500 rounded-full relative"
-                    style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
-                  />
-                </div>
-
-                {/* Minimal Control Buttons */}
-                <div className="flex items-center justify-between text-xs text-slate-300">
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={togglePlay}
-                      className="w-9 h-9 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md"
-                    >
-                      {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current translate-x-[-1px]" />}
-                    </button>
-                    <button
-                      onClick={() => skipSeconds(-5)}
-                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-xs font-mono cursor-pointer"
-                    >
-                      -5s
-                    </button>
-                    <button
-                      onClick={() => skipSeconds(5)}
-                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-xs font-mono cursor-pointer"
-                    >
-                      +5s
-                    </button>
-                    <span className="font-mono text-xs text-slate-400">
-                      {formatSecondsToTime(currentTime)} / {formatSecondsToTime(duration)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => setShowSubtitlesOverlay(!showSubtitlesOverlay)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                        showSubtitlesOverlay ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-500"
-                      }`}
-                    >
-                      CC {showSubtitlesOverlay ? "ON" : "OFF"}
-                    </button>
-                    <div className="flex items-center gap-1.5">
-                      <button onClick={toggleMute} className="text-slate-400 hover:text-white">
-                        {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4" />}
-                      </button>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.05"
-                        value={isMuted ? 0 : volume}
-                        onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-                        className="w-16 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Immersive Side Drawer for Scrolling Subtitle Cues (Can be toggled) */}
-            {showImmersiveSideDrawer && (
-              <div className="w-80 sm:w-96 bg-slate-900 border-r border-slate-800 flex flex-col h-full z-20 shrink-0 shadow-2xl animate-slideLeft">
-                <div className="p-3 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
-                  <div className="flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-blue-400" />
-                    <span className="text-xs font-bold text-white">الجمل والتفريغ ({activeCues.length})</span>
-                  </div>
-                  <button
-                    onClick={() => setShowImmersiveSideDrawer(false)}
-                    className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg"
-                    title="إغلاق اللوحة الجانبية للتكبير الكلي"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {/* Subtitle Cues Scrolling List */}
-                <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-                  {activeCues.map((cue) => {
-                    const isCurrent = currentCue?.id === cue.id;
-                    // Check if there is a matching secondary cue at this timestamp
-                    const matchingSec = secondaryCues.find(
-                      sc => (sc.startTime >= cue.startTime - 0.5 && sc.startTime <= cue.endTime + 0.5) ||
-                            (sc.endTime >= cue.startTime - 0.5 && sc.endTime <= cue.endTime + 0.5)
-                    );
-
-                    return (
-                      <div
-                        key={cue.id}
-                        onClick={() => handleSeek(cue.startTime)}
-                        className={`p-2.5 rounded-xl transition-all cursor-pointer flex flex-col gap-1 ${
-                          isCurrent
-                            ? "bg-blue-600/30 border border-blue-500 text-white shadow-lg"
-                            : "hover:bg-slate-800 text-slate-300"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between text-[10px] font-mono">
-                          <span className={`px-1.5 py-0.5 rounded-md font-bold ${
-                            isCurrent ? "bg-blue-600 text-white" : "bg-slate-800 text-blue-400"
-                          }`}>
-                            {formatSecondsToTime(cue.startTime)}
-                          </span>
-                          {isCurrent && <span className="text-blue-400 font-sans font-bold">● جاري التشغيل</span>}
-                        </div>
-                        <p className={`text-xs font-medium ${isCurrent ? "text-white font-bold" : "text-slate-200"}`}>
-                          {cue.text}
-                        </p>
-                        {showDualSubtitles && matchingSec && (
-                          <p className="text-[11px] text-emerald-300 font-bold border-t border-slate-800/80 pt-1">
-                            {matchingSec.text}
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}
