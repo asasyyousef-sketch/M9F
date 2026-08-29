@@ -2124,8 +2124,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   }, [showSubtitlesOverlay, showDualSubtitles, activeTrackId, secondaryTrackId, currentFile, triggerVisualFeedback, triggerHud, triggerSwipeSamplePreview]);
 
   const handleCenterSwipeDown = useCallback(() => {
-    triggerSwipeSamplePreview();
     if (showSubtitlesOverlay && showDualSubtitles) {
+      triggerSwipeSamplePreview();
       setShowDualSubtitles(false);
       try {
         localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(false));
@@ -2140,9 +2140,11 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       });
       triggerHud("إخفاء الترجمة الثانية", "سحب ⬇️");
     } else if (showSubtitlesOverlay && !showDualSubtitles) {
+      setShowSubtitlesOverlay(false);
       setShowDualSubtitles(false);
       try {
         localStorage.setItem("media_player_show_subtitles_overlay", JSON.stringify(false));
+        localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(false));
       } catch (e) {
         console.error(e);
       }
