@@ -6,6 +6,7 @@ import crypto from "crypto";
 import { spawn } from "child_process";
 import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from "url";
+import multer from "multer";
 import { initialFolders, initialCards } from "./src/data/seed";
 import { getSupabase, SUPABASE_SQL_SCHEMA } from "./src/supabaseClient";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -244,6 +245,460 @@ async function startServer() {
   } else {
     console.log("\n💡 Supabase is running in local fallback mode (default placeholders are set). To enable real-time cloud sync, replace the placeholders in /.env with your real Supabase credentials!\n");
   }
+
+  // ==========================================
+  // 🎬 MEDIA PLAYER STORAGE & API ROUTES (Audio & Video)
+  // ==========================================
+  const MEDIA_DIR = path.join(process.cwd(), "uploads", "media");
+  const MEDIA_META_PATH = path.join(process.cwd(), "media_files.json");
+
+  if (!fs.existsSync(MEDIA_DIR)) {
+    fs.mkdirSync(MEDIA_DIR, { recursive: true });
+  }
+
+  interface ServerSubtitleCue {
+    id: string;
+    startTime: number;
+    endTime: number;
+    text: string;
+  }
+
+  interface ServerSubtitleTrack {
+    id: string;
+    label: string;
+    language?: string;
+    cues: ServerSubtitleCue[];
+    source?: "uploaded" | "ai" | "manual";
+    uploadedAt?: string;
+  }
+
+  interface ServerMediaFile {
+    id: string;
+    filename: string;
+    originalName: string;
+    title: string;
+    size: number;
+    mimeType: string;
+    type: "video" | "audio";
+    uploadedAt: string;
+    url: string;
+    duration?: number;
+    subtitles?: ServerSubtitleTrack[];
+  }
+
+  function loadMediaMeta(): ServerMediaFile[] {
+    try {
+      if (fs.existsSync(MEDIA_META_PATH)) {
+        const raw = fs.readFileSync(MEDIA_META_PATH, "utf-8").trim();
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            // Check if file still exists on disk
+            return parsed.filter((item: ServerMediaFile) => {
+              const filePath = path.join(MEDIA_DIR, item.filename);
+              return fs.existsSync(filePath);
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error reading media_files.json:", e);
+    }
+    return [];
+  }
+
+  function saveMediaMeta(list: ServerMediaFile[]) {
+    try {
+      fs.writeFileSync(MEDIA_META_PATH, JSON.stringify(list, null, 2), "utf-8");
+    } catch (e) {
+      console.error("Error saving media_files.json:", e);
+    }
+  }
+
+  const mediaStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      if (!fs.existsSync(MEDIA_DIR)) {
+        fs.mkdirSync(MEDIA_DIR, { recursive: true });
+      }
+      cb(null, MEDIA_DIR);
+    },
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase() || "";
+      const rawBase = path.basename(file.originalname, ext);
+      const safeBase = rawBase.replace(/[^\w\u0600-\u06FF\s-]/g, "_").trim().slice(0, 60) || "media";
+      const unique = Date.now() + "-" + Math.round(Math.random() * 1e6);
+      cb(null, `${safeBase}-${unique}${ext}`);
+    }
+  });
+
+  const mediaUpload = multer({
+    storage: mediaStorage,
+    limits: { fileSize: 1024 * 1024 * 1024 } // 1GB max per file
+  });
+
+  // Serve static files in /uploads/media
+  app.use("/uploads/media", express.static(MEDIA_DIR, {
+    setHeaders: (res) => {
+      res.setHeader("Accept-Ranges", "bytes");
+    }
+  }));
+
+  // 1. Get all media files
+  app.get("/api/media/files", (req, res) => {
+    try {
+      const list = loadMediaMeta();
+      // Sort newest first
+      list.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+      res.json({ files: list });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Failed to load media files" });
+    }
+  });
+
+  // 2. Upload media files (supports single or multiple)
+  app.post("/api/media/upload", mediaUpload.array("files", 10), (req, res) => {
+    try {
+      const uploadedFiles = req.files as Express.Multer.File[];
+      if (!uploadedFiles || uploadedFiles.length === 0) {
+        return res.status(400).json({ error: "لم يتم اختيار أي ملفات للرفع" });
+      }
+
+      const currentList = loadMediaMeta();
+      const newItems: ServerMediaFile[] = [];
+
+      for (const file of uploadedFiles) {
+        const ext = path.extname(file.originalname).toLowerCase();
+        const isVideo = file.mimetype.startsWith("video/") ||
+          [".mp4", ".webm", ".mkv", ".mov", ".avi", ".m4v", ".wmv", ".flv", ".3gp", ".ogv"].includes(ext);
+
+        const isAudio = file.mimetype.startsWith("audio/") ||
+          [".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".wma", ".opus"].includes(ext);
+
+        const mediaType: "video" | "audio" = isVideo ? "video" : "audio";
+        const titleWithoutExt = path.basename(file.originalname, ext);
+
+        const item: ServerMediaFile = {
+          id: "media-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9),
+          filename: file.filename,
+          originalName: file.originalname,
+          title: titleWithoutExt,
+          size: file.size,
+          mimeType: file.mimetype || (isVideo ? "video/mp4" : "audio/mpeg"),
+          type: mediaType,
+          uploadedAt: new Date().toISOString(),
+          url: `/api/media/stream/${file.filename}`
+        };
+
+        newItems.push(item);
+        currentList.unshift(item);
+      }
+
+      saveMediaMeta(currentList);
+
+      res.json({
+        success: true,
+        message: `تم رفع ${newItems.length} ملف بنجاح!`,
+        files: newItems
+      });
+    } catch (e: any) {
+      console.error("Upload error:", e);
+      res.status(500).json({ error: e.message || "حدث خطأ أثناء رفع الملف" });
+    }
+  });
+
+  // 3. Delete media file
+  app.delete("/api/media/files/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const list = loadMediaMeta();
+      const targetIndex = list.findIndex((m) => m.id === id || m.filename === id);
+
+      if (targetIndex === -1) {
+        return res.status(404).json({ error: "الملف غير موجود" });
+      }
+
+      const [removed] = list.splice(targetIndex, 1);
+      const filePath = path.join(MEDIA_DIR, removed.filename);
+
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+        } catch (unlinkErr) {
+          console.error("Failed to delete file from disk:", unlinkErr);
+        }
+      }
+
+      saveMediaMeta(list);
+      res.json({ success: true, message: "تم حذف الملف بنجاح", id });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "فشل حذف الملف" });
+    }
+  });
+
+  // 4. Update title / rename media file
+  app.patch("/api/media/files/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const { title } = req.body;
+      if (!title || typeof title !== "string") {
+        return res.status(400).json({ error: "عنوان الملف مطلوب" });
+      }
+
+      const list = loadMediaMeta();
+      const item = list.find((m) => m.id === id || m.filename === id);
+      if (!item) {
+        return res.status(404).json({ error: "الملف غير موجود" });
+      }
+
+      item.title = title.trim();
+      saveMediaMeta(list);
+      res.json({ success: true, file: item });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "فشل تعديل الاسم" });
+    }
+  });
+
+  // 5. Stream media file with HTTP Range support for scrubbing
+  app.get("/api/media/stream/:filename", (req, res) => {
+    try {
+      const filename = path.basename(req.params.filename);
+      const filePath = path.join(MEDIA_DIR, filename);
+
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).send("File not found");
+      }
+
+      const stat = fs.statSync(filePath);
+      const fileSize = stat.size;
+      const range = req.headers.range;
+
+      const ext = path.extname(filename).toLowerCase();
+      let contentType = "application/octet-stream";
+      if (ext === ".mp4") contentType = "video/mp4";
+      else if (ext === ".webm") contentType = "video/webm";
+      else if (ext === ".mkv") contentType = "video/x-matroska";
+      else if (ext === ".mov") contentType = "video/quicktime";
+      else if (ext === ".mp3") contentType = "audio/mpeg";
+      else if (ext === ".wav") contentType = "audio/wav";
+      else if (ext === ".ogg") contentType = "audio/ogg";
+      else if (ext === ".m4a") contentType = "audio/mp4";
+      else if (ext === ".flac") contentType = "audio/flac";
+      else if (ext === ".aac") contentType = "audio/aac";
+
+      if (range) {
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        const chunksize = end - start + 1;
+        const fileStream = fs.createReadStream(filePath, { start, end });
+        const head = {
+          "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+          "Accept-Ranges": "bytes",
+          "Content-Length": chunksize,
+          "Content-Type": contentType,
+        };
+        res.writeHead(206, head);
+        fileStream.pipe(res);
+      } else {
+        const head = {
+          "Content-Length": fileSize,
+          "Content-Type": contentType,
+          "Accept-Ranges": "bytes",
+        };
+        res.writeHead(200, head);
+        fs.createReadStream(filePath).pipe(res);
+      }
+    } catch (e: any) {
+      console.error("Streaming error:", e);
+      if (!res.headersSent) {
+        res.status(500).send("Error streaming media file");
+      }
+    }
+  });
+
+  // 6. Download media file
+  app.get("/api/media/download/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const list = loadMediaMeta();
+      const item = list.find((m) => m.id === id || m.filename === id);
+      if (!item) {
+        return res.status(404).send("File not found");
+      }
+
+      const filePath = path.join(MEDIA_DIR, item.filename);
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).send("File not found on disk");
+      }
+
+      res.download(filePath, item.originalName);
+    } catch (e: any) {
+      res.status(500).send("Failed to download file");
+    }
+  });
+
+  // 7. Save / Add Subtitle Track to a Media File
+  app.post("/api/media/:id/subtitles", (req, res) => {
+    try {
+      const { id } = req.params;
+      const { label, language, cues, source } = req.body;
+
+      if (!Array.isArray(cues) || cues.length === 0) {
+        return res.status(400).json({ error: "قائمة مقاطع الترجمة (Cues) غير صالحة أو فارغة" });
+      }
+
+      const list = loadMediaMeta();
+      const item = list.find((m) => m.id === id || m.filename === id);
+      if (!item) {
+        return res.status(404).json({ error: "الملف غير موجود" });
+      }
+
+      if (!item.subtitles) {
+        item.subtitles = [];
+      }
+
+      const newTrack: ServerSubtitleTrack = {
+        id: "sub-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
+        label: label?.trim() || "الترجمة",
+        language: language || "ar",
+        cues: cues.map((c: any, idx: number) => ({
+          id: c.id || `cue-${idx + 1}`,
+          startTime: Math.max(0, parseFloat(c.startTime) || 0),
+          endTime: Math.max(0.1, parseFloat(c.endTime) || 1),
+          text: (c.text || "").trim()
+        })).filter(c => c.text.length > 0),
+        source: source || "uploaded",
+        uploadedAt: new Date().toISOString()
+      };
+
+      // Add to subtitles array
+      item.subtitles.unshift(newTrack);
+      saveMediaMeta(list);
+
+      res.json({
+        success: true,
+        message: "تم حفظ ملف الترجمة بنجاح!",
+        track: newTrack,
+        file: item
+      });
+    } catch (e: any) {
+      console.error("Save subtitles error:", e);
+      res.status(500).json({ error: e.message || "فشل حفظ الترجمة" });
+    }
+  });
+
+  // 8. Delete Subtitle Track
+  app.delete("/api/media/:id/subtitles/:trackId", (req, res) => {
+    try {
+      const { id, trackId } = req.params;
+      const list = loadMediaMeta();
+      const item = list.find((m) => m.id === id || m.filename === id);
+      if (!item) {
+        return res.status(404).json({ error: "الملف غير موجود" });
+      }
+
+      if (item.subtitles) {
+        item.subtitles = item.subtitles.filter((t) => t.id !== trackId);
+        saveMediaMeta(list);
+      }
+
+      res.json({ success: true, message: "تم حذف مسار الترجمة", file: item });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "فشل حذف الترجمة" });
+    }
+  });
+
+  // 9. Generate AI Subtitles with Gemini
+  app.post("/api/media/:id/generate-subtitles", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { language = "ar", promptHint = "", fullText = "" } = req.body;
+
+      const list = loadMediaMeta();
+      const item = list.find((m) => m.id === id || m.filename === id);
+      if (!item) {
+        return res.status(404).json({ error: "الملف غير موجود" });
+      }
+
+      if (!process.env.GEMINI_API_KEY) {
+        return res.status(500).json({ error: "مفتاح GEMINI_API_KEY غير متوفر على السيرفر" });
+      }
+
+      const aiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const prompt = `أنت خبير في إنشاء وتزامن الترجمات وملفات SRT/VTT لمقاطع الفيديو والصوتيات التعليمية.
+معلومات الملف:
+- اسم الملف: ${item.title} (${item.originalName})
+- نوع الملف: ${item.type === "video" ? "فيديو" : "ملف صوتي"}
+- اللغة المستهدفة: ${language}
+${promptHint ? `- ملاحظات أو موضوع المقطع: ${promptHint}` : ""}
+${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullText}` : ""}
+
+المطلوب:
+قم بتوليد قائمة مقاطع ترجمة دقيقة ومتزامنة (Subtitle Cues) تناسب هذا الملف أو النص المزود.
+يجب أن ترجع النتيجة كـ JSON Array حصراً بالتنسيق التالي:
+[
+  {
+    "startTime": 0.0,
+    "endTime": 3.5,
+    "text": "النص أو الجملة المنطوقة هنا"
+  },
+  {
+    "startTime": 4.0,
+    "endTime": 8.2,
+    "text": "الجملة التالية بالتسلسل الزمني الدقيق"
+  }
+]
+`;
+
+      const response = await aiClient.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json"
+        }
+      });
+
+      const rawJson = response.text || "[]";
+      let parsedCues: any[] = [];
+      try {
+        parsedCues = JSON.parse(rawJson);
+      } catch (err) {
+        console.error("Failed to parse Gemini subtitles JSON:", err);
+      }
+
+      if (!Array.isArray(parsedCues) || parsedCues.length === 0) {
+        return res.status(500).json({ error: "لم يتمكن الذكاء الاصطناعي من توليد الترجمة بشكل صحيح" });
+      }
+
+      const newTrack: ServerSubtitleTrack = {
+        id: "sub-ai-" + Date.now(),
+        label: `ترجمة ذكية (${language.toUpperCase()}) ⚡`,
+        language,
+        cues: parsedCues.map((c, idx) => ({
+          id: `cue-${idx + 1}`,
+          startTime: Math.max(0, parseFloat(c.startTime) || 0),
+          endTime: Math.max(0.1, parseFloat(c.endTime) || (parseFloat(c.startTime) || 0) + 3),
+          text: (c.text || "").trim()
+        })).filter(c => c.text.length > 0),
+        source: "ai",
+        uploadedAt: new Date().toISOString()
+      };
+
+      if (!item.subtitles) item.subtitles = [];
+      item.subtitles.unshift(newTrack);
+      saveMediaMeta(list);
+
+      res.json({
+        success: true,
+        message: "تم توليد الترجمة الذكية بنجاح!",
+        track: newTrack,
+        file: item
+      });
+    } catch (e: any) {
+      console.error("Generate subtitles error:", e);
+      res.status(500).json({ error: e.message || "حدث خطأ أثناء توليد الترجمة بالذكاء الاصطناعي" });
+    }
+  });
 
   // API Route - Get Flashcard Data
   app.get("/api/duckduckgo-images", async (req, res) => {

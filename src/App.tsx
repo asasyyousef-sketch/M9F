@@ -5,6 +5,7 @@ import { AIWorkspace, AIFolder, AICard } from "./components/AIWorkspace";
 import { AICorrectorWorkspace } from "./components/AICorrectorWorkspace";
 import { RecycleBin } from "./components/RecycleBin";
 import { YoutubeWorkspace } from "./components/YoutubeWorkspace";
+import { MediaPlayerWorkspace } from "./components/MediaPlayerWorkspace";
 import {
   CreateFolderModal,
   AddCardModal,
@@ -96,8 +97,8 @@ export default function App() {
   // Mobile sidebar visibility state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Tab navigation view state: "library" | "ai" | "trash" | "youtube" | "corrector"
-  const [viewMode, setViewMode] = useState<"library" | "ai" | "trash" | "youtube" | "corrector">("library");
+  // Tab navigation view state: "library" | "ai" | "trash" | "youtube" | "corrector" | "media"
+  const [viewMode, setViewMode] = useState<"library" | "ai" | "trash" | "youtube" | "corrector" | "media">("library");
 
   // YouTube transcripts (spT) state
   const [transcripts, setTranscripts] = useState<TranscriptDocument[]>(() => {
@@ -920,6 +921,10 @@ export default function App() {
     setViewMode("corrector");
   }, []);
 
+  const handleSelectMedia = useCallback(() => {
+    setViewMode("media");
+  }, []);
+
   const handleDataReloaded = useCallback((newFolders: Folder[], newCards: Flashcard[]) => {
     setFolders(newFolders);
     setCards(newCards);
@@ -1015,11 +1020,17 @@ export default function App() {
           onSelectTrash={handleSelectTrash}
           onSelectYoutube={handleSelectYoutube}
           onSelectCorrector={handleSelectCorrector}
+          onSelectMedia={handleSelectMedia}
           onDataReloaded={handleDataReloaded}
         />
 
         {/* Center Canvas Workspace */}
-        {viewMode === "corrector" ? (
+        {viewMode === "media" ? (
+          <MediaPlayerWorkspace
+            onToggleSidebar={handleToggleSidebar}
+            onBackToLibrary={handleHomeClick}
+          />
+        ) : viewMode === "corrector" ? (
           <AICorrectorWorkspace
             onToggleSidebar={handleToggleSidebar}
             onBackToLibrary={handleHomeClick}

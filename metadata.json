@@ -1,6 +1,6 @@
 {
   "name": "Flashcard App",
-  "description": "Interactive flashcard and language learning application with AI generation, TTS support, and database synchronization.",
+  "description": "Interactive flashcard and language learning application with AI generation, TTS support, YouTube transcripts, audio/video media player, and database synchronization.",
   "requestFramePermissions": [
     "microphone"
   ],

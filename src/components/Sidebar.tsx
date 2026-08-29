@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Home, Folder, FolderOpen, History, Star, Settings, ChevronLeft, ChevronDown, BookOpen, X, Database, AlertTriangle, CheckCircle, Copy, Check, Sparkles, Trash2, Youtube, PenTool } from "lucide-react";
+import { Home, Folder, FolderOpen, History, Star, Settings, ChevronLeft, ChevronDown, BookOpen, X, Database, AlertTriangle, CheckCircle, Copy, Check, Sparkles, Trash2, Youtube, PenTool, Film } from "lucide-react";
 import { Folder as FolderType, DbStatus } from "../types";
 
 interface SidebarProps {
@@ -11,11 +11,12 @@ interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
   dbStatus?: DbStatus;
-  activeTab?: "library" | "ai" | "trash" | "youtube" | "corrector";
+  activeTab?: "library" | "ai" | "trash" | "youtube" | "corrector" | "media";
   onSelectAI?: () => void;
   onSelectTrash?: () => void;
   onSelectYoutube?: () => void;
   onSelectCorrector?: () => void;
+  onSelectMedia?: () => void;
   onDataReloaded?: (folders: any[], cards: any[]) => void;
 }
 
@@ -33,6 +34,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   onSelectTrash,
   onSelectYoutube,
   onSelectCorrector,
+  onSelectMedia,
   onDataReloaded
 }) => {
   // Keep track of expanded state for collapsible folders
@@ -318,6 +320,21 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
           >
             <PenTool className="w-4 h-4 text-emerald-600" />
             <span>صحح بالذكاء ✍️</span>
+          </button>
+
+          <button
+            onClick={() => {
+              onSelectMedia?.();
+              onClose?.();
+            }}
+            className={`flex items-center gap-3 px-4 py-2 mx-3 rounded-xl text-right transition-all font-bold text-xs cursor-pointer w-[calc(100%-24px)] mt-1.5 ${
+              activeTab === "media"
+                ? "bg-[#e2ecf9] text-[#0056f6]"
+                : "text-on-surface hover:bg-surface-container-low"
+            }`}
+          >
+            <Film className="w-4 h-4 text-blue-600" />
+            <span>مشغل الوسائط 🎬</span>
           </button>
 
           {/* Section: Trash */}

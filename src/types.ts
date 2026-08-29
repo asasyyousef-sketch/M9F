@@ -286,4 +286,35 @@ export const GRADIO_LANGUAGES = [
   { id: "russian", name: "🇷🇺 الروسية (Russian)", code: "ru" }
 ];
 
+export interface SubtitleCue {
+  id: string;
+  startTime: number; // in seconds (e.g. 1.25)
+  endTime: number;   // in seconds (e.g. 4.80)
+  text: string;
+}
+
+export interface MediaSubtitleTrack {
+  id: string;
+  label: string;      // e.g. "العربية (SRT)" or "English"
+  language?: string;  // e.g. "ar", "en"
+  cues: SubtitleCue[];
+  source?: "uploaded" | "ai" | "manual";
+  uploadedAt?: string;
+}
+
+export interface MediaFile {
+  id: string;
+  filename: string;
+  originalName: string;
+  title: string;
+  size: number;
+  mimeType: string;
+  type: "video" | "audio";
+  uploadedAt: string;
+  url: string;
+  duration?: number;
+  subtitles?: MediaSubtitleTrack[];
+}
+
+
 
