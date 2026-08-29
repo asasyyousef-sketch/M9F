@@ -2208,9 +2208,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   const handleStageTap = useCallback(
     (xRatio: number) => {
-      // 80% Center Zone (0.10 to 0.90), 10% Left (< 0.10), 10% Right (> 0.90)
+      // 60% Center Zone (0.20 to 0.80), 20% Left (< 0.20), 20% Right (> 0.80)
       const side: "left" | "right" | "center" =
-        xRatio < 0.10 ? "left" : xRatio > 0.90 ? "right" : "center";
+        xRatio < 0.20 ? "left" : xRatio > 0.80 ? "right" : "center";
       const now = Date.now();
       const currentTracker = tapTrackerRef.current;
 
@@ -2223,7 +2223,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
         // DOUBLE TAP ACTION
         if (side === "center") {
-          // Center 80% Double Tap: Play / Pause
+          // Center 60% Double Tap: Play / Pause
           const el = getMediaElement();
           const willPlay = el ? el.paused : !isPlaying;
           togglePlay();
@@ -2233,7 +2233,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
             label: willPlay ? "تشغيل" : "إيقاف مؤقت"
           });
         } else if (side === "right") {
-          // Right 10% Double Tap: Skip Forward 5s (+5s)
+          // Right 20% Double Tap: Skip Forward 5s (+5s)
           skipSeconds(5);
           triggerVisualFeedback({
             type: "seek_forward_5s",
@@ -2242,7 +2242,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
             subLabel: "تقديم 5 ثواني"
           });
         } else if (side === "left") {
-          // Left 10% Double Tap: Rewind 5s (-5s)
+          // Left 20% Double Tap: Rewind 5s (-5s)
           skipSeconds(-5);
           triggerVisualFeedback({
             type: "seek_backward_5s",
