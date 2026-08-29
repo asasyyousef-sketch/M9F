@@ -307,6 +307,8 @@ interface ActiveGestureOverlay {
     | "seek_forward_5s"
     | "prev_sentence"
     | "next_sentence"
+    | "volume_up"
+    | "volume_down"
     | "swipe_up_sub1"
     | "swipe_up_sub2"
     | "swipe_down_sub2"
@@ -315,7 +317,6 @@ interface ActiveGestureOverlay {
   side: "left" | "right" | "center";
   label?: string;
   subLabel?: string;
-  tapCount?: number;
 }
 
 interface MediaPlayerWorkspaceProps {
@@ -621,7 +622,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     setActiveGesture({ ...gesture, id });
     gestureTimerRef.current = window.setTimeout(() => {
       setActiveGesture(null);
-    }, 600);
+    }, 340);
   }, []);
 
   // Edit / Add Cue Modal
@@ -2040,16 +2041,16 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   // ---------------------------------------------------------
   // Swipe & Multi-Tap Engine (Mobile, Desktop & Fullscreen)
-  // 1. Fullscreen Single Tap: Only show/hide controls & timeline bar
-  // 2. Double Tap Center: Toggle Play / Pause
-  // 3. Double Tap Right / Left: Skip +5s / Rewind -5s
-  // 4. Triple Tap Right / Left: Next sentence / Previous sentence
-  // 5. Swipe UP (1st): Show Subtitle 1 | Swipe UP (2nd): Show Subtitle 2 (Dual)
-  // 6. Swipe DOWN (1st): Hide Subtitle 2 | Swipe DOWN (2nd): Hide All Subtitles
+  // Zones:
+  // - Center 80% (0.10 <= x <= 0.90): Double Tap -> Play/Pause | Swipe UP -> Show Subtitle 1 / 2 | Swipe DOWN -> Hide Subtitle 2 / All
+  // - Left 10% (x < 0.10): Double Tap -> Rewind -5s | Swipe UP (Left zone) -> Next sentence | Swipe DOWN (Left zone) -> Prev sentence
+  // - Right 10% (x > 0.90): Double Tap -> Skip +5s | Swipe UP (Right zone) -> Volume UP | Swipe DOWN (Right zone) -> Volume DOWN
+  // - Fullscreen Single Tap: Only show/hide controls & timeline bar
   // ---------------------------------------------------------
-  const handleSwipeUp = useCallback(() => {
+
+  // Center Swipe UP / DOWN (Subtitles)
+  const handleCenterSwipeUp = useCallback(() => {
     if (!showSubtitlesOverlay) {
-      // 1st Swipe UP: Show Primary Subtitle
       setShowSubtitlesOverlay(true);
       setShowDualSubtitles(false);
       if (!activeTrackId && currentFile?.subtitles && currentFile.subtitles.length > 0) {
@@ -2069,7 +2070,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       });
       triggerHud("إظهار الترجمة الأولى", "سحب ⬆️");
     } else if (!showDualSubtitles) {
-      // 2nd Swipe UP: Show Secondary Subtitle (Dual)
       setShowDualSubtitles(true);
       if (!secondaryTrackId && currentFile?.subtitles && currentFile.subtitles.length > 1) {
         const other = currentFile.subtitles.find((t) => t.id !== activeTrackId);
@@ -2092,9 +2092,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   }, [showSubtitlesOverlay, showDualSubtitles, activeTrackId, secondaryTrackId, currentFile, triggerVisualFeedback, triggerHud]);
 
-  const handleSwipeDown = useCallback(() => {
+  const handleCenterSwipeDown = useCallback(() => {
     if (showSubtitlesOverlay && showDualSubtitles) {
-      // 1st Swipe DOWN: Hide Secondary Subtitle
       setShowDualSubtitles(false);
       try {
         localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(false));
@@ -2109,8 +2108,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       });
       triggerHud("إخفاء الترجمة الثانية", "سحب ⬇️");
     } else if (showSubtitlesOverlay && !showDualSubtitles) {
-      // 2nd Swipe DOWN: Hide Primary Subtitle (Hide All)
-      setShowSubtitlesOverlay(false);
+      setShowDualSubtitles(false);
       try {
         localStorage.setItem("media_player_show_subtitles_overlay", JSON.stringify(false));
       } catch (e) {
@@ -2128,99 +2126,99 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   }, [showSubtitlesOverlay, showDualSubtitles, triggerVisualFeedback, triggerHud]);
 
+  // Left Swipe UP / DOWN (Sentence navigation)
+  const handleLeftSwipeUp = useCallback(() => {
+    jumpToNextSentence(true);
+    triggerVisualFeedback({
+      type: "next_sentence",
+      side: "left",
+      label: "الجملة التالية",
+      subLabel: "سحب للأعلى: تقديم جملة"
+    });
+  }, [jumpToNextSentence, triggerVisualFeedback]);
+
+  const handleLeftSwipeDown = useCallback(() => {
+    jumpToPreviousSentence(true);
+    triggerVisualFeedback({
+      type: "prev_sentence",
+      side: "left",
+      label: "الجملة السابقة",
+      subLabel: "سحب للأسفل: تراجع جملة"
+    });
+  }, [jumpToPreviousSentence, triggerVisualFeedback]);
+
+  // Right Swipe UP / DOWN (Volume Control)
+  const handleRightSwipeUp = useCallback(() => {
+    const nextVol = Math.min(2.0, Math.round((volume + 0.10) * 100) / 100);
+    handleVolumeChange(nextVol);
+    triggerVisualFeedback({
+      type: "volume_up",
+      side: "right",
+      label: `مستوى الصوت: ${Math.round(nextVol * 100)}%`,
+      subLabel: nextVol > 1.0 ? "⚡ تعزيز الصوت الفائق" : "سحب للأعلى: رفع الصوت"
+    });
+  }, [volume, handleVolumeChange, triggerVisualFeedback]);
+
+  const handleRightSwipeDown = useCallback(() => {
+    const nextVol = Math.max(0, Math.round((volume - 0.10) * 100) / 100);
+    handleVolumeChange(nextVol);
+    triggerVisualFeedback({
+      type: "volume_down",
+      side: "right",
+      label: `مستوى الصوت: ${Math.round(nextVol * 100)}%`,
+      subLabel: nextVol === 0 ? "كتم الصوت" : "سحب للأسفل: خفض الصوت"
+    });
+  }, [volume, handleVolumeChange, triggerVisualFeedback]);
+
   const handleStageTap = useCallback(
     (xRatio: number) => {
-      // Determine Zone: Left 28%, Right 28%, Center 44%
+      // 80% Center Zone (0.10 to 0.90), 10% Left (< 0.10), 10% Right (> 0.90)
       const side: "left" | "right" | "center" =
-        xRatio < 0.28 ? "left" : xRatio > 0.72 ? "right" : "center";
+        xRatio < 0.10 ? "left" : xRatio > 0.90 ? "right" : "center";
       const now = Date.now();
       const currentTracker = tapTrackerRef.current;
 
-      // Check if consecutive tap within 320ms on the same zone
-      if (currentTracker && now - currentTracker.lastTime < 320 && currentTracker.side === side) {
+      // Check if double tap within 280ms on the same zone
+      if (currentTracker && now - currentTracker.lastTime < 280 && currentTracker.side === side) {
         if (currentTracker.timer) {
           window.clearTimeout(currentTracker.timer);
         }
-        const newCount = currentTracker.count + 1;
+        tapTrackerRef.current = null;
 
-        if (newCount >= 3) {
-          // TRIPLE TAP (3 نقرات متتالية)
-          tapTrackerRef.current = null;
-          if (side === "right") {
-            // Right Triple Tap: Next Sentence
-            jumpToNextSentence(true);
-            triggerVisualFeedback({
-              type: "next_sentence",
-              side: "right",
-              label: "الجملة التالية",
-              subLabel: "3 نقرات: تقديم جملة",
-              tapCount: 3
-            });
-          } else if (side === "left") {
-            // Left Triple Tap: Previous Sentence
-            jumpToPreviousSentence(true);
-            triggerVisualFeedback({
-              type: "prev_sentence",
-              side: "left",
-              label: "الجملة السابقة",
-              subLabel: "3 نقرات: تراجع جملة",
-              tapCount: 3
-            });
-          } else {
-            // Center Triple Tap: Replay Sentence
-            replayCurrentSentenceOnly();
-          }
-          return;
+        // DOUBLE TAP ACTION
+        if (side === "center") {
+          // Center 80% Double Tap: Play / Pause
+          const el = getMediaElement();
+          const willPlay = el ? el.paused : !isPlaying;
+          togglePlay();
+          triggerVisualFeedback({
+            type: willPlay ? "play" : "pause",
+            side: "center",
+            label: willPlay ? "تشغيل" : "إيقاف مؤقت"
+          });
+        } else if (side === "right") {
+          // Right 10% Double Tap: Skip Forward 5s (+5s)
+          skipSeconds(5);
+          triggerVisualFeedback({
+            type: "seek_forward_5s",
+            side: "right",
+            label: "+5 ثواني",
+            subLabel: "تقديم 5 ثواني"
+          });
+        } else if (side === "left") {
+          // Left 10% Double Tap: Rewind 5s (-5s)
+          skipSeconds(-5);
+          triggerVisualFeedback({
+            type: "seek_backward_5s",
+            side: "left",
+            label: "-5 ثواني",
+            subLabel: "تراجع 5 ثواني"
+          });
         }
-
-        // COUNT IS 2 (Double Tap waiting for potential 3rd tap)
-        const timer = window.setTimeout(() => {
-          tapTrackerRef.current = null;
-          if (side === "center") {
-            // Double Tap Center: Toggle Play / Pause!
-            const el = getMediaElement();
-            const willPlay = el ? el.paused : !isPlaying;
-            togglePlay();
-            triggerVisualFeedback({
-              type: willPlay ? "play" : "pause",
-              side: "center",
-              label: willPlay ? "تشغيل" : "إيقاف مؤقت",
-              subLabel: "نقرتان بالوسط",
-              tapCount: 2
-            });
-          } else if (side === "right") {
-            // Double Tap Right: Skip Forward 5s (+5s)
-            skipSeconds(5);
-            triggerVisualFeedback({
-              type: "seek_forward_5s",
-              side: "right",
-              label: "+5 ثواني",
-              subLabel: "نقرتان: تقديم 5 ثواني",
-              tapCount: 2
-            });
-          } else if (side === "left") {
-            // Double Tap Left: Rewind 5s (-5s)
-            skipSeconds(-5);
-            triggerVisualFeedback({
-              type: "seek_backward_5s",
-              side: "left",
-              label: "-5 ثواني",
-              subLabel: "نقرتان: تراجع 5 ثواني",
-              tapCount: 2
-            });
-          }
-        }, 260);
-
-        tapTrackerRef.current = {
-          count: 2,
-          side,
-          timer,
-          lastTime: now
-        };
         return;
       }
 
-      // COUNT IS 1 (First Tap)
+      // FIRST TAP
       if (currentTracker?.timer) {
         window.clearTimeout(currentTracker.timer);
       }
@@ -2244,7 +2242,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
             });
           }
         }
-      }, 260);
+      }, 230);
 
       tapTrackerRef.current = {
         count: 1,
@@ -2259,9 +2257,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       isPlaying,
       togglePlay,
       skipSeconds,
-      jumpToNextSentence,
-      jumpToPreviousSentence,
-      replayCurrentSentenceOnly,
       triggerVisualFeedback
     ]
   );
@@ -2291,6 +2286,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const start = pointerStartRef.current;
     pointerStartRef.current = null;
 
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
     const endX = e.clientX;
     const endY = e.clientY;
     const deltaX = endX - start.x;
@@ -2298,26 +2296,42 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const absDeltaX = Math.abs(deltaX);
     const absDeltaY = Math.abs(deltaY);
     const duration = Date.now() - start.time;
+    const startXRatio = (start.x - rect.left) / rect.width;
 
-    // Vertical Swipe Detection: Drag >= 40px, mostly vertical, under 700ms
-    if (absDeltaY >= 40 && absDeltaY > absDeltaX * 1.2 && duration < 700) {
+    // Vertical Swipe Detection: Drag >= 35px, mostly vertical, under 700ms
+    if (absDeltaY >= 35 && absDeltaY > absDeltaX * 1.1 && duration < 700) {
       if (tapTrackerRef.current?.timer) {
         window.clearTimeout(tapTrackerRef.current.timer);
         tapTrackerRef.current = null;
       }
 
-      if (deltaY > 0) {
-        handleSwipeUp();
+      if (startXRatio < 0.20) {
+        // LEFT ZONE SWIPE (Sentence Navigation)
+        if (deltaY > 0) {
+          handleLeftSwipeUp(); // Next sentence
+        } else {
+          handleLeftSwipeDown(); // Prev sentence
+        }
+      } else if (startXRatio > 0.80) {
+        // RIGHT ZONE SWIPE (Volume Control)
+        if (deltaY > 0) {
+          handleRightSwipeUp(); // Volume Up
+        } else {
+          handleRightSwipeDown(); // Volume Down
+        }
       } else {
-        handleSwipeDown();
+        // CENTER ZONE SWIPE (Subtitles)
+        if (deltaY > 0) {
+          handleCenterSwipeUp();
+        } else {
+          handleCenterSwipeDown();
+        }
       }
       return;
     }
 
     // Tap Detection: Minimal movement (< 25px)
     if (absDeltaX < 25 && absDeltaY < 25) {
-      const rect = e.currentTarget.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
       const xRatio = (endX - rect.left) / rect.width;
       handleStageTap(xRatio);
     }
@@ -2595,7 +2609,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     </div>
                   )}
 
-                  {/* 3. Left Zone: Previous Sentence (3 taps) or Double-Tap -5s */}
+                  {/* 3. Left Zone: Previous / Next Sentence (Swipe) or Double-Tap -5s */}
                   {activeGesture && activeGesture.side === "left" && (
                     <div className="absolute left-0 inset-y-0 w-1/3 flex items-center justify-start pl-6 sm:pl-10 pointer-events-none z-35 animate-yt-side">
                       <div className="bg-black/80 backdrop-blur-md border border-white/20 rounded-2xl px-4 sm:px-5 py-3.5 sm:py-4 flex flex-col items-center gap-1.5 shadow-2xl text-white">
@@ -2607,20 +2621,28 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                             <span className="text-xs sm:text-sm font-black font-mono text-white tracking-wide">-5 ثواني</span>
                             <span className="text-[10px] text-slate-300 font-bold bg-white/10 px-2 py-0.5 rounded-full">نقرتان</span>
                           </>
+                        ) : activeGesture.type === "next_sentence" ? (
+                          <>
+                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-blue-600/50 border border-blue-400/50 flex items-center justify-center">
+                              <SkipForward className="w-6 h-6 sm:w-7 sm:h-7 text-blue-200" />
+                            </div>
+                            <span className="text-xs sm:text-sm font-bold text-slate-100">الجملة التالية</span>
+                            <span className="text-[10px] text-blue-300 font-bold bg-blue-500/20 px-2 py-0.5 rounded-full">سحب ⬆️</span>
+                          </>
                         ) : (
                           <>
                             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-blue-600/50 border border-blue-400/50 flex items-center justify-center">
                               <SkipBack className="w-6 h-6 sm:w-7 sm:h-7 text-blue-200" />
                             </div>
                             <span className="text-xs sm:text-sm font-bold text-slate-100">الجملة السابقة</span>
-                            <span className="text-[10px] text-blue-300 font-bold bg-blue-500/20 px-2 py-0.5 rounded-full">3 نقرات</span>
+                            <span className="text-[10px] text-blue-300 font-bold bg-blue-500/20 px-2 py-0.5 rounded-full">سحب ⬇️</span>
                           </>
                         )}
                       </div>
                     </div>
                   )}
 
-                  {/* 4. Right Zone: Next Sentence (3 taps) or Double-Tap +5s */}
+                  {/* 4. Right Zone: Volume Up/Down (Swipe) or Double-Tap +5s */}
                   {activeGesture && activeGesture.side === "right" && (
                     <div className="absolute right-0 inset-y-0 w-1/3 flex items-center justify-end pr-6 sm:pr-10 pointer-events-none z-35 animate-yt-side">
                       <div className="bg-black/80 backdrop-blur-md border border-white/20 rounded-2xl px-4 sm:px-5 py-3.5 sm:py-4 flex flex-col items-center gap-1.5 shadow-2xl text-white">
@@ -2632,13 +2654,25 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                             <span className="text-xs sm:text-sm font-black font-mono text-white tracking-wide">+5 ثواني</span>
                             <span className="text-[10px] text-slate-300 font-bold bg-white/10 px-2 py-0.5 rounded-full">نقرتان</span>
                           </>
+                        ) : activeGesture.type === "volume_up" ? (
+                          <>
+                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-emerald-600/50 border border-emerald-400/50 flex items-center justify-center">
+                              <Volume2 className="w-6 h-6 sm:w-7 sm:h-7 text-emerald-200" />
+                            </div>
+                            <span className="text-xs sm:text-sm font-bold text-slate-100">{activeGesture.label}</span>
+                            <span className="text-[10px] text-emerald-300 font-bold bg-emerald-500/20 px-2 py-0.5 rounded-full">سحب ⬆️</span>
+                          </>
                         ) : (
                           <>
-                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-blue-600/50 border border-blue-400/50 flex items-center justify-center">
-                              <SkipForward className="w-6 h-6 sm:w-7 sm:h-7 text-blue-200" />
+                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-amber-600/50 border border-amber-400/50 flex items-center justify-center">
+                              {volume <= 0.05 || isMuted ? (
+                                <VolumeX className="w-6 h-6 sm:w-7 sm:h-7 text-amber-200" />
+                              ) : (
+                                <Volume2 className="w-6 h-6 sm:w-7 sm:h-7 text-amber-200" />
+                              )}
                             </div>
-                            <span className="text-xs sm:text-sm font-bold text-slate-100">الجملة التالية</span>
-                            <span className="text-[10px] text-blue-300 font-bold bg-blue-500/20 px-2 py-0.5 rounded-full">3 نقرات</span>
+                            <span className="text-xs sm:text-sm font-bold text-slate-100">{activeGesture.label}</span>
+                            <span className="text-[10px] text-amber-300 font-bold bg-amber-500/20 px-2 py-0.5 rounded-full">سحب ⬇️</span>
                           </>
                         )}
                       </div>
