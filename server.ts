@@ -629,9 +629,21 @@ async function startServer() {
         return res.status(404).json({ error: "الملف غير موجود" });
       }
 
-      const effectiveGeminiKey = (customApiKey && customApiKey.trim()) || (geminiApiKey && geminiApiKey.trim()) || process.env.GEMINI_API_KEY || "";
+      const headerAuth = req.headers.authorization?.startsWith("Bearer ")
+        ? req.headers.authorization.slice(7).trim()
+        : "";
+      const headerKey = (req.headers["x-gemini-key"] as string) || "";
+      const effectiveGeminiKey =
+        (customApiKey && customApiKey.trim()) ||
+        (geminiApiKey && geminiApiKey.trim()) ||
+        (req.body.userApiKey && req.body.userApiKey.trim()) ||
+        (req.body.apiKey && req.body.apiKey.trim()) ||
+        headerKey.trim() ||
+        headerAuth ||
+        process.env.GEMINI_API_KEY ||
+        "";
       if (!effectiveGeminiKey) {
-        return res.status(500).json({ error: "مفتاح GEMINI_API_KEY غير متوفر على السيرفر" });
+        return res.status(500).json({ error: "مفتاح GEMINI_API_KEY غير متوفر. يرجى إدخال المفتاح في الإعدادات أو على السيرفر." });
       }
 
       const aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
@@ -756,9 +768,21 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
         return res.status(400).json({ error: "لا يوجد مسار ترجمة أصلي لترجمته" });
       }
 
-      const effectiveGeminiKey = (customApiKey && customApiKey.trim()) || (geminiApiKey && geminiApiKey.trim()) || process.env.GEMINI_API_KEY || "";
+      const headerAuth = req.headers.authorization?.startsWith("Bearer ")
+        ? req.headers.authorization.slice(7).trim()
+        : "";
+      const headerKey = (req.headers["x-gemini-key"] as string) || "";
+      const effectiveGeminiKey =
+        (customApiKey && customApiKey.trim()) ||
+        (geminiApiKey && geminiApiKey.trim()) ||
+        (req.body.userApiKey && req.body.userApiKey.trim()) ||
+        (req.body.apiKey && req.body.apiKey.trim()) ||
+        headerKey.trim() ||
+        headerAuth ||
+        process.env.GEMINI_API_KEY ||
+        "";
       if (!effectiveGeminiKey) {
-        return res.status(500).json({ error: "مفتاح GEMINI_API_KEY غير متوفر على السيرفر" });
+        return res.status(500).json({ error: "مفتاح GEMINI_API_KEY غير متوفر. يرجى إدخال المفتاح في الإعدادات أو على السيرفر." });
       }
 
       const aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
@@ -3997,8 +4021,13 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
     const provider = aiProvider === "groq" ? "groq" : "gemini";
     let apiKey = "";
 
+    const headerAuth = req.headers.authorization?.startsWith("Bearer ")
+      ? req.headers.authorization.slice(7).trim()
+      : "";
+    const headerKey = (req.headers["x-gemini-key"] as string) || (req.headers["x-api-key"] as string) || "";
+
     if (provider === "groq") {
-      apiKey = customApiKey || process.env.GROQ_API_KEY || "";
+      apiKey = customApiKey || req.body.groqApiKey || process.env.GROQ_API_KEY || "";
       if (!apiKey) {
         // We set streaming headers first so we can report streaming status/errors properly
         res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
@@ -4006,10 +4035,17 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         return res.end();
       }
     } else {
-      apiKey = customApiKey || process.env.GEMINI_API_KEY || "";
+      apiKey =
+        (customApiKey && customApiKey.trim()) ||
+        (req.body.geminiApiKey && req.body.geminiApiKey.trim()) ||
+        (req.body.userApiKey && req.body.userApiKey.trim()) ||
+        headerKey.trim() ||
+        headerAuth ||
+        process.env.GEMINI_API_KEY ||
+        "";
       if (!apiKey) {
         res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
-        res.write(JSON.stringify({ type: "error", error: "مفتاح Gemini API Key غير مكوّن على الخادم حالياً." }) + "\n");
+        res.write(JSON.stringify({ type: "error", error: "مفتاح Gemini API Key غير مكوّن على الخادم حالياً. يرجى إدخال المفتاح في الإعدادات." }) + "\n");
         return res.end();
       }
     }
@@ -4406,18 +4442,30 @@ ${transcriptText.trim()}
     const provider = aiProvider === "groq" ? "groq" : "gemini";
     let apiKey = "";
 
+    const headerAuthRefine = req.headers.authorization?.startsWith("Bearer ")
+      ? req.headers.authorization.slice(7).trim()
+      : "";
+    const headerKeyRefine = (req.headers["x-gemini-key"] as string) || (req.headers["x-api-key"] as string) || "";
+
     if (provider === "groq") {
-      apiKey = customApiKey || process.env.GROQ_API_KEY || "";
+      apiKey = customApiKey || req.body.groqApiKey || process.env.GROQ_API_KEY || "";
       if (!apiKey) {
         res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
         res.write(JSON.stringify({ type: "error", error: "الرجاء توفير مفتاح Groq API Key الخاص بك أولاً في الإعدادات أو الإعدادات الذكية." }) + "\n");
         return res.end();
       }
     } else {
-      apiKey = customApiKey || process.env.GEMINI_API_KEY || "";
+      apiKey =
+        (customApiKey && customApiKey.trim()) ||
+        (req.body.geminiApiKey && req.body.geminiApiKey.trim()) ||
+        (req.body.userApiKey && req.body.userApiKey.trim()) ||
+        headerKeyRefine.trim() ||
+        headerAuthRefine ||
+        process.env.GEMINI_API_KEY ||
+        "";
       if (!apiKey) {
         res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
-        res.write(JSON.stringify({ type: "error", error: "مفتاح Gemini API Key غير مكوّن على الخادم حالياً." }) + "\n");
+        res.write(JSON.stringify({ type: "error", error: "مفتاح Gemini API Key غير مكوّن على الخادم حالياً. يرجى إدخال المفتاح في الإعدادات." }) + "\n");
         return res.end();
       }
     }

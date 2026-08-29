@@ -145,6 +145,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [hoverCueText, setHoverCueText] = useState<string | null>(null);
   const fadeTimeoutRef = useRef<number | null>(null);
+  const wasPlayingBeforeScrubRef = useRef<boolean>(false);
 
   // Edit / Add Cue Modal
   const [editingCue, setEditingCue] = useState<SubtitleCue | null>(null);
@@ -264,6 +265,17 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   }, [currentCue, autoScrollTranscript]);
 
+  // Get user-configured Gemini API key from Settings / localStorage
+  const getSavedGeminiKey = (): string => {
+    return (
+      localStorage.getItem("settings_gemini_api_key") ||
+      localStorage.getItem("gemini_api_key") ||
+      localStorage.getItem("user_gemini_key") ||
+      localStorage.getItem("GEMINI_API_KEY") ||
+      ""
+    ).trim();
+  };
+
   // Translate Subtitle Track with Gemini AI
   const handleTranslateTrackWithGemini = async (targetLang = "ar") => {
     if (!currentFile || !activeTrack) {
@@ -274,15 +286,23 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     setIsTranslatingTrack(true);
     setErrorMsg(null);
 
+    const savedKey = getSavedGeminiKey();
+
     try {
       const res = await fetch(`/api/media/${currentFile.id}/translate-subtitles`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(savedKey ? { "x-gemini-key": savedKey, Authorization: `Bearer ${savedKey}` } : {})
+        },
         body: JSON.stringify({
           trackId: activeTrack.id,
           targetLanguage: targetLang,
           sourceLanguage: activeTrack.language || "de",
-          selectedModel: selectedAiModel
+          selectedModel: selectedAiModel,
+          customApiKey: savedKey || undefined,
+          geminiApiKey: savedKey || undefined,
+          userApiKey: savedKey || undefined
         })
       });
 
@@ -425,15 +445,23 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     setIsAiGenerating(true);
     setErrorMsg(null);
 
+    const savedKey = getSavedGeminiKey();
+
     try {
       const res = await fetch(`/api/media/${currentFile.id}/generate-subtitles`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(savedKey ? { "x-gemini-key": savedKey, Authorization: `Bearer ${savedKey}` } : {})
+        },
         body: JSON.stringify({
           language: aiSubtitleLang,
           promptHint: aiPromptHint.trim(),
           fullText: pastedSubtitleText.trim(),
-          selectedModel: selectedAiModel
+          selectedModel: selectedAiModel,
+          customApiKey: savedKey || undefined,
+          geminiApiKey: savedKey || undefined,
+          userApiKey: savedKey || undefined
         })
       });
 
@@ -659,13 +687,59 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   // Media Player element getter & control handlers
   const getMediaElement = () => (currentFile?.type === "video" ? videoRef.current : audioRef.current);
 
+  // Zero-Pop Audio Fading & Smooth Playback Engine
+  const smoothPause = (onPaused?: () => void) => {
+    const el = getMediaElement();
+    if (!el) return;
+    if (el.paused) {
+      setIsPlaying(false);
+      if (onPaused) onPaused();
+      return;
+    }
+
+    const currentVol = isMuted ? 0 : volume;
+    if (currentVol > 0.02) {
+      // Rapid 18ms micro-ramp down to eliminate waveform discontinuity pop on headphone/speakers
+      el.volume = 0.0001;
+      setTimeout(() => {
+        if (el) {
+          el.pause();
+          el.volume = isMuted ? 0 : volume;
+          setIsPlaying(false);
+          if (onPaused) onPaused();
+        }
+      }, 18);
+    } else {
+      el.pause();
+      setIsPlaying(false);
+      if (onPaused) onPaused();
+    }
+  };
+
+  const smoothPlay = () => {
+    const el = getMediaElement();
+    if (!el) return;
+    const targetVol = isMuted ? 0 : volume;
+    if (targetVol > 0.02) {
+      el.volume = 0.0001;
+      el.play().then(() => {
+        setIsPlaying(true);
+        setTimeout(() => {
+          if (el && !isMuted) el.volume = targetVol;
+        }, 25);
+      }).catch(console.error);
+    } else {
+      el.play().then(() => setIsPlaying(true)).catch(console.error);
+    }
+  };
+
   const togglePlay = () => {
     const el = getMediaElement();
     if (!el) return;
-    if (isPlaying) {
-      el.pause();
+    if (!el.paused) {
+      smoothPause();
     } else {
-      el.play().catch(console.error);
+      smoothPlay();
     }
   };
 
@@ -682,7 +756,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
     if (needsAntiPop) {
       // Instantly drop volume to prevent audio buffer discontinuity crackle
-      el.volume = 0.001;
+      el.volume = 0.0001;
       el.currentTime = boundedTime;
       setCurrentTime(boundedTime);
 
@@ -693,7 +767,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         if (el && !isMuted) {
           el.volume = currentVol;
         }
-      }, 40);
+      }, 35);
     } else {
       el.currentTime = boundedTime;
       setCurrentTime(boundedTime);
@@ -719,19 +793,41 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     return fraction * totalDuration;
   };
 
-  // Smooth YouTube-like Drag & Scrub pointer handler
+  // Smooth YouTube-like Drag & Scrub pointer handler:
+  // 1. Pauses immediately on mouse down (no audio popping or stuttering).
+  // 2. Renders video frames one by one in real-time as user moves the mouse.
+  // 3. Resumes video playback ONLY when the user releases (pointerup) the mouse if it was playing before.
   const handlePointerDownTimeline = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     if (!progressBarRef.current) return;
+
+    const el = getMediaElement();
+    const isCurrentlyPlaying = el ? !el.paused : isPlaying;
+    wasPlayingBeforeScrubRef.current = isCurrentlyPlaying;
+
+    // Immediately pause and silence during scrubbing
+    if (el && isCurrentlyPlaying) {
+      el.volume = 0.0001;
+      el.pause();
+      setIsPlaying(false);
+    }
+
     setIsScrubbing(true);
 
     const targetTime = calculateTimeFromEvent(e);
-    handleSeek(targetTime);
+    if (el) {
+      el.currentTime = targetTime;
+    }
+    setCurrentTime(targetTime);
 
     const onPointerMove = (ev: PointerEvent) => {
       ev.preventDefault();
       const newTime = calculateTimeFromEvent(ev);
-      handleSeek(newTime);
+      if (el) {
+        // Fast frame-by-frame visual scrubbing
+        el.currentTime = newTime;
+      }
+      setCurrentTime(newTime);
     };
 
     const onPointerUp = (ev: PointerEvent) => {
@@ -740,6 +836,30 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("pointercancel", onPointerUp);
+
+      const finalTime = calculateTimeFromEvent(ev);
+      if (el) {
+        el.currentTime = finalTime;
+      }
+      setCurrentTime(finalTime);
+
+      // Only resume playing when the user releases the mouse if it was previously playing
+      if (wasPlayingBeforeScrubRef.current && el) {
+        const targetVol = isMuted ? 0 : volume;
+        if (targetVol > 0.02) {
+          el.volume = 0.0001;
+          el.play().then(() => {
+            setIsPlaying(true);
+            setTimeout(() => {
+              if (el && !isMuted) el.volume = targetVol;
+            }, 30);
+          }).catch(console.error);
+        } else {
+          el.play().then(() => setIsPlaying(true)).catch(console.error);
+        }
+      } else if (el) {
+        el.volume = isMuted ? 0 : volume;
+      }
     };
 
     window.addEventListener("pointermove", onPointerMove, { passive: false });
