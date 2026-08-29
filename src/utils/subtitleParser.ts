@@ -39,6 +39,69 @@ export function formatSecondsToTime(secs: number, showHoursAlways = false): stri
 }
 
 /**
+ * Formats seconds into "MM:SS.s" (minutes, seconds and tenths of second)
+ * e.g., 74.5 -> "01:14.5"
+ */
+export function formatSecondsToClock(secs: number): string {
+  if (isNaN(secs) || secs < 0) return "00:00.0";
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = Math.floor(secs % 60);
+  const tenths = Math.floor(Math.round((secs % 1) * 10));
+
+  const finalSec = s + (tenths === 10 ? 1 : 0);
+  const finalTenths = tenths === 10 ? 0 : tenths;
+  const prefix = h > 0 ? `${h.toString().padStart(2, "0")}:` : "";
+  return `${prefix}${m.toString().padStart(2, "0")}:${finalSec.toString().padStart(2, "0")}.${finalTenths}`;
+}
+
+/**
+ * Parses user-entered time string (like "01:30", "1:30", "01:30.5", "00:01:30", "90") into total seconds.
+ */
+export function parseTimeToSeconds(timeStr: string): number | null {
+  if (!timeStr || typeof timeStr !== "string") return null;
+  const cleaned = timeStr.trim().replace(",", ".");
+  if (!cleaned) return null;
+
+  // If it's pure number e.g. "90" or "90.5"
+  if (/^\d+(\.\d+)?$/.test(cleaned)) {
+    const val = parseFloat(cleaned);
+    return isNaN(val) ? null : val;
+  }
+
+  // If it has colons (e.g. "MM:SS" or "HH:MM:SS" or "MM:SS.s")
+  const parts = cleaned.split(":");
+  if (parts.length === 2) {
+    const min = parseFloat(parts[0]);
+    const sec = parseFloat(parts[1]);
+    if (isNaN(min) || isNaN(sec)) return null;
+    return min * 60 + sec;
+  } else if (parts.length === 3) {
+    const hrs = parseFloat(parts[0]);
+    const min = parseFloat(parts[1]);
+    const sec = parseFloat(parts[2]);
+    if (isNaN(hrs) || isNaN(min) || isNaN(sec)) return null;
+    return hrs * 3600 + min * 60 + sec;
+  }
+
+  return null;
+}
+
+/**
+ * Splits total seconds into minutes, seconds (with 1 decimal place), and formatted clock
+ */
+export function splitSecondsToMinSec(totalSecs: number): { minutes: number; seconds: number; formatted: string } {
+  if (isNaN(totalSecs) || totalSecs < 0) totalSecs = 0;
+  const m = Math.floor(totalSecs / 60);
+  const s = Math.round((totalSecs % 60) * 10) / 10;
+  return {
+    minutes: m,
+    seconds: s,
+    formatted: formatSecondsToClock(totalSecs)
+  };
+}
+
+/**
  * Formats seconds to SRT timestamp: "00:01:23,456"
  */
 export function formatSecondsToSrtTime(secs: number): string {

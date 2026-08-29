@@ -23,7 +23,8 @@ import {
   ChevronDown,
   ChevronUp,
   Server,
-  Info
+  Info,
+  Palette
 } from "lucide-react";
 import { MediaFile, SubtitleCue } from "../types";
 import {
@@ -38,13 +39,15 @@ interface GradioTranscriberModalProps {
   onClose: () => void;
   currentFile: MediaFile | null;
   onSubtitlesGenerated: (trackLabel: string, cues: SubtitleCue[], rawSrt: string) => Promise<void>;
+  onOpenStyleModal?: () => void;
 }
 
 export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
   isOpen,
   onClose,
   currentFile,
-  onSubtitlesGenerated
+  onSubtitlesGenerated,
+  onOpenStyleModal
 }) => {
   // Source Selection: 'current' (active media file) or 'upload' (new file from device)
   const [sourceMode, setSourceMode] = useState<"current" | "upload">(
@@ -263,13 +266,27 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
-            title="إغلاق"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {onOpenStyleModal && (
+              <button
+                type="button"
+                onClick={onOpenStyleModal}
+                className="px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                title="تخصيص ألوان وخطوط ومواقع الترجمة"
+              >
+                <Palette className="w-3.5 h-3.5" />
+                <span>تخصيص الستايل</span>
+              </button>
+            )}
+
+            <button
+              onClick={onClose}
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              title="إغلاق"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* MODAL BODY (SCROLLABLE) */}

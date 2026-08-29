@@ -458,7 +458,7 @@ async function startServer() {
     }
   });
 
-  // 5. Stream media file with HTTP Range support for scrubbing
+  // 5. Stream media file with HTTP Range support for instant seeking & scrubbing
   app.get("/api/media/stream/:filename", (req, res) => {
     try {
       const filename = path.basename(req.params.filename);
@@ -485,21 +485,32 @@ async function startServer() {
       else if (ext === ".flac") contentType = "audio/flac";
       else if (ext === ".aac") contentType = "audio/aac";
 
+      // Enable CORS and byte-range headers
+      res.setHeader("Accept-Ranges", "bytes");
+
       if (range) {
         const parts = range.replace(/bytes=/, "").split("-");
         const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        
+        // Use optimal 3MB chunk size if browser didn't specify end range, ensuring lightning-fast seek response
+        const CHUNK_SIZE = 1024 * 1024 * 3; // 3 MB
+        const requestedEnd = parts[1] ? parseInt(parts[1], 10) : NaN;
+        const end = !isNaN(requestedEnd) ? Math.min(requestedEnd, fileSize - 1) : Math.min(start + CHUNK_SIZE, fileSize - 1);
+        
         const chunksize = end - start + 1;
         const fileStream = fs.createReadStream(filePath, { start, end });
+        
         const head = {
           "Content-Range": `bytes ${start}-${end}/${fileSize}`,
           "Accept-Ranges": "bytes",
           "Content-Length": chunksize,
           "Content-Type": contentType,
-          "Cache-Control": "public, max-age=3600",
+          "Cache-Control": "public, max-age=86400, no-transform",
         };
+        
         res.writeHead(206, head);
         fileStream.pipe(res);
+        
         req.on("close", () => {
           fileStream.destroy();
         });
@@ -508,7 +519,7 @@ async function startServer() {
           "Content-Length": fileSize,
           "Content-Type": contentType,
           "Accept-Ranges": "bytes",
-          "Cache-Control": "public, max-age=3600",
+          "Cache-Control": "public, max-age=86400, no-transform",
         };
         res.writeHead(200, head);
         const fullStream = fs.createReadStream(filePath);
@@ -546,11 +557,11 @@ async function startServer() {
     }
   });
 
-  // 7. Save / Add Subtitle Track to a Media File
+  // 7. Save / Add / Update Subtitle Track on a Media File
   app.post("/api/media/:id/subtitles", (req, res) => {
     try {
       const { id } = req.params;
-      const { label, language, cues, source } = req.body;
+      const { label, language, cues, source, trackId } = req.body;
 
       if (!Array.isArray(cues) || cues.length === 0) {
         return res.status(400).json({ error: "قائمة مقاطع الترجمة (Cues) غير صالحة أو فارغة" });
@@ -566,21 +577,42 @@ async function startServer() {
         item.subtitles = [];
       }
 
+      const cleanCues: ServerSubtitleCue[] = cues.map((c: any, idx: number) => ({
+        id: c.id || `cue-${idx + 1}`,
+        startTime: Math.max(0, parseFloat(c.startTime) || 0),
+        endTime: Math.max(0.1, parseFloat(c.endTime) || 1),
+        text: (c.text || "").trim()
+      })).filter(c => c.text.length > 0);
+
+      // If updating an existing track by trackId
+      const existingTrackIndex = trackId
+        ? item.subtitles.findIndex((t) => t.id === trackId)
+        : -1;
+
+      if (existingTrackIndex !== -1) {
+        const existing = item.subtitles[existingTrackIndex];
+        existing.cues = cleanCues;
+        if (label?.trim()) existing.label = label.trim();
+        if (language) existing.language = language;
+        saveMediaMeta(list);
+        return res.json({
+          success: true,
+          message: "تم تحديث مسار الترجمة وحفظ التغييرات بنجاح!",
+          track: existing,
+          file: item
+        });
+      }
+
       const newTrack: ServerSubtitleTrack = {
         id: "sub-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
         label: label?.trim() || "الترجمة",
         language: language || "ar",
-        cues: cues.map((c: any, idx: number) => ({
-          id: c.id || `cue-${idx + 1}`,
-          startTime: Math.max(0, parseFloat(c.startTime) || 0),
-          endTime: Math.max(0.1, parseFloat(c.endTime) || 1),
-          text: (c.text || "").trim()
-        })).filter(c => c.text.length > 0),
+        cues: cleanCues,
         source: source || "uploaded",
         uploadedAt: new Date().toISOString()
       };
 
-      // Add to subtitles array
+      // Add new track to subtitles array
       item.subtitles.unshift(newTrack);
       saveMediaMeta(list);
 
@@ -593,6 +625,54 @@ async function startServer() {
     } catch (e: any) {
       console.error("Save subtitles error:", e);
       res.status(500).json({ error: e.message || "فشل حفظ الترجمة" });
+    }
+  });
+
+  // 7.1. Update Specific Subtitle Track
+  app.put("/api/media/:id/subtitles/:trackId", (req, res) => {
+    try {
+      const { id, trackId } = req.params;
+      const { label, language, cues } = req.body;
+
+      if (!Array.isArray(cues)) {
+        return res.status(400).json({ error: "قائمة مقاطع الترجمة (Cues) غير صالحة" });
+      }
+
+      const list = loadMediaMeta();
+      const item = list.find((m) => m.id === id || m.filename === id);
+      if (!item) {
+        return res.status(404).json({ error: "الملف غير موجود" });
+      }
+
+      if (!item.subtitles) {
+        item.subtitles = [];
+      }
+
+      const targetTrack = item.subtitles.find((t) => t.id === trackId);
+      if (!targetTrack) {
+        return res.status(404).json({ error: "مسار الترجمة غير موجود" });
+      }
+
+      targetTrack.cues = cues.map((c: any, idx: number) => ({
+        id: c.id || `cue-${idx + 1}`,
+        startTime: Math.max(0, parseFloat(c.startTime) || 0),
+        endTime: Math.max(0.1, parseFloat(c.endTime) || 1),
+        text: (c.text || "").trim()
+      })).filter(c => c.text.length > 0);
+
+      if (label?.trim()) targetTrack.label = label.trim();
+      if (language) targetTrack.language = language;
+
+      saveMediaMeta(list);
+      res.json({
+        success: true,
+        message: "تم تحديث مسار الترجمة بنجاح!",
+        track: targetTrack,
+        file: item
+      });
+    } catch (e: any) {
+      console.error("Update track error:", e);
+      res.status(500).json({ error: e.message || "فشل تحديث الترجمة" });
     }
   });
 

@@ -16,6 +16,7 @@ import {
   RotateCw,
   Repeat,
   Maximize2,
+  Minimize2,
   Menu,
   ArrowRight,
   Search,
@@ -39,6 +40,7 @@ import {
   ChevronDown,
   Wand2,
   Sliders,
+  SlidersHorizontal,
   CheckCheck,
   Mic,
   Server,
@@ -48,18 +50,198 @@ import {
   Layers,
   Split,
   BookOpen,
-  Bot
+  Bot,
+  Palette,
+  Type,
+  RefreshCw,
+  SkipBack,
+  SkipForward,
+  Zap
 } from "lucide-react";
 import { MediaFile, MediaSubtitleTrack, SubtitleCue } from "../types";
 import {
   parseSubtitleContent,
   formatSecondsToTime,
+  formatSecondsToClock,
+  parseTimeToSeconds,
+  splitSecondsToMinSec,
   exportCuesToSrt,
   exportCuesToVtt,
   exportCuesToPlainText
 } from "../utils/subtitleParser";
 import { GradioTranscriberModal } from "./GradioTranscriberModal";
+import { SubtitleStyleModal, SubtitleStylePanel } from "./SubtitleStyleModal";
+import { SubtitleOptionsModal } from "./SubtitleOptionsModal";
+import { CleanCueEditorModal } from "./CleanCueEditorModal";
 import { ALL_AVAILABLE_MODELS, AIModelOption } from "./AICorrectorWorkspace";
+
+export interface SubtitleTrackStyleConfig {
+  fontSize: number; // in px
+  textColor: string; // hex
+  bgColor: string; // hex
+  bgOpacity: number; // 0 - 100%
+  fontWeight: "400" | "600" | "700" | "900";
+  fontFamily: "sans" | "serif" | "mono" | "system" | "cairo" | "tajawal" | "amiri";
+  textShadow: "none" | "subtle" | "strong" | "glow" | "outline";
+  textStroke: boolean;
+  position: "bottom" | "top" | "center";
+  offsetY: number; // in px
+  borderRadius?: number; // in px
+  paddingX?: number; // in px
+  paddingY?: number; // in px
+  letterSpacing?: number; // in px, e.g. -1, 0, 1, 2, 4
+  wordSpacing?: number; // in px, e.g. 0, 2, 4, 8
+  lineHeight?: number; // e.g. 1.2, 1.4, 1.6, 1.8
+  direction?: "auto" | "rtl" | "ltr";
+  textAlign?: "center" | "right" | "left";
+}
+
+export const DEFAULT_PRIMARY_STYLE: SubtitleTrackStyleConfig = {
+  fontSize: 20,
+  textColor: "#ffffff",
+  bgColor: "#0f172a", // Slate-900 high clarity
+  bgOpacity: 85,
+  fontWeight: "700",
+  fontFamily: "tajawal",
+  textShadow: "subtle",
+  textStroke: false,
+  position: "bottom",
+  offsetY: 28,
+  borderRadius: 14,
+  paddingX: 16,
+  paddingY: 6,
+  letterSpacing: 0,
+  wordSpacing: 0,
+  lineHeight: 1.4,
+  direction: "auto",
+  textAlign: "center"
+};
+
+export const DEFAULT_SECONDARY_STYLE: SubtitleTrackStyleConfig = {
+  fontSize: 20,
+  textColor: "#6ee7b7", // emerald-300
+  bgColor: "#064e3b", // emerald-950 high contrast
+  bgOpacity: 85,
+  fontWeight: "700",
+  fontFamily: "tajawal",
+  textShadow: "subtle",
+  textStroke: false,
+  position: "bottom",
+  offsetY: 28,
+  borderRadius: 14,
+  paddingX: 16,
+  paddingY: 6,
+  letterSpacing: 0,
+  wordSpacing: 0,
+  lineHeight: 1.4,
+  direction: "auto",
+  textAlign: "center"
+};
+
+export function hexToRgba(hex: string, opacity: number): string {
+  if (!hex) return `rgba(0, 0, 0, ${opacity})`;
+  let c = hex.replace("#", "");
+  if (c.length === 3) {
+    c = c.split("").map((x) => x + x).join("");
+  }
+  if (c.length !== 6) return `rgba(0, 0, 0, ${opacity})`;
+  const num = parseInt(c, 16);
+  const r = (num >> 16) & 255;
+  const g = (num >> 8) & 255;
+  const b = num & 255;
+  return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, opacity))})`;
+}
+
+export function detectTextDirection(text?: string): "rtl" | "ltr" {
+  if (!text || typeof text !== "string") return "ltr";
+  // Arabic, Hebrew, Persian, Urdu unicode ranges
+  const rtlRegex = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
+  return rtlRegex.test(text) ? "rtl" : "ltr";
+}
+
+export function computeSubtitleCSS(
+  config: SubtitleTrackStyleConfig,
+  isImmersive: boolean = false,
+  customScale: number = 1,
+  text?: string
+): React.CSSProperties {
+  // Preserve exact user font-size setting consistently across all modes (Normal, Immersive Theater, Fullscreen)
+  const computedFontSize = Math.round(config.fontSize * customScale);
+
+  let shadowStyle = "none";
+  if (config.textShadow === "subtle") {
+    shadowStyle = "0 2px 4px rgba(0, 0, 0, 0.85)";
+  } else if (config.textShadow === "strong") {
+    shadowStyle = "0 3px 8px rgba(0, 0, 0, 0.95), 0 1px 2px rgba(0, 0, 0, 0.9)";
+  } else if (config.textShadow === "glow") {
+    shadowStyle = `0 0 10px ${config.textColor}cc, 0 0 20px ${config.textColor}66`;
+  } else if (config.textShadow === "outline") {
+    shadowStyle = "-1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 1.5px 1.5px 0 #000, 0 2px 4px rgba(0,0,0,0.9)";
+  }
+
+  let fontFamilyStyle = "'Tajawal', system-ui, -apple-system, sans-serif";
+  if (config.fontFamily === "cairo") {
+    fontFamilyStyle = "'Cairo', 'Tajawal', system-ui, sans-serif";
+  } else if (config.fontFamily === "amiri") {
+    fontFamilyStyle = "'Amiri', 'Playfair Display', Georgia, serif";
+  } else if (config.fontFamily === "sans") {
+    fontFamilyStyle = "'Tajawal', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif";
+  } else if (config.fontFamily === "serif") {
+    fontFamilyStyle = "'Amiri', 'Playfair Display', Georgia, serif";
+  } else if (config.fontFamily === "mono") {
+    fontFamilyStyle = "'Fira Code', 'Courier New', monospace";
+  } else if (config.fontFamily === "system") {
+    fontFamilyStyle = "system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  }
+
+  const bg = config.bgOpacity === 0 ? "transparent" : hexToRgba(config.bgColor || "#000000", config.bgOpacity / 100);
+  const rad = config.borderRadius !== undefined ? `${Math.round(config.borderRadius * scaleFactor)}px` : `${Math.round(14 * scaleFactor)}px`;
+  const padY = config.paddingY !== undefined ? Math.round(config.paddingY * scaleFactor) : Math.max(4, Math.round(computedFontSize * 0.3));
+  const padX = config.paddingX !== undefined ? Math.round(config.paddingX * scaleFactor) : Math.max(12, Math.round(computedFontSize * 0.75));
+
+  const letterSp = config.letterSpacing !== undefined ? `${config.letterSpacing}px` : "0px";
+  const wordSp = config.wordSpacing !== undefined ? `${config.wordSpacing}px` : "0px";
+  const lineH = config.lineHeight !== undefined ? config.lineHeight : 1.4;
+
+  let computedDirection: "rtl" | "ltr" = "ltr";
+  if (config.direction === "rtl") {
+    computedDirection = "rtl";
+  } else if (config.direction === "ltr") {
+    computedDirection = "ltr";
+  } else {
+    // "auto" or undefined: detect language based on text (Arabic -> rtl, Foreign/Latin -> ltr)
+    computedDirection = detectTextDirection(text);
+  }
+
+  return {
+    fontSize: `${computedFontSize}px`,
+    color: config.textColor,
+    backgroundColor: bg,
+    fontWeight: config.fontWeight,
+    fontFamily: fontFamilyStyle,
+    textShadow: shadowStyle,
+    WebkitTextStroke: config.textStroke ? "1px #000000" : "none",
+    padding: `${padY}px ${padX}px`,
+    borderRadius: rad,
+    backdropFilter: config.bgOpacity > 0 && config.bgOpacity < 90 ? "blur(10px)" : "none",
+    WebkitBackdropFilter: config.bgOpacity > 0 && config.bgOpacity < 90 ? "blur(10px)" : "none",
+    border: config.bgOpacity > 0 ? "1px solid rgba(255, 255, 255, 0.18)" : "none",
+    boxShadow: config.bgOpacity > 0 ? "0 4px 20px rgba(0, 0, 0, 0.45)" : "none",
+    display: "inline-block",
+    maxWidth: "92%",
+    textAlign: config.textAlign || "center",
+    direction: computedDirection,
+    unicodeBidi: "plaintext",
+    lineHeight: lineH,
+    letterSpacing: letterSp,
+    wordSpacing: wordSp,
+    WebkitFontSmoothing: "antialiased",
+    MozOsxFontSmoothing: "grayscale",
+    textRendering: "optimizeLegibility",
+    wordBreak: "break-word",
+    transition: "all 0.1s ease-out"
+  };
+}
 
 interface MediaPlayerWorkspaceProps {
   onToggleSidebar?: () => void;
@@ -84,19 +266,66 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const [duration, setDuration] = useState<number>(0);
   const [playbackRate, setPlaybackRate] = useState<number>(1);
   const [isLooping, setIsLooping] = useState<boolean>(false);
-  const [volume, setVolume] = useState<number>(1);
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [volume, setVolume] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("media_player_volume");
+      return saved !== null ? parseFloat(saved) : 1;
+    } catch {
+      return 1;
+    }
+  });
+  const [isMuted, setIsMuted] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("media_player_is_muted");
+      return saved !== null ? JSON.parse(saved) : false;
+    } catch {
+      return false;
+    }
+  });
 
   // Subtitle States
   const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
   const [secondaryTrackId, setSecondaryTrackId] = useState<string | null>(null);
-  const [showDualSubtitles, setShowDualSubtitles] = useState<boolean>(true);
-  const [showSubtitlesOverlay, setShowSubtitlesOverlay] = useState<boolean>(true);
+  const [showDualSubtitles, setShowDualSubtitles] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("media_player_show_dual_subtitles");
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
+  const [showSubtitlesOverlay, setShowSubtitlesOverlay] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("media_player_show_subtitles_overlay");
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
   const [showTranscriptPanel, setShowTranscriptPanel] = useState<boolean>(true);
+  const [sidePanelView, setSidePanelView] = useState<"transcript" | "style">("transcript");
   const [autoScrollTranscript, setAutoScrollTranscript] = useState<boolean>(true);
+  // Default is FALSE (hidden timestamps for wider text space, customizable & persisted)
+  const [showCueTimestamps, setShowCueTimestamps] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("media_player_show_cue_timestamps");
+      return saved !== null ? JSON.parse(saved) : false;
+    } catch {
+      return false;
+    }
+  });
   const [subtitleFontSize, setSubtitleFontSize] = useState<"sm" | "md" | "lg" | "xl">("md");
   const [subtitleStyle, setSubtitleStyle] = useState<"black" | "transparent" | "yellow" | "outline">("black");
   const [subtitleSearchQuery, setSubtitleSearchQuery] = useState<string>("");
+
+  // Speed Menu Popup State
+  const [showSpeedMenu, setShowSpeedMenu] = useState<boolean>(false);
+  const speedMenuRef = useRef<HTMLDivElement>(null);
+
+  // Fullscreen state and section ref
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [showFullscreenControls, setShowFullscreenControls] = useState<boolean>(false);
+  const playerSectionRef = useRef<HTMLElement>(null);
 
   // Immersive Theater Mode (Video huge, minimal bottom controls, side drawer for scrolling cues with toggle)
   const [isImmersiveMode, setIsImmersiveMode] = useState<boolean>(false);
@@ -138,7 +367,138 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   };
 
-  // Timeline states for smooth YouTube-like scrubbing and zero-pop audio
+  // Subtitle Custom Styling States (Persisted in localStorage with live updates)
+  const [primarySubStyle, setPrimarySubStyle] = useState<SubtitleTrackStyleConfig>(() => {
+    try {
+      const saved = localStorage.getItem("media_player_sub_primary_style");
+      return saved ? { ...DEFAULT_PRIMARY_STYLE, ...JSON.parse(saved) } : DEFAULT_PRIMARY_STYLE;
+    } catch {
+      return DEFAULT_PRIMARY_STYLE;
+    }
+  });
+
+  const [secondarySubStyle, setSecondarySubStyle] = useState<SubtitleTrackStyleConfig>(() => {
+    try {
+      const saved = localStorage.getItem("media_player_sub_secondary_style");
+      return saved ? { ...DEFAULT_SECONDARY_STYLE, ...JSON.parse(saved) } : DEFAULT_SECONDARY_STYLE;
+    } catch {
+      return DEFAULT_SECONDARY_STYLE;
+    }
+  });
+
+  const [showSubtitleStyleModal, setShowSubtitleStyleModal] = useState<boolean>(false);
+  const [showSubtitleOptionsModal, setShowSubtitleOptionsModal] = useState<boolean>(false);
+  const [activeStyleTab, setActiveStyleTab] = useState<"primary" | "secondary" | "both">("primary");
+
+  const openStyleInSidebar = (source: "gradio" | "upload" | "options" | null = null) => {
+    if (source === "gradio") setShowGradioModal(false);
+    if (source === "upload") setShowSubtitleUploadModal(false);
+    if (source === "options") setShowSubtitleOptionsModal(false);
+    setShowSubtitleStyleModal(false);
+    setShowTranscriptPanel(true);
+    setSidePanelView("style");
+  };
+
+  // Save subtitle styles to localStorage whenever modified
+  const updatePrimarySubStyle = (updater: Partial<SubtitleTrackStyleConfig> | ((prev: SubtitleTrackStyleConfig) => SubtitleTrackStyleConfig)) => {
+    setPrimarySubStyle((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : { ...prev, ...updater };
+      try {
+        localStorage.setItem("media_player_sub_primary_style", JSON.stringify(next));
+      } catch (e) {
+        console.error(e);
+      }
+      return next;
+    });
+  };
+
+  const updateSecondarySubStyle = (updater: Partial<SubtitleTrackStyleConfig> | ((prev: SubtitleTrackStyleConfig) => SubtitleTrackStyleConfig)) => {
+    setSecondarySubStyle((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : { ...prev, ...updater };
+      try {
+        localStorage.setItem("media_player_sub_secondary_style", JSON.stringify(next));
+      } catch (e) {
+        console.error(e);
+      }
+      return next;
+    });
+  };
+
+  const updateBothSubStyles = (updater: Partial<SubtitleTrackStyleConfig>) => {
+    updatePrimarySubStyle(updater);
+    updateSecondarySubStyle(updater);
+  };
+
+  // Subtitle Selection Preferences per file (persisted in localStorage)
+  const getSavedSubtitlePreferences = (fileId: string): { primaryId: string | null; secondaryId: string | null } => {
+    try {
+      const saved = localStorage.getItem(`media_player_sub_tracks_${fileId}`);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.error("Failed to load subtitle preferences:", e);
+    }
+    return { primaryId: null, secondaryId: null };
+  };
+
+  const saveSubtitlePreferences = (fileId: string, primaryId: string | null, secondaryId: string | null) => {
+    try {
+      localStorage.setItem(
+        `media_player_sub_tracks_${fileId}`,
+        JSON.stringify({ primaryId, secondaryId })
+      );
+    } catch (e) {
+      console.error("Failed to save subtitle preferences:", e);
+    }
+  };
+
+  // Helper setters that also persist
+  const handleSelectPrimaryTrack = (trackId: string | null) => {
+    setActiveTrackId(trackId);
+    if (currentFile) {
+      saveSubtitlePreferences(currentFile.id, trackId, secondaryTrackId);
+    }
+  };
+
+  const handleSelectSecondaryTrack = (trackId: string | null) => {
+    setSecondaryTrackId(trackId);
+    if (trackId) {
+      setShowDualSubtitles(true);
+      try {
+        localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(true));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    if (currentFile) {
+      saveSubtitlePreferences(currentFile.id, activeTrackId, trackId);
+    }
+  };
+
+  const handleToggleDualSubtitles = () => {
+    setShowDualSubtitles((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(next));
+      } catch (e) {
+        console.error(e);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSubtitlesOverlay = () => {
+    setShowSubtitlesOverlay((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("media_player_show_subtitles_overlay", JSON.stringify(next));
+      } catch (e) {
+        console.error(e);
+      }
+      return next;
+    });
+  };
   const [bufferedPercent, setBufferedPercent] = useState<number>(0);
   const [isScrubbing, setIsScrubbing] = useState<boolean>(false);
   const [hoverPosition, setHoverPosition] = useState<number | null>(null);
@@ -147,8 +507,25 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const fadeTimeoutRef = useRef<number | null>(null);
   const wasPlayingBeforeScrubRef = useRef<boolean>(false);
 
+  // Pro Navigation Shortcuts & Sentence Replay States
+  const singleSentencePlaybackEndRef = useRef<number | null>(null);
+  const [hudToast, setHudToast] = useState<{ text: string; sub?: string } | null>(null);
+  const hudTimerRef = useRef<number | null>(null);
+
+  const triggerHud = useCallback((text: string, sub?: string) => {
+    if (hudTimerRef.current) {
+      window.clearTimeout(hudTimerRef.current);
+    }
+    setHudToast({ text, sub });
+    hudTimerRef.current = window.setTimeout(() => {
+      setHudToast(null);
+    }, 950);
+  }, []);
+
   // Edit / Add Cue Modal
   const [editingCue, setEditingCue] = useState<SubtitleCue | null>(null);
+  const [syncWithSecondaryTrack, setSyncWithSecondaryTrack] = useState<boolean>(true);
+  const originalCueTimesRef = useRef<{ id: string; startTime: number; endTime: number; text: string } | null>(null);
   const [copiedTranscript, setCopiedTranscript] = useState<boolean>(false);
 
   // Filters and UI states
@@ -163,6 +540,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   // Refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const subtitleFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -180,11 +558,19 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       const loadedFiles: MediaFile[] = data.files || [];
       setFiles(loadedFiles);
 
-      // Keep currentFile synchronized if already chosen
+      // Keep currentFile synchronized or restore previously playing file
       if (currentFile) {
         const updatedCurrent = loadedFiles.find((f) => f.id === currentFile.id);
         if (updatedCurrent) {
           setCurrentFile(updatedCurrent);
+        }
+      } else {
+        const lastPlayedId = localStorage.getItem("media_player_last_played_file_id");
+        if (lastPlayedId) {
+          const matched = loadedFiles.find((f) => f.id === lastPlayedId);
+          if (matched) {
+            setCurrentFile(matched);
+          }
         }
       }
     } catch (err: any) {
@@ -199,16 +585,38 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     fetchMediaFiles();
   }, []);
 
-  // Set active and secondary subtitle tracks when currentFile changes
+  // Save currently selected file to localStorage
+  const handleSelectFile = (file: MediaFile | null, autoPlay: boolean = true) => {
+    setCurrentFile(file);
+    setIsPlaying(autoPlay);
+    try {
+      if (file) {
+        localStorage.setItem("media_player_last_played_file_id", file.id);
+      } else {
+        localStorage.removeItem("media_player_last_played_file_id");
+      }
+    } catch (e) {
+      console.error("Failed to save last played file:", e);
+    }
+  };
+
+  // Set active and secondary subtitle tracks when currentFile changes (restoring saved preferences)
   useEffect(() => {
     if (currentFile?.subtitles && currentFile.subtitles.length > 0) {
-      // Default to first track if not selected or current not in list
-      if (!activeTrackId || !currentFile.subtitles.some(t => t.id === activeTrackId)) {
+      const savedPrefs = getSavedSubtitlePreferences(currentFile.id);
+
+      // Restore Primary Track
+      if (savedPrefs.primaryId && currentFile.subtitles.some((t) => t.id === savedPrefs.primaryId)) {
+        setActiveTrackId(savedPrefs.primaryId);
+      } else if (!activeTrackId || !currentFile.subtitles.some((t) => t.id === activeTrackId)) {
         setActiveTrackId(currentFile.subtitles[0].id);
       }
-      // If there is a second track, automatically set it as secondary track (e.g. Arabic translation + German original)
-      if (currentFile.subtitles.length > 1 && (!secondaryTrackId || !currentFile.subtitles.some(t => t.id === secondaryTrackId))) {
-        const otherTrack = currentFile.subtitles.find(t => t.id !== (activeTrackId || currentFile.subtitles![0].id));
+
+      // Restore Secondary Track
+      if (savedPrefs.secondaryId && currentFile.subtitles.some((t) => t.id === savedPrefs.secondaryId)) {
+        setSecondaryTrackId(savedPrefs.secondaryId);
+      } else if (currentFile.subtitles.length > 1 && (!secondaryTrackId || !currentFile.subtitles.some((t) => t.id === secondaryTrackId))) {
+        const otherTrack = currentFile.subtitles.find((t) => t.id !== (activeTrackId || currentFile.subtitles![0].id));
         if (otherTrack) {
           setSecondaryTrackId(otherTrack.id);
         }
@@ -255,12 +663,23 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     ) || null;
   }, [secondaryCues, currentTime]);
 
-  // Auto-scroll transcript to active cue (smooth like YouTube)
+  // Auto-scroll transcript container only to active cue (isolated from page scroll)
   useEffect(() => {
     if (autoScrollTranscript && activeCueRef.current && transcriptContainerRef.current) {
-      activeCueRef.current.scrollIntoView({
-        behavior: "smooth",
-        block: "center"
+      const container = transcriptContainerRef.current;
+      const element = activeCueRef.current;
+
+      const containerRect = container.getBoundingClientRect();
+      const elementRect = element.getBoundingClientRect();
+
+      // Calculate relative vertical offset inside the subtitles list container only
+      const relativeTop = elementRect.top - containerRect.top;
+      const targetScrollTop =
+        container.scrollTop + relativeTop - container.clientHeight / 2 + element.clientHeight / 2;
+
+      container.scrollTo({
+        top: Math.max(0, targetScrollTop),
+        behavior: "smooth"
       });
     }
   }, [currentCue, autoScrollTranscript]);
@@ -490,32 +909,66 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   };
 
-  // Save Subtitle Track to Server
+  // Save Subtitle Track to Server (supports adding new track or updating existing track by trackId)
   const saveSubtitleTrackToServer = async (
     mediaId: string,
     label: string,
     cues: SubtitleCue[],
-    source: "uploaded" | "ai" | "manual"
+    source: "uploaded" | "ai" | "manual",
+    trackId?: string
   ) => {
+    // Optimistic local state update for instant UI response
+    const cleanCues = cues.map((c, idx) => ({
+      id: c.id || `cue-${idx + 1}`,
+      startTime: Math.max(0, parseFloat(String(c.startTime)) || 0),
+      endTime: Math.max(0.1, parseFloat(String(c.endTime)) || 1),
+      text: (c.text || "").trim()
+    })).filter((c) => c.text.length > 0);
+
+    if (currentFile && currentFile.id === mediaId) {
+      const existingSubs = currentFile.subtitles ? [...currentFile.subtitles] : [];
+      let updatedSubs: MediaSubtitleTrack[];
+
+      if (trackId && existingSubs.some((t) => t.id === trackId)) {
+        updatedSubs = existingSubs.map((t) =>
+          t.id === trackId ? { ...t, cues: cleanCues, label: label || t.label } : t
+        );
+      } else {
+        const dummyTrack: MediaSubtitleTrack = {
+          id: trackId || `sub-${Date.now()}`,
+          label: label || "الترجمة",
+          cues: cleanCues,
+          source,
+          uploadedAt: new Date().toISOString()
+        };
+        updatedSubs = [dummyTrack, ...existingSubs];
+      }
+
+      const updatedFile = { ...currentFile, subtitles: updatedSubs };
+      setCurrentFile(updatedFile);
+      setFiles((prev) => prev.map((f) => (f.id === mediaId ? updatedFile : f)));
+    }
+
     try {
       const res = await fetch(`/api/media/${mediaId}/subtitles`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label, cues, source })
+        body: JSON.stringify({ label, cues: cleanCues, source, trackId })
       });
 
       if (!res.ok) throw new Error("فشل حفظ ملف الترجمة على السيرفر");
       const data = await res.json();
 
-      setSuccessMsg(`تمت إضافة مسار الترجمة "${label}" بنجاح! (${cues.length} مقطع)`);
+      setSuccessMsg(`تم حفظ وتحديث الترجمة بنجاح! (${cleanCues.length} مقطع)`);
       if (data.file) {
         setCurrentFile(data.file);
-        setFiles(prev => prev.map(f => f.id === data.file.id ? data.file : f));
+        setFiles((prev) => prev.map((f) => (f.id === data.file.id ? data.file : f)));
       }
       if (data.track) {
         setActiveTrackId(data.track.id);
       }
     } catch (err: any) {
+      console.error(err);
       setErrorMsg(err.message || "حدث خطأ أثناء حفظ الترجمة");
     }
   };
@@ -547,6 +1000,18 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   };
 
+  // Open Cue Edit Modal
+  const handleOpenEditCue = (cue: SubtitleCue) => {
+    originalCueTimesRef.current = {
+      id: cue.id,
+      startTime: cue.startTime,
+      endTime: cue.endTime,
+      text: cue.text
+    };
+    setEditingCue({ ...cue });
+    setSyncWithSecondaryTrack(Boolean(secondaryTrack && secondaryTrack.id !== activeTrackId));
+  };
+
   // Add new Cue at current timestamp
   const handleAddNewCueAtCurrentTime = () => {
     if (!currentFile || !activeTrack) {
@@ -554,7 +1019,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       return;
     }
 
-    const start = Math.floor(currentTime * 10) / 10;
+    const start = Math.round(currentTime * 10) / 10;
     const newCue: SubtitleCue = {
       id: `cue-${Date.now()}`,
       startTime: start,
@@ -563,20 +1028,85 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     };
 
     const updatedCues = [...activeTrack.cues, newCue].sort((a, b) => a.startTime - b.startTime);
-    saveSubtitleTrackToServer(currentFile.id, activeTrack.label, updatedCues, "manual");
-    setEditingCue(newCue);
+    saveSubtitleTrackToServer(currentFile.id, activeTrack.label, updatedCues, "manual", activeTrack.id);
+    handleOpenEditCue(newCue);
   };
 
-  // Save edited cue
-  const handleSaveEditedCue = () => {
-    if (!editingCue || !currentFile || !activeTrack) return;
+  // Save edited cue with optional synchronization to secondary track
+  const handleSaveEditedCue = (cueToSave?: SubtitleCue, shouldSyncSecondary?: boolean) => {
+    const targetCue = cueToSave || editingCue;
+    if (!targetCue || !currentFile || !activeTrack) return;
+
+    const doSync = shouldSyncSecondary !== undefined ? shouldSyncSecondary : syncWithSecondaryTrack;
+    const cleanStartTime = Math.max(0, Math.round(targetCue.startTime * 10) / 10);
+    const cleanEndTime = Math.max(cleanStartTime + 0.2, Math.round(targetCue.endTime * 10) / 10);
+    
+    const cleanCue: SubtitleCue = {
+      ...targetCue,
+      startTime: cleanStartTime,
+      endTime: cleanEndTime,
+      text: targetCue.text.trim()
+    };
 
     const updatedCues = activeTrack.cues
-      .map(c => (c.id === editingCue.id ? editingCue : c))
+      .map((c) => (c.id === cleanCue.id ? cleanCue : c))
       .sort((a, b) => a.startTime - b.startTime);
 
-    saveSubtitleTrackToServer(currentFile.id, activeTrack.label, updatedCues, "manual");
+    saveSubtitleTrackToServer(currentFile.id, activeTrack.label, updatedCues, "manual", activeTrack.id);
+
+    // Synchronize to secondary subtitle track if requested and available
+    if (doSync && secondaryTrack && secondaryTrack.id !== activeTrack.id && secondaryTrack.cues.length > 0) {
+      const origTimes = originalCueTimesRef.current || {
+        startTime: cleanStartTime,
+        endTime: cleanEndTime,
+        id: cleanCue.id,
+        text: cleanCue.text
+      };
+
+      // Match best candidate in secondary track (highest time overlap, or closest start time)
+      let bestMatchIdx = -1;
+      let maxOverlap = 0;
+
+      secondaryTrack.cues.forEach((sc, idx) => {
+        const overlapStart = Math.max(sc.startTime, origTimes.startTime);
+        const overlapEnd = Math.min(sc.endTime, origTimes.endTime);
+        const overlap = Math.max(0, overlapEnd - overlapStart);
+        if (overlap > maxOverlap) {
+          maxOverlap = overlap;
+          bestMatchIdx = idx;
+        }
+      });
+
+      if (bestMatchIdx === -1) {
+        let minDiff = Infinity;
+        secondaryTrack.cues.forEach((sc, idx) => {
+          const diff = Math.abs(sc.startTime - origTimes.startTime);
+          if (diff < minDiff) {
+            minDiff = diff;
+            bestMatchIdx = idx;
+          }
+        });
+      }
+
+      if (bestMatchIdx !== -1) {
+        const updatedSecCues = secondaryTrack.cues.map((sc, idx) => {
+          if (idx === bestMatchIdx) {
+            return {
+              ...sc,
+              startTime: cleanStartTime,
+              endTime: cleanEndTime
+            };
+          }
+          return sc;
+        }).sort((a, b) => a.startTime - b.startTime);
+
+        saveSubtitleTrackToServer(currentFile.id, secondaryTrack.label, updatedSecCues, "manual", secondaryTrack.id);
+        triggerHud("تمت مزامنة الترجمة الثانية ✓", "⚡");
+      }
+    }
+
     setEditingCue(null);
+    originalCueTimesRef.current = null;
   };
 
   // Delete single cue
@@ -584,8 +1114,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     e.stopPropagation();
     if (!currentFile || !activeTrack) return;
 
-    const updatedCues = activeTrack.cues.filter(c => c.id !== cueId);
-    saveSubtitleTrackToServer(currentFile.id, activeTrack.label, updatedCues, "manual");
+    const updatedCues = activeTrack.cues.filter((c) => c.id !== cueId);
+    saveSubtitleTrackToServer(currentFile.id, activeTrack.label, updatedCues, "manual", activeTrack.id);
   };
 
   // Drag and drop handlers
@@ -687,49 +1217,26 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   // Media Player element getter & control handlers
   const getMediaElement = () => (currentFile?.type === "video" ? videoRef.current : audioRef.current);
 
-  // Zero-Pop Audio Fading & Smooth Playback Engine
+  // Smooth & Instant Playback Controls
   const smoothPause = (onPaused?: () => void) => {
     const el = getMediaElement();
     if (!el) return;
-    if (el.paused) {
-      setIsPlaying(false);
-      if (onPaused) onPaused();
-      return;
-    }
-
-    const currentVol = isMuted ? 0 : volume;
-    if (currentVol > 0.02) {
-      // Rapid 18ms micro-ramp down to eliminate waveform discontinuity pop on headphone/speakers
-      el.volume = 0.0001;
-      setTimeout(() => {
-        if (el) {
-          el.pause();
-          el.volume = isMuted ? 0 : volume;
-          setIsPlaying(false);
-          if (onPaused) onPaused();
-        }
-      }, 18);
-    } else {
-      el.pause();
-      setIsPlaying(false);
-      if (onPaused) onPaused();
-    }
+    el.pause();
+    setIsPlaying(false);
+    if (onPaused) onPaused();
   };
 
   const smoothPlay = () => {
     const el = getMediaElement();
     if (!el) return;
-    const targetVol = isMuted ? 0 : volume;
-    if (targetVol > 0.02) {
-      el.volume = 0.0001;
-      el.play().then(() => {
-        setIsPlaying(true);
-        setTimeout(() => {
-          if (el && !isMuted) el.volume = targetVol;
-        }, 25);
-      }).catch(console.error);
-    } else {
-      el.play().then(() => setIsPlaying(true)).catch(console.error);
+    const playPromise = el.play();
+    if (playPromise !== undefined) {
+      playPromise
+        .then(() => setIsPlaying(true))
+        .catch((err) => {
+          // Auto-play / user gesture handling
+          console.warn("Playback prevented or interrupted:", err);
+        });
     }
   };
 
@@ -743,35 +1250,24 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   };
 
-  // Zero-Pop Anti-Glitch Seeking Engine
-  // Prevent loud speaker/headphone popping by micro-attenuating audio amplitude during timestamp repositioning
+  // Instant Seeking Engine for Sentences & Timeline
   const handleSeek = (newTime: number) => {
     const el = getMediaElement();
     if (!el) return;
     const totalDuration = duration || el.duration || 0;
     const boundedTime = Math.max(0, Math.min(newTime, totalDuration > 0 ? totalDuration : Infinity));
 
-    const currentVol = isMuted ? 0 : volume;
-    const needsAntiPop = !isMuted && currentVol > 0.02 && !el.paused;
-
-    if (needsAntiPop) {
-      // Instantly drop volume to prevent audio buffer discontinuity crackle
-      el.volume = 0.0001;
-      el.currentTime = boundedTime;
-      setCurrentTime(boundedTime);
-
-      if (fadeTimeoutRef.current) {
-        window.clearTimeout(fadeTimeoutRef.current);
+    // Direct, immediate seek with fastSeek fallback
+    if ("fastSeek" in el && typeof (el as any).fastSeek === "function") {
+      try {
+        (el as any).fastSeek(boundedTime);
+      } catch {
+        el.currentTime = boundedTime;
       }
-      fadeTimeoutRef.current = window.setTimeout(() => {
-        if (el && !isMuted) {
-          el.volume = currentVol;
-        }
-      }, 35);
     } else {
       el.currentTime = boundedTime;
-      setCurrentTime(boundedTime);
     }
+    setCurrentTime(boundedTime);
   };
 
   // Calculate precise time from pointer event relative to timeline LTR width
@@ -867,7 +1363,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     window.addEventListener("pointercancel", onPointerUp, { passive: false });
   };
 
-  // Timeline hover position & tooltip
+  // Timeline hover position & tooltip (Throttled for zero playback interference)
+  const hoverSeekThrottleRef = useRef<number | null>(null);
+
   const handleTimelinePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!progressBarRef.current) return;
     const rect = progressBarRef.current.getBoundingClientRect();
@@ -878,6 +1376,22 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
     setHoverPosition(fraction * 100);
     setHoverTime(calculatedTime);
+
+    // Throttled sync for preview frame bubble without overloading video decoder
+    if (previewVideoRef.current && currentFile?.type === "video") {
+      if (!hoverSeekThrottleRef.current) {
+        hoverSeekThrottleRef.current = window.setTimeout(() => {
+          hoverSeekThrottleRef.current = null;
+          if (previewVideoRef.current) {
+            try {
+              previewVideoRef.current.currentTime = calculatedTime;
+            } catch {
+              // Safe catch
+            }
+          }
+        }, 60);
+      }
+    }
 
     // Find cue text at this hover time
     const cueAtTime = activeCues.find(c => calculatedTime >= c.startTime && calculatedTime <= c.endTime);
@@ -906,30 +1420,97 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     if (audioRef.current) audioRef.current.playbackRate = speed;
   };
 
+  const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
+  // Instant one-click speed cycling
+  const cyclePlaybackSpeed = () => {
+    const currentIndex = PLAYBACK_SPEEDS.indexOf(playbackRate);
+    const nextIndex = (currentIndex + 1) % PLAYBACK_SPEEDS.length;
+    const nextSpeed = PLAYBACK_SPEEDS[nextIndex];
+    handleSpeedChange(nextSpeed);
+    triggerHud(`سرعة التشغيل: ${nextSpeed}x`, "⚡");
+  };
+
   const toggleMute = () => {
     const nextMute = !isMuted;
     setIsMuted(nextMute);
+    try {
+      localStorage.setItem("media_player_is_muted", JSON.stringify(nextMute));
+    } catch (e) {
+      console.error(e);
+    }
     if (videoRef.current) videoRef.current.muted = nextMute;
     if (audioRef.current) audioRef.current.muted = nextMute;
+    triggerHud(nextMute ? "كتم الصوت" : "إلغاء الكتم", "M");
   };
 
   const handleVolumeChange = (newVol: number) => {
     const clampedVol = Math.max(0, Math.min(1, newVol));
     setVolume(clampedVol);
-    setIsMuted(clampedVol === 0);
-    if (videoRef.current) videoRef.current.volume = clampedVol;
-    if (audioRef.current) audioRef.current.volume = clampedVol;
+    const nextMute = clampedVol === 0;
+    setIsMuted(nextMute);
+    try {
+      localStorage.setItem("media_player_volume", clampedVol.toString());
+      localStorage.setItem("media_player_is_muted", JSON.stringify(nextMute));
+    } catch (e) {
+      console.error(e);
+    }
+    if (videoRef.current) {
+      videoRef.current.volume = clampedVol;
+      videoRef.current.muted = nextMute;
+    }
+    if (audioRef.current) {
+      audioRef.current.volume = clampedVol;
+      audioRef.current.muted = nextMute;
+    }
   };
 
   const handleToggleFullscreen = () => {
-    if (videoRef.current) {
-      if (document.fullscreenElement) {
-        document.exitFullscreen();
-      } else {
-        videoRef.current.requestFullscreen().catch(console.error);
+    const target = playerSectionRef.current || videoRef.current;
+    if (!target) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(console.error);
+    } else {
+      if (target.requestFullscreen) {
+        target.requestFullscreen().catch((err) => {
+          console.error("Fullscreen error, fallback to video element:", err);
+          if (videoRef.current?.requestFullscreen) {
+            videoRef.current.requestFullscreen().catch(console.error);
+          }
+        });
       }
     }
   };
+
+  // Sync fullscreen state
+  useEffect(() => {
+    const handleFsChange = () => {
+      const isFs = !!document.fullscreenElement;
+      setIsFullscreen(isFs);
+      setShowFullscreenControls(false);
+    };
+    document.addEventListener("fullscreenchange", handleFsChange);
+    document.addEventListener("webkitfullscreenchange", handleFsChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFsChange);
+      document.removeEventListener("webkitfullscreenchange", handleFsChange);
+    };
+  }, []);
+
+  // Close Speed menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (speedMenuRef.current && !speedMenuRef.current.contains(e.target as Node)) {
+        setShowSpeedMenu(false);
+      }
+    };
+    if (showSpeedMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showSpeedMenu]);
 
   // Play next or previous track in list
   const handleNextTrack = () => {
@@ -987,6 +1568,97 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const totalAudios = useMemo(() => files.filter((f) => f.type === "audio").length, [files]);
   const totalSize = useMemo(() => files.reduce((acc, f) => acc + (f.size || 0), 0), [files]);
 
+  // Pro Navigation Shortcuts & Sentence Handlers
+  // Replay current sentence only (R)
+  const replayCurrentSentenceOnly = useCallback(() => {
+    if (!activeCues || activeCues.length === 0) return;
+    const el = getMediaElement();
+    const time = el ? el.currentTime : currentTime;
+
+    let targetCue = activeCues.find(
+      (c) => time >= c.startTime && time <= c.endTime
+    );
+    if (!targetCue) {
+      const prevCues = activeCues.filter((c) => c.startTime <= time);
+      if (prevCues.length > 0) {
+        targetCue = prevCues[prevCues.length - 1];
+      } else {
+        targetCue = activeCues[0];
+      }
+    }
+
+    if (targetCue) {
+      singleSentencePlaybackEndRef.current = targetCue.endTime;
+      handleSeek(targetCue.startTime);
+      smoothPlay();
+      triggerHud("إعادة الجملة الحالية فقط", "R");
+    }
+  }, [activeCues, currentTime, handleSeek, smoothPlay, triggerHud]);
+
+  // Jump to Previous Sentence ([)
+  const jumpToPreviousSentence = useCallback(() => {
+    if (!activeCues || activeCues.length === 0) {
+      skipSeconds(-5);
+      return;
+    }
+    const el = getMediaElement();
+    const time = el ? el.currentTime : currentTime;
+
+    const currentIdx = activeCues.findIndex(
+      (c) => time >= c.startTime && time <= c.endTime
+    );
+
+    let targetCue: SubtitleCue;
+    if (currentIdx > 0) {
+      targetCue = activeCues[currentIdx - 1];
+    } else if (currentIdx === 0) {
+      targetCue = activeCues[0];
+    } else {
+      const prevCues = activeCues.filter((c) => c.startTime < time);
+      if (prevCues.length > 0) {
+        targetCue = prevCues[prevCues.length - 1];
+      } else {
+        targetCue = activeCues[0];
+      }
+    }
+
+    if (targetCue) {
+      singleSentencePlaybackEndRef.current = null;
+      handleSeek(targetCue.startTime);
+      if (!isPlaying) smoothPlay();
+      triggerHud("الجملة السابقة", "[");
+    }
+  }, [activeCues, currentTime, handleSeek, isPlaying, smoothPlay, skipSeconds, triggerHud]);
+
+  // Jump to Next Sentence (])
+  const jumpToNextSentence = useCallback(() => {
+    if (!activeCues || activeCues.length === 0) {
+      skipSeconds(5);
+      return;
+    }
+    const el = getMediaElement();
+    const time = el ? el.currentTime : currentTime;
+
+    const currentIdx = activeCues.findIndex(
+      (c) => time >= c.startTime && time <= c.endTime
+    );
+
+    let targetCue: SubtitleCue | null = null;
+    if (currentIdx >= 0 && currentIdx < activeCues.length - 1) {
+      targetCue = activeCues[currentIdx + 1];
+    } else if (currentIdx === -1) {
+      const nextCue = activeCues.find((c) => c.startTime > time);
+      if (nextCue) targetCue = nextCue;
+    }
+
+    if (targetCue) {
+      singleSentencePlaybackEndRef.current = null;
+      handleSeek(targetCue.startTime);
+      if (!isPlaying) smoothPlay();
+      triggerHud("الجملة التالية", "]");
+    }
+  }, [activeCues, currentTime, handleSeek, isPlaying, smoothPlay, skipSeconds, triggerHud]);
+
   // Sync media element events and buffer indicator
   useEffect(() => {
     const el = currentFile?.type === "video" ? videoRef.current : audioRef.current;
@@ -999,7 +1671,18 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
-    const onTimeUpdate = () => setCurrentTime(el.currentTime);
+    const onTimeUpdate = () => {
+      const cur = el.currentTime;
+      setCurrentTime(cur);
+      // Auto-stop when single-sentence playback limit is reached
+      if (
+        singleSentencePlaybackEndRef.current !== null &&
+        cur >= singleSentencePlaybackEndRef.current
+      ) {
+        singleSentencePlaybackEndRef.current = null;
+        smoothPause();
+      }
+    };
     const onLoadedMetadata = () => {
       setDuration(el.duration);
       if (isPlaying) {
@@ -1034,30 +1717,46 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       el.removeEventListener("progress", onProgress);
       el.removeEventListener("ended", onEnded);
     };
-  }, [currentFile, playbackRate, isLooping, volume, isMuted, isPlaying, duration]);
+  }, [currentFile, playbackRate, isLooping, volume, isMuted, isPlaying, duration, smoothPause]);
 
-  // Keyboard Shortcuts (Space, K, J, L, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Numbers 0-9, C, M, F, Esc)
+  // Keyboard Shortcuts ([ = Prev Sentence, ] = Next Sentence, R = Replay Sentence Only, Space = Play/Pause, + Pro controls)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't intercept when user is typing in input or textarea
-      if (["INPUT", "TEXTAREA"].includes((e.target as HTMLElement)?.tagName)) {
+      // Don't intercept when user is typing in input, textarea, or select
+      const targetTag = (e.target as HTMLElement)?.tagName;
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(targetTag) || (e.target as HTMLElement)?.isContentEditable) {
         return;
       }
 
-      if (e.code === "Space" || e.key === "k" || e.key === "K") {
+      if (e.code === "Space" || e.key === " " || e.key === "k" || e.key === "K") {
         e.preventDefault();
+        singleSentencePlaybackEndRef.current = null;
         togglePlay();
+        triggerHud(isPlaying ? "إيقاف مؤقت" : "تشغيل", "Space");
+      } else if (e.key === "[" || e.code === "BracketLeft" || e.key === "ج") {
+        e.preventDefault();
+        jumpToPreviousSentence();
+      } else if (e.key === "]" || e.code === "BracketRight" || e.key === "د") {
+        e.preventDefault();
+        jumpToNextSentence();
+      } else if (e.key === "r" || e.key === "R" || e.code === "KeyR" || e.key === "ق") {
+        e.preventDefault();
+        replayCurrentSentenceOnly();
       } else if (e.key === "j" || e.key === "J") {
         e.preventDefault();
+        singleSentencePlaybackEndRef.current = null;
         skipSeconds(-10);
       } else if (e.key === "l" || e.key === "L") {
         e.preventDefault();
+        singleSentencePlaybackEndRef.current = null;
         skipSeconds(10);
       } else if (e.code === "ArrowLeft") {
         e.preventDefault();
+        singleSentencePlaybackEndRef.current = null;
         skipSeconds(-5);
       } else if (e.code === "ArrowRight") {
         e.preventDefault();
+        singleSentencePlaybackEndRef.current = null;
         skipSeconds(5);
       } else if (e.code === "ArrowUp") {
         e.preventDefault();
@@ -1067,6 +1766,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         handleVolumeChange(Math.max(0, volume - 0.05));
       } else if (/^[0-9]$/.test(e.key)) {
         e.preventDefault();
+        singleSentencePlaybackEndRef.current = null;
         const num = parseInt(e.key, 10);
         const totalDur = duration || getMediaElement()?.duration || 0;
         if (totalDur > 0) {
@@ -1087,7 +1787,19 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPlaying, isMuted, volume, duration, currentFile, isImmersiveMode]);
+  }, [
+    isPlaying,
+    isMuted,
+    volume,
+    duration,
+    currentFile,
+    isImmersiveMode,
+    jumpToPreviousSentence,
+    jumpToNextSentence,
+    replayCurrentSentenceOnly,
+    togglePlay,
+    triggerHud
+  ]);
 
   // Copy full transcript text
   const handleCopyTranscript = () => {
@@ -1127,34 +1839,52 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  // Subtitle styling classes
-  const subtitleStyleClass = useMemo(() => {
-    switch (subtitleStyle) {
-      case "yellow":
-        return "bg-black/90 text-yellow-300 border border-yellow-500/30";
-      case "transparent":
-        return "bg-slate-900/60 backdrop-blur-md text-white border border-white/10";
-      case "outline":
-        return "bg-transparent text-white font-black drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] text-stroke";
-      case "black":
-      default:
-        return "bg-black/85 text-white border border-slate-700/50 shadow-2xl";
-    }
-  }, [subtitleStyle]);
+  // Stage Click Handler: In Fullscreen, clicking the bottom 30% reveals floating controls, clicking outside hides them
+  const handleStageClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (isFullscreen) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const clickY = e.clientY - rect.top;
+      const ratio = clickY / rect.height;
 
-  const subtitleFontSizeClass = useMemo(() => {
-    switch (subtitleFontSize) {
-      case "sm":
-        return "text-xs sm:text-sm py-1 px-3";
-      case "lg":
-        return "text-base sm:text-xl py-2 px-5";
-      case "xl":
-        return "text-lg sm:text-2xl py-2.5 px-6";
-      case "md":
-      default:
-        return "text-sm sm:text-base py-1.5 px-4";
+      if (ratio >= 0.70) {
+        // Bottom 30% of the screen: toggle or reveal floating controls
+        setShowFullscreenControls((prev) => !prev);
+      } else {
+        // Outside / Upper 70% of the screen: hide controls if open, or toggle play if already hidden
+        if (showFullscreenControls) {
+          setShowFullscreenControls(false);
+        } else {
+          togglePlay();
+        }
+      }
+    } else {
+      togglePlay();
     }
-  }, [subtitleFontSize]);
+  };
+
+  // Advanced Real-time Subtitle Style Computation Engine
+  const getSubtitleTrackComputedStyle = useCallback((config: SubtitleTrackStyleConfig, isImmersive: boolean, text?: string): React.CSSProperties => {
+    return computeSubtitleCSS(config, isImmersive, 1, text);
+  }, []);
+
+  const getSubtitlePositionStyle = useCallback((position: "bottom" | "top" | "center", offsetY: number): React.CSSProperties => {
+    if (position === "top") {
+      return { top: `${offsetY}px`, bottom: "auto", transform: "none" };
+    }
+    if (position === "center") {
+      return { top: "50%", bottom: "auto", transform: "translateY(-50%)" };
+    }
+    // Flexible bottom positioning:
+    // When in fullscreen and floating controls are revealed, raise the subtitle smoothly (+96px)
+    // so it sits cleanly above the floating bar without being covered by it!
+    const extraBottom = isFullscreen && showFullscreenControls ? 96 : 0;
+    return {
+      bottom: `${offsetY + extraBottom}px`,
+      top: "auto",
+      transform: "none",
+      transition: "bottom 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s ease"
+    };
+  }, [isFullscreen, showFullscreenControls]);
 
   return (
     <div
@@ -1320,303 +2050,109 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         {/* ======================================================== */}
         {currentFile && (
           <section
+            ref={playerSectionRef}
             className={
-              isImmersiveMode
-                ? "fixed inset-0 z-50 bg-black flex flex-col h-screen w-screen p-3 sm:p-4 overflow-hidden text-white animate-fadeIn"
-                : "bg-slate-900 rounded-2xl p-4 sm:p-5 text-white shadow-2xl border border-slate-800 overflow-hidden"
+              isFullscreen
+                ? "fixed inset-0 z-50 bg-black flex flex-col h-screen w-screen p-0 m-0 overflow-hidden text-white select-none"
+                : isImmersiveMode
+                ? "fixed inset-0 z-50 bg-black flex flex-col h-screen w-screen p-2 sm:p-3 overflow-hidden text-white animate-fadeIn"
+                : "bg-slate-900 rounded-xl p-2 sm:p-2.5 text-white shadow-2xl border border-slate-800 overflow-hidden"
             }
           >
-            {/* Top Bar of Active Media */}
-            <div
-              className={`flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800/80 mb-3 shrink-0 ${
-                isImmersiveMode ? "bg-slate-950/90 px-3 py-2 rounded-xl border border-slate-800" : ""
-              }`}
-            >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <span
-                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider shrink-0 ${
-                    currentFile.type === "video"
-                      ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
-                      : "bg-purple-500/20 text-purple-400 border border-purple-500/30"
-                  }`}
-                >
-                  {currentFile.type === "video" ? "🎬 فيديو" : "🎵 صوت"}
-                </span>
-
-                {isImmersiveMode && (
-                  <span className="hidden sm:inline-block px-2.5 py-0.5 rounded-lg bg-linear-to-r from-purple-600/40 to-blue-600/40 border border-purple-500/40 text-purple-200 text-[11px] font-black">
-                    📺 وضع التكبير السينمائي
-                  </span>
-                )}
-
-                {editingId === currentFile.id ? (
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      value={editTitleText}
-                      onChange={(e) => setEditTitleText(e.target.value)}
-                      className="bg-slate-800 text-white text-xs px-2.5 py-1 rounded-lg border border-slate-700 focus:outline-hidden focus:border-blue-500"
-                      autoFocus
-                    />
-                    <button
-                      onClick={() => handleSaveRename(currentFile.id)}
-                      className="p-1 bg-blue-600 hover:bg-blue-500 rounded-lg text-white cursor-pointer"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => setEditingId(null)}
-                      className="p-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 truncate">
-                    <h2 className="text-sm sm:text-base font-bold text-slate-100 truncate">
-                      {currentFile.title}
-                    </h2>
-                    {!isImmersiveMode && (
-                      <button
-                        onClick={(e) => handleStartRename(currentFile, e)}
-                        className="text-slate-400 hover:text-white p-1 transition-colors cursor-pointer"
-                        title="تعديل الاسم"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Subtitle Track Selector & Actions */}
-              <div className="flex items-center gap-2 flex-wrap">
-                {/* Primary Subtitle Track Pill Dropdown */}
-                <div className="flex items-center gap-1.5 bg-slate-800/90 border border-slate-700 rounded-xl px-2.5 py-1 text-xs">
-                  <Subtitles className="w-3.5 h-3.5 text-indigo-400" />
-                  <span className="text-slate-400 text-[11px]">الترجمة 1:</span>
-                  <select
-                    value={activeTrackId || ""}
-                    onChange={(e) => setActiveTrackId(e.target.value || null)}
-                    className="bg-transparent text-white text-xs font-semibold focus:outline-hidden cursor-pointer"
-                  >
-                    <option value="" className="bg-slate-800 text-slate-400">
-                      إيقاف الترجمة (Off)
-                    </option>
-                    {currentFile.subtitles?.map((track) => (
-                      <option key={track.id} value={track.id} className="bg-slate-800 text-white">
-                        {track.label} ({track.cues.length} مقطع)
-                      </option>
-                    ))}
-                  </select>
-
-                  {activeTrack && !isImmersiveMode && (
-                    <button
-                      onClick={(e) => handleDeleteSubtitleTrack(activeTrack.id, e)}
-                      className="text-slate-400 hover:text-rose-400 p-0.5 transition-colors cursor-pointer mr-1"
-                      title="حذف هذا المسار"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
-
-                {/* Secondary Subtitle Track Pill Dropdown (Dual Subtitles / ترجمة مزدوجة) */}
-                {currentFile.subtitles && currentFile.subtitles.length > 1 && (
-                  <div className="flex items-center gap-1.5 bg-slate-800/90 border border-emerald-500/40 rounded-xl px-2.5 py-1 text-xs">
-                    <Split className="w-3.5 h-3.5 text-emerald-400" />
-                    <span className="text-emerald-400 text-[11px] font-bold">الترجمة 2:</span>
-                    <select
-                      value={secondaryTrackId || ""}
-                      onChange={(e) => {
-                        setSecondaryTrackId(e.target.value || null);
-                        if (e.target.value) setShowDualSubtitles(true);
-                      }}
-                      className="bg-transparent text-emerald-200 text-xs font-semibold focus:outline-hidden cursor-pointer"
-                    >
-                      <option value="" className="bg-slate-800 text-slate-400">
-                        بدون ترجمة ثانوية
-                      </option>
-                      {currentFile.subtitles?.map((track) => (
-                        <option key={track.id} value={track.id} className="bg-slate-800 text-white">
-                          {track.label}
-                        </option>
-                      ))}
-                    </select>
-
-                    <button
-                      onClick={() => setShowDualSubtitles(!showDualSubtitles)}
-                      className={`p-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                        showDualSubtitles ? "bg-emerald-600/40 text-emerald-300" : "bg-slate-750 text-slate-400"
-                      }`}
-                      title={showDualSubtitles ? "إخفاء الترجمة المزدوجة" : "إظهار الترجمة المزدوجة"}
-                    >
-                      {showDualSubtitles ? "مزدوجة ✓" : "مفردة"}
-                    </button>
-                  </div>
-                )}
-
-                {/* Gemini AI Subtitle Translation Button (ترجمة المسار الحالي للعربية) */}
-                {activeTrack && (
-                  <button
-                    onClick={() => setShowTranslateModal(true)}
-                    className="px-2.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-sm"
-                    title="ترجمة هذا المسار إلى العربية فوراً عبر Gemini لعمل ترجمة مزدوجة (ألماني + عربي)"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                    <span>ترجمة للعربية (Gemini) 🇸🇦</span>
-                  </button>
-                )}
-
-                {!isImmersiveMode && (
-                  <button
-                    onClick={() => setShowSubtitleUploadModal(true)}
-                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1"
-                    title="رفع أو كتابة ترجمة يدوية"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">إضافة ترجمة</span>
-                  </button>
-                )}
-
-                {/* Gradio Local STT Server Button */}
-                <button
-                  onClick={() => setShowGradioModal(true)}
-                  className="px-3 py-1.5 bg-gradient-to-r from-amber-600 via-rose-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white rounded-xl text-xs font-black shadow-md shadow-indigo-600/20 transition-all cursor-pointer flex items-center gap-1.5 animate-pulse"
-                  title="تفريغ صوتي ألماني عبر سيرفر Gradio المحلي (192.168.0.159:7861)"
-                >
-                  <Mic className="w-3.5 h-3.5" />
-                  <span>تفريغ Gradio 🇩🇪</span>
-                </button>
-
-                {/* Immersive Theater Mode Button / Exit Button */}
-                {isImmersiveMode ? (
-                  <button
-                    onClick={() => setIsImmersiveMode(false)}
-                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-black shadow-lg transition-all cursor-pointer flex items-center gap-1.5 border border-purple-400"
-                    title="الخروج من وضع التكبير (Esc)"
-                  >
-                    <Shrink className="w-3.5 h-3.5" />
-                    <span>خروج من التكبير (Esc)</span>
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => setIsImmersiveMode(true)}
-                    className="px-3 py-1.5 bg-linear-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-xl text-xs font-black shadow-md transition-all cursor-pointer flex items-center gap-1.5"
-                    title="وضع تكبير الشاشة الأقصى (فيديو كبير + تحكم مبسط + لوحة جانبية متحركة)"
-                  >
-                    <Expand className="w-3.5 h-3.5" />
-                    <span>وضع التكبير السينمائي 📺</span>
-                  </button>
-                )}
-
-                {/* Toggle Transcript View Button */}
-                <button
-                  onClick={() => setShowTranscriptPanel(!showTranscriptPanel)}
-                  className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                    showTranscriptPanel
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : "bg-slate-800 text-slate-300 hover:text-white"
-                  }`}
-                  title={isImmersiveMode ? "إظهار / إخفاء النافذة الجانبية للجمل للتكبير الكلي" : "لوحة التفريغ النصي والترجمة مثل اليوتيوب"}
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>{showTranscriptPanel ? (isImmersiveMode ? "إخفاء لوحة الجمل" : "إخفاء التفريغ") : (isImmersiveMode ? "إظهار لوحة الجمل" : "تفريغ اليوتيوب")}</span>
-                </button>
-
-                {!isImmersiveMode && (
-                  <>
-                    <a
-                      href={`/api/media/download/${currentFile.id}`}
-                      className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
-                      title="تحميل المقطع الأصلي"
-                    >
-                      <Download className="w-4 h-4" />
-                    </a>
-
-                    <button
-                      onClick={() => {
-                        setCurrentFile(null);
-                        setIsPlaying(false);
-                      }}
-                      className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                      title="إغلاق المشغل"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Split Grid / Flex: Player View + Transcript Panel */}
+            {/* Split Grid / Flex: Player View + Transcript Panel (Zero excessive gap) */}
             <div
               className={
-                isImmersiveMode
-                  ? "flex-1 flex overflow-hidden gap-3.5 min-h-0 relative"
-                  : "grid grid-cols-1 lg:grid-cols-12 gap-5"
+                isFullscreen
+                  ? "flex-1 w-full h-full relative overflow-hidden"
+                  : isImmersiveMode
+                  ? "flex-1 flex overflow-hidden gap-2 min-h-0 relative"
+                  : "grid grid-cols-1 lg:grid-cols-12 gap-2"
               }
             >
               {/* Media Player Column */}
               <div
                 className={
-                  isImmersiveMode
-                    ? "flex-1 flex flex-col min-w-0 min-h-0 space-y-2.5 justify-between"
-                    : `${showTranscriptPanel ? "lg:col-span-7 xl:col-span-8" : "lg:col-span-12"} space-y-4`
+                  isFullscreen
+                    ? "w-full h-full relative flex flex-col min-w-0 min-h-0"
+                    : isImmersiveMode
+                    ? "flex-1 flex flex-col min-w-0 min-h-0 gap-2 justify-between"
+                    : `${showTranscriptPanel ? "lg:col-span-7 xl:col-span-8" : "lg:col-span-12"} flex flex-col gap-2`
                 }
               >
                 {/* VIDEO OR AUDIO STAGE */}
                 <div
+                  onClick={handleStageClick}
                   className={
-                    isImmersiveMode
-                      ? "flex-1 relative rounded-2xl bg-black overflow-hidden flex items-center justify-center min-h-0 group border border-slate-800/80 shadow-2xl"
-                      : "relative rounded-2xl bg-black overflow-hidden flex items-center justify-center min-h-[260px] sm:min-h-[380px] group border border-slate-800 shadow-inner"
+                    isFullscreen
+                      ? "flex-1 relative bg-black overflow-hidden flex items-center justify-center min-h-0 w-full h-full cursor-pointer select-none"
+                      : isImmersiveMode
+                      ? "flex-1 relative rounded-lg bg-black overflow-hidden flex items-center justify-center min-h-0 group border border-slate-800/80 shadow-2xl"
+                      : "relative rounded-lg bg-black overflow-hidden flex items-center justify-center min-h-[260px] sm:min-h-[380px] group border border-slate-800 shadow-inner cursor-pointer"
                   }
                 >
+                  {/* Floating HUD Indicator for Shortcuts */}
+                  {hudToast && (
+                    <div className="absolute top-5 inset-x-0 flex justify-center pointer-events-none z-30 animate-fadeIn">
+                      <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/90 text-white px-3.5 py-1.5 rounded-lg shadow-2xl flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-100">{hudToast.text}</span>
+                        {hudToast.sub && (
+                          <kbd className="px-2 py-0.5 bg-blue-600/40 text-blue-300 border border-blue-500/50 rounded-md text-xs font-mono font-black">
+                            {hudToast.sub}
+                          </kbd>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {currentFile.type === "video" ? (
                     <>
                       <video
                         ref={videoRef}
                         src={`/api/media/stream/${currentFile.filename}`}
                         className={
-                          isImmersiveMode
+                          isFullscreen
+                            ? "w-full h-full object-contain pointer-events-none"
+                            : isImmersiveMode
                             ? "w-full h-full object-contain cursor-pointer"
                             : "w-full max-h-[500px] object-contain cursor-pointer"
                         }
+                        preload="auto"
                         playsInline
-                        onClick={togglePlay}
                       />
 
-                      {/* Video Subtitles Overlay (Supports Dual Subtitles: German + Arabic) */}
-                      {showSubtitlesOverlay && (currentCue || (showDualSubtitles && currentSecondaryCue)) && (
+                      {/* Video Subtitles Overlay (Supports Dual Subtitles: German + Arabic with Live Custom Styling & Live Preview) */}
+                      {showSubtitlesOverlay && (currentCue || (showDualSubtitles && currentSecondaryCue) || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && (
                         <div
-                          className={`absolute ${
-                            isImmersiveMode ? "bottom-12" : "bottom-8"
-                          } inset-x-0 flex flex-col items-center justify-center gap-2 px-4 pointer-events-none z-20 transition-all duration-150 animate-fadeIn`}
+                          className="absolute inset-x-0 flex flex-col items-center justify-center gap-2 px-4 pointer-events-none z-20 transition-all duration-300 ease-out"
+                          style={getSubtitlePositionStyle(primarySubStyle.position, primarySubStyle.offsetY)}
                         >
-                          {/* Primary Subtitle (German / Original) */}
-                          {currentCue && (
-                            <div
-                              className={`max-w-[90%] text-center rounded-2xl transition-all leading-relaxed font-sans shadow-2xl ${subtitleStyleClass} ${
-                                isImmersiveMode ? "text-base sm:text-xl md:text-2xl font-bold px-5 py-2.5" : subtitleFontSizeClass
-                              }`}
-                            >
-                              <span className="font-bold">{currentCue.text}</span>
-                            </div>
-                          )}
+                          {/* Primary Subtitle (e.g., German / Original) */}
+                          {(currentCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && !currentCue)) && (() => {
+                            const text = currentCue ? currentCue.text : "Guten Morgen! Willkommen zu unserem Deutschkurs.";
+                            const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
+                            return (
+                              <div
+                                dir={dir}
+                                style={getSubtitleTrackComputedStyle(primarySubStyle, isImmersiveMode, text)}
+                              >
+                                <span>{text}</span>
+                              </div>
+                            );
+                          })()}
 
-                          {/* Secondary Subtitle (Arabic / Translated with Gemini) */}
-                          {showDualSubtitles && currentSecondaryCue && (
-                            <div
-                              className={`max-w-[90%] text-center rounded-2xl transition-all leading-relaxed font-sans shadow-2xl bg-emerald-950/90 text-emerald-200 border border-emerald-500/60 font-bold ${
-                                isImmersiveMode
-                                  ? "text-sm sm:text-base md:text-lg px-4 py-1.5"
-                                  : "text-sm px-3.5 py-1"
-                              }`}
-                            >
-                              <span>{currentSecondaryCue.text}</span>
-                            </div>
-                          )}
+                          {/* Secondary Subtitle (e.g., Arabic / Translated with Gemini) */}
+                          {showDualSubtitles && (currentSecondaryCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && !currentSecondaryCue)) && (() => {
+                            const text = currentSecondaryCue ? currentSecondaryCue.text : "صباح الخير! أهلاً بكم في دورة اللغة الألمانية الخاصة بنا.";
+                            const dir = secondarySubStyle.direction === "rtl" ? "rtl" : secondarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
+                            return (
+                              <div
+                                dir={dir}
+                                style={getSubtitleTrackComputedStyle(secondarySubStyle, isImmersiveMode, text)}
+                              >
+                                <span>{text}</span>
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
                     </>
@@ -1630,6 +2166,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       <audio
                         ref={audioRef}
                         src={`/api/media/stream/${currentFile.filename}`}
+                        preload="auto"
                       />
 
                       {/* Rotating Vinyl Record Graphic */}
@@ -1651,25 +2188,33 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                         <p className="text-xs text-slate-400 mt-1">{currentFile.originalName}</p>
                       </div>
 
-                      {/* Audio Karaoke Subtitle Box (Supports Dual Subtitles) */}
+                      {/* Audio Karaoke Subtitle Box (Supports Dual Subtitles with Live Custom Styling) */}
                       {showSubtitlesOverlay && (
                         <div className="w-full max-w-lg mt-2 min-h-[64px] flex flex-col items-center justify-center gap-2">
                           {currentCue || (showDualSubtitles && currentSecondaryCue) ? (
                             <>
-                              {currentCue && (
-                                <div
-                                  className={`text-center rounded-2xl transition-all leading-relaxed font-sans shadow-lg ${subtitleStyleClass} ${
-                                    isImmersiveMode ? "text-lg font-bold px-4 py-2" : subtitleFontSizeClass
-                                  }`}
-                                >
-                                  <span className="font-bold">{currentCue.text}</span>
-                                </div>
-                              )}
-                              {showDualSubtitles && currentSecondaryCue && (
-                                <div className="text-center rounded-2xl transition-all leading-relaxed font-sans shadow-lg bg-emerald-950/85 text-emerald-200 border border-emerald-500/50 px-4 py-1.5 text-sm font-bold">
-                                  <span>{currentSecondaryCue.text}</span>
-                                </div>
-                              )}
+                              {currentCue && (() => {
+                                const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(currentCue.text);
+                                return (
+                                  <div
+                                    dir={dir}
+                                    style={getSubtitleTrackComputedStyle(primarySubStyle, isImmersiveMode, currentCue.text)}
+                                  >
+                                    <span>{currentCue.text}</span>
+                                  </div>
+                                );
+                              })()}
+                              {showDualSubtitles && currentSecondaryCue && (() => {
+                                const dir = secondarySubStyle.direction === "rtl" ? "rtl" : secondarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(currentSecondaryCue.text);
+                                return (
+                                  <div
+                                    dir={dir}
+                                    style={getSubtitleTrackComputedStyle(secondarySubStyle, isImmersiveMode, currentSecondaryCue.text)}
+                                  >
+                                    <span>{currentSecondaryCue.text}</span>
+                                  </div>
+                                );
+                              })()}
                             </>
                           ) : (
                             <div className="text-xs text-slate-500 italic bg-slate-800/40 px-4 py-2 rounded-xl border border-slate-800">
@@ -1682,58 +2227,71 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   )}
                 </div>
 
-                {/* Player Timeline & Controls Bar */}
+                {/* Player Timeline & Controls Bar (Unified in LTR layout for consistent button/scrubber directions) */}
                 <div
-                  className={`bg-slate-800/90 border border-slate-700/80 rounded-2xl ${
-                    isImmersiveMode ? "p-3 space-y-2.5" : "p-4 space-y-3.5"
-                  }`}
+                  dir="ltr"
+                  onClick={(e) => e.stopPropagation()}
+                  className={
+                    isFullscreen
+                      ? `absolute bottom-3 inset-x-3 sm:bottom-6 sm:inset-x-8 md:inset-x-16 lg:inset-x-24 z-40 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl shadow-2xl p-2.5 sm:p-3 space-y-2 transition-all duration-300 ease-out ${
+                          showFullscreenControls
+                            ? "opacity-100 translate-y-0 pointer-events-auto"
+                            : "opacity-0 translate-y-8 pointer-events-none"
+                        }`
+                      : `bg-slate-850 bg-slate-900/95 border border-slate-700/80 rounded-lg shadow-lg ${
+                          isImmersiveMode ? "p-2.5 space-y-2" : "p-2.5 sm:p-3 space-y-2"
+                        }`
+                  }
                 >
-                  {/* High-Precision YouTube-Grade Timeline */}
-                  <div className="space-y-1 select-none" dir="ltr">
+                  {/* High-Precision YouTube-Grade Timeline with Live Hover Frame Bubble */}
+                  <div className="space-y-1.5 select-none relative">
                     <div
                       ref={progressBarRef}
                       onPointerDown={handlePointerDownTimeline}
                       onPointerMove={handleTimelinePointerMove}
                       onPointerLeave={handleTimelinePointerLeave}
-                      className="w-full h-2.5 hover:h-3.5 bg-slate-700/70 rounded-full cursor-pointer transition-all relative group flex items-center touch-none py-1"
+                      className="w-full h-5 cursor-pointer relative group flex items-center touch-none select-none"
                     >
-                      {/* 1. Buffered Stream Track */}
-                      <div
-                        className="h-full bg-slate-500/40 rounded-full absolute left-0 top-0 pointer-events-none transition-all duration-300"
-                        style={{ width: `${bufferedPercent}%` }}
-                      />
-
-                      {/* 2. Hover Ghost Preview Track */}
-                      {hoverPosition !== null && (
+                      {/* Fixed-height stable track (Zero layout shift on hover) */}
+                      <div className="w-full h-2 bg-slate-700/70 rounded-full relative overflow-hidden">
+                        {/* 1. Buffered Stream Track */}
                         <div
-                          className="h-full bg-white/20 rounded-full absolute left-0 top-0 pointer-events-none"
-                          style={{ width: `${hoverPosition}%` }}
+                          className="h-full bg-slate-500/40 rounded-full absolute left-0 top-0 pointer-events-none transition-all duration-300"
+                          style={{ width: `${bufferedPercent}%` }}
                         />
-                      )}
 
-                      {/* 3. Subtitle Cue Tick Markers on Timeline */}
-                      {duration > 0 &&
-                        activeCues.map((cue) => {
-                          const cuePercent = (cue.startTime / duration) * 100;
-                          return (
-                            <div
-                              key={cue.id}
-                              style={{ left: `${cuePercent}%` }}
-                              className="w-[2px] h-full bg-amber-400/60 absolute top-0 pointer-events-none z-10 rounded-full"
-                              title={cue.text}
-                            />
-                          );
-                        })}
+                        {/* 2. Hover Ghost Preview Track */}
+                        {hoverPosition !== null && (
+                          <div
+                            className="h-full bg-white/20 rounded-full absolute left-0 top-0 pointer-events-none"
+                            style={{ width: `${hoverPosition}%` }}
+                          />
+                        )}
 
-                      {/* 4. Active Played Progress Track */}
+                        {/* 3. Subtitle Cue Tick Markers on Timeline */}
+                        {duration > 0 &&
+                          activeCues.map((cue) => {
+                            const cuePercent = (cue.startTime / duration) * 100;
+                            return (
+                              <div
+                                key={cue.id}
+                                style={{ left: `${cuePercent}%` }}
+                                className="w-[2px] h-full bg-amber-400/80 absolute top-0 pointer-events-none z-10"
+                                title={cue.text}
+                              />
+                            );
+                          })}
+
+                        {/* 4. Active Played Progress Track */}
+                        <div
+                          className="h-full bg-linear-to-r from-blue-500 via-indigo-500 to-purple-500 rounded-full absolute left-0 top-0 shadow-xs pointer-events-none"
+                          style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+                        />
+                      </div>
+
+                      {/* 5. Scrubber Handle / Thumb (Scales on hover or active scrubbing without shifting layout) */}
                       <div
-                        className="h-full bg-linear-to-r from-blue-500 via-indigo-500 to-purple-500 rounded-full absolute left-0 top-0 shadow-sm pointer-events-none"
-                        style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
-                      />
-
-                      {/* 5. Scrubber Handle / Thumb (Scales on hover or active scrubbing) */}
-                      <div
-                        className={`w-4 h-4 rounded-full bg-white border-2 border-indigo-600 shadow-lg shadow-black/60 absolute top-1/2 -translate-y-1/2 -translate-x-1/2 pointer-events-none transition-transform duration-100 ${
+                        className={`w-3.5 h-3.5 rounded-full bg-white border-2 border-indigo-600 shadow-md shadow-black/60 absolute top-1/2 -translate-y-1/2 -translate-x-1/2 pointer-events-none transition-transform duration-100 ${
                           isScrubbing
                             ? "scale-125 ring-4 ring-indigo-500/30"
                             : "scale-0 group-hover:scale-100"
@@ -1741,181 +2299,172 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                         style={{ left: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
                       />
 
-                      {/* 6. Hover Timestamp Tooltip Preview */}
+                      {/* 6. Live YouTube-Grade Hover Frame Bubble Preview */}
                       {hoverPosition !== null && hoverTime !== null && (
                         <div
-                          style={{ left: `${Math.max(6, Math.min(94, hoverPosition))}%` }}
-                          className="absolute -top-11 -translate-x-1/2 px-2.5 py-1 bg-slate-950/95 border border-slate-700 text-white rounded-lg shadow-2xl flex flex-col items-center pointer-events-none z-30 whitespace-nowrap animate-fadeIn"
+                          style={{ left: `${Math.max(10, Math.min(90, hoverPosition))}%` }}
+                          className="absolute bottom-full mb-3.5 -translate-x-1/2 flex flex-col items-center pointer-events-none z-40 animate-fadeIn"
                         >
-                          <span className="font-mono text-xs font-bold text-blue-300">
-                            {formatSecondsToTime(hoverTime)}
-                          </span>
-                          {hoverCueText && (
-                            <span className="text-[10px] text-slate-300 max-w-[180px] truncate mt-0.5 font-medium">
-                              {hoverCueText}
-                            </span>
-                          )}
-                          <div className="w-2 h-2 bg-slate-950 rotate-45 border-r border-b border-slate-700 absolute -bottom-1" />
+                          <div className="bg-slate-950/95 border border-slate-600/90 rounded-lg p-1.5 shadow-2xl flex flex-col items-center gap-1.5 backdrop-blur-md">
+                            {/* Video Live Frame Thumbnail */}
+                            {currentFile.type === "video" && (
+                              <div className="w-40 sm:w-44 h-24 sm:h-26 bg-black rounded-md overflow-hidden relative border border-slate-800">
+                                <video
+                                  ref={previewVideoRef}
+                                  src={`/api/media/stream/${currentFile.filename}`}
+                                  className="w-full h-full object-cover"
+                                  muted
+                                  preload="metadata"
+                                  playsInline
+                                />
+                                <div className="absolute bottom-1 right-1 bg-black/80 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold text-white">
+                                  {formatSecondsToTime(hoverTime)}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Timestamp for Audio or Video */}
+                            {currentFile.type === "audio" && (
+                              <div className="px-2 py-0.5 bg-indigo-950/80 border border-indigo-500/40 rounded-md">
+                                <span className="font-mono text-xs font-bold text-indigo-300">
+                                  {formatSecondsToTime(hoverTime)}
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Subtitle cue text preview at hover timestamp */}
+                            {hoverCueText && (
+                              <div className="max-w-[200px] text-center px-2 py-1 bg-slate-900/90 rounded-md border border-slate-700/60">
+                                <p className="text-[11px] text-slate-200 font-sans font-medium line-clamp-2 leading-tight">
+                                  {hoverCueText}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                          {/* Triangle Arrow */}
+                          <div className="w-2.5 h-2.5 bg-slate-950 rotate-45 border-r border-b border-slate-600/90 -mt-1.5" />
                         </div>
                       )}
                     </div>
 
-                    {/* Timeline Info Bar (Time elapsed / Duration + Scrubbing indicator) */}
+                    {/* Timeline Info Bar (Time elapsed / Duration) */}
                     <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono pt-0.5">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-2">
                         <span className="text-white font-bold">{formatSecondsToTime(currentTime)}</span>
-                        {isScrubbing && (
-                          <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.2 rounded font-sans font-bold animate-pulse">
-                            تمرير مباشر
-                          </span>
-                        )}
+                        <span className="text-slate-500">/</span>
+                        <span>{formatSecondsToTime(duration)}</span>
                       </div>
-                      <span>{formatSecondsToTime(duration)}</span>
+                      <div className="text-[10px] text-slate-400 font-sans">
+                        {playbackRate !== 1 && <span className="text-blue-400 font-bold mr-2">{playbackRate}x</span>}
+                        {isLooping && <span className="text-emerald-400 font-bold">تكرار نشط</span>}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Primary Controls Row */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                    {/* Left: Speed, Loop & Subtitle Appearance */}
-                    <div className="flex items-center gap-2">
-                      {/* CC Toggle Button */}
+                  {/* Primary Controls Row: Unified LTR Flow */}
+                  {/* Control Bar: Compact, Space-Efficient Icon-Driven Toolbar with consistent eye-friendly heights and colors */}
+                  <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 pt-0.5">
+                    {/* Left Controls: Play, Skips, Navigation & Volume */}
+                    <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
+                      {/* Play/Pause Main Button */}
                       <button
-                        onClick={() => setShowSubtitlesOverlay(!showSubtitlesOverlay)}
-                        className={`px-2.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 border ${
-                          showSubtitlesOverlay
-                            ? "bg-indigo-600 text-white border-indigo-500"
-                            : "bg-slate-700/80 text-slate-400 border-slate-600 hover:text-white"
-                        }`}
-                        title={showSubtitlesOverlay ? "إخفاء شريط الترجمة (C)" : "إظهار شريط الترجمة (C)"}
+                        onClick={togglePlay}
+                        className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white flex items-center justify-center shadow-xs transition-transform active:scale-95 cursor-pointer shrink-0"
+                        title={isPlaying ? "إيقاف مؤقت (Space)" : "تشغيل (Space)"}
                       >
-                        <Subtitles className="w-4 h-4" />
-                        <span>CC</span>
+                        {isPlaying ? (
+                          <Pause className="w-3.5 h-3.5 fill-current" />
+                        ) : (
+                          <Play className="w-3.5 h-3.5 fill-current translate-x-[1px]" />
+                        )}
                       </button>
 
-                      {/* Subtitle Font Size / Style Toggle */}
-                      {showSubtitlesOverlay && (
-                        <div className="flex items-center bg-slate-700/80 border border-slate-600/70 rounded-xl p-1 text-xs">
+                      {/* -5s Skip */}
+                      <button
+                        onClick={() => skipSeconds(-5)}
+                        className="h-8 px-2 bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer border border-slate-700/60 flex items-center gap-1 shrink-0 text-xs"
+                        title="تراجع 5 ثواني (J / ArrowLeft)"
+                      >
+                        <RotateCcw className="w-3 h-3 text-slate-400" />
+                        <span className="text-[10.5px] font-mono font-semibold">5s</span>
+                      </button>
+
+                      {/* +5s Skip */}
+                      <button
+                        onClick={() => skipSeconds(5)}
+                        className="h-8 px-2 bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer border border-slate-700/60 flex items-center gap-1 shrink-0 text-xs"
+                        title="تقديم 5 ثواني (L / ArrowRight)"
+                      >
+                        <RotateCw className="w-3 h-3 text-slate-400" />
+                        <span className="text-[10.5px] font-mono font-semibold">5s</span>
+                      </button>
+
+                      {/* Track Navigation Group (Prev & Next Track) */}
+                      <div className="flex items-center gap-0.5 bg-slate-800/80 border border-slate-700/60 rounded-lg p-0.5 shadow-xs h-8">
+                        {/* Prev Track */}
+                        <button
+                          onClick={handlePrevTrack}
+                          disabled={filteredFiles.length <= 1}
+                          className="h-7 w-7 hover:bg-slate-700/80 text-slate-300 hover:text-white rounded-md transition-colors disabled:opacity-30 cursor-pointer flex items-center justify-center shrink-0"
+                          title="المقطع السابق"
+                        >
+                          <SkipBack className="w-3 h-3" />
+                        </button>
+
+                        {/* Next Track */}
+                        <button
+                          onClick={handleNextTrack}
+                          disabled={filteredFiles.length <= 1}
+                          className="h-7 w-7 hover:bg-slate-700/80 text-slate-300 hover:text-white rounded-md transition-colors disabled:opacity-30 cursor-pointer flex items-center justify-center shrink-0"
+                          title="المقطع التالي"
+                        >
+                          <SkipForward className="w-3 h-3" />
+                        </button>
+                      </div>
+
+                      {/* Pro Subtitle Navigation Shortcuts Group (Clean Unified Icons) */}
+                      {activeCues.length > 0 && (
+                        <div className="flex items-center bg-slate-800/80 border border-slate-700/60 rounded-lg p-0.5 shadow-xs h-8">
+                          {/* Previous Sentence [ */}
                           <button
-                            onClick={() =>
-                              setSubtitleFontSize((prev) =>
-                                prev === "sm" ? "md" : prev === "md" ? "lg" : prev === "lg" ? "xl" : "sm"
-                              )
-                            }
-                            className="px-2 py-0.5 text-[10px] font-bold text-slate-300 hover:text-white cursor-pointer"
-                            title="تغيير حجم خط الترجمة"
+                            onClick={jumpToPreviousSentence}
+                            className="h-7 px-1.5 hover:bg-slate-700/80 text-slate-300 hover:text-white rounded-md transition-all cursor-pointer flex items-center gap-1"
+                            title="القفز للجملة السابقة (اختصار: [)"
                           >
-                            خط: {subtitleFontSize.toUpperCase()}
+                            <SkipBack className="w-3 h-3 text-indigo-400" />
                           </button>
-                          <span className="text-slate-500">|</span>
+
+                          {/* Replay Current Sentence Only R */}
                           <button
-                            onClick={() =>
-                              setSubtitleStyle((prev) =>
-                                prev === "black"
-                                  ? "yellow"
-                                  : prev === "yellow"
-                                  ? "transparent"
-                                  : prev === "transparent"
-                                  ? "outline"
-                                  : "black"
-                              )
-                            }
-                            className="px-2 py-0.5 text-[10px] font-bold text-slate-300 hover:text-white cursor-pointer"
-                            title="تغيير ستايل الترجمة"
+                            onClick={replayCurrentSentenceOnly}
+                            className="h-7 px-1.5 hover:bg-blue-600/30 text-blue-300 hover:text-white rounded-md transition-all cursor-pointer flex items-center gap-1"
+                            title="إعادة نطق الجملة الحالية فقط (اختصار: R)"
                           >
-                            🎨
+                            <RefreshCw className="w-3 h-3 text-blue-400" />
+                          </button>
+
+                          {/* Next Sentence ] */}
+                          <button
+                            onClick={jumpToNextSentence}
+                            className="h-7 px-1.5 hover:bg-slate-700/80 text-slate-300 hover:text-white rounded-md transition-all cursor-pointer flex items-center gap-1"
+                            title="القفز للجملة التالية (اختصار: ])"
+                          >
+                            <SkipForward className="w-3 h-3 text-indigo-400" />
                           </button>
                         </div>
                       )}
 
-                      {/* Speed selector */}
-                      <div className="flex items-center bg-slate-700/80 border border-slate-600/70 rounded-xl p-1 text-xs">
-                        {[0.75, 1, 1.25, 1.5, 2].map((speed) => (
-                          <button
-                            key={speed}
-                            onClick={() => handleSpeedChange(speed)}
-                            className={`px-1.5 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                              playbackRate === speed
-                                ? "bg-blue-600 text-white"
-                                : "text-slate-400 hover:text-white"
-                            }`}
-                          >
-                            {speed}x
-                          </button>
-                        ))}
-                      </div>
-
-                      <button
-                        onClick={() => setIsLooping(!isLooping)}
-                        className={`p-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                          isLooping ? "bg-blue-600 text-white" : "bg-slate-700 text-slate-400 hover:text-white"
-                        }`}
-                        title={isLooping ? "إلغاء التكرار" : "تكرار المقطع"}
-                      >
-                        <Repeat className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    {/* Center: Skip & Play Controls */}
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={handlePrevTrack}
-                        disabled={filteredFiles.length <= 1}
-                        className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white rounded-xl transition-colors disabled:opacity-30 cursor-pointer"
-                        title="المقطع السابق"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                      </button>
-
-                      <button
-                        onClick={() => skipSeconds(-5)}
-                        className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-0.5"
-                        title="تراجع 5 ثواني (J)"
-                      >
-                        <span className="text-[10px] font-mono">5-</span>
-                      </button>
-
-                      <button
-                        onClick={togglePlay}
-                        className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-linear-to-tr from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white flex items-center justify-center shadow-lg shadow-blue-500/30 transition-transform active:scale-95 cursor-pointer"
-                        title={isPlaying ? "إيقاف مؤقت (Space)" : "تشغيل (Space)"}
-                      >
-                        {isPlaying ? (
-                          <Pause className="w-6 h-6 fill-current" />
-                        ) : (
-                          <Play className="w-6 h-6 fill-current translate-x-[-1px]" />
-                        )}
-                      </button>
-
-                      <button
-                        onClick={() => skipSeconds(5)}
-                        className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-0.5"
-                        title="تقديم 5 ثواني (L)"
-                      >
-                        <span className="text-[10px] font-mono">+5</span>
-                      </button>
-
-                      <button
-                        onClick={handleNextTrack}
-                        disabled={filteredFiles.length <= 1}
-                        className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white rounded-xl transition-colors disabled:opacity-30 cursor-pointer"
-                        title="المقطع التالي"
-                      >
-                        <RotateCw className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    {/* Right: Volume & Fullscreen */}
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1.5 bg-slate-700/80 px-2.5 py-1.5 rounded-xl border border-slate-600/70">
+                      {/* Volume & Mute */}
+                      <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 h-8 rounded-lg border border-slate-700/60">
                         <button
                           onClick={toggleMute}
                           className="text-slate-400 hover:text-white transition-colors cursor-pointer"
                           title="كتم الصوت (M)"
                         >
                           {isMuted || volume === 0 ? (
-                            <VolumeX className="w-4 h-4 text-rose-400" />
+                            <VolumeX className="w-3.5 h-3.5 text-rose-400" />
                           ) : (
-                            <Volume2 className="w-4 h-4" />
+                            <Volume2 className="w-3.5 h-3.5 text-slate-300" />
                           )}
                         </button>
                         <input
@@ -1925,256 +2474,517 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           step="0.05"
                           value={isMuted ? 0 : volume}
                           onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-                          className="w-14 sm:w-16 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                          className="w-12 sm:w-16 h-1 bg-slate-600 rounded-md appearance-none cursor-pointer accent-blue-500"
                         />
                       </div>
+                    </div>
 
-                      {currentFile.type === "video" && (
+                    {/* Right Controls: Grouped cleanly into 3 organized clusters (Subtitles Tools, Playback Settings, Viewport Modes) */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {/* Cluster 1: Subtitle & Transcript Tools */}
+                      <div className="flex items-center bg-slate-800/80 border border-slate-700/60 rounded-lg p-0.5 shadow-xs h-8">
+                        {/* CC Toggle */}
                         <button
-                          onClick={handleToggleFullscreen}
-                          className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white rounded-xl transition-colors cursor-pointer"
-                          title="ملء الشاشة (F)"
+                          onClick={handleToggleSubtitlesOverlay}
+                          className={`h-7 px-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center ${
+                            showSubtitlesOverlay
+                              ? "bg-indigo-600 text-white shadow-xs"
+                              : "text-slate-400 hover:text-white hover:bg-slate-700/60"
+                          }`}
+                          title={showSubtitlesOverlay ? "إخفاء شريط الترجمة (C)" : "إظهار شريط الترجمة (C)"}
                         >
-                          <Maximize2 className="w-4 h-4" />
+                          <Subtitles className="w-3.5 h-3.5" />
                         </button>
-                      )}
+
+                        {/* Subtitle Style Customization Studio Trigger */}
+                        <button
+                          onClick={() => {
+                            if (showTranscriptPanel && sidePanelView === "style") {
+                              setSidePanelView("transcript");
+                            } else {
+                              setShowTranscriptPanel(true);
+                              setSidePanelView("style");
+                            }
+                          }}
+                          className={`h-7 px-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center ${
+                            showTranscriptPanel && sidePanelView === "style"
+                              ? "bg-amber-500 text-slate-950 shadow-xs"
+                              : "text-slate-400 hover:text-amber-300 hover:bg-slate-700/60"
+                          }`}
+                          title="تخصيص ستايل ولون وخلفية الترجمة في اللوحة الجانبية"
+                        >
+                          <Palette className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Subtitle Options & Management Hub */}
+                        <button
+                          onClick={() => setShowSubtitleOptionsModal(!showSubtitleOptionsModal)}
+                          className={`h-7 px-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center relative ${
+                            showSubtitleOptionsModal
+                              ? "bg-indigo-600 text-white shadow-xs"
+                              : "text-slate-400 hover:text-indigo-300 hover:bg-slate-700/60"
+                          }`}
+                          title="خيارات ومسارات الترجمة (المسار الأول، الترجمة المزدوجة، الذكاء الاصطناعي والتفريغ)"
+                        >
+                          <Languages className="w-3.5 h-3.5" />
+                          {/* Status indicator dot if multiple tracks exist or dual is on */}
+                          {((currentFile.subtitles?.length ?? 0) > 1 || showDualSubtitles) && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 absolute top-1 right-1" />
+                          )}
+                        </button>
+
+                        {/* Toggle Sentences / Transcript Side Panel */}
+                        <button
+                          onClick={() => setShowTranscriptPanel(!showTranscriptPanel)}
+                          className={`h-7 px-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center ${
+                            showTranscriptPanel
+                              ? "bg-blue-600 text-white shadow-xs"
+                              : "text-slate-400 hover:text-white hover:bg-slate-700/60"
+                          }`}
+                          title={showTranscriptPanel ? "إخفاء لوحة الجمل والتفريغ" : "إظهار لوحة الجمل والتفريغ"}
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Cluster 2: Playback Settings (Speed + Loop) */}
+                      <div className="flex items-center bg-slate-800/80 border border-slate-700/60 rounded-lg p-0.5 shadow-xs h-8">
+                        {/* Playback Speed Menu Trigger & Rectangular Popup Above Button */}
+                        <div className="relative" ref={speedMenuRef}>
+                          <button
+                            onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+                            className={`h-7 px-2 rounded-md text-[11px] font-mono font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                              showSpeedMenu || playbackRate !== 1
+                                ? "bg-amber-500/20 text-amber-300 border border-amber-500/50"
+                                : "text-slate-400 hover:text-white hover:bg-slate-700/60"
+                            }`}
+                            title="تغيير سرعة التشغيل"
+                          >
+                            <Zap className="w-3 h-3 text-amber-400" />
+                            <span>{playbackRate}x</span>
+                          </button>
+
+                          {/* Rectangular Speed Popup Above Button */}
+                          {showSpeedMenu && (
+                            <div className="absolute bottom-full mb-2 right-0 sm:left-1/2 sm:-translate-x-1/2 bg-slate-900/98 backdrop-blur-md border border-slate-700/90 rounded-lg p-2.5 shadow-2xl z-50 min-w-[170px] animate-scaleUp">
+                              <div className="flex items-center justify-between pb-1.5 mb-2 border-b border-slate-800 text-[11px] font-bold text-slate-300">
+                                <span className="flex items-center gap-1.5">
+                                  <Zap className="w-3.5 h-3.5 text-amber-400" />
+                                  سرعة التشغيل
+                                </span>
+                                <span className="text-[10px] text-amber-400 font-mono bg-amber-950/70 px-1.5 py-0.5 rounded border border-amber-500/30 font-bold">
+                                  {playbackRate}x
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-1.5 font-mono text-xs">
+                                {PLAYBACK_SPEEDS.map((rate) => (
+                                  <button
+                                    key={rate}
+                                    onClick={() => {
+                                      handleSpeedChange(rate);
+                                      setShowSpeedMenu(false);
+                                      triggerHud("سرعة التشغيل", `${rate}x`);
+                                    }}
+                                    className={`px-2 py-1.5 rounded-md text-center transition-all flex items-center justify-between cursor-pointer ${
+                                      playbackRate === rate
+                                        ? "bg-amber-500 text-slate-950 font-black shadow-xs"
+                                        : "bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/50"
+                                    }`}
+                                  >
+                                    <span>{rate === 1 ? "1.0x عادي" : `${rate}x`}</span>
+                                    {playbackRate === rate && <Check className="w-3 h-3 ml-1" />}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Loop button */}
+                        <button
+                          onClick={() => setIsLooping(!isLooping)}
+                          className={`h-7 px-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center ${
+                            isLooping
+                              ? "bg-blue-600 text-white shadow-xs"
+                              : "text-slate-400 hover:text-white hover:bg-slate-700/60"
+                          }`}
+                          title={isLooping ? "إلغاء التكرار" : "تكرار المقطع"}
+                        >
+                          <Repeat className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Cluster 3: Screen & Display Modes */}
+                      <div className="flex items-center bg-slate-800/80 border border-slate-700/60 rounded-lg p-0.5 shadow-xs h-8">
+                        {/* Immersive Theater Mode Toggle Button (Exit / Enter) */}
+                        <button
+                          onClick={() => setIsImmersiveMode(!isImmersiveMode)}
+                          className={`h-7 px-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center ${
+                            isImmersiveMode
+                              ? "bg-purple-600 text-white shadow-xs hover:bg-purple-500"
+                              : "text-slate-400 hover:text-purple-300 hover:bg-slate-700/60"
+                          }`}
+                          title={isImmersiveMode ? "الخروج من وضع التكبير السينمائي (Esc)" : "وضع التكبير السينمائي الشامل"}
+                        >
+                          {isImmersiveMode ? (
+                            <Shrink className="w-3.5 h-3.5 text-white" />
+                          ) : (
+                            <Expand className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+
+                        {/* Fullscreen button */}
+                        {currentFile.type === "video" && (
+                          <button
+                            onClick={handleToggleFullscreen}
+                            className={`h-7 px-2 rounded-md transition-colors cursor-pointer flex items-center justify-center ${
+                              isFullscreen
+                                ? "bg-indigo-600 text-white shadow-xs"
+                                : "text-slate-400 hover:text-white hover:bg-slate-700/60"
+                            }`}
+                            title={isFullscreen ? "الخروج من ملء الشاشة (F / Esc)" : "ملء الشاشة بالكامل (F)"}
+                          >
+                            {isFullscreen ? (
+                              <Minimize2 className="w-3.5 h-3.5 text-white" />
+                            ) : (
+                              <Maximize2 className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
 
               {/* ======================================================== */}
-              {/* YOUTUBE-STYLE INTERACTIVE TRANSCRIPT / SUBTITLE PANEL */}
+              {/* SIDE PANEL: TRANSCRIPT (SENTENCES) & SUBTITLE STYLE STUDIO */}
+              {/* Only shown when not in fullscreen mode as requested */}
               {/* ======================================================== */}
-              {showTranscriptPanel && (
+              {!isFullscreen && showTranscriptPanel && (
                 <div
                   className={
                     isImmersiveMode
-                      ? "w-80 sm:w-96 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col h-full z-20 shrink-0 shadow-2xl overflow-hidden animate-slideLeft"
-                      : "lg:col-span-5 xl:col-span-4 bg-slate-800/90 border border-slate-700/90 rounded-2xl flex flex-col h-[480px] lg:h-[580px] overflow-hidden shadow-lg animate-fadeIn"
+                      ? "w-80 sm:w-96 bg-slate-900 border border-slate-800 rounded-lg flex flex-col h-full z-20 shrink-0 shadow-2xl overflow-hidden animate-slideLeft"
+                      : "lg:col-span-5 xl:col-span-4 bg-slate-800/90 border border-slate-700/90 rounded-lg flex flex-col h-[480px] lg:h-full lg:min-h-[460px] overflow-hidden shadow-lg animate-fadeIn"
                   }
                 >
                   {/* Panel Header */}
-                  <div className="p-3 border-b border-slate-700/80 bg-slate-800 flex items-center justify-between shrink-0">
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-blue-400" />
-                      <span className="text-xs font-black text-slate-100">
-                        الجمل والتفريغ ({activeCues.length} مقطع)
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      {/* Auto-scroll toggle */}
-                      <button
-                        onClick={() => setAutoScrollTranscript(!autoScrollTranscript)}
-                        className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                          autoScrollTranscript
-                            ? "bg-blue-600/30 text-blue-400 border border-blue-500/40"
-                            : "bg-slate-700 text-slate-400"
-                        }`}
-                        title={autoScrollTranscript ? "إيقاف التمرير التلقائي" : "تفعيل التمرير التلقائي مع الصوت"}
-                      >
-                        {autoScrollTranscript ? "تمرير تلقائي ⚡" : "تمرير يدوي"}
-                      </button>
-
-                      {/* Copy full text */}
-                      <button
-                        onClick={handleCopyTranscript}
-                        disabled={activeCues.length === 0}
-                        className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer disabled:opacity-30"
-                        title="نسخ النص كاملاً"
-                      >
-                        {copiedTranscript ? (
-                          <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
-                        ) : (
-                          <Copy className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-
-                      {/* Export Subtitle Dropdown */}
-                      <div className="relative group">
-                        <button
-                          disabled={activeCues.length === 0}
-                          className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer disabled:opacity-30"
-                          title="تصدير وتحميل ملف الترجمة"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                        </button>
-                        <div className="absolute left-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-xl p-1.5 shadow-xl hidden group-hover:flex flex-col gap-1 z-30 min-w-[110px]">
-                          <button
-                            onClick={() => handleDownloadSubtitles("srt")}
-                            className="px-2 py-1 text-right text-[11px] font-bold text-slate-300 hover:bg-slate-800 rounded-lg"
+                  <div className="px-3 py-2 border-b border-slate-700/80 bg-slate-800 flex items-center justify-between gap-2 shrink-0">
+                    {/* Media Icon + Name */}
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {sidePanelView === "style" ? (
+                        <>
+                          <Palette className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          <span className="text-xs font-bold text-slate-100 truncate">
+                            تخصيص الستايل
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          {currentFile.type === "video" ? (
+                            <Film className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                          ) : (
+                            <Music className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                          )}
+                          <span
+                            className="text-xs font-bold text-slate-200 truncate max-w-[130px] sm:max-w-[180px]"
+                            title={currentFile.title || currentFile.originalName}
                           >
-                            تحميل (.SRT)
-                          </button>
-                          <button
-                            onClick={() => handleDownloadSubtitles("vtt")}
-                            className="px-2 py-1 text-right text-[11px] font-bold text-slate-300 hover:bg-slate-800 rounded-lg"
-                          >
-                            تحميل (.VTT)
-                          </button>
-                          <button
-                            onClick={() => handleDownloadSubtitles("txt")}
-                            className="px-2 py-1 text-right text-[11px] font-bold text-slate-300 hover:bg-slate-800 rounded-lg"
-                          >
-                            تحميل نصي (.TXT)
-                          </button>
-                        </div>
-                      </div>
-
-                      {isImmersiveMode && (
-                        <button
-                          onClick={() => setShowTranscriptPanel(false)}
-                          className="p-1 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg cursor-pointer ml-1"
-                          title="إغلاق اللوحة الجانبية للتكبير الكلي"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
+                            {currentFile.title || currentFile.originalName}
+                          </span>
+                        </>
                       )}
                     </div>
-                  </div>
 
-                  {/* Search inside Subtitles */}
-                  <div className="p-2.5 border-b border-slate-700/60 bg-slate-850">
-                    <div className="relative">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        placeholder="ابحث في نص الترجمة..."
-                        value={subtitleSearchQuery}
-                        onChange={(e) => setSubtitleSearchQuery(e.target.value)}
-                        className="w-full pl-3 pr-8 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
-                      />
-                      {subtitleSearchQuery && (
-                        <button
-                          onClick={() => setSubtitleSearchQuery("")}
-                          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Cues List */}
-                  <div
-                    ref={transcriptContainerRef}
-                    className="flex-1 overflow-y-auto p-2 space-y-1.5"
-                  >
-                    {activeCues.length === 0 ? (
-                      <div className="h-full flex flex-col items-center justify-center p-6 text-center text-slate-400 gap-3">
-                        <Subtitles className="w-10 h-10 text-slate-600" />
-                        <div>
-                          <p className="text-xs font-bold text-slate-300">لا يوجد ملف ترجمة لهذا المقطع بعد</p>
-                          <p className="text-[11px] text-slate-500 mt-1">
-                            يمكنك استخدام سيرفر التفريغ الألماني المحلي (Gradio) أو رفع ملف ترجمة جاهز
-                          </p>
-                        </div>
-                        <div className="flex flex-col sm:flex-row items-center gap-2">
+                    {/* Actions: تمرير -> إخفاء/إظهار الدقائق -> نسخ -> تنزيل -> إغلاق */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {sidePanelView === "transcript" ? (
+                        <>
+                          {/* Simple Auto-scroll text button without badge/padding */}
                           <button
-                            onClick={() => setShowGradioModal(true)}
-                            className="px-3.5 py-1.5 bg-gradient-to-r from-amber-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white rounded-xl text-xs font-black shadow-md transition-all cursor-pointer flex items-center gap-1.5"
-                          >
-                            <Mic className="w-3.5 h-3.5" />
-                            <span>تفريغ Gradio 🇩🇪</span>
-                          </button>
-                          <button
-                            onClick={() => setShowSubtitleUploadModal(true)}
-                            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                          >
-                            + إضافة ترجمة يدوية
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      filteredCues.map((cue) => {
-                        const isCurrent = currentCue?.id === cue.id;
-                        // Find matching secondary cue (Gemini Arabic translation)
-                        const matchingSec = secondaryCues.find(
-                          (sc) =>
-                            (sc.startTime >= cue.startTime - 0.5 && sc.startTime <= cue.endTime + 0.5) ||
-                            (sc.endTime >= cue.startTime - 0.5 && sc.endTime <= cue.endTime + 0.5) ||
-                            (cue.startTime >= sc.startTime - 0.5 && cue.startTime <= sc.endTime + 0.5)
-                        );
-
-                        return (
-                          <div
-                            key={cue.id}
-                            ref={isCurrent ? activeCueRef : null}
-                            onClick={() => handleSeek(cue.startTime)}
-                            className={`p-2.5 rounded-xl transition-all duration-150 flex items-start gap-2.5 cursor-pointer group ${
-                              isCurrent
-                                ? "bg-blue-600/30 border border-blue-500/70 text-white shadow-md ring-1 ring-blue-500/30"
-                                : "hover:bg-slate-800 text-slate-300 hover:text-white"
+                            onClick={() => setAutoScrollTranscript(!autoScrollTranscript)}
+                            className={`text-xs font-medium transition-colors cursor-pointer ${
+                              autoScrollTranscript
+                                ? "text-blue-400 font-bold"
+                                : "text-slate-400 hover:text-slate-200"
                             }`}
+                            title={autoScrollTranscript ? "إيقاف التمرير التلقائي" : "تفعيل التمرير التلقائي"}
                           >
-                            {/* Timestamp Badge (Click to jump) */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleSeek(cue.startTime);
-                              }}
-                              className={`px-2 py-0.5 rounded-md text-[11px] font-mono font-bold shrink-0 transition-colors cursor-pointer ${
-                                isCurrent
-                                  ? "bg-blue-600 text-white"
-                                  : "bg-slate-950 text-blue-400 group-hover:bg-blue-950"
-                              }`}
-                              title="اضغط للانتقال لهذا التوقيت"
-                            >
-                              {formatSecondsToTime(cue.startTime)}
-                            </button>
+                            تمرير
+                          </button>
 
-                            {/* Text Content */}
-                            <div className="flex-1 min-w-0 space-y-1">
-                              <p className={`text-xs leading-relaxed font-sans ${isCurrent ? "font-bold text-white" : ""}`}>
-                                {cue.text}
-                              </p>
-                              {showDualSubtitles && matchingSec && (
-                                <p className="text-[11px] text-emerald-300 font-semibold border-t border-slate-700/60 pt-1">
-                                  {matchingSec.text}
-                                </p>
-                              )}
-                            </div>
+                          {/* Toggle Cue Timestamps (Minutes/Seconds) - Default: OFF / Hidden to maximize sentence room */}
+                          <button
+                            onClick={() => {
+                              const nextState = !showCueTimestamps;
+                              setShowCueTimestamps(nextState);
+                              try {
+                                localStorage.setItem("media_player_show_cue_timestamps", JSON.stringify(nextState));
+                              } catch (e) {
+                                console.error(e);
+                              }
+                              triggerHud(nextState ? "إظهار أرقام الدقائق" : "إخفاء أرقام الدقائق", "⏰");
+                            }}
+                            className={`p-1 hover:bg-slate-700 rounded-md transition-colors cursor-pointer ${
+                              showCueTimestamps
+                                ? "text-amber-400 bg-amber-950/40"
+                                : "text-slate-400 hover:text-slate-200"
+                            }`}
+                            title={showCueTimestamps ? "إخفاء أرقام الدقائق والتوقيت (توفير مساحة أكبر للنص)" : "إظهار أرقام الدقائق والتوقيت"}
+                          >
+                            <Clock className="w-3.5 h-3.5" />
+                          </button>
 
-                            {/* Cue Edit/Delete Tools on Hover */}
-                            {!isImmersiveMode && (
-                              <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 shrink-0 transition-opacity">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setEditingCue(cue);
-                                  }}
-                                  className="p-1 hover:bg-slate-700 text-slate-400 hover:text-white rounded-md cursor-pointer"
-                                  title="تعديل هذا المقطع"
-                                >
-                                  <Edit2 className="w-3 h-3" />
-                                </button>
-                                <button
-                                  onClick={(e) => handleDeleteCue(cue.id, e)}
-                                  className="p-1 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-md cursor-pointer"
-                                  title="حذف"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
-                              </div>
+                          {/* Copy full text */}
+                          <button
+                            onClick={handleCopyTranscript}
+                            disabled={activeCues.length === 0}
+                            className="p-1 hover:bg-slate-700 text-slate-400 hover:text-white rounded-md transition-colors cursor-pointer disabled:opacity-30"
+                            title="نسخ النص كاملاً"
+                          >
+                            {copiedTranscript ? (
+                              <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
                             )}
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
+                          </button>
 
-                  {/* Panel Footer / Quick Add Cue at time */}
-                  {!isImmersiveMode && (
-                    <div className="p-2.5 border-t border-slate-700/80 bg-slate-800 flex items-center justify-between shrink-0">
+                          {/* Export Subtitle Dropdown */}
+                          <div className="relative group">
+                            <button
+                              disabled={activeCues.length === 0}
+                              className="p-1 hover:bg-slate-700 text-slate-400 hover:text-white rounded-md transition-colors cursor-pointer disabled:opacity-30"
+                              title="تصدير وتحميل ملف الترجمة"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </button>
+                            <div className="absolute left-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-lg p-1.5 shadow-xl hidden group-hover:flex flex-col gap-1 z-30 min-w-[110px]">
+                              <button
+                                onClick={() => handleDownloadSubtitles("srt")}
+                                className="px-2 py-1 text-right text-[11px] font-bold text-slate-300 hover:bg-slate-800 rounded-md"
+                              >
+                                تحميل (.SRT)
+                              </button>
+                              <button
+                                onClick={() => handleDownloadSubtitles("vtt")}
+                                className="px-2 py-1 text-right text-[11px] font-bold text-slate-300 hover:bg-slate-800 rounded-md"
+                              >
+                                تحميل (.VTT)
+                              </button>
+                              <button
+                                onClick={() => handleDownloadSubtitles("txt")}
+                                className="px-2 py-1 text-right text-[11px] font-bold text-slate-300 hover:bg-slate-800 rounded-md"
+                              >
+                                تحميل نصي (.TXT)
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => setSidePanelView("transcript")}
+                          className="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer"
+                          title="العودة لقائمة الجمل والتفريغ"
+                        >
+                          <span>العودة للجمل</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
+                      )}
+
+                      {/* Close panel button */}
                       <button
-                        onClick={handleAddNewCueAtCurrentTime}
-                        className="w-full py-1.5 px-3 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                        onClick={() => setShowTranscriptPanel(false)}
+                        className="p-1 hover:bg-slate-700 text-slate-400 hover:text-white rounded-md cursor-pointer transition-colors"
+                        title="إغلاق لوحة الجمل"
                       >
-                        <Plus className="w-3.5 h-3.5 text-blue-400" />
-                        <span>إضافة سطر عند التوقيت الحالي ({formatSecondsToTime(currentTime)})</span>
+                        <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
+                  </div>
+
+                  {/* Panel Body: Either Subtitle Style Studio OR Sentences / Transcript List */}
+                  {sidePanelView === "style" ? (
+                    <div className="flex-1 min-h-0 overflow-hidden flex flex-col bg-slate-900">
+                      <SubtitleStylePanel
+                        primaryStyle={primarySubStyle}
+                        secondaryStyle={secondarySubStyle}
+                        onUpdatePrimaryStyle={updatePrimarySubStyle}
+                        onUpdateSecondaryStyle={updateSecondarySubStyle}
+                        onUpdateBothStyles={updateBothSubStyles}
+                        onClose={() => setSidePanelView("transcript")}
+                        onSaveAndReturn={() => setSidePanelView("transcript")}
+                        isEmbedded={true}
+                        activeTrackLabel={activeTrack?.label}
+                        secondaryTrackLabel={secondaryTrack?.label}
+                        samplePrimaryText={currentCue?.text}
+                        sampleSecondaryText={currentSecondaryCue?.text}
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      {/* Search inside Subtitles */}
+                      <div className="p-2.5 border-b border-slate-700/60 bg-slate-850">
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            placeholder="ابحث في نص الترجمة..."
+                            value={subtitleSearchQuery}
+                            onChange={(e) => setSubtitleSearchQuery(e.target.value)}
+                            className="w-full pl-3 pr-8 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
+                          />
+                          {subtitleSearchQuery && (
+                            <button
+                              onClick={() => setSubtitleSearchQuery("")}
+                              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Cues List */}
+                      <div
+                        ref={transcriptContainerRef}
+                        className="flex-1 overflow-y-auto p-2 space-y-1.5"
+                      >
+                        {activeCues.length === 0 ? (
+                          <div className="h-full flex flex-col items-center justify-center p-6 text-center text-slate-400 gap-3">
+                            <Subtitles className="w-10 h-10 text-slate-600" />
+                            <div>
+                              <p className="text-xs font-bold text-slate-300">لا يوجد ملف ترجمة لهذا المقطع بعد</p>
+                              <p className="text-[11px] text-slate-500 mt-1">
+                                يمكنك استخدام سيرفر التفريغ الألماني المحلي (Gradio) أو رفع ملف ترجمة جاهز
+                              </p>
+                            </div>
+                            <div className="flex flex-col sm:flex-row items-center gap-2">
+                              <button
+                                onClick={() => setShowGradioModal(true)}
+                                className="px-3.5 py-1.5 bg-gradient-to-r from-amber-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white rounded-lg text-xs font-black shadow-md transition-all cursor-pointer flex items-center gap-1.5"
+                              >
+                                <Mic className="w-3.5 h-3.5" />
+                                <span>تفريغ Gradio 🇩🇪</span>
+                              </button>
+                              <button
+                                onClick={() => setShowSubtitleUploadModal(true)}
+                                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                              >
+                                + إضافة ترجمة يدوية
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          filteredCues.map((cue) => {
+                            const isCurrent = currentCue?.id === cue.id;
+                            // Find matching secondary cue (Gemini Arabic translation)
+                            const matchingSec = secondaryCues.find(
+                              (sc) =>
+                                (sc.startTime >= cue.startTime - 0.5 && sc.startTime <= cue.endTime + 0.5) ||
+                                (sc.endTime >= cue.startTime - 0.5 && sc.endTime <= cue.endTime + 0.5) ||
+                                (cue.startTime >= sc.startTime - 0.5 && cue.startTime <= sc.endTime + 0.5)
+                            );
+
+                            return (
+                              <div
+                                key={cue.id}
+                                ref={isCurrent ? activeCueRef : null}
+                                onClick={() => handleSeek(cue.startTime)}
+                                className={`p-2.5 rounded-lg border transition-colors duration-150 flex items-start gap-2.5 cursor-pointer group ${
+                                  isCurrent
+                                    ? "bg-blue-600/25 border-blue-500/80 text-white shadow-xs"
+                                    : "border-transparent hover:bg-slate-800/80 text-slate-300 hover:text-white"
+                                }`}
+                              >
+                                {/* Timestamp Badge (Click to jump) - Controlled by showCueTimestamps toggle */}
+                                {showCueTimestamps && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSeek(cue.startTime);
+                                    }}
+                                    className={`px-2 py-0.5 rounded-md text-[11px] font-mono font-bold shrink-0 transition-colors cursor-pointer border ${
+                                      isCurrent
+                                        ? "bg-blue-600 border-blue-500 text-white shadow-xs"
+                                        : "bg-slate-950 text-blue-400 group-hover:bg-blue-950 border-slate-800"
+                                    }`}
+                                    title="اضغط للانتقال لهذا التوقيت"
+                                  >
+                                    {formatSecondsToClock(cue.startTime)}
+                                  </button>
+                                )}
+
+                                {/* Text Content (Stable font-medium to prevent layout text-wrapping shifts) */}
+                                <div className="flex-1 min-w-0 space-y-1">
+                                  <p className={`text-xs leading-relaxed font-sans font-medium ${isCurrent ? "text-white font-semibold" : "text-slate-200"}`}>
+                                    {cue.text}
+                                  </p>
+                                  {showDualSubtitles && matchingSec && (
+                                    <p className="text-[11px] text-emerald-300 font-medium border-t border-slate-700/60 pt-1">
+                                      {matchingSec.text}
+                                    </p>
+                                  )}
+                                </div>
+
+                                {/* Cue Edit/Delete Tools on Hover */}
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      singleSentencePlaybackEndRef.current = cue.endTime;
+                                      handleSeek(cue.startTime);
+                                      smoothPlay();
+                                      triggerHud("إعادة الجملة", "R");
+                                    }}
+                                    className="p-1 bg-slate-800/80 hover:bg-blue-600/40 text-slate-300 hover:text-blue-200 rounded-md cursor-pointer transition-colors"
+                                    title="إعادة تشغيل هذه الجملة فقط (R)"
+                                  >
+                                    <RefreshCw className="w-3 h-3 text-blue-400" />
+                                  </button>
+
+                                  {!isImmersiveMode && (
+                                    <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleOpenEditCue(cue);
+                                        }}
+                                        className="p-1 hover:bg-slate-700 text-slate-400 hover:text-white rounded-md cursor-pointer"
+                                        title="تعديل هذا المقطع"
+                                      >
+                                        <Edit2 className="w-3 h-3" />
+                                      </button>
+                                      <button
+                                        onClick={(e) => handleDeleteCue(cue.id, e)}
+                                        className="p-1 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-md cursor-pointer"
+                                        title="حذف"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+
+                      {/* Panel Footer / Quick Add Cue at time */}
+                      {!isImmersiveMode && (
+                        <div className="p-2.5 border-t border-slate-700/80 bg-slate-800 flex items-center justify-between shrink-0">
+                          <button
+                            onClick={handleAddNewCueAtCurrentTime}
+                            className="w-full py-1.5 px-3 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5 text-blue-400" />
+                            <span>إضافة سطر عند التوقيت الحالي ({formatSecondsToClock(currentTime)})</span>
+                          </button>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -2351,8 +3161,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   <div
                     key={file.id}
                     onClick={() => {
-                      setCurrentFile(file);
-                      setIsPlaying(true);
+                      handleSelectFile(file, true);
                     }}
                     className={`rounded-2xl border p-4 transition-all duration-200 flex flex-col justify-between cursor-pointer group relative overflow-hidden ${
                       isSelected
@@ -2490,8 +3299,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   <div
                     key={file.id}
                     onClick={() => {
-                      setCurrentFile(file);
-                      setIsPlaying(true);
+                      handleSelectFile(file, true);
                     }}
                     className={`p-3.5 sm:px-4 flex items-center justify-between gap-3 transition-colors cursor-pointer ${
                       isSelected
@@ -2612,12 +3420,25 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   <p className="text-xs text-slate-500">{currentFile.title}</p>
                 </div>
               </div>
-              <button
-                onClick={() => setShowSubtitleUploadModal(false)}
-                className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => openStyleInSidebar("upload")}
+                  className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                  title="تخصيص ألوان وخطوط ومواقع الترجمة في اللوحة الجانبية"
+                >
+                  <Palette className="w-3.5 h-3.5" />
+                  <span>تخصيص الستايل</span>
+                </button>
+
+                <button
+                  onClick={() => setShowSubtitleUploadModal(false)}
+                  className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Mode Switcher Tabs */}
@@ -2810,82 +3631,29 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       )}
 
       {/* ======================================================== */}
-      {/* MODAL: EDIT INDIVIDUAL CUE */}
+      {/* MODAL: CLEAN CUE TIMING & TEXT EDITOR (MM:SS FORMAT + SYNC) */}
       {/* ======================================================== */}
       {editingCue && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-scaleUp">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
-              <h3 className="font-black text-slate-900 text-sm">تعديل مقطع الترجمة</h3>
-              <button
-                onClick={() => setEditingCue(null)}
-                className="p-1 text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                    وقت البداية (ثواني):
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={editingCue.startTime}
-                    onChange={(e) =>
-                      setEditingCue({ ...editingCue, startTime: parseFloat(e.target.value) || 0 })
-                    }
-                    className="w-full text-xs p-2 border border-slate-200 rounded-xl"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                    وقت النهاية (ثواني):
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={editingCue.endTime}
-                    onChange={(e) =>
-                      setEditingCue({ ...editingCue, endTime: parseFloat(e.target.value) || 0 })
-                    }
-                    className="w-full text-xs p-2 border border-slate-200 rounded-xl"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                  نص الترجمة:
-                </label>
-                <textarea
-                  rows={3}
-                  value={editingCue.text}
-                  onChange={(e) => setEditingCue({ ...editingCue, text: e.target.value })}
-                  className="w-full text-xs p-2.5 border border-slate-200 rounded-xl resize-none focus:outline-hidden focus:border-blue-500"
-                />
-              </div>
-
-              <div className="flex items-center gap-2 pt-2">
-                <button
-                  onClick={handleSaveEditedCue}
-                  className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl"
-                >
-                  حفظ التعديل ✓
-                </button>
-                <button
-                  onClick={() => setEditingCue(null)}
-                  className="px-4 py-2 bg-slate-100 text-slate-600 font-bold text-xs rounded-xl hover:bg-slate-200"
-                >
-                  إلغاء
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <CleanCueEditorModal
+          cue={editingCue}
+          activeTrackLabel={activeTrack?.label || "الترجمة"}
+          secondaryTrackLabel={secondaryTrack && secondaryTrack.id !== activeTrackId ? secondaryTrack.label : undefined}
+          currentTime={currentTime}
+          initialSyncSecondary={syncWithSecondaryTrack}
+          onSave={(cleanCue, shouldSync) => {
+            handleSaveEditedCue(cleanCue, shouldSync);
+          }}
+          onClose={() => {
+            setEditingCue(null);
+            originalCueTimesRef.current = null;
+          }}
+          onPreview={(start, end) => {
+            singleSentencePlaybackEndRef.current = end;
+            handleSeek(start);
+            smoothPlay();
+            triggerHud("معاينة توقيت المقطع", "▶");
+          }}
+        />
       )}
 
       {/* ======================================================== */}
@@ -3020,12 +3788,40 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         isOpen={showGradioModal}
         onClose={() => setShowGradioModal(false)}
         currentFile={currentFile}
+        onOpenStyleModal={() => openStyleInSidebar("gradio")}
         onSubtitlesGenerated={async (trackLabel, cues, rawSrt) => {
           if (currentFile) {
             await saveSubtitleTrackToServer(currentFile.id, trackLabel, cues, "ai");
             setShowGradioModal(false);
           }
         }}
+      />
+
+      {/* ======================================================== */}
+      {/* MODAL: SUBTITLE OPTIONS & MANAGEMENT HUB */}
+      {/* ======================================================== */}
+      <SubtitleOptionsModal
+        isOpen={showSubtitleOptionsModal}
+        onClose={() => setShowSubtitleOptionsModal(false)}
+        currentFile={currentFile}
+        activeTrackId={activeTrackId}
+        secondaryTrackId={secondaryTrackId}
+        showDualSubtitles={showDualSubtitles}
+        showSubtitlesOverlay={showSubtitlesOverlay}
+        onToggleSubtitlesOverlay={handleToggleSubtitlesOverlay}
+        onSelectPrimaryTrack={handleSelectPrimaryTrack}
+        onSelectSecondaryTrack={handleSelectSecondaryTrack}
+        onToggleDualSubtitles={handleToggleDualSubtitles}
+        onDeleteTrack={(trackId) => handleDeleteSubtitleTrack(trackId)}
+        onOpenUploadModal={() => setShowSubtitleUploadModal(true)}
+        onOpenGradioModal={() => setShowGradioModal(true)}
+        onOpenTranslateModal={() => setShowTranslateModal(true)}
+        onOpenStyleModal={() => openStyleInSidebar("options")}
+        onDownloadSubtitles={handleDownloadSubtitles}
+        onCopyTranscript={handleCopyTranscript}
+        isCopiedTranscript={copiedTranscript}
+        selectedAiModel={selectedAiModel}
+        onSelectAiModel={handleSelectAiModel}
       />
     </div>
   );
