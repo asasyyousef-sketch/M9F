@@ -612,7 +612,7 @@ async function startServer() {
   app.post("/api/media/:id/generate-subtitles", async (req, res) => {
     try {
       const { id } = req.params;
-      const { language = "ar", promptHint = "", fullText = "" } = req.body;
+      const { language = "ar", promptHint = "", fullText = "", selectedModel = "gemini-3.6-flash", customApiKey, geminiApiKey } = req.body;
 
       const list = loadMediaMeta();
       const item = list.find((m) => m.id === id || m.filename === id);
@@ -620,11 +620,12 @@ async function startServer() {
         return res.status(404).json({ error: "الملف غير موجود" });
       }
 
-      if (!process.env.GEMINI_API_KEY) {
+      const effectiveGeminiKey = (customApiKey && customApiKey.trim()) || (geminiApiKey && geminiApiKey.trim()) || process.env.GEMINI_API_KEY || "";
+      if (!effectiveGeminiKey) {
         return res.status(500).json({ error: "مفتاح GEMINI_API_KEY غير متوفر على السيرفر" });
       }
 
-      const aiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
       const prompt = `أنت خبير في إنشاء وتزامن الترجمات وملفات SRT/VTT لمقاطع الفيديو والصوتيات التعليمية.
 معلومات الملف:
 - اسم الملف: ${item.title} (${item.originalName})
@@ -650,15 +651,44 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
 ]
 `;
 
-      const response = await aiClient.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json"
-        }
-      });
+      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
+      const candidateModels = Array.from(new Set([
+        primaryModel,
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite"
+      ])).filter(m => !m.includes("groq") && m !== "gemini-2.5-flash");
 
-      const rawJson = response.text || "[]";
+      let rawJson = "[]";
+      let usedModel = primaryModel;
+      let lastErr: any = null;
+
+      for (const modelToTry of candidateModels) {
+        try {
+          const response = await aiClient.models.generateContent({
+            model: modelToTry,
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json"
+            }
+          });
+          if (response.text) {
+            rawJson = response.text;
+            usedModel = modelToTry;
+            break;
+          }
+        } catch (err: any) {
+          console.warn(`Subtitle gen failed on model ${modelToTry}, trying fallback...`, err?.message);
+          lastErr = err;
+        }
+      }
+
+      if (rawJson === "[]" && lastErr) {
+        throw lastErr;
+      }
+
       let parsedCues: any[] = [];
       try {
         parsedCues = JSON.parse(rawJson);
@@ -690,13 +720,150 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
 
       res.json({
         success: true,
-        message: "تم توليد الترجمة الذكية بنجاح!",
+        message: `تم توليد الترجمة الذكية بنجاح عبر نموذج ${usedModel}!`,
         track: newTrack,
         file: item
       });
     } catch (e: any) {
       console.error("Generate subtitles error:", e);
       res.status(500).json({ error: e.message || "حدث خطأ أثناء توليد الترجمة بالذكاء الاصطناعي" });
+    }
+  });
+
+  // 10. Translate Existing Subtitle Track with Gemini (Dual Subtitle Translation)
+  app.post("/api/media/:id/translate-subtitles", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { trackId, targetLanguage = "ar", sourceLanguage = "de", selectedModel = "gemini-3.6-flash", customApiKey, geminiApiKey } = req.body;
+
+      const list = loadMediaMeta();
+      const item = list.find((m) => m.id === id || m.filename === id);
+      if (!item) {
+        return res.status(404).json({ error: "الملف غير موجود" });
+      }
+
+      const sourceTrack = item.subtitles?.find((t) => t.id === trackId) || item.subtitles?.[0];
+      if (!sourceTrack || !Array.isArray(sourceTrack.cues) || sourceTrack.cues.length === 0) {
+        return res.status(400).json({ error: "لا يوجد مسار ترجمة أصلي لترجمته" });
+      }
+
+      const effectiveGeminiKey = (customApiKey && customApiKey.trim()) || (geminiApiKey && geminiApiKey.trim()) || process.env.GEMINI_API_KEY || "";
+      if (!effectiveGeminiKey) {
+        return res.status(500).json({ error: "مفتاح GEMINI_API_KEY غير متوفر على السيرفر" });
+      }
+
+      const aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
+      
+      const langNameMap: Record<string, string> = {
+        ar: "العربية",
+        en: "الإنجليزية (English)",
+        de: "الألمانية (Deutsch)",
+        fr: "الفرنسية (Français)",
+        es: "الإسبانية (Español)",
+        tr: "التركية (Türkçe)",
+        it: "الإيطالية (Italiano)"
+      };
+
+      const targetLangName = langNameMap[targetLanguage] || targetLanguage;
+      const sourceLangName = langNameMap[sourceLanguage] || sourceLanguage;
+
+      const prompt = `أنت مترجم فوري ومحترف لترجمة محتوى الفيديو والملفات الصوتية بدقة لغوية وتعبيرية وسياقية فائقة.
+المهمة:
+قم بترجمة مقاطع الترجمة التالية بدقة من ${sourceLangName} إلى ${targetLangName}.
+حافظ بدقة على نفس أوقات البداية والنهاية (startTime و endTime) ونفس المعرفات (id).
+
+المقاطع الأصلية المطلوب ترجمتها:
+${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, endTime: c.endTime, text: c.text })), null, 2)}
+
+الشروط:
+1. حافظ على المعنى السياقي السليم والمناسب للترجمة المرئية.
+2. أرجع النتيجة حصراً كمصفوفة JSON بالتنسيق التالي:
+[
+  {
+    "id": "معرف المقطع",
+    "startTime": 0.0,
+    "endTime": 3.5,
+    "text": "الترجمة هنا باللغة المستهدفة"
+  }
+]`;
+
+      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
+      const candidateModels = Array.from(new Set([
+        primaryModel,
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite"
+      ])).filter(m => !m.includes("groq") && m !== "gemini-2.5-flash");
+
+      let rawJson = "[]";
+      let usedModel = primaryModel;
+      let lastErr: any = null;
+
+      for (const modelToTry of candidateModels) {
+        try {
+          const response = await aiClient.models.generateContent({
+            model: modelToTry,
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json"
+            }
+          });
+          if (response.text) {
+            rawJson = response.text;
+            usedModel = modelToTry;
+            break;
+          }
+        } catch (err: any) {
+          console.warn(`Subtitle translation failed on model ${modelToTry}, trying fallback...`, err?.message);
+          lastErr = err;
+        }
+      }
+
+      if (rawJson === "[]" && lastErr) {
+        throw lastErr;
+      }
+
+      let translatedCues: any[] = [];
+      try {
+        translatedCues = JSON.parse(rawJson);
+      } catch (err) {
+        console.error("Failed to parse Gemini translation JSON:", err);
+      }
+
+      if (!Array.isArray(translatedCues) || translatedCues.length === 0) {
+        return res.status(500).json({ error: "لم يتمكن الذكاء الاصطناعي من ترجمة المقاطع بشكل صحيح" });
+      }
+
+      const translatedTrack: ServerSubtitleTrack = {
+        id: "sub-trans-" + Date.now(),
+        label: `🇸🇦 ${targetLangName} (${usedModel})`,
+        language: targetLanguage,
+        cues: translatedCues.map((c, idx) => ({
+          id: c.id || `cue-trans-${idx + 1}`,
+          startTime: Math.max(0, parseFloat(c.startTime) || 0),
+          endTime: Math.max(0.1, parseFloat(c.endTime) || (parseFloat(c.startTime) || 0) + 3),
+          text: (c.text || "").trim()
+        })).filter(c => c.text.length > 0),
+        source: "ai",
+        uploadedAt: new Date().toISOString()
+      };
+
+      if (!item.subtitles) item.subtitles = [];
+      // Insert after original or at top
+      item.subtitles.unshift(translatedTrack);
+      saveMediaMeta(list);
+
+      res.json({
+        success: true,
+        message: `تمت ترجمة المسار إلى ${targetLangName} بنجاح عبر نموذج ${usedModel}! ⚡`,
+        track: translatedTrack,
+        file: item
+      });
+    } catch (e: any) {
+      console.error("Translate subtitles error:", e);
+      res.status(500).json({ error: e.message || "حدث خطأ أثناء ترجمة المسار عبر الذكاء الاصطناعي" });
     }
   });
 

@@ -41,7 +41,14 @@ import {
   Sliders,
   CheckCheck,
   Mic,
-  Server
+  Server,
+  Expand,
+  Shrink,
+  Tv,
+  Layers,
+  Split,
+  BookOpen,
+  Bot
 } from "lucide-react";
 import { MediaFile, MediaSubtitleTrack, SubtitleCue } from "../types";
 import {
@@ -52,6 +59,7 @@ import {
   exportCuesToPlainText
 } from "../utils/subtitleParser";
 import { GradioTranscriberModal } from "./GradioTranscriberModal";
+import { ALL_AVAILABLE_MODELS, AIModelOption } from "./AICorrectorWorkspace";
 
 interface MediaPlayerWorkspaceProps {
   onToggleSidebar?: () => void;
@@ -81,12 +89,23 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   // Subtitle States
   const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
+  const [secondaryTrackId, setSecondaryTrackId] = useState<string | null>(null);
+  const [showDualSubtitles, setShowDualSubtitles] = useState<boolean>(true);
   const [showSubtitlesOverlay, setShowSubtitlesOverlay] = useState<boolean>(true);
   const [showTranscriptPanel, setShowTranscriptPanel] = useState<boolean>(true);
   const [autoScrollTranscript, setAutoScrollTranscript] = useState<boolean>(true);
   const [subtitleFontSize, setSubtitleFontSize] = useState<"sm" | "md" | "lg" | "xl">("md");
   const [subtitleStyle, setSubtitleStyle] = useState<"black" | "transparent" | "yellow" | "outline">("black");
   const [subtitleSearchQuery, setSubtitleSearchQuery] = useState<string>("");
+
+  // Immersive Theater Mode (Video huge, minimal bottom controls, side drawer for scrolling cues with toggle)
+  const [isImmersiveMode, setIsImmersiveMode] = useState<boolean>(false);
+  const [showImmersiveSideDrawer, setShowImmersiveSideDrawer] = useState<boolean>(true);
+
+  // Gemini Subtitle Translation state
+  const [isTranslatingTrack, setIsTranslatingTrack] = useState<boolean>(false);
+  const [showTranslateModal, setShowTranslateModal] = useState<boolean>(false);
+  const [translateTargetLang, setTranslateTargetLang] = useState<string>("ar");
 
   // Subtitle Modals
   const [showSubtitleUploadModal, setShowSubtitleUploadModal] = useState<boolean>(false);
@@ -97,6 +116,27 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const [aiSubtitleLang, setAiSubtitleLang] = useState<string>("ar");
   const [aiPromptHint, setAiPromptHint] = useState<string>("");
   const [isAiGenerating, setIsAiGenerating] = useState<boolean>(false);
+
+  // Selected AI Model (Same models as in AI Corrector / قسم صحح)
+  const [selectedAiModel, setSelectedAiModel] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return (
+        localStorage.getItem("media_player_selected_ai_model") ||
+        localStorage.getItem("ai_corrector_selected_model") ||
+        "gemini-3.6-flash"
+      );
+    }
+    return "gemini-3.6-flash";
+  });
+
+  const handleSelectAiModel = (m: string) => {
+    setSelectedAiModel(m);
+    try {
+      localStorage.setItem("media_player_selected_ai_model", m);
+    } catch (e) {
+      console.error("Failed to save AI model preference:", e);
+    }
+  };
 
   // Edit / Add Cue Modal
   const [editingCue, setEditingCue] = useState<SubtitleCue | null>(null);
@@ -150,19 +190,27 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     fetchMediaFiles();
   }, []);
 
-  // Set active subtitle track when currentFile changes
+  // Set active and secondary subtitle tracks when currentFile changes
   useEffect(() => {
     if (currentFile?.subtitles && currentFile.subtitles.length > 0) {
       // Default to first track if not selected or current not in list
       if (!activeTrackId || !currentFile.subtitles.some(t => t.id === activeTrackId)) {
         setActiveTrackId(currentFile.subtitles[0].id);
       }
+      // If there is a second track, automatically set it as secondary track (e.g. Arabic translation + German original)
+      if (currentFile.subtitles.length > 1 && (!secondaryTrackId || !currentFile.subtitles.some(t => t.id === secondaryTrackId))) {
+        const otherTrack = currentFile.subtitles.find(t => t.id !== (activeTrackId || currentFile.subtitles![0].id));
+        if (otherTrack) {
+          setSecondaryTrackId(otherTrack.id);
+        }
+      }
     } else {
       setActiveTrackId(null);
+      setSecondaryTrackId(null);
     }
   }, [currentFile]);
 
-  // Active Subtitle Track and Cues
+  // Active Subtitle Track (Primary) and Cues
   const activeTrack = useMemo(() => {
     if (!currentFile?.subtitles || !activeTrackId) return null;
     return currentFile.subtitles.find((t) => t.id === activeTrackId) || null;
@@ -172,13 +220,31 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     return activeTrack?.cues || [];
   }, [activeTrack]);
 
-  // Current active Cue matching current time
+  // Current active Cue matching current time for Primary Track
   const currentCue = useMemo(() => {
     if (!activeCues || activeCues.length === 0) return null;
     return activeCues.find(
       (cue) => currentTime >= cue.startTime && currentTime <= cue.endTime
     ) || null;
   }, [activeCues, currentTime]);
+
+  // Secondary Subtitle Track (For Dual Subtitles / الترجمة المزدوجة)
+  const secondaryTrack = useMemo(() => {
+    if (!currentFile?.subtitles || !secondaryTrackId || secondaryTrackId === activeTrackId) return null;
+    return currentFile.subtitles.find((t) => t.id === secondaryTrackId) || null;
+  }, [currentFile, secondaryTrackId, activeTrackId]);
+
+  const secondaryCues = useMemo(() => {
+    return secondaryTrack?.cues || [];
+  }, [secondaryTrack]);
+
+  // Current active Cue for Secondary Track
+  const currentSecondaryCue = useMemo(() => {
+    if (!secondaryCues || secondaryCues.length === 0) return null;
+    return secondaryCues.find(
+      (cue) => currentTime >= cue.startTime && currentTime <= cue.endTime
+    ) || null;
+  }, [secondaryCues, currentTime]);
 
   // Auto-scroll transcript to active cue (smooth like YouTube)
   useEffect(() => {
@@ -189,6 +255,55 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       });
     }
   }, [currentCue, autoScrollTranscript]);
+
+  // Translate Subtitle Track with Gemini AI
+  const handleTranslateTrackWithGemini = async (targetLang = "ar") => {
+    if (!currentFile || !activeTrack) {
+      setErrorMsg("يرجى اختيار مسار ترجمة أصلي أولاً لترجمته");
+      return;
+    }
+
+    setIsTranslatingTrack(true);
+    setErrorMsg(null);
+
+    try {
+      const res = await fetch(`/api/media/${currentFile.id}/translate-subtitles`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          trackId: activeTrack.id,
+          targetLanguage: targetLang,
+          sourceLanguage: activeTrack.language || "de",
+          selectedModel: selectedAiModel
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "فشلت ترجمة المسار عبر Gemini AI");
+      }
+
+      const data = await res.json();
+      setSuccessMsg(data.message || `تم إنشاء الترجمة العربية بنجاح وتفعيل الترجمة المزدوجة! 🇸🇦⚡`);
+
+      if (data.file) {
+        setCurrentFile(data.file);
+        setFiles(prev => prev.map(f => f.id === data.file.id ? data.file : f));
+      }
+
+      // Automatically set the new translated track as secondary track for dual subtitles!
+      if (data.track) {
+        setSecondaryTrackId(data.track.id);
+        setShowDualSubtitles(true);
+      }
+      setShowTranslateModal(false);
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg(err.message || "حدث خطأ أثناء ترجمة مسار الترجمة بالذكاء الاصطناعي");
+    } finally {
+      setIsTranslatingTrack(false);
+    }
+  };
 
   // Upload handler for Media Files
   const handleUploadFiles = (fileList: FileList | File[]) => {
@@ -309,7 +424,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         body: JSON.stringify({
           language: aiSubtitleLang,
           promptHint: aiPromptHint.trim(),
-          fullText: pastedSubtitleText.trim()
+          fullText: pastedSubtitleText.trim(),
+          selectedModel: selectedAiModel
         })
       });
 
@@ -996,10 +1112,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
               {/* Subtitle Track Selector & Actions */}
               <div className="flex items-center gap-2 flex-wrap">
-                {/* Subtitle Track Pill Dropdown */}
+                {/* Primary Subtitle Track Pill Dropdown */}
                 <div className="flex items-center gap-1.5 bg-slate-800/90 border border-slate-700 rounded-xl px-2.5 py-1 text-xs">
                   <Subtitles className="w-3.5 h-3.5 text-indigo-400" />
-                  <span className="text-slate-400 text-[11px]">الترجمة:</span>
+                  <span className="text-slate-400 text-[11px]">الترجمة 1:</span>
                   <select
                     value={activeTrackId || ""}
                     onChange={(e) => setActiveTrackId(e.target.value || null)}
@@ -1026,6 +1142,53 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   )}
                 </div>
 
+                {/* Secondary Subtitle Track Pill Dropdown (Dual Subtitles / ترجمة مزدوجة) */}
+                {currentFile.subtitles && currentFile.subtitles.length > 1 && (
+                  <div className="flex items-center gap-1.5 bg-slate-800/90 border border-emerald-500/40 rounded-xl px-2.5 py-1 text-xs">
+                    <Split className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-emerald-400 text-[11px] font-bold">الترجمة 2:</span>
+                    <select
+                      value={secondaryTrackId || ""}
+                      onChange={(e) => {
+                        setSecondaryTrackId(e.target.value || null);
+                        if (e.target.value) setShowDualSubtitles(true);
+                      }}
+                      className="bg-transparent text-emerald-200 text-xs font-semibold focus:outline-hidden cursor-pointer"
+                    >
+                      <option value="" className="bg-slate-800 text-slate-400">
+                        بدون ترجمة ثانوية
+                      </option>
+                      {currentFile.subtitles?.map((track) => (
+                        <option key={track.id} value={track.id} className="bg-slate-800 text-white">
+                          {track.label}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      onClick={() => setShowDualSubtitles(!showDualSubtitles)}
+                      className={`p-1 rounded-lg text-[10px] font-bold transition-all ${
+                        showDualSubtitles ? "bg-emerald-600/40 text-emerald-300" : "bg-slate-750 text-slate-400"
+                      }`}
+                      title={showDualSubtitles ? "إخفاء الترجمة المزدوجة" : "إظهار الترجمة المزدوجة"}
+                    >
+                      {showDualSubtitles ? "مزدوجة ✓" : "مفردة"}
+                    </button>
+                  </div>
+                )}
+
+                {/* Gemini AI Subtitle Translation Button (ترجمة المسار الحالي للعربية) */}
+                {activeTrack && (
+                  <button
+                    onClick={() => setShowTranslateModal(true)}
+                    className="px-2.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-sm"
+                    title="ترجمة هذا المسار إلى العربية فوراً عبر Gemini لعمل ترجمة مزدوجة (ألماني + عربي)"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                    <span>ترجمة للعربية (Gemini) 🇸🇦</span>
+                  </button>
+                )}
+
                 {/* Subtitle Upload / Add Button */}
                 <button
                   onClick={() => setShowSubtitleUploadModal(true)}
@@ -1044,6 +1207,16 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                 >
                   <Mic className="w-3.5 h-3.5" />
                   <span>تفريغ Gradio 🇩🇪</span>
+                </button>
+
+                {/* Immersive Theater Mode Button (وضع تكبير الشاشة الفائق) */}
+                <button
+                  onClick={() => setIsImmersiveMode(true)}
+                  className="px-3 py-1.5 bg-linear-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-xl text-xs font-black shadow-md transition-all cursor-pointer flex items-center gap-1.5"
+                  title="وضع تكبير الشاشة الأقصى (فيديو كبير + تحكم مبسط + لوحة جانبية متحركة)"
+                >
+                  <Expand className="w-3.5 h-3.5" />
+                  <span>وضع التكبير السينمائي 📺</span>
                 </button>
 
                 {/* Toggle Transcript View Button */}
@@ -1097,16 +1270,28 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                         onClick={togglePlay}
                       />
 
-                      {/* Video Subtitles Overlay (Like YouTube CC Overlay) */}
-                      {showSubtitlesOverlay && currentCue && (
+                      {/* Video Subtitles Overlay (Supports Dual Subtitles: German + Arabic) */}
+                      {showSubtitlesOverlay && (currentCue || (showDualSubtitles && currentSecondaryCue)) && (
                         <div
-                          className="absolute bottom-12 inset-x-0 flex items-center justify-center px-4 pointer-events-none z-20 transition-all duration-150 animate-fadeIn"
+                          className="absolute bottom-10 inset-x-0 flex flex-col items-center justify-center gap-1.5 px-4 pointer-events-none z-20 transition-all duration-150 animate-fadeIn"
                         >
-                          <div
-                            className={`max-w-[90%] text-center rounded-xl transition-all leading-relaxed font-sans ${subtitleStyleClass} ${subtitleFontSizeClass}`}
-                          >
-                            <span className="font-semibold">{currentCue.text}</span>
-                          </div>
+                          {/* Primary Subtitle (German / Original) */}
+                          {currentCue && (
+                            <div
+                              className={`max-w-[90%] text-center rounded-xl transition-all leading-relaxed font-sans shadow-lg ${subtitleStyleClass} ${subtitleFontSizeClass}`}
+                            >
+                              <span className="font-semibold">{currentCue.text}</span>
+                            </div>
+                          )}
+
+                          {/* Secondary Subtitle (Arabic / Translated with Gemini) */}
+                          {showDualSubtitles && currentSecondaryCue && (
+                            <div
+                              className="max-w-[90%] text-center rounded-xl transition-all leading-relaxed font-sans shadow-lg bg-emerald-950/85 text-emerald-200 border border-emerald-500/50 px-3.5 py-1 text-sm font-bold"
+                            >
+                              <span>{currentSecondaryCue.text}</span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </>
@@ -1135,13 +1320,22 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                         <p className="text-xs text-slate-400 mt-1">{currentFile.originalName}</p>
                       </div>
 
-                      {/* Audio Karaoke Subtitle Box */}
+                      {/* Audio Karaoke Subtitle Box (Supports Dual Subtitles) */}
                       {showSubtitlesOverlay && (
-                        <div className="w-full max-w-lg mt-2 min-h-[64px] flex items-center justify-center">
-                          {currentCue ? (
-                            <div className={`text-center rounded-2xl transition-all leading-relaxed font-sans shadow-lg ${subtitleStyleClass} ${subtitleFontSizeClass}`}>
-                              <span className="font-bold">{currentCue.text}</span>
-                            </div>
+                        <div className="w-full max-w-lg mt-2 min-h-[64px] flex flex-col items-center justify-center gap-1.5">
+                          {currentCue || (showDualSubtitles && currentSecondaryCue) ? (
+                            <>
+                              {currentCue && (
+                                <div className={`text-center rounded-2xl transition-all leading-relaxed font-sans shadow-lg ${subtitleStyleClass} ${subtitleFontSizeClass}`}>
+                                  <span className="font-bold">{currentCue.text}</span>
+                                </div>
+                              )}
+                              {showDualSubtitles && currentSecondaryCue && (
+                                <div className="text-center rounded-2xl transition-all leading-relaxed font-sans shadow-lg bg-emerald-950/85 text-emerald-200 border border-emerald-500/50 px-4 py-1.5 text-sm font-bold">
+                                  <span>{currentSecondaryCue.text}</span>
+                                </div>
+                              )}
+                            </>
                           ) : (
                             <div className="text-xs text-slate-500 italic bg-slate-800/40 px-4 py-2 rounded-xl border border-slate-800">
                               {activeTrack ? "جاري انتظار مقطع الترجمة التالي..." : "لا توجد ترجمة نشطة (اضغط على إضافة ترجمة بالأعلى)"}
@@ -2079,6 +2273,38 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                 </div>
 
                 <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <Bot className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>نموذج الذكاء الاصطناعي (AI Model):</span>
+                    </span>
+                    <span className="text-[10px] text-indigo-600 font-mono bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                      {selectedAiModel}
+                    </span>
+                  </label>
+                  <select
+                    value={selectedAiModel}
+                    onChange={(e) => handleSelectAiModel(e.target.value)}
+                    className="w-full text-xs p-2.5 border border-slate-200 rounded-xl bg-white focus:outline-hidden focus:border-indigo-500"
+                  >
+                    <optgroup label="⚡ نماذج فائقة وموصى بها">
+                      {ALL_AVAILABLE_MODELS.filter(m => !m.group || m.group === "general").map((m) => (
+                        <option key={m.key} value={m.key}>
+                          {m.name} - ({m.desc})
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="🚀 نماذج الحصة اليومية العالية (500 RPD)">
+                      {ALL_AVAILABLE_MODELS.filter(m => m.group === "high_quota").map((m) => (
+                        <option key={m.key} value={m.key}>
+                          {m.name} - ({m.desc})
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+
+                <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     لغة الترجمة المطلوبة:
                   </label>
@@ -2207,6 +2433,404 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: GEMINI SUBTITLE TRANSLATION (DUAL SUBTITLES) */}
+      {/* ======================================================== */}
+      {showTranslateModal && activeTrack && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl text-white animate-scaleUp">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-linear-to-tr from-emerald-600 to-teal-600 flex items-center justify-center text-white shadow-md">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-black text-white text-sm">ترجمة مسار الترجمة بالذكاء الاصطناعي (Gemini)</h3>
+                  <p className="text-[11px] text-slate-400">لإنشاء ترجمة مزدوجة (ألماني + عربي) بالتوقيت الدقيق</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowTranslateModal(false)}
+                className="p-1 text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-slate-800/80 p-3 rounded-2xl border border-slate-700 space-y-1">
+                <p className="text-xs text-slate-400">المسار المصدر المختار للترجمة:</p>
+                <p className="text-sm font-bold text-white flex items-center gap-2">
+                  <Subtitles className="w-4 h-4 text-indigo-400" />
+                  <span>{activeTrack.label}</span>
+                  <span className="text-[11px] text-slate-400">({activeTrack.cues.length} مقطع زمني)</span>
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <Bot className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>نموذج الذكاء الاصطناعي (AI Model):</span>
+                  </span>
+                  <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/80 px-2 py-0.5 rounded-md border border-emerald-500/30">
+                    {selectedAiModel}
+                  </span>
+                </label>
+                <select
+                  value={selectedAiModel}
+                  onChange={(e) => handleSelectAiModel(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:outline-hidden focus:border-emerald-500"
+                >
+                  <optgroup label="⚡ نماذج فائقة وموصى بها (Gemini / Groq)">
+                    {ALL_AVAILABLE_MODELS.filter(m => !m.group || m.group === "general").map((m) => (
+                      <option key={m.key} value={m.key} className="bg-slate-900 text-white">
+                        {m.name} - ({m.desc})
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="🚀 نماذج الحصة اليومية العالية (500 RPD)">
+                    {ALL_AVAILABLE_MODELS.filter(m => m.group === "high_quota").map((m) => (
+                      <option key={m.key} value={m.key} className="bg-slate-900 text-white">
+                        {m.name} - ({m.desc})
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  اختر لغة الترجمة الهدف:
+                </label>
+                <select
+                  value={translateTargetLang}
+                  onChange={(e) => setTranslateTargetLang(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:outline-hidden focus:border-emerald-500"
+                >
+                  <option value="ar">🇸🇦 العربية (Arabic) - موصى بها للترجمة المزدوجة</option>
+                  <option value="en">🇬🇧 الإنجليزية (English)</option>
+                  <option value="de">🇩🇪 الألمانية (German)</option>
+                  <option value="fr">🇫🇷 الفرنسية (French)</option>
+                  <option value="es">🇪🇸 الإسبانية (Spanish)</option>
+                  <option value="tr">🇹🇷 التركية (Turkish)</option>
+                </select>
+              </div>
+
+              <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-2xl p-3.5 text-xs text-emerald-200 space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <Split className="w-4 h-4 text-emerald-400" />
+                  <span>ميزة الترجمة المزدوجة التلقائية:</span>
+                </p>
+                <p className="text-[11px] text-emerald-300/80 leading-relaxed">
+                  سيقوم مودل Gemini بترجمة جميع مقاطع التوقيت مع المحافظة على التزامن بالمللي ثانية، وسيقوم المشغل تلقائياً بعرض النصين معاً (الأصلي الألماني والترجمة العربية تحت بعض).
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  onClick={() => handleTranslateTrackWithGemini(translateTargetLang)}
+                  disabled={isTranslatingTrack}
+                  className="flex-1 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                >
+                  {isTranslatingTrack ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>جاري الترجمة عبر Gemini...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" />
+                      <span>بدء الترجمة وحفظ المسار ⚡</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowTranslateModal(false)}
+                  disabled={isTranslatingTrack}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* IMMERSIVE THEATER MODE (وضع تكبير الشاشة الفائق) */}
+      {/* ======================================================== */}
+      {isImmersiveMode && currentFile && (
+        <div className="fixed inset-0 z-50 bg-black flex flex-col overflow-hidden animate-fadeIn select-none">
+          {/* Immersive Top Bar */}
+          <div className="h-12 bg-slate-950/90 border-b border-slate-800/80 px-4 flex items-center justify-between z-30 shrink-0">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-black bg-gradient-to-r from-purple-500 to-blue-500 text-white px-2.5 py-0.5 rounded-lg">
+                وضع التكبير السينمائي
+              </span>
+              <h2 className="text-xs sm:text-sm font-bold text-white truncate max-w-xs sm:max-w-md">
+                {currentFile.title}
+              </h2>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Dual Subtitles Quick Toggle */}
+              {currentFile.subtitles && currentFile.subtitles.length > 1 && (
+                <button
+                  onClick={() => setShowDualSubtitles(!showDualSubtitles)}
+                  className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                    showDualSubtitles ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400"
+                  }`}
+                  title="تفعيل أو إلغاء الترجمة المزدوجة"
+                >
+                  <Split className="w-3.5 h-3.5" />
+                  <span>ترجمة مزدوجة {showDualSubtitles ? "مفعلة ✓" : "معطلة"}</span>
+                </button>
+              )}
+
+              {/* Toggle Side Subtitle Panel */}
+              <button
+                onClick={() => setShowImmersiveSideDrawer(!showImmersiveSideDrawer)}
+                className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  showImmersiveSideDrawer
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "bg-slate-800 text-slate-400 hover:text-white"
+                }`}
+                title="إظهار / إخفاء النافذة الجانبية للجمل المتحركة للتكبير الكلي"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>{showImmersiveSideDrawer ? "إخفاء لوحة الجمل" : "إظهار لوحة الجمل"}</span>
+              </button>
+
+              {/* Exit Immersive Theater Mode */}
+              <button
+                onClick={() => setIsImmersiveMode(false)}
+                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
+                title="الخروج من وضع التكبير (Esc)"
+              >
+                <Shrink className="w-3.5 h-3.5" />
+                <span>خروج</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Immersive Main Body */}
+          <div className="flex-1 flex overflow-hidden relative">
+            {/* Video Canvas Stage (Huge & Dominant) */}
+            <div className="flex-1 flex flex-col bg-black relative min-w-0 justify-center items-center">
+              <div className="relative w-full h-full flex items-center justify-center p-2 sm:p-4">
+                {currentFile.type === "video" ? (
+                  <>
+                    <video
+                      ref={videoRef}
+                      src={`/api/media/stream/${currentFile.filename}`}
+                      className="w-full h-full object-contain cursor-pointer"
+                      playsInline
+                      onClick={togglePlay}
+                    />
+
+                    {/* Immersive Subtitles Overlay (Dual Subtitles support) */}
+                    {showSubtitlesOverlay && (currentCue || (showDualSubtitles && currentSecondaryCue)) && (
+                      <div
+                        className="absolute bottom-16 inset-x-0 flex flex-col items-center justify-center gap-2 px-6 pointer-events-none z-20 transition-all duration-150 animate-fadeIn"
+                      >
+                        {/* Primary Subtitle (German / Original) */}
+                        {currentCue && (
+                          <div
+                            className={`max-w-[90%] text-center rounded-2xl transition-all leading-relaxed font-sans shadow-2xl ${subtitleStyleClass} ${subtitleFontSizeClass}`}
+                          >
+                            <span className="font-bold text-base sm:text-xl md:text-2xl drop-shadow-md">{currentCue.text}</span>
+                          </div>
+                        )}
+
+                        {/* Secondary Subtitle (Arabic / Gemini Translated) */}
+                        {showDualSubtitles && currentSecondaryCue && (
+                          <div
+                            className="max-w-[90%] text-center rounded-2xl transition-all leading-relaxed font-sans shadow-2xl bg-emerald-950/90 text-emerald-200 border border-emerald-500/60 px-5 py-2 text-sm sm:text-base md:text-lg font-black"
+                          >
+                            <span>{currentSecondaryCue.text}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  /* Audio Stage in Immersive View */
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-6 relative bg-linear-to-b from-slate-950 via-slate-900 to-black">
+                    <audio
+                      ref={audioRef}
+                      src={`/api/media/stream/${currentFile.filename}`}
+                    />
+                    <div
+                      className={`w-40 h-40 rounded-full border-4 border-slate-700 bg-linear-to-tr from-purple-600 via-indigo-600 to-blue-600 flex items-center justify-center shadow-2xl transition-transform ${
+                        isPlaying ? "animate-spin" : ""
+                      }`}
+                      style={{ animationDuration: "8s" }}
+                    >
+                      <Music className="w-12 h-12 text-white" />
+                    </div>
+
+                    <div className="text-center">
+                      <p className="font-black text-white text-lg">{currentFile.title}</p>
+                      <p className="text-xs text-slate-400">{currentFile.originalName}</p>
+                    </div>
+
+                    {/* Audio Karaoke Subtitle Box in Immersive */}
+                    {showSubtitlesOverlay && (
+                      <div className="w-full max-w-2xl px-4 flex flex-col items-center justify-center gap-2">
+                        {currentCue && (
+                          <div className={`text-center rounded-2xl leading-relaxed font-sans shadow-xl ${subtitleStyleClass} ${subtitleFontSizeClass}`}>
+                            <span className="font-bold text-lg">{currentCue.text}</span>
+                          </div>
+                        )}
+                        {showDualSubtitles && currentSecondaryCue && (
+                          <div className="text-center rounded-2xl leading-relaxed font-sans shadow-xl bg-emerald-950/90 text-emerald-200 border border-emerald-500/60 px-5 py-2 text-base font-bold">
+                            <span>{currentSecondaryCue.text}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Minimal Bottom Control Bar for Immersive Theater Mode */}
+              <div className="w-full bg-gradient-to-t from-black via-black/90 to-transparent p-3 sm:p-4 z-30 shrink-0 space-y-2">
+                {/* Progress bar */}
+                <div
+                  ref={progressBarRef}
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const clickPos = (e.clientX - rect.left) / rect.width;
+                    const rtlPos = 1 - clickPos;
+                    handleSeek(rtlPos * duration);
+                  }}
+                  className="w-full h-2 bg-slate-800 hover:h-3 rounded-full cursor-pointer transition-all relative overflow-hidden"
+                >
+                  <div
+                    className="h-full bg-linear-to-r from-blue-500 via-indigo-500 to-purple-500 rounded-full relative"
+                    style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+                  />
+                </div>
+
+                {/* Minimal Control Buttons */}
+                <div className="flex items-center justify-between text-xs text-slate-300">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={togglePlay}
+                      className="w-9 h-9 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md"
+                    >
+                      {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current translate-x-[-1px]" />}
+                    </button>
+                    <button
+                      onClick={() => skipSeconds(-5)}
+                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-xs font-mono cursor-pointer"
+                    >
+                      -5s
+                    </button>
+                    <button
+                      onClick={() => skipSeconds(5)}
+                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-xs font-mono cursor-pointer"
+                    >
+                      +5s
+                    </button>
+                    <span className="font-mono text-xs text-slate-400">
+                      {formatSecondsToTime(currentTime)} / {formatSecondsToTime(duration)}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setShowSubtitlesOverlay(!showSubtitlesOverlay)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                        showSubtitlesOverlay ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-500"
+                      }`}
+                    >
+                      CC {showSubtitlesOverlay ? "ON" : "OFF"}
+                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={toggleMute} className="text-slate-400 hover:text-white">
+                        {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4" />}
+                      </button>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={isMuted ? 0 : volume}
+                        onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                        className="w-16 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Immersive Side Drawer for Scrolling Subtitle Cues (Can be toggled) */}
+            {showImmersiveSideDrawer && (
+              <div className="w-80 sm:w-96 bg-slate-900 border-r border-slate-800 flex flex-col h-full z-20 shrink-0 shadow-2xl animate-slideLeft">
+                <div className="p-3 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-blue-400" />
+                    <span className="text-xs font-bold text-white">الجمل والتفريغ ({activeCues.length})</span>
+                  </div>
+                  <button
+                    onClick={() => setShowImmersiveSideDrawer(false)}
+                    className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg"
+                    title="إغلاق اللوحة الجانبية للتكبير الكلي"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Subtitle Cues Scrolling List */}
+                <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+                  {activeCues.map((cue) => {
+                    const isCurrent = currentCue?.id === cue.id;
+                    // Check if there is a matching secondary cue at this timestamp
+                    const matchingSec = secondaryCues.find(
+                      sc => (sc.startTime >= cue.startTime - 0.5 && sc.startTime <= cue.endTime + 0.5) ||
+                            (sc.endTime >= cue.startTime - 0.5 && sc.endTime <= cue.endTime + 0.5)
+                    );
+
+                    return (
+                      <div
+                        key={cue.id}
+                        onClick={() => handleSeek(cue.startTime)}
+                        className={`p-2.5 rounded-xl transition-all cursor-pointer flex flex-col gap-1 ${
+                          isCurrent
+                            ? "bg-blue-600/30 border border-blue-500 text-white shadow-lg"
+                            : "hover:bg-slate-800 text-slate-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-[10px] font-mono">
+                          <span className={`px-1.5 py-0.5 rounded-md font-bold ${
+                            isCurrent ? "bg-blue-600 text-white" : "bg-slate-800 text-blue-400"
+                          }`}>
+                            {formatSecondsToTime(cue.startTime)}
+                          </span>
+                          {isCurrent && <span className="text-blue-400 font-sans font-bold">● جاري التشغيل</span>}
+                        </div>
+                        <p className={`text-xs font-medium ${isCurrent ? "text-white font-bold" : "text-slate-200"}`}>
+                          {cue.text}
+                        </p>
+                        {showDualSubtitles && matchingSec && (
+                          <p className="text-[11px] text-emerald-300 font-bold border-t border-slate-800/80 pt-1">
+                            {matchingSec.text}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
