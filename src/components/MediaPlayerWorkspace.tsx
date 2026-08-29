@@ -165,8 +165,8 @@ export function computeSubtitleCSS(
   customScale: number = 1,
   text?: string
 ): React.CSSProperties {
-  // Preserve exact user font-size setting consistently across all modes (Normal, Immersive Theater, Fullscreen)
-  const computedFontSize = Math.round(config.fontSize * customScale);
+  const scaleFactor = (isImmersive ? 1.25 : 1) * customScale;
+  const computedFontSize = Math.round(config.fontSize * scaleFactor);
 
   let shadowStyle = "none";
   if (config.textShadow === "subtle") {
