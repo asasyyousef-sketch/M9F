@@ -2727,10 +2727,11 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     </div>
                   )}
 
-                  {/* Samsung One UI-style Floating Horizontal Volume Slider HUD */}
+                  {/* Samsung One UI-style Floating Minimal Horizontal Volume Slider HUD */}
                   {showSamsungVolumeBar && (
                     <div
-                      className="absolute top-4 sm:top-6 inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 z-40 max-w-[340px] sm:max-w-md w-auto pointer-events-auto transition-all duration-300 ease-out"
+                      dir="ltr"
+                      className="absolute top-4 sm:top-6 inset-x-4 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 z-40 max-w-[290px] sm:max-w-xs w-auto pointer-events-auto transition-all duration-200 ease-out"
                       onPointerDown={(e) => {
                         e.stopPropagation();
                         if (samsungVolumeTimerRef.current) window.clearTimeout(samsungVolumeTimerRef.current);
@@ -2746,147 +2747,86 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                         triggerSamsungVolumeBar();
                       }}
                     >
-                      <div className="bg-slate-950/95 backdrop-blur-2xl border border-white/20 rounded-2xl p-3 sm:px-4 sm:py-3 shadow-2xl flex flex-col gap-2 text-white">
-                        {/* Header Row: Mute/Icon, Label, Percentage & Close */}
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2.5">
-                            {/* Interactive Mute Toggle Button */}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleMute();
-                                triggerSamsungVolumeBar();
-                              }}
-                              className={`w-8 h-8 rounded-xl flex items-center justify-center transition-transform active:scale-90 cursor-pointer ${
-                                isMuted || volume === 0
-                                  ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
-                                  : volume > 1.0
-                                  ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                                  : "bg-blue-500/20 text-blue-300 border border-blue-500/30"
-                              }`}
-                              title={isMuted ? "إلغاء الكتم" : "كتم الصوت"}
-                            >
-                              {isMuted || volume === 0 ? (
-                                <VolumeX className="w-4 h-4" />
-                              ) : volume > 1.0 ? (
-                                <Volume2 className="w-4 h-4" />
-                              ) : volume < 0.5 ? (
-                                <Volume1 className="w-4 h-4" />
-                              ) : (
-                                <Volume2 className="w-4 h-4" />
-                              )}
-                            </button>
+                      <div className="bg-slate-950/90 backdrop-blur-xl border border-white/20 rounded-full px-3.5 py-2 shadow-2xl flex items-center gap-3 text-white">
+                        {/* Interactive Mute / Icon Toggle */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleMute();
+                            triggerSamsungVolumeBar();
+                          }}
+                          className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-transform active:scale-90 cursor-pointer ${
+                            isMuted || volume === 0
+                              ? "bg-rose-500/20 text-rose-300"
+                              : volume > 1.0
+                              ? "bg-amber-500/20 text-amber-300"
+                              : "bg-blue-500/20 text-blue-300"
+                          }`}
+                          title={isMuted ? "Unmute" : "Mute"}
+                        >
+                          {isMuted || volume === 0 ? (
+                            <VolumeX className="w-4 h-4" />
+                          ) : volume > 1.0 ? (
+                            <Volume2 className="w-4 h-4" />
+                          ) : volume < 0.5 ? (
+                            <Volume1 className="w-4 h-4" />
+                          ) : (
+                            <Volume2 className="w-4 h-4" />
+                          )}
+                        </button>
 
-                            <div className="flex flex-col">
-                              <span className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
-                                مستوى الصوت
-                                {volume > 1.0 && (
-                                  <span className="text-[10px] bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black px-1.5 py-0.5 rounded-full flex items-center gap-0.5 shadow-xs">
-                                    <Zap className="w-2.5 h-2.5 fill-current" /> تعزيز فائق
-                                  </span>
-                                )}
-                              </span>
-                              <span className="text-[10px] text-slate-400 font-sans">
-                                {isMuted ? "الصوت مكتوم" : "اسحب الشريط أفقياً للضبط"}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-white/10 ${
-                              isMuted || volume === 0
-                                ? "text-rose-400"
-                                : volume > 1.0
-                                ? "text-amber-400 font-black"
-                                : "text-blue-400"
-                            }`}>
-                              {isMuted ? "0%" : `${Math.round(volume * 100)}%`}
-                            </span>
-
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setShowSamsungVolumeBar(false);
-                              }}
-                              className="w-6 h-6 rounded-lg bg-white/10 hover:bg-white/20 active:scale-90 flex items-center justify-center text-slate-300 hover:text-white cursor-pointer transition-colors"
-                              title="إغلاق"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Horizontal Interactive Slider Bar */}
-                        <div className="flex items-center gap-2 pt-0.5">
-                          <button
-                            type="button"
-                            onClick={(e) => {
+                        {/* Minimalist Horizontal Range Slider */}
+                        <div className="relative flex-1 flex items-center h-6 min-w-[120px]">
+                          <input
+                            type="range"
+                            min="0"
+                            max="2.0"
+                            step="0.05"
+                            value={isMuted ? 0 : volume}
+                            dir="ltr"
+                            onChange={(e) => {
                               e.stopPropagation();
-                              const nextVol = Math.max(0, Math.round((volume - 0.05) * 100) / 100);
-                              handleVolumeChange(nextVol);
+                              handleVolumeChange(parseFloat(e.target.value));
                               triggerSamsungVolumeBar();
                             }}
-                            className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 active:scale-90 flex items-center justify-center text-slate-200 cursor-pointer shrink-0 transition-transform"
-                            title="خفض 5%"
-                          >
-                            <Minus className="w-3.5 h-3.5" />
-                          </button>
-
-                          <div className="relative flex-1 flex items-center h-7">
-                            <input
-                              type="range"
-                              min="0"
-                              max="2.0"
-                              step="0.05"
-                              value={isMuted ? 0 : volume}
-                              onChange={(e) => {
-                                e.stopPropagation();
-                                handleVolumeChange(parseFloat(e.target.value));
-                                triggerSamsungVolumeBar();
-                              }}
-                              onPointerDown={(e) => {
-                                e.stopPropagation();
-                                if (samsungVolumeTimerRef.current) window.clearTimeout(samsungVolumeTimerRef.current);
-                              }}
-                              onPointerUp={(e) => {
-                                e.stopPropagation();
-                                triggerSamsungVolumeBar();
-                              }}
-                              onTouchStart={(e) => {
-                                e.stopPropagation();
-                                if (samsungVolumeTimerRef.current) window.clearTimeout(samsungVolumeTimerRef.current);
-                              }}
-                              onTouchEnd={(e) => {
-                                e.stopPropagation();
-                                triggerSamsungVolumeBar();
-                              }}
-                              className="w-full h-3 bg-slate-800 rounded-full appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all"
-                              style={{
-                                background: `linear-gradient(to right, ${
-                                  volume > 1.0 ? '#f59e0b' : '#3b82f6'
-                                } 0%, ${
-                                  volume > 1.0 ? '#fbbf24' : '#6366f1'
-                                } ${(Math.min(volume, 2.0) / 2.0) * 100}%, rgba(51, 65, 85, 0.8) ${(Math.min(volume, 2.0) / 2.0) * 100}%, rgba(51, 65, 85, 0.8) 100%)`
-                              }}
-                            />
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
+                            onPointerDown={(e) => {
                               e.stopPropagation();
-                              const nextVol = Math.min(2.0, Math.round((volume + 0.05) * 100) / 100);
-                              handleVolumeChange(nextVol);
+                              if (samsungVolumeTimerRef.current) window.clearTimeout(samsungVolumeTimerRef.current);
+                            }}
+                            onPointerUp={(e) => {
+                              e.stopPropagation();
                               triggerSamsungVolumeBar();
                             }}
-                            className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 active:scale-90 flex items-center justify-center text-slate-200 cursor-pointer shrink-0 transition-transform"
-                            title="رفع 5%"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
+                            onTouchStart={(e) => {
+                              e.stopPropagation();
+                              if (samsungVolumeTimerRef.current) window.clearTimeout(samsungVolumeTimerRef.current);
+                            }}
+                            onTouchEnd={(e) => {
+                              e.stopPropagation();
+                              triggerSamsungVolumeBar();
+                            }}
+                            className="w-full h-2.5 bg-slate-800 rounded-full appearance-none cursor-pointer accent-blue-400 hover:accent-blue-300 transition-all"
+                            style={{
+                              background: `linear-gradient(to right, ${
+                                volume > 1.0 ? '#f59e0b' : '#3b82f6'
+                              } 0%, ${
+                                volume > 1.0 ? '#fbbf24' : '#60a5fa'
+                              } ${(Math.min(volume, 2.0) / 2.0) * 100}%, rgba(51, 65, 85, 0.7) ${(Math.min(volume, 2.0) / 2.0) * 100}%, rgba(51, 65, 85, 0.7) 100%)`
+                            }}
+                          />
                         </div>
+
+                        {/* Percentage Indicator */}
+                        <span className={`text-xs font-mono font-bold shrink-0 min-w-[38px] text-right ${
+                          isMuted || volume === 0
+                            ? "text-rose-400"
+                            : volume > 1.0
+                            ? "text-amber-400"
+                            : "text-blue-300"
+                        }`}>
+                          {isMuted ? "0%" : `${Math.round(volume * 100)}%`}
+                        </span>
                       </div>
                     </div>
                   )}
@@ -2915,14 +2855,12 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                         >
                           {/* Primary Subtitle (e.g., German / Original) */}
                           {(currentCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal || showSwipeSamplePreview) && !currentCue)) && (() => {
-                            const isSample = !currentCue;
-                            const text = currentCue ? currentCue.text : "Guten Morgen! Willkommen zu unserem Deutschkurs.";
+                            const text = currentCue ? currentCue.text : "this is test";
                             const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
                               <div
                                 dir={dir}
                                 style={getSubtitleTrackComputedStyle(primarySubStyle, isImmersiveMode, text)}
-                                className={isSample ? "animate-pulse" : ""}
                               >
                                 <span>{text}</span>
                               </div>
@@ -2931,14 +2869,12 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
                           {/* Secondary Subtitle (e.g., Arabic / Translated with Gemini) */}
                           {showDualSubtitles && (currentSecondaryCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal || showSwipeSamplePreview) && !currentSecondaryCue)) && (() => {
-                            const isSample = !currentSecondaryCue;
-                            const text = currentSecondaryCue ? currentSecondaryCue.text : "صباح الخير! أهلاً بكم في دورة اللغة الألمانية الخاصة بنا.";
+                            const text = currentSecondaryCue ? currentSecondaryCue.text : "هذه تجربة كلام هنا";
                             const dir = secondarySubStyle.direction === "rtl" ? "rtl" : secondarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
                               <div
                                 dir={dir}
                                 style={getSubtitleTrackComputedStyle(secondarySubStyle, isImmersiveMode, text)}
-                                className={isSample ? "animate-pulse" : ""}
                               >
                                 <span>{text}</span>
                               </div>
@@ -2985,28 +2921,24 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           {currentCue || (showDualSubtitles && currentSecondaryCue) || showSwipeSamplePreview ? (
                             <>
                               {(currentCue || (showSwipeSamplePreview && !currentCue)) && (() => {
-                                const isSample = !currentCue;
-                                const text = currentCue ? currentCue.text : "Guten Morgen! Willkommen zu unserem Deutschkurs.";
+                                const text = currentCue ? currentCue.text : "this is test";
                                 const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                                 return (
                                   <div
                                     dir={dir}
                                     style={getSubtitleTrackComputedStyle(primarySubStyle, isImmersiveMode, text)}
-                                    className={isSample ? "animate-pulse" : ""}
                                   >
                                     <span>{text}</span>
                                   </div>
                                 );
                               })()}
                               {showDualSubtitles && (currentSecondaryCue || (showSwipeSamplePreview && !currentSecondaryCue)) && (() => {
-                                const isSample = !currentSecondaryCue;
-                                const text = currentSecondaryCue ? currentSecondaryCue.text : "صباح الخير! أهلاً بكم في دورة اللغة الألمانية الخاصة بنا.";
+                                const text = currentSecondaryCue ? currentSecondaryCue.text : "هذه تجربة كلام هنا";
                                 const dir = secondarySubStyle.direction === "rtl" ? "rtl" : secondarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                                 return (
                                   <div
                                     dir={dir}
                                     style={getSubtitleTrackComputedStyle(secondarySubStyle, isImmersiveMode, text)}
-                                    className={isSample ? "animate-pulse" : ""}
                                   >
                                     <span>{text}</span>
                                   </div>
