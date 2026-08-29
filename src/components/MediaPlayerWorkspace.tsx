@@ -10,6 +10,7 @@ import {
   Edit2,
   Check,
   X,
+  Volume1,
   Volume2,
   VolumeX,
   RotateCcw,
@@ -33,6 +34,7 @@ import {
   FileText,
   Copy,
   Plus,
+  Minus,
   Settings2,
   Languages,
   Eye,
@@ -587,6 +589,34 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const singleSentencePlaybackEndRef = useRef<number | null>(null);
   const [hudToast, setHudToast] = useState<{ text: string; sub?: string } | null>(null);
   const hudTimerRef = useRef<number | null>(null);
+
+  // Transient Sample Subtitle Preview on Swipe (Shows what appeared/disappeared with current styling when no cue is active)
+  const [showSwipeSamplePreview, setShowSwipeSamplePreview] = useState<boolean>(false);
+  const swipeSampleTimerRef = useRef<number | null>(null);
+
+  const triggerSwipeSamplePreview = useCallback(() => {
+    if (swipeSampleTimerRef.current) {
+      window.clearTimeout(swipeSampleTimerRef.current);
+    }
+    setShowSwipeSamplePreview(true);
+    swipeSampleTimerRef.current = window.setTimeout(() => {
+      setShowSwipeSamplePreview(false);
+    }, 1800);
+  }, []);
+
+  // Floating Samsung One UI-style Horizontal Volume Slider Bar State
+  const [showSamsungVolumeBar, setShowSamsungVolumeBar] = useState<boolean>(false);
+  const samsungVolumeTimerRef = useRef<number | null>(null);
+
+  const triggerSamsungVolumeBar = useCallback(() => {
+    if (samsungVolumeTimerRef.current) {
+      window.clearTimeout(samsungVolumeTimerRef.current);
+    }
+    setShowSamsungVolumeBar(true);
+    samsungVolumeTimerRef.current = window.setTimeout(() => {
+      setShowSamsungVolumeBar(false);
+    }, 2600);
+  }, []);
 
   const triggerHud = useCallback((text: string, sub?: string) => {
     if (hudTimerRef.current) {
@@ -2050,6 +2080,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   // Center Swipe UP / DOWN (Subtitles)
   const handleCenterSwipeUp = useCallback(() => {
+    triggerSwipeSamplePreview();
     if (!showSubtitlesOverlay) {
       setShowSubtitlesOverlay(true);
       setShowDualSubtitles(false);
@@ -2090,9 +2121,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     } else {
       triggerHud("كلا الترجمتين مفعّلتان بالفعل", "💬💬");
     }
-  }, [showSubtitlesOverlay, showDualSubtitles, activeTrackId, secondaryTrackId, currentFile, triggerVisualFeedback, triggerHud]);
+  }, [showSubtitlesOverlay, showDualSubtitles, activeTrackId, secondaryTrackId, currentFile, triggerVisualFeedback, triggerHud, triggerSwipeSamplePreview]);
 
   const handleCenterSwipeDown = useCallback(() => {
+    triggerSwipeSamplePreview();
     if (showSubtitlesOverlay && showDualSubtitles) {
       setShowDualSubtitles(false);
       try {
@@ -2124,7 +2156,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     } else {
       triggerHud("الترجمة مخفية بالفعل", "🚫");
     }
-  }, [showSubtitlesOverlay, showDualSubtitles, triggerVisualFeedback, triggerHud]);
+  }, [showSubtitlesOverlay, showDualSubtitles, triggerVisualFeedback, triggerHud, triggerSwipeSamplePreview]);
 
   // Left Swipe UP / DOWN (Sentence navigation)
   const handleLeftSwipeUp = useCallback(() => {
@@ -2151,24 +2183,26 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const handleRightSwipeUp = useCallback(() => {
     const nextVol = Math.min(2.0, Math.round((volume + 0.10) * 100) / 100);
     handleVolumeChange(nextVol);
+    triggerSamsungVolumeBar();
     triggerVisualFeedback({
       type: "volume_up",
       side: "right",
       label: `مستوى الصوت: ${Math.round(nextVol * 100)}%`,
       subLabel: nextVol > 1.0 ? "⚡ تعزيز الصوت الفائق" : "سحب للأعلى: رفع الصوت"
     });
-  }, [volume, handleVolumeChange, triggerVisualFeedback]);
+  }, [volume, handleVolumeChange, triggerVisualFeedback, triggerSamsungVolumeBar]);
 
   const handleRightSwipeDown = useCallback(() => {
     const nextVol = Math.max(0, Math.round((volume - 0.10) * 100) / 100);
     handleVolumeChange(nextVol);
+    triggerSamsungVolumeBar();
     triggerVisualFeedback({
       type: "volume_down",
       side: "right",
       label: `مستوى الصوت: ${Math.round(nextVol * 100)}%`,
       subLabel: nextVol === 0 ? "كتم الصوت" : "سحب للأسفل: خفض الصوت"
     });
-  }, [volume, handleVolumeChange, triggerVisualFeedback]);
+  }, [volume, handleVolumeChange, triggerVisualFeedback, triggerSamsungVolumeBar]);
 
   const handleStageTap = useCallback(
     (xRatio: number) => {
@@ -2693,6 +2727,170 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     </div>
                   )}
 
+                  {/* Samsung One UI-style Floating Horizontal Volume Slider HUD */}
+                  {showSamsungVolumeBar && (
+                    <div
+                      className="absolute top-4 sm:top-6 inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 z-40 max-w-[340px] sm:max-w-md w-auto pointer-events-auto transition-all duration-300 ease-out"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        if (samsungVolumeTimerRef.current) window.clearTimeout(samsungVolumeTimerRef.current);
+                      }}
+                      onTouchStart={(e) => {
+                        e.stopPropagation();
+                        if (samsungVolumeTimerRef.current) window.clearTimeout(samsungVolumeTimerRef.current);
+                      }}
+                      onMouseEnter={() => {
+                        if (samsungVolumeTimerRef.current) window.clearTimeout(samsungVolumeTimerRef.current);
+                      }}
+                      onMouseLeave={() => {
+                        triggerSamsungVolumeBar();
+                      }}
+                    >
+                      <div className="bg-slate-950/95 backdrop-blur-2xl border border-white/20 rounded-2xl p-3 sm:px-4 sm:py-3 shadow-2xl flex flex-col gap-2 text-white">
+                        {/* Header Row: Mute/Icon, Label, Percentage & Close */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2.5">
+                            {/* Interactive Mute Toggle Button */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleMute();
+                                triggerSamsungVolumeBar();
+                              }}
+                              className={`w-8 h-8 rounded-xl flex items-center justify-center transition-transform active:scale-90 cursor-pointer ${
+                                isMuted || volume === 0
+                                  ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
+                                  : volume > 1.0
+                                  ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                                  : "bg-blue-500/20 text-blue-300 border border-blue-500/30"
+                              }`}
+                              title={isMuted ? "إلغاء الكتم" : "كتم الصوت"}
+                            >
+                              {isMuted || volume === 0 ? (
+                                <VolumeX className="w-4 h-4" />
+                              ) : volume > 1.0 ? (
+                                <Volume2 className="w-4 h-4" />
+                              ) : volume < 0.5 ? (
+                                <Volume1 className="w-4 h-4" />
+                              ) : (
+                                <Volume2 className="w-4 h-4" />
+                              )}
+                            </button>
+
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
+                                مستوى الصوت
+                                {volume > 1.0 && (
+                                  <span className="text-[10px] bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black px-1.5 py-0.5 rounded-full flex items-center gap-0.5 shadow-xs">
+                                    <Zap className="w-2.5 h-2.5 fill-current" /> تعزيز فائق
+                                  </span>
+                                )}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-sans">
+                                {isMuted ? "الصوت مكتوم" : "اسحب الشريط أفقياً للضبط"}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-white/10 ${
+                              isMuted || volume === 0
+                                ? "text-rose-400"
+                                : volume > 1.0
+                                ? "text-amber-400 font-black"
+                                : "text-blue-400"
+                            }`}>
+                              {isMuted ? "0%" : `${Math.round(volume * 100)}%`}
+                            </span>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowSamsungVolumeBar(false);
+                              }}
+                              className="w-6 h-6 rounded-lg bg-white/10 hover:bg-white/20 active:scale-90 flex items-center justify-center text-slate-300 hover:text-white cursor-pointer transition-colors"
+                              title="إغلاق"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Horizontal Interactive Slider Bar */}
+                        <div className="flex items-center gap-2 pt-0.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const nextVol = Math.max(0, Math.round((volume - 0.05) * 100) / 100);
+                              handleVolumeChange(nextVol);
+                              triggerSamsungVolumeBar();
+                            }}
+                            className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 active:scale-90 flex items-center justify-center text-slate-200 cursor-pointer shrink-0 transition-transform"
+                            title="خفض 5%"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+
+                          <div className="relative flex-1 flex items-center h-7">
+                            <input
+                              type="range"
+                              min="0"
+                              max="2.0"
+                              step="0.05"
+                              value={isMuted ? 0 : volume}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                handleVolumeChange(parseFloat(e.target.value));
+                                triggerSamsungVolumeBar();
+                              }}
+                              onPointerDown={(e) => {
+                                e.stopPropagation();
+                                if (samsungVolumeTimerRef.current) window.clearTimeout(samsungVolumeTimerRef.current);
+                              }}
+                              onPointerUp={(e) => {
+                                e.stopPropagation();
+                                triggerSamsungVolumeBar();
+                              }}
+                              onTouchStart={(e) => {
+                                e.stopPropagation();
+                                if (samsungVolumeTimerRef.current) window.clearTimeout(samsungVolumeTimerRef.current);
+                              }}
+                              onTouchEnd={(e) => {
+                                e.stopPropagation();
+                                triggerSamsungVolumeBar();
+                              }}
+                              className="w-full h-3 bg-slate-800 rounded-full appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all"
+                              style={{
+                                background: `linear-gradient(to right, ${
+                                  volume > 1.0 ? '#f59e0b' : '#3b82f6'
+                                } 0%, ${
+                                  volume > 1.0 ? '#fbbf24' : '#6366f1'
+                                } ${(Math.min(volume, 2.0) / 2.0) * 100}%, rgba(51, 65, 85, 0.8) ${(Math.min(volume, 2.0) / 2.0) * 100}%, rgba(51, 65, 85, 0.8) 100%)`
+                              }}
+                            />
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const nextVol = Math.min(2.0, Math.round((volume + 0.05) * 100) / 100);
+                              handleVolumeChange(nextVol);
+                              triggerSamsungVolumeBar();
+                            }}
+                            className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 active:scale-90 flex items-center justify-center text-slate-200 cursor-pointer shrink-0 transition-transform"
+                            title="رفع 5%"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {currentFile.type === "video" ? (
                     <>
                       <video
@@ -2710,19 +2908,21 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       />
 
                       {/* Video Subtitles Overlay (Supports Dual Subtitles: German + Arabic with Live Custom Styling & Live Preview) */}
-                      {showSubtitlesOverlay && (currentCue || (showDualSubtitles && currentSecondaryCue) || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && (
+                      {showSubtitlesOverlay && (currentCue || (showDualSubtitles && currentSecondaryCue) || showSwipeSamplePreview || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && (
                         <div
                           className="absolute inset-x-0 flex flex-col items-center justify-center gap-2 px-4 pointer-events-none z-20 transition-all duration-300 ease-out"
                           style={getSubtitlePositionStyle(primarySubStyle.position, primarySubStyle.offsetY)}
                         >
                           {/* Primary Subtitle (e.g., German / Original) */}
-                          {(currentCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && !currentCue)) && (() => {
+                          {(currentCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal || showSwipeSamplePreview) && !currentCue)) && (() => {
+                            const isSample = !currentCue;
                             const text = currentCue ? currentCue.text : "Guten Morgen! Willkommen zu unserem Deutschkurs.";
                             const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
                               <div
                                 dir={dir}
                                 style={getSubtitleTrackComputedStyle(primarySubStyle, isImmersiveMode, text)}
+                                className={isSample ? "animate-pulse" : ""}
                               >
                                 <span>{text}</span>
                               </div>
@@ -2730,13 +2930,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           })()}
 
                           {/* Secondary Subtitle (e.g., Arabic / Translated with Gemini) */}
-                          {showDualSubtitles && (currentSecondaryCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && !currentSecondaryCue)) && (() => {
+                          {showDualSubtitles && (currentSecondaryCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal || showSwipeSamplePreview) && !currentSecondaryCue)) && (() => {
+                            const isSample = !currentSecondaryCue;
                             const text = currentSecondaryCue ? currentSecondaryCue.text : "صباح الخير! أهلاً بكم في دورة اللغة الألمانية الخاصة بنا.";
                             const dir = secondarySubStyle.direction === "rtl" ? "rtl" : secondarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
                               <div
                                 dir={dir}
                                 style={getSubtitleTrackComputedStyle(secondarySubStyle, isImmersiveMode, text)}
+                                className={isSample ? "animate-pulse" : ""}
                               >
                                 <span>{text}</span>
                               </div>
@@ -2780,27 +2982,33 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       {/* Audio Karaoke Subtitle Box (Supports Dual Subtitles with Live Custom Styling) */}
                       {showSubtitlesOverlay && (
                         <div className="w-full max-w-lg mt-2 min-h-[64px] flex flex-col items-center justify-center gap-2">
-                          {currentCue || (showDualSubtitles && currentSecondaryCue) ? (
+                          {currentCue || (showDualSubtitles && currentSecondaryCue) || showSwipeSamplePreview ? (
                             <>
-                              {currentCue && (() => {
-                                const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(currentCue.text);
+                              {(currentCue || (showSwipeSamplePreview && !currentCue)) && (() => {
+                                const isSample = !currentCue;
+                                const text = currentCue ? currentCue.text : "Guten Morgen! Willkommen zu unserem Deutschkurs.";
+                                const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                                 return (
                                   <div
                                     dir={dir}
-                                    style={getSubtitleTrackComputedStyle(primarySubStyle, isImmersiveMode, currentCue.text)}
+                                    style={getSubtitleTrackComputedStyle(primarySubStyle, isImmersiveMode, text)}
+                                    className={isSample ? "animate-pulse" : ""}
                                   >
-                                    <span>{currentCue.text}</span>
+                                    <span>{text}</span>
                                   </div>
                                 );
                               })()}
-                              {showDualSubtitles && currentSecondaryCue && (() => {
-                                const dir = secondarySubStyle.direction === "rtl" ? "rtl" : secondarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(currentSecondaryCue.text);
+                              {showDualSubtitles && (currentSecondaryCue || (showSwipeSamplePreview && !currentSecondaryCue)) && (() => {
+                                const isSample = !currentSecondaryCue;
+                                const text = currentSecondaryCue ? currentSecondaryCue.text : "صباح الخير! أهلاً بكم في دورة اللغة الألمانية الخاصة بنا.";
+                                const dir = secondarySubStyle.direction === "rtl" ? "rtl" : secondarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                                 return (
                                   <div
                                     dir={dir}
-                                    style={getSubtitleTrackComputedStyle(secondarySubStyle, isImmersiveMode, currentSecondaryCue.text)}
+                                    style={getSubtitleTrackComputedStyle(secondarySubStyle, isImmersiveMode, text)}
+                                    className={isSample ? "animate-pulse" : ""}
                                   >
-                                    <span>{currentSecondaryCue.text}</span>
+                                    <span>{text}</span>
                                   </div>
                                 );
                               })()}
