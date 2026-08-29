@@ -2390,9 +2390,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       return { top: "50%", bottom: "auto", transform: "translateY(-50%)" };
     }
     // Flexible bottom positioning:
-    // When in fullscreen and floating controls are revealed, raise the subtitle smoothly (+96px)
-    // so it sits cleanly above the floating bar without being covered by it!
-    const extraBottom = isFullscreen && showFullscreenControls ? 96 : 0;
+    // When in fullscreen and floating controls are revealed, raise the subtitle smoothly (+150px)
+    // so it sits completely and cleanly above the controls bar and timeline scrubber without any overlap!
+    const extraBottom = isFullscreen && showFullscreenControls ? 150 : 0;
     return {
       bottom: `${offsetY + extraBottom}px`,
       top: "auto",
