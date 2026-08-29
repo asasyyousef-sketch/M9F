@@ -138,6 +138,14 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   };
 
+  // Timeline states for smooth YouTube-like scrubbing and zero-pop audio
+  const [bufferedPercent, setBufferedPercent] = useState<number>(0);
+  const [isScrubbing, setIsScrubbing] = useState<boolean>(false);
+  const [hoverPosition, setHoverPosition] = useState<number | null>(null);
+  const [hoverTime, setHoverTime] = useState<number | null>(null);
+  const [hoverCueText, setHoverCueText] = useState<string | null>(null);
+  const fadeTimeoutRef = useRef<number | null>(null);
+
   // Edit / Add Cue Modal
   const [editingCue, setEditingCue] = useState<SubtitleCue | null>(null);
   const [copiedTranscript, setCopiedTranscript] = useState<boolean>(false);
@@ -661,23 +669,106 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   };
 
+  // Zero-Pop Anti-Glitch Seeking Engine
+  // Prevent loud speaker/headphone popping by micro-attenuating audio amplitude during timestamp repositioning
   const handleSeek = (newTime: number) => {
     const el = getMediaElement();
     if (!el) return;
     const totalDuration = duration || el.duration || 0;
     const boundedTime = Math.max(0, Math.min(newTime, totalDuration > 0 ? totalDuration : Infinity));
-    el.currentTime = boundedTime;
-    setCurrentTime(boundedTime);
+
+    const currentVol = isMuted ? 0 : volume;
+    const needsAntiPop = !isMuted && currentVol > 0.02 && !el.paused;
+
+    if (needsAntiPop) {
+      // Instantly drop volume to prevent audio buffer discontinuity crackle
+      el.volume = 0.001;
+      el.currentTime = boundedTime;
+      setCurrentTime(boundedTime);
+
+      if (fadeTimeoutRef.current) {
+        window.clearTimeout(fadeTimeoutRef.current);
+      }
+      fadeTimeoutRef.current = window.setTimeout(() => {
+        if (el && !isMuted) {
+          el.volume = currentVol;
+        }
+      }, 40);
+    } else {
+      el.currentTime = boundedTime;
+      setCurrentTime(boundedTime);
+    }
   };
 
-  const handleProgressBarClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
+  // Calculate precise time from pointer event relative to timeline LTR width
+  const calculateTimeFromEvent = (e: MouseEvent | TouchEvent | React.MouseEvent | React.PointerEvent | PointerEvent) => {
+    if (!progressBarRef.current) return 0;
+    const rect = progressBarRef.current.getBoundingClientRect();
+    if (rect.width <= 0) return 0;
+
+    let clientX = 0;
+    if ("clientX" in e && typeof e.clientX === "number") {
+      clientX = e.clientX;
+    } else if ("touches" in e && (e as TouchEvent).touches.length > 0) {
+      clientX = (e as TouchEvent).touches[0].clientX;
+    }
+
+    // Force strictly LTR calculation: 0 = Left edge, 1 = Right edge
+    const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const totalDuration = duration || getMediaElement()?.duration || 0;
+    return fraction * totalDuration;
+  };
+
+  // Smooth YouTube-like Drag & Scrub pointer handler
+  const handlePointerDownTimeline = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (!progressBarRef.current) return;
+    setIsScrubbing(true);
+
+    const targetTime = calculateTimeFromEvent(e);
+    handleSeek(targetTime);
+
+    const onPointerMove = (ev: PointerEvent) => {
+      ev.preventDefault();
+      const newTime = calculateTimeFromEvent(ev);
+      handleSeek(newTime);
+    };
+
+    const onPointerUp = (ev: PointerEvent) => {
+      ev.preventDefault();
+      setIsScrubbing(false);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+
+    window.addEventListener("pointermove", onPointerMove, { passive: false });
+    window.addEventListener("pointerup", onPointerUp, { passive: false });
+    window.addEventListener("pointercancel", onPointerUp, { passive: false });
+  };
+
+  // Timeline hover position & tooltip
+  const handleTimelinePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!progressBarRef.current) return;
+    const rect = progressBarRef.current.getBoundingClientRect();
     if (rect.width <= 0) return;
-    const clickFraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const el = getMediaElement();
-    const totalDuration = duration || el?.duration || 0;
-    if (totalDuration > 0) {
-      handleSeek(clickFraction * totalDuration);
+    const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const totalDuration = duration || getMediaElement()?.duration || 0;
+    const calculatedTime = fraction * totalDuration;
+
+    setHoverPosition(fraction * 100);
+    setHoverTime(calculatedTime);
+
+    // Find cue text at this hover time
+    const cueAtTime = activeCues.find(c => calculatedTime >= c.startTime && calculatedTime <= c.endTime);
+    setHoverCueText(cueAtTime?.text || null);
+  };
+
+  const handleTimelinePointerLeave = () => {
+    if (!isScrubbing) {
+      setHoverPosition(null);
+      setHoverTime(null);
+      setHoverCueText(null);
     }
   };
 
@@ -686,8 +777,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     if (!el) return;
     const totalDuration = duration || el.duration || Infinity;
     const target = Math.min(Math.max(0, el.currentTime + seconds), totalDuration);
-    el.currentTime = target;
-    setCurrentTime(target);
+    handleSeek(target);
   };
 
   const handleSpeedChange = (speed: number) => {
@@ -704,10 +794,11 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   };
 
   const handleVolumeChange = (newVol: number) => {
-    setVolume(newVol);
-    setIsMuted(newVol === 0);
-    if (videoRef.current) videoRef.current.volume = newVol;
-    if (audioRef.current) audioRef.current.volume = newVol;
+    const clampedVol = Math.max(0, Math.min(1, newVol));
+    setVolume(clampedVol);
+    setIsMuted(clampedVol === 0);
+    if (videoRef.current) videoRef.current.volume = clampedVol;
+    if (audioRef.current) audioRef.current.volume = clampedVol;
   };
 
   const handleToggleFullscreen = () => {
@@ -776,7 +867,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const totalAudios = useMemo(() => files.filter((f) => f.type === "audio").length, [files]);
   const totalSize = useMemo(() => files.reduce((acc, f) => acc + (f.size || 0), 0), [files]);
 
-  // Sync media element events
+  // Sync media element events and buffer indicator
   useEffect(() => {
     const el = currentFile?.type === "video" ? videoRef.current : audioRef.current;
     if (!el) return;
@@ -795,6 +886,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         el.play().catch(console.error);
       }
     };
+    const onProgress = () => {
+      if (el && el.buffered.length > 0 && (duration > 0 || el.duration > 0)) {
+        const totalDur = duration || el.duration;
+        const bufferedEnd = el.buffered.end(el.buffered.length - 1);
+        setBufferedPercent(Math.min(100, (bufferedEnd / totalDur) * 100));
+      }
+    };
     const onEnded = () => {
       if (!isLooping) {
         setIsPlaying(false);
@@ -805,6 +903,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     el.addEventListener("pause", onPause);
     el.addEventListener("timeupdate", onTimeUpdate);
     el.addEventListener("loadedmetadata", onLoadedMetadata);
+    el.addEventListener("progress", onProgress);
     el.addEventListener("ended", onEnded);
 
     return () => {
@@ -812,11 +911,12 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       el.removeEventListener("pause", onPause);
       el.removeEventListener("timeupdate", onTimeUpdate);
       el.removeEventListener("loadedmetadata", onLoadedMetadata);
+      el.removeEventListener("progress", onProgress);
       el.removeEventListener("ended", onEnded);
     };
-  }, [currentFile, playbackRate, isLooping, volume, isMuted, isPlaying]);
+  }, [currentFile, playbackRate, isLooping, volume, isMuted, isPlaying, duration]);
 
-  // Keyboard Shortcuts (Space, K, J, L, C, M, F)
+  // Keyboard Shortcuts (Space, K, J, L, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Numbers 0-9, C, M, F, Esc)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't intercept when user is typing in input or textarea
@@ -827,10 +927,31 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       if (e.code === "Space" || e.key === "k" || e.key === "K") {
         e.preventDefault();
         togglePlay();
-      } else if (e.key === "j" || e.key === "J" || e.code === "ArrowLeft") {
+      } else if (e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        skipSeconds(-10);
+      } else if (e.key === "l" || e.key === "L") {
+        e.preventDefault();
+        skipSeconds(10);
+      } else if (e.code === "ArrowLeft") {
+        e.preventDefault();
         skipSeconds(-5);
-      } else if (e.key === "l" || e.key === "L" || e.code === "ArrowRight") {
+      } else if (e.code === "ArrowRight") {
+        e.preventDefault();
         skipSeconds(5);
+      } else if (e.code === "ArrowUp") {
+        e.preventDefault();
+        handleVolumeChange(Math.min(1, volume + 0.05));
+      } else if (e.code === "ArrowDown") {
+        e.preventDefault();
+        handleVolumeChange(Math.max(0, volume - 0.05));
+      } else if (/^[0-9]$/.test(e.key)) {
+        e.preventDefault();
+        const num = parseInt(e.key, 10);
+        const totalDur = duration || getMediaElement()?.duration || 0;
+        if (totalDur > 0) {
+          handleSeek((num / 10) * totalDur);
+        }
       } else if (e.key === "c" || e.key === "C") {
         setShowSubtitlesOverlay(prev => !prev);
       } else if (e.key === "m" || e.key === "M") {
@@ -846,7 +967,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPlaying, isMuted, currentFile, isImmersiveMode]);
+  }, [isPlaying, isMuted, volume, duration, currentFile, isImmersiveMode]);
 
   // Copy full transcript text
   const handleCopyTranscript = () => {
@@ -1447,20 +1568,88 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     isImmersiveMode ? "p-3 space-y-2.5" : "p-4 space-y-3.5"
                   }`}
                 >
-                  {/* Time Progress Bar */}
-                  <div className="space-y-1">
+                  {/* High-Precision YouTube-Grade Timeline */}
+                  <div className="space-y-1 select-none" dir="ltr">
                     <div
                       ref={progressBarRef}
-                      onClick={handleProgressBarClick}
-                      className="w-full h-2.5 bg-slate-700 hover:h-3.5 rounded-full cursor-pointer transition-all relative overflow-hidden group"
+                      onPointerDown={handlePointerDownTimeline}
+                      onPointerMove={handleTimelinePointerMove}
+                      onPointerLeave={handleTimelinePointerLeave}
+                      className="w-full h-2.5 hover:h-3.5 bg-slate-700/70 rounded-full cursor-pointer transition-all relative group flex items-center touch-none py-1"
                     >
+                      {/* 1. Buffered Stream Track */}
                       <div
-                        className="h-full bg-linear-to-r from-blue-500 via-indigo-500 to-purple-500 rounded-full relative"
+                        className="h-full bg-slate-500/40 rounded-full absolute left-0 top-0 pointer-events-none transition-all duration-300"
+                        style={{ width: `${bufferedPercent}%` }}
+                      />
+
+                      {/* 2. Hover Ghost Preview Track */}
+                      {hoverPosition !== null && (
+                        <div
+                          className="h-full bg-white/20 rounded-full absolute left-0 top-0 pointer-events-none"
+                          style={{ width: `${hoverPosition}%` }}
+                        />
+                      )}
+
+                      {/* 3. Subtitle Cue Tick Markers on Timeline */}
+                      {duration > 0 &&
+                        activeCues.map((cue) => {
+                          const cuePercent = (cue.startTime / duration) * 100;
+                          return (
+                            <div
+                              key={cue.id}
+                              style={{ left: `${cuePercent}%` }}
+                              className="w-[2px] h-full bg-amber-400/60 absolute top-0 pointer-events-none z-10 rounded-full"
+                              title={cue.text}
+                            />
+                          );
+                        })}
+
+                      {/* 4. Active Played Progress Track */}
+                      <div
+                        className="h-full bg-linear-to-r from-blue-500 via-indigo-500 to-purple-500 rounded-full absolute left-0 top-0 shadow-sm pointer-events-none"
                         style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
                       />
+
+                      {/* 5. Scrubber Handle / Thumb (Scales on hover or active scrubbing) */}
+                      <div
+                        className={`w-4 h-4 rounded-full bg-white border-2 border-indigo-600 shadow-lg shadow-black/60 absolute top-1/2 -translate-y-1/2 -translate-x-1/2 pointer-events-none transition-transform duration-100 ${
+                          isScrubbing
+                            ? "scale-125 ring-4 ring-indigo-500/30"
+                            : "scale-0 group-hover:scale-100"
+                        }`}
+                        style={{ left: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+                      />
+
+                      {/* 6. Hover Timestamp Tooltip Preview */}
+                      {hoverPosition !== null && hoverTime !== null && (
+                        <div
+                          style={{ left: `${Math.max(6, Math.min(94, hoverPosition))}%` }}
+                          className="absolute -top-11 -translate-x-1/2 px-2.5 py-1 bg-slate-950/95 border border-slate-700 text-white rounded-lg shadow-2xl flex flex-col items-center pointer-events-none z-30 whitespace-nowrap animate-fadeIn"
+                        >
+                          <span className="font-mono text-xs font-bold text-blue-300">
+                            {formatSecondsToTime(hoverTime)}
+                          </span>
+                          {hoverCueText && (
+                            <span className="text-[10px] text-slate-300 max-w-[180px] truncate mt-0.5 font-medium">
+                              {hoverCueText}
+                            </span>
+                          )}
+                          <div className="w-2 h-2 bg-slate-950 rotate-45 border-r border-b border-slate-700 absolute -bottom-1" />
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
-                      <span>{formatSecondsToTime(currentTime)}</span>
+
+                    {/* Timeline Info Bar (Time elapsed / Duration + Scrubbing indicator) */}
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono pt-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-white font-bold">{formatSecondsToTime(currentTime)}</span>
+                        {isScrubbing && (
+                          <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.2 rounded font-sans font-bold animate-pulse">
+                            تمرير مباشر
+                          </span>
+                        )}
+                      </div>
                       <span>{formatSecondsToTime(duration)}</span>
                     </div>
                   </div>

@@ -496,17 +496,26 @@ async function startServer() {
           "Accept-Ranges": "bytes",
           "Content-Length": chunksize,
           "Content-Type": contentType,
+          "Cache-Control": "public, max-age=3600",
         };
         res.writeHead(206, head);
         fileStream.pipe(res);
+        req.on("close", () => {
+          fileStream.destroy();
+        });
       } else {
         const head = {
           "Content-Length": fileSize,
           "Content-Type": contentType,
           "Accept-Ranges": "bytes",
+          "Cache-Control": "public, max-age=3600",
         };
         res.writeHead(200, head);
-        fs.createReadStream(filePath).pipe(res);
+        const fullStream = fs.createReadStream(filePath);
+        fullStream.pipe(res);
+        req.on("close", () => {
+          fullStream.destroy();
+        });
       }
     } catch (e: any) {
       console.error("Streaming error:", e);
