@@ -257,6 +257,69 @@ export function computeSubtitleCSS(
   };
 }
 
+// ---------------------------------------------------------
+// Studio-Grade Web Audio Graph Engine (Real Digital Gain Booster & Voice Clarifier)
+// Supports up to 300% (3.0x) amplification with dynamic limiter & speech EQ
+// ---------------------------------------------------------
+interface WebAudioGraph {
+  ctx: AudioContext;
+  source: MediaElementAudioSourceNode;
+  gainNode: GainNode;
+  speechFilter: BiquadFilterNode;
+  compressor: DynamicsCompressorNode;
+}
+
+const audioGraphWeakMap = new WeakMap<HTMLMediaElement, WebAudioGraph>();
+
+function getOrCreateAudioGraph(el: HTMLMediaElement | null): WebAudioGraph | null {
+  if (!el || typeof window === "undefined") return null;
+  try {
+    const existing = audioGraphWeakMap.get(el);
+    if (existing && existing.ctx.state !== "closed") {
+      if (existing.ctx.state === "suspended") {
+        existing.ctx.resume().catch(() => {});
+      }
+      return existing;
+    }
+
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return null;
+
+    const ctx = new AudioContextClass();
+    const source = ctx.createMediaElementSource(el);
+
+    // Speech / Voice intelligibility peaking filter at 2.4 kHz (human vocal clarity range)
+    const speechFilter = ctx.createBiquadFilter();
+    speechFilter.type = "peaking";
+    speechFilter.frequency.setValueAtTime(2400, ctx.currentTime);
+    speechFilter.Q.setValueAtTime(1.4, ctx.currentTime);
+    speechFilter.gain.setValueAtTime(0, ctx.currentTime);
+
+    const gainNode = ctx.createGain();
+
+    // Studio Dynamic Compressor / Brickwall Limiter to avoid distortion at 200%-300% boost
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.setValueAtTime(-1.5, ctx.currentTime);
+    compressor.knee.setValueAtTime(12, ctx.currentTime);
+    compressor.ratio.setValueAtTime(16, ctx.currentTime);
+    compressor.attack.setValueAtTime(0.003, ctx.currentTime);
+    compressor.release.setValueAtTime(0.15, ctx.currentTime);
+
+    // Graph routing: Source -> Speech Filter -> Gain Booster -> Compressor Limiter -> Output
+    source.connect(speechFilter);
+    speechFilter.connect(gainNode);
+    gainNode.connect(compressor);
+    compressor.connect(ctx.destination);
+
+    const graph: WebAudioGraph = { ctx, source, gainNode, speechFilter, compressor };
+    audioGraphWeakMap.set(el, graph);
+    return graph;
+  } catch (err) {
+    console.warn("Web Audio Booster fallback notice:", err);
+    return null;
+  }
+}
+
 interface ActiveGestureOverlay {
   id: number;
   type:
@@ -312,6 +375,14 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const [isMuted, setIsMuted] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem("media_player_is_muted");
+      return saved !== null ? JSON.parse(saved) : false;
+    } catch {
+      return false;
+    }
+  });
+  const [voiceClarifier, setVoiceClarifier] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("media_player_voice_clarifier");
       return saved !== null ? JSON.parse(saved) : false;
     } catch {
       return false;
@@ -1818,8 +1889,36 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const getMediaElement = () => (currentFile?.type === "video" ? videoRef.current : audioRef.current);
 
   // ---------------------------------------------------------
-  // High-Fidelity Direct Audio Engine & Playback Controls
+  // High-Fidelity Studio Audio Engine & Playback Controls
   // ---------------------------------------------------------
+  const syncAudioGain = useCallback((targetVol: number, targetMute: boolean, clarifierActive: boolean) => {
+    const el = getMediaElement();
+    if (!el) return;
+
+    const graph = getOrCreateAudioGraph(el);
+    const effectiveGain = targetMute ? 0 : targetVol; // Can be 0 to 3.0 (0% to 300%)
+
+    if (graph && graph.ctx.state !== "closed") {
+      if (graph.ctx.state === "suspended") {
+        graph.ctx.resume().catch(() => {});
+      }
+      // When Web Audio Graph is active, native volume is set to 1.0, and GainNode handles 0.0 to 3.0x
+      el.volume = 1.0;
+      el.muted = false;
+
+      const now = graph.ctx.currentTime;
+      graph.gainNode.gain.cancelScheduledValues(now);
+      graph.gainNode.gain.linearRampToValueAtTime(Math.max(0.0001, effectiveGain), now + 0.03);
+
+      // Speech clarifier EQ boost (+6.5dB at speech intelligibility center)
+      graph.speechFilter.gain.setValueAtTime(clarifierActive ? 6.5 : 0.0, now);
+    } else {
+      // Direct native fallback
+      el.muted = targetMute;
+      el.volume = Math.min(1, Math.max(0, targetMute ? 0 : targetVol > 1 ? 1 : targetVol));
+    }
+  }, [currentFile]);
+
   const smoothPause = useCallback((onPaused?: () => void) => {
     const el = getMediaElement();
     if (!el) return;
@@ -1831,8 +1930,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const smoothPlay = useCallback(() => {
     const el = getMediaElement();
     if (!el) return;
-    el.muted = isMuted;
-    el.volume = Math.min(1, Math.max(0, isMuted ? 0 : volume > 1 ? 1 : volume));
+
+    syncAudioGain(volume, isMuted, voiceClarifier);
 
     const playPromise = el.play();
     if (playPromise !== undefined) {
@@ -1842,7 +1941,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           console.warn("Playback interrupted or prevented:", err);
         });
     }
-  }, [currentFile, isMuted, volume]);
+  }, [currentFile, isMuted, volume, voiceClarifier, syncAudioGain]);
 
   const togglePlay = useCallback(() => {
     const el = getMediaElement();
@@ -2024,17 +2123,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     } catch (e) {
       console.error(e);
     }
-    const el = getMediaElement();
-    if (el) {
-      el.muted = nextMute;
-      el.volume = Math.min(1, Math.max(0, nextMute ? 0 : volume > 1 ? 1 : volume));
-    }
+    syncAudioGain(volume, nextMute, voiceClarifier);
     triggerHud(nextMute ? "كتم الصوت" : "إلغاء الكتم", "M");
-  }, [isMuted, volume, triggerHud]);
+  }, [isMuted, volume, voiceClarifier, syncAudioGain, triggerHud]);
 
   const handleVolumeChange = useCallback((newVol: number) => {
-    // Supports volume up to 2.0 (200% Super Boost)
-    const clampedVol = Math.max(0, Math.min(2.0, newVol));
+    // Supports volume up to 3.0 (300% Super Booster)
+    const clampedVol = Math.max(0, Math.min(3.0, newVol));
     setVolume(clampedVol);
     const nextMute = clampedVol === 0;
     setIsMuted(nextMute);
@@ -2045,16 +2140,26 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       console.error(e);
     }
 
-    const el = getMediaElement();
-    if (el) {
-      el.muted = nextMute;
-      el.volume = Math.min(1, Math.max(0, nextMute ? 0 : clampedVol > 1 ? 1 : clampedVol));
-    }
+    syncAudioGain(clampedVol, nextMute, voiceClarifier);
 
-    if (clampedVol > 1.0) {
-      triggerHud(`تعزيز الصوت: ${Math.round(clampedVol * 100)}% ⚡`, "BOOST");
+    if (clampedVol > 2.0) {
+      triggerHud(`تضخيم فائق: ${Math.round(clampedVol * 100)}% 🚀`, "MAX");
+    } else if (clampedVol > 1.0) {
+      triggerHud(`مضخم الصوت: ${Math.round(clampedVol * 100)}% ⚡`, "BOOST");
     }
-  }, [triggerHud]);
+  }, [voiceClarifier, syncAudioGain, triggerHud]);
+
+  const toggleVoiceClarifier = useCallback(() => {
+    const next = !voiceClarifier;
+    setVoiceClarifier(next);
+    try {
+      localStorage.setItem("media_player_voice_clarifier", JSON.stringify(next));
+    } catch (e) {
+      console.error(e);
+    }
+    syncAudioGain(volume, isMuted, next);
+    triggerHud(next ? "تفعيل توضيح مخارج الحروف 🎙️" : "تعطيل توضيح الكلام", "EQ");
+  }, [voiceClarifier, volume, isMuted, syncAudioGain, triggerHud]);
 
   const handleToggleFullscreen = () => {
     const target = playerSectionRef.current || videoRef.current;
@@ -2280,8 +2385,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
     el.playbackRate = playbackRate;
     el.loop = isLooping;
-    el.volume = Math.min(1, Math.max(0, isMuted ? 0 : volume > 1 ? 1 : volume));
-    el.muted = isMuted;
+    syncAudioGain(volume, isMuted, voiceClarifier);
 
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
@@ -2299,6 +2403,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     };
     const onLoadedMetadata = () => {
       setDuration(el.duration);
+      syncAudioGain(volume, isMuted, voiceClarifier);
       if (isPlaying) {
         el.play().catch(console.error);
       }
@@ -2331,7 +2436,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       el.removeEventListener("progress", onProgress);
       el.removeEventListener("ended", onEnded);
     };
-  }, [currentFile, playbackRate, isLooping, volume, isMuted, isPlaying, duration, smoothPause]);
+  }, [currentFile, playbackRate, isLooping, volume, isMuted, voiceClarifier, isPlaying, duration, smoothPause, syncAudioGain]);
 
   // Keyboard Shortcuts ([ = Prev Sentence, ] = Next Sentence, R = Replay Sentence Only, Space = Play/Pause, + Pro controls)
   useEffect(() => {
@@ -3388,11 +3493,11 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     </div>
                   )}
 
-                  {/* Samsung One UI-style Floating Minimal Horizontal Volume Slider HUD */}
+                  {/* Studio-Grade Samsung-Style Floating Volume & Audio Booster HUD */}
                   {showSamsungVolumeBar && (
                     <div
                       dir="ltr"
-                      className="absolute top-4 sm:top-6 inset-x-4 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 z-40 max-w-[290px] sm:max-w-xs w-auto pointer-events-auto transition-all duration-200 ease-out"
+                      className="absolute top-4 sm:top-6 inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 z-40 max-w-[340px] sm:max-w-sm w-auto pointer-events-auto transition-all duration-200 ease-out"
                       onPointerDown={(e) => {
                         e.stopPropagation();
                         if (samsungVolumeTimerRef.current) window.clearTimeout(samsungVolumeTimerRef.current);
@@ -3408,86 +3513,155 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                         triggerSamsungVolumeBar();
                       }}
                     >
-                      <div className="bg-slate-950/90 backdrop-blur-xl border border-white/20 rounded-full px-3.5 py-2 shadow-2xl flex items-center gap-3 text-white">
-                        {/* Interactive Mute / Icon Toggle */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleMute();
-                            triggerSamsungVolumeBar();
-                          }}
-                          className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-transform active:scale-90 cursor-pointer ${
-                            isMuted || volume === 0
-                              ? "bg-rose-500/20 text-rose-300"
-                              : volume > 1.0
-                              ? "bg-amber-500/20 text-amber-300"
-                              : "bg-blue-500/20 text-blue-300"
-                          }`}
-                          title={isMuted ? "Unmute" : "Mute"}
-                        >
-                          {isMuted || volume === 0 ? (
-                            <VolumeX className="w-4 h-4" />
-                          ) : volume > 1.0 ? (
-                            <Volume2 className="w-4 h-4" />
-                          ) : volume < 0.5 ? (
-                            <Volume1 className="w-4 h-4" />
-                          ) : (
-                            <Volume2 className="w-4 h-4" />
-                          )}
-                        </button>
+                      <div className="bg-slate-950/95 backdrop-blur-2xl border border-white/20 rounded-2xl p-3 shadow-2xl flex flex-col gap-2.5 text-white">
+                        {/* Top Row: Mute Icon + Range Slider + Percentage Badge */}
+                        <div className="flex items-center gap-3">
+                          {/* Interactive Mute / Icon Toggle */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleMute();
+                              triggerSamsungVolumeBar();
+                            }}
+                            className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-transform active:scale-90 cursor-pointer ${
+                              isMuted || volume === 0
+                                ? "bg-rose-500/20 text-rose-300"
+                                : volume > 2.0
+                                ? "bg-purple-500/20 text-purple-300 ring-1 ring-purple-500/50"
+                                : volume > 1.0
+                                ? "bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/50"
+                                : "bg-blue-500/20 text-blue-300"
+                            }`}
+                            title={isMuted ? "إلغاء الكتم" : "كتم الصوت"}
+                          >
+                            {isMuted || volume === 0 ? (
+                              <VolumeX className="w-4 h-4" />
+                            ) : volume > 2.0 ? (
+                              <Zap className="w-4 h-4 text-purple-400 fill-current" />
+                            ) : volume > 1.0 ? (
+                              <Volume2 className="w-4 h-4 text-amber-400" />
+                            ) : volume < 0.5 ? (
+                              <Volume1 className="w-4 h-4" />
+                            ) : (
+                              <Volume2 className="w-4 h-4" />
+                            )}
+                          </button>
 
-                        {/* Minimalist Horizontal Range Slider */}
-                        <div className="relative flex-1 flex items-center h-6 min-w-[120px]">
-                          <input
-                            type="range"
-                            min="0"
-                            max="2.0"
-                            step="0.05"
-                            value={isMuted ? 0 : volume}
-                            dir="ltr"
-                            onChange={(e) => {
-                              e.stopPropagation();
-                              handleVolumeChange(parseFloat(e.target.value));
-                              triggerSamsungVolumeBar();
-                            }}
-                            onPointerDown={(e) => {
-                              e.stopPropagation();
-                              if (samsungVolumeTimerRef.current) window.clearTimeout(samsungVolumeTimerRef.current);
-                            }}
-                            onPointerUp={(e) => {
-                              e.stopPropagation();
-                              triggerSamsungVolumeBar();
-                            }}
-                            onTouchStart={(e) => {
-                              e.stopPropagation();
-                              if (samsungVolumeTimerRef.current) window.clearTimeout(samsungVolumeTimerRef.current);
-                            }}
-                            onTouchEnd={(e) => {
-                              e.stopPropagation();
-                              triggerSamsungVolumeBar();
-                            }}
-                            className="w-full h-2.5 bg-slate-800 rounded-full appearance-none cursor-pointer accent-blue-400 hover:accent-blue-300 transition-all"
-                            style={{
-                              background: `linear-gradient(to right, ${
-                                volume > 1.0 ? '#f59e0b' : '#3b82f6'
-                              } 0%, ${
-                                volume > 1.0 ? '#fbbf24' : '#60a5fa'
-                              } ${(Math.min(volume, 2.0) / 2.0) * 100}%, rgba(51, 65, 85, 0.7) ${(Math.min(volume, 2.0) / 2.0) * 100}%, rgba(51, 65, 85, 0.7) 100%)`
-                            }}
-                          />
+                          {/* Minimalist Horizontal Range Slider (0% to 300%) */}
+                          <div className="relative flex-1 flex items-center h-6 min-w-[130px]">
+                            <input
+                              type="range"
+                              min="0"
+                              max="3.0"
+                              step="0.05"
+                              value={isMuted ? 0 : volume}
+                              dir="ltr"
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                handleVolumeChange(parseFloat(e.target.value));
+                                triggerSamsungVolumeBar();
+                              }}
+                              onPointerDown={(e) => {
+                                e.stopPropagation();
+                                if (samsungVolumeTimerRef.current) window.clearTimeout(samsungVolumeTimerRef.current);
+                              }}
+                              onPointerUp={(e) => {
+                                e.stopPropagation();
+                                triggerSamsungVolumeBar();
+                              }}
+                              onTouchStart={(e) => {
+                                e.stopPropagation();
+                                if (samsungVolumeTimerRef.current) window.clearTimeout(samsungVolumeTimerRef.current);
+                              }}
+                              onTouchEnd={(e) => {
+                                e.stopPropagation();
+                                triggerSamsungVolumeBar();
+                              }}
+                              className="w-full h-2.5 bg-slate-800 rounded-full appearance-none cursor-pointer accent-blue-400 hover:accent-blue-300 transition-all"
+                              style={{
+                                background: `linear-gradient(to right, ${
+                                  volume > 2.0 ? '#a855f7' : volume > 1.0 ? '#f59e0b' : '#3b82f6'
+                                } 0%, ${
+                                  volume > 2.0 ? '#ec4899' : volume > 1.0 ? '#fbbf24' : '#60a5fa'
+                                } ${(Math.min(volume, 3.0) / 3.0) * 100}%, rgba(51, 65, 85, 0.7) ${(Math.min(volume, 3.0) / 3.0) * 100}%, rgba(51, 65, 85, 0.7) 100%)`
+                              }}
+                            />
+                          </div>
+
+                          {/* Percentage Indicator Badge */}
+                          <span
+                            className={`text-xs font-mono font-black shrink-0 min-w-[44px] text-right px-1.5 py-0.5 rounded ${
+                              isMuted || volume === 0
+                                ? "text-rose-400 bg-rose-950/40 border border-rose-800/40"
+                                : volume > 2.0
+                                ? "text-purple-300 bg-purple-950/60 border border-purple-500/40"
+                                : volume > 1.0
+                                ? "text-amber-300 bg-amber-950/60 border border-amber-500/40"
+                                : "text-blue-300 bg-blue-950/40 border border-blue-800/40"
+                            }`}
+                          >
+                            {isMuted ? "0%" : `${Math.round(volume * 100)}%`}
+                          </span>
                         </div>
 
-                        {/* Percentage Indicator */}
-                        <span className={`text-xs font-mono font-bold shrink-0 min-w-[38px] text-right ${
-                          isMuted || volume === 0
-                            ? "text-rose-400"
-                            : volume > 1.0
-                            ? "text-amber-400"
-                            : "text-blue-300"
-                        }`}>
-                          {isMuted ? "0%" : `${Math.round(volume * 100)}%`}
-                        </span>
+                        {/* Bottom Row: Quick Presets & Speech Clarifier Button */}
+                        <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-800/80">
+                          {/* Quick Volume Presets */}
+                          <div className="flex items-center gap-1">
+                            {[
+                              { label: "100%", val: 1.0, title: "صوت قياسي طبيعي" },
+                              { label: "150%", val: 1.5, title: "تعزيز الصوت" },
+                              { label: "200% ⚡", val: 2.0, title: "مضخم صوت قوي" },
+                              { label: "300% 🚀", val: 3.0, title: "أقصى قوة تضخيم" }
+                            ].map((preset) => {
+                              const isActive = Math.abs(volume - preset.val) < 0.05 && !isMuted;
+                              return (
+                                <button
+                                  key={preset.val}
+                                  type="button"
+                                  title={preset.title}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleVolumeChange(preset.val);
+                                    triggerSamsungVolumeBar();
+                                  }}
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                                    isActive
+                                      ? preset.val > 2.0
+                                        ? "bg-purple-600 text-white shadow-xs"
+                                        : preset.val > 1.0
+                                        ? "bg-amber-500 text-slate-950 shadow-xs"
+                                        : "bg-blue-600 text-white shadow-xs"
+                                      : "bg-slate-800/90 hover:bg-slate-750 text-slate-300 border border-slate-700/50"
+                                  }`}
+                                >
+                                  {preset.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* Voice Clarifier Toggle (Speech Intelligibility EQ) */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleVoiceClarifier();
+                              triggerSamsungVolumeBar();
+                            }}
+                            title="توضيح مخارج الحروف وترددات الكلام البشري لتسهيل سماع الحوار"
+                            className={`px-2 py-0.5 rounded text-[10.5px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                              voiceClarifier
+                                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow-xs"
+                                : "bg-slate-800/80 hover:bg-slate-750 text-slate-400 border border-slate-700/40"
+                            }`}
+                          >
+                            <span>🎙️</span>
+                            <span className="hidden sm:inline">توضيح الكلام</span>
+                            <span className="sm:hidden">توضيح</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -3496,6 +3670,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   {currentFile.type === "video" ? (
                     <video
                       ref={videoRef}
+                      crossOrigin="anonymous"
                       src={currentFile.url && (currentFile.url.startsWith("http://") || currentFile.url.startsWith("https://") || currentFile.url.startsWith("blob:")) ? currentFile.url : `/api/media/stream/${currentFile.filename}`}
                       className={
                         isFullscreen
@@ -3516,6 +3691,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     >
                       <audio
                         ref={audioRef}
+                        crossOrigin="anonymous"
                         src={currentFile.url && (currentFile.url.startsWith("http://") || currentFile.url.startsWith("https://") || currentFile.url.startsWith("blob:")) ? currentFile.url : `/api/media/stream/${currentFile.filename}`}
                         preload="auto"
                       />
