@@ -85,6 +85,19 @@ export interface MediaExplorerViewProps {
 const videoThumbnailCache: Record<string, string> = {};
 const mediaMetadataCache: Record<string, { duration: number; width?: number; height?: number }> = {};
 
+// Helper to resolve media stream URL for inspector and thumbnails
+export function resolveMediaFileUrl(file: MediaFile | null | undefined): string {
+  if (!file) return "";
+  if (file.url && file.url.startsWith("blob:")) return file.url;
+  if (file.url && (file.url.startsWith("http://") || file.url.startsWith("https://"))) {
+    return `/api/media/stream-proxy?url=${encodeURIComponent(file.url)}`;
+  }
+  if (file.filename) {
+    return `/api/media/stream/${encodeURIComponent(file.filename)}`;
+  }
+  return file.url || "";
+}
+
 export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
   files,
   folders,
@@ -409,7 +422,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
     const videoFiles = files.filter((f) => f.type === "video");
     videoFiles.slice(0, 15).forEach((vf) => {
       if (!videoThumbnailCache[vf.id]) {
-        generateVideoThumbnail(vf.id, vf.url);
+        generateVideoThumbnail(vf.id, resolveMediaFileUrl(vf));
       }
     });
   }, [files]);
@@ -2363,7 +2376,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                     <div className="relative w-full h-44 bg-black flex items-center justify-center">
                       <video
                         ref={previewMediaRef as any}
-                        src={previewTargetFile.url}
+                        src={resolveMediaFileUrl(previewTargetFile)}
                         controls
                         onTimeUpdate={(e) => {
                           const target = e.currentTarget;
@@ -2396,7 +2409,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                       </div>
                       <audio
                         ref={previewMediaRef as any}
-                        src={previewTargetFile.url}
+                        src={resolveMediaFileUrl(previewTargetFile)}
                         controls
                         onTimeUpdate={(e) => {
                           const target = e.currentTarget;

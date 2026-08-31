@@ -260,6 +260,26 @@ export function computeSubtitleCSS(
 }
 
 // ---------------------------------------------------------
+// Fast & Universal Media Stream URL Resolver
+// Routes external/Gradio URLs through stream-proxy with HTTP 206 Range support and CORS
+// ---------------------------------------------------------
+export function resolveMediaStreamUrl(file: MediaFile | null | undefined): string {
+  if (!file) return "";
+  if (file.url && file.url.startsWith("blob:")) {
+    return file.url;
+  }
+  if (file.url && (file.url.startsWith("http://") || file.url.startsWith("https://"))) {
+    // If it's a remote URL or local Gradio URL (e.g., http://192.168.0.159:7861/videos/...),
+    // proxy it through /api/media/stream-proxy to enable full HTTP 206 Partial Content (Range seeks) & CORS
+    return `/api/media/stream-proxy?url=${encodeURIComponent(file.url)}`;
+  }
+  if (file.filename) {
+    return `/api/media/stream/${encodeURIComponent(file.filename)}`;
+  }
+  return file.url || "";
+}
+
+// ---------------------------------------------------------
 // Studio-Grade Web Audio Graph Engine (Real Digital Gain Booster & Voice Clarifier)
 // Supports up to 300% (3.0x) amplification with dynamic limiter & speech EQ
 // ---------------------------------------------------------
@@ -288,7 +308,14 @@ function getOrCreateAudioGraph(el: HTMLMediaElement | null): WebAudioGraph | nul
     if (!AudioContextClass) return null;
 
     const ctx = new AudioContextClass();
-    const source = ctx.createMediaElementSource(el);
+    let source: MediaElementAudioSourceNode;
+    try {
+      source = ctx.createMediaElementSource(el);
+    } catch (sourceErr) {
+      console.warn("createMediaElementSource skipped (e.g. cross-origin/CORS fallback):", sourceErr);
+      try { ctx.close(); } catch {}
+      return null;
+    }
 
     // Speech / Voice intelligibility peaking filter at 2.4 kHz (human vocal clarity range)
     const speechFilter = ctx.createBiquadFilter();
@@ -2048,28 +2075,32 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const el = getMediaElement();
     if (!el) return;
 
-    const graph = getOrCreateAudioGraph(el);
     const effectiveGain = targetMute ? 0 : targetVol; // Can be 0 to 3.0 (0% to 300%)
 
-    if (graph && graph.ctx.state !== "closed") {
-      if (graph.ctx.state === "suspended") {
-        graph.ctx.resume().catch(() => {});
+    // Only engage Web Audio Graph if super volume booster (>100%) or voice clarifier is active
+    if (effectiveGain > 1.0 || clarifierActive) {
+      const graph = getOrCreateAudioGraph(el);
+      if (graph && graph.ctx.state !== "closed") {
+        if (graph.ctx.state === "suspended") {
+          graph.ctx.resume().catch(() => {});
+        }
+        // When Web Audio Graph is active, native volume is set to 1.0, and GainNode handles 0.0 to 3.0x
+        el.volume = 1.0;
+        el.muted = false;
+
+        const now = graph.ctx.currentTime;
+        graph.gainNode.gain.cancelScheduledValues(now);
+        graph.gainNode.gain.linearRampToValueAtTime(Math.max(0.0001, effectiveGain), now + 0.03);
+
+        // Speech clarifier EQ boost (+6.5dB at speech intelligibility center)
+        graph.speechFilter.gain.setValueAtTime(clarifierActive ? 6.5 : 0.0, now);
+        return;
       }
-      // When Web Audio Graph is active, native volume is set to 1.0, and GainNode handles 0.0 to 3.0x
-      el.volume = 1.0;
-      el.muted = false;
-
-      const now = graph.ctx.currentTime;
-      graph.gainNode.gain.cancelScheduledValues(now);
-      graph.gainNode.gain.linearRampToValueAtTime(Math.max(0.0001, effectiveGain), now + 0.03);
-
-      // Speech clarifier EQ boost (+6.5dB at speech intelligibility center)
-      graph.speechFilter.gain.setValueAtTime(clarifierActive ? 6.5 : 0.0, now);
-    } else {
-      // Direct native fallback
-      el.muted = targetMute;
-      el.volume = Math.min(1, Math.max(0, targetMute ? 0 : targetVol > 1 ? 1 : targetVol));
     }
+
+    // Direct native fallback - 100% stable, zero CORS restriction, hardware-accelerated
+    el.muted = targetMute;
+    el.volume = Math.min(1, Math.max(0, targetMute ? 0 : targetVol > 1 ? 1 : targetVol));
   }, [currentFile]);
 
   const smoothPause = useCallback((onPaused?: () => void) => {
@@ -3882,8 +3913,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   {currentFile.type === "video" ? (
                     <video
                       ref={videoRef}
-                      crossOrigin="anonymous"
-                      src={currentFile.url && (currentFile.url.startsWith("http://") || currentFile.url.startsWith("https://") || currentFile.url.startsWith("blob:")) ? currentFile.url : `/api/media/stream/${currentFile.filename}`}
+                      src={resolveMediaStreamUrl(currentFile)}
                       className={
                         isFullscreen
                           ? "w-full h-full object-contain pointer-events-none"
@@ -3891,7 +3921,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           ? "w-full h-full object-contain cursor-pointer"
                           : "w-full max-h-[500px] object-contain cursor-pointer"
                       }
-                      preload="auto"
+                      preload="metadata"
                       playsInline
                     />
                   ) : (
@@ -3903,9 +3933,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     >
                       <audio
                         ref={audioRef}
-                        crossOrigin="anonymous"
-                        src={currentFile.url && (currentFile.url.startsWith("http://") || currentFile.url.startsWith("https://") || currentFile.url.startsWith("blob:")) ? currentFile.url : `/api/media/stream/${currentFile.filename}`}
-                        preload="auto"
+                        src={resolveMediaStreamUrl(currentFile)}
+                        preload="metadata"
                       />
 
                       {/* Rotating Vinyl Record Graphic */}
@@ -4094,7 +4123,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                               <div className="w-40 sm:w-44 h-24 sm:h-26 bg-black rounded-md overflow-hidden relative border border-slate-800">
                                 <video
                                   ref={previewVideoRef}
-                                  src={currentFile.url && (currentFile.url.startsWith("http://") || currentFile.url.startsWith("https://") || currentFile.url.startsWith("blob:")) ? currentFile.url : `/api/media/stream/${currentFile.filename}`}
+                                  src={resolveMediaStreamUrl(currentFile)}
                                   className="w-full h-full object-cover"
                                   muted
                                   preload="metadata"

@@ -713,6 +713,59 @@ async function startServer() {
     }
   });
 
+  // 5.1 Stream remote or Gradio media URL with full HTTP Range support, CORS, and chunking
+  app.get("/api/media/stream-proxy", async (req, res) => {
+    try {
+      const targetUrl = req.query.url as string;
+      if (!targetUrl || (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://"))) {
+        return res.status(400).send("Invalid target URL");
+      }
+
+      // Universal CORS headers so the browser video player never gets blocked
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type, Accept");
+      res.setHeader("Accept-Ranges", "bytes");
+
+      const range = req.headers.range;
+      const headers: Record<string, string> = {};
+      if (range) {
+        headers["Range"] = range;
+      }
+
+      const remoteRes = await fetch(targetUrl, { headers });
+
+      res.status(remoteRes.status);
+      remoteRes.headers.forEach((value, key) => {
+        const lower = key.toLowerCase();
+        if (["content-type", "content-length", "content-range", "accept-ranges", "cache-control", "last-modified", "etag"].includes(lower)) {
+          res.setHeader(key, value);
+        }
+      });
+
+      if (!res.getHeader("Content-Type")) {
+        const lowerUrl = targetUrl.toLowerCase();
+        if (lowerUrl.endsWith(".mp4")) res.setHeader("Content-Type", "video/mp4");
+        else if (lowerUrl.endsWith(".webm")) res.setHeader("Content-Type", "video/webm");
+        else if (lowerUrl.endsWith(".mkv")) res.setHeader("Content-Type", "video/x-matroska");
+        else if (lowerUrl.endsWith(".mp3")) res.setHeader("Content-Type", "audio/mpeg");
+        else if (lowerUrl.endsWith(".wav")) res.setHeader("Content-Type", "audio/wav");
+      }
+
+      if (remoteRes.body) {
+        const { Readable } = await import("stream");
+        Readable.fromWeb(remoteRes.body as any).pipe(res);
+      } else {
+        res.end();
+      }
+    } catch (err: any) {
+      console.error("Stream proxy error:", err);
+      if (!res.headersSent) {
+        res.status(500).send("Failed to proxy media stream");
+      }
+    }
+  });
+
   // 6. Download media file
   app.get("/api/media/download/:id", (req, res) => {
     try {
