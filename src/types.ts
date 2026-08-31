@@ -302,6 +302,14 @@ export interface MediaSubtitleTrack {
   uploadedAt?: string;
 }
 
+export interface MediaFolder {
+  id: string;
+  name: string;
+  color?: string;
+  createdAt: string;
+  parentId?: string | null;
+}
+
 export interface MediaFile {
   id: string;
   filename: string;
@@ -314,6 +322,10 @@ export interface MediaFile {
   url: string;
   duration?: number;
   subtitles?: MediaSubtitleTrack[];
+  folderId?: string;
+  primaryTrackId?: string;
+  secondaryTrackId?: string;
+  showDualSubtitles?: boolean;
 }
 
 

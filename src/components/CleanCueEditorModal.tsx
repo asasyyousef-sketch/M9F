@@ -128,7 +128,7 @@ export const CleanCueEditorModal: React.FC<CleanCueEditorModalProps> = ({
   const duration = Math.max(0, Math.round((endTime - startTime) * 10) / 10);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
       <div
         className="bg-slate-900 border border-slate-700/90 text-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-4.5 animate-scaleUp"
         dir="rtl"
@@ -140,7 +140,7 @@ export const CleanCueEditorModal: React.FC<CleanCueEditorModalProps> = ({
               <Clock className="w-4.5 h-4.5" />
             </div>
             <div>
-              <h3 className="font-black text-white text-sm sm:text-base">تعديل توقيت الجملة</h3>
+              <h3 className="font-black text-white text-sm sm:text-base">تعديل الجملة</h3>
               <p className="text-[11px] text-slate-400">
                 المسار: <span className="text-blue-400 font-bold">{activeTrackLabel}</span> • مدة الظهور:{" "}
                 <span className="text-emerald-400 font-bold font-mono">{duration} ثانية</span>

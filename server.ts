@@ -284,6 +284,9 @@ async function startServer() {
     url: string;
     duration?: number;
     subtitles?: ServerSubtitleTrack[];
+    primaryTrackId?: string;
+    secondaryTrackId?: string;
+    showDualSubtitles?: boolean;
   }
 
   function loadMediaMeta(): ServerMediaFile[] {
@@ -612,8 +615,14 @@ async function startServer() {
         uploadedAt: new Date().toISOString()
       };
 
-      // Add new track to subtitles array
-      item.subtitles.unshift(newTrack);
+      // Add new track to subtitles array (maintain original primary track as first)
+      if (!item.primaryTrackId) {
+        item.primaryTrackId = newTrack.id;
+      } else if (!item.secondaryTrackId && item.subtitles.length >= 1) {
+        item.secondaryTrackId = newTrack.id;
+      }
+
+      item.subtitles.push(newTrack);
       saveMediaMeta(list);
 
       res.json({
@@ -676,6 +685,40 @@ async function startServer() {
     }
   });
 
+  // 7.2. Update Subtitle Preferences (Primary track, Secondary track, Dual Subtitles) per file
+  app.patch("/api/media/:id/subtitle-preferences", (req, res) => {
+    try {
+      const { id } = req.params;
+      const { primaryTrackId, secondaryTrackId, showDualSubtitles } = req.body;
+
+      const list = loadMediaMeta();
+      const item = list.find((m) => m.id === id || m.filename === id);
+      if (!item) {
+        return res.status(404).json({ error: "الملف غير موجود" });
+      }
+
+      if (primaryTrackId !== undefined) {
+        item.primaryTrackId = primaryTrackId || undefined;
+      }
+      if (secondaryTrackId !== undefined) {
+        item.secondaryTrackId = secondaryTrackId || undefined;
+      }
+      if (showDualSubtitles !== undefined) {
+        item.showDualSubtitles = Boolean(showDualSubtitles);
+      }
+
+      saveMediaMeta(list);
+      res.json({
+        success: true,
+        message: "تم حفظ خيارات ومسارات الترجمة للملف بنجاح",
+        file: item
+      });
+    } catch (e: any) {
+      console.error("Update subtitle preferences error:", e);
+      res.status(500).json({ error: e.message || "فشل حفظ إعدادات الترجمة" });
+    }
+  });
+
   // 8. Delete Subtitle Track
   app.delete("/api/media/:id/subtitles/:trackId", (req, res) => {
     try {
@@ -688,6 +731,18 @@ async function startServer() {
 
       if (item.subtitles) {
         item.subtitles = item.subtitles.filter((t) => t.id !== trackId);
+
+        // Re-adjust primary & secondary tracks if the deleted track was selected
+        if (item.primaryTrackId === trackId) {
+          item.primaryTrackId = item.subtitles[0]?.id || undefined;
+        }
+        if (item.secondaryTrackId === trackId) {
+          item.secondaryTrackId = item.subtitles.find((t) => t.id !== item.primaryTrackId)?.id || undefined;
+        }
+        if (!item.secondaryTrackId) {
+          item.showDualSubtitles = false;
+        }
+
         saveMediaMeta(list);
       }
 
@@ -964,8 +1019,11 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
       };
 
       if (!item.subtitles) item.subtitles = [];
-      // Insert after original or at top
-      item.subtitles.unshift(translatedTrack);
+      // Keep original source track as primary, append translated track as secondary track
+      item.subtitles.push(translatedTrack);
+      item.primaryTrackId = sourceTrack.id;
+      item.secondaryTrackId = translatedTrack.id;
+      item.showDualSubtitles = true;
       saveMediaMeta(list);
 
       res.json({

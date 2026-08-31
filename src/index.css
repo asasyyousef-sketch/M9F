@@ -86,10 +86,23 @@ body {
   transform: rotateY(180deg);
 }
 
-/* Scrollbar styles */
+/* Scrollbar styles - Ultra-thin and subtle */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+}
+
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 3.5px;
+  height: 3.5px;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* YouTube-like Fullscreen Gesture Animations - Ultra Snappy */
@@ -456,12 +469,13 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c3c6d7;
-  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 9999px;
+  transition: background-color 0.2s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #737686;
+  background: rgba(148, 163, 184, 0.45);
 }
 
 /* Ultra light mode performance overrides */

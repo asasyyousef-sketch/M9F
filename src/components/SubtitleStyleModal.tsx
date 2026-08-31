@@ -24,7 +24,10 @@ import {
   ArrowRightLeft,
   Globe,
   Tv,
-  Space
+  Space,
+  ChevronDown,
+  ChevronUp,
+  Maximize2
 } from "lucide-react";
 import {
   SubtitleTrackStyleConfig,
@@ -75,11 +78,18 @@ const BG_COLOR_PRESETS = [
   { label: "أزرق كحلي", hex: "#1e1b4b" }
 ];
 
-const STYLE_TEMPLATES: { name: string; icon: string; desc: string; style: Partial<SubtitleTrackStyleConfig> }[] = [
+const STYLE_TEMPLATES: {
+  name: string;
+  icon: string;
+  desc: string;
+  tag: string;
+  style: Partial<SubtitleTrackStyleConfig>;
+}[] = [
   {
     name: "سينمائي نيتفلكس",
     icon: "🎬",
     desc: "أبيض ناصع بخلفية سوداء شفافة مريحة",
+    tag: "شائع جداً",
     style: {
       fontSize: 20,
       textColor: "#ffffff",
@@ -105,6 +115,7 @@ const STYLE_TEMPLATES: { name: string; icon: string; desc: string; style: Partia
     name: "يوتيوب الذهبي",
     icon: "🟡",
     desc: "نص أصفر عالي التباين وجذاب جداً",
+    tag: "عالي التباين",
     style: {
       fontSize: 22,
       textColor: "#fde047",
@@ -129,7 +140,8 @@ const STYLE_TEMPLATES: { name: string; icon: string; desc: string; style: Partia
   {
     name: "زجاجي عصري (Glass)",
     icon: "💎",
-    desc: "خلفية بلورية شبه شفافة عصرية",
+    desc: "خلفية بلورية شبه شفافة عصرية وأنيقة",
+    tag: "تصميم حديث",
     style: {
       fontSize: 20,
       textColor: "#ffffff",
@@ -155,6 +167,7 @@ const STYLE_TEMPLATES: { name: string; icon: string; desc: string; style: Partia
     name: "خط بارز نقي (Outline)",
     icon: "✏️",
     desc: "بدون خلفية مع تحديد أسود دقيق للحروف",
+    tag: "بدون خلفية",
     style: {
       fontSize: 22,
       textColor: "#ffffff",
@@ -180,6 +193,7 @@ const STYLE_TEMPLATES: { name: string; icon: string; desc: string; style: Partia
     name: "زمردي هادئ",
     icon: "🟢",
     desc: "أخضر زمردي مريح للعينين للقراءة الطويلة",
+    tag: "مريح للعين",
     style: {
       fontSize: 20,
       textColor: "#6ee7b7",
@@ -205,6 +219,7 @@ const STYLE_TEMPLATES: { name: string; icon: string; desc: string; style: Partia
     name: "سماوي نيون مضيء",
     icon: "⚡",
     desc: "توهج نيون أزرق جذاب وعالي الوضوح",
+    tag: "مضيء نيون",
     style: {
       fontSize: 20,
       textColor: "#38bdf8",
@@ -286,24 +301,30 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
     <div className="flex flex-col h-full text-slate-200 bg-slate-900 select-none overflow-hidden" dir="rtl">
       
       {/* ======================================================== */}
-      {/* 1. TOP LIVE PREVIEW STAGE (100% Identical to Video Screen) */}
+      {/* 1. TOP LIVE PREVIEW STAGE (Compact & Mobile-Optimized) */}
       {/* ======================================================== */}
-      <div className="p-3 bg-slate-950 border-b border-slate-800/90 shrink-0">
-        <div className="flex items-center justify-between mb-1.5">
+      <div className="p-2 sm:p-3 bg-slate-950 border-b border-slate-800/90 shrink-0">
+        <div className="flex items-center justify-between gap-2 mb-1.5">
           <button
             type="button"
             onClick={() => setShowPreviewStage(!showPreviewStage)}
             className="text-[11px] font-bold text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors"
           >
-            <Tv className="w-3.5 h-3.5 text-indigo-400" />
-            <span>المعاينة الحية المتطابقة مع الفيديو:</span>
-            <span className="text-[10px] text-slate-500 font-normal">
+            <Tv className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+            <span className="truncate">المعاينة الحية المتطابقة</span>
+            <span className="text-[10px] text-slate-500 font-normal shrink-0">
               ({showPreviewStage ? "إخفاء" : "إظهار"})
             </span>
+            {showPreviewStage ? (
+              <ChevronUp className="w-3 h-3 text-slate-500" />
+            ) : (
+              <ChevronDown className="w-3 h-3 text-slate-500" />
+            )}
           </button>
-          <span className="text-[10px] text-emerald-400 bg-emerald-950/70 border border-emerald-500/30 px-2 py-0.5 rounded-full font-mono flex items-center gap-1">
+          
+          <span className="text-[9.5px] text-emerald-400 bg-emerald-950/70 border border-emerald-500/30 px-1.5 py-0.5 rounded-full font-mono flex items-center gap-1 shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>تطابق 100% ✓</span>
+            <span>مباشر ✓</span>
           </span>
         </div>
 
@@ -314,15 +335,15 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
           const pDir = primaryStyle.direction === "rtl" ? "rtl" : primaryStyle.direction === "ltr" ? "ltr" : detectTextDirection(pText);
           const sDir = secondaryStyle.direction === "rtl" ? "rtl" : secondaryStyle.direction === "ltr" ? "ltr" : detectTextDirection(sText);
           return (
-            <div className="relative w-full min-h-24 bg-gradient-to-b from-slate-900 via-slate-950 to-black rounded-lg border border-slate-800 flex flex-col items-center justify-center p-2.5 overflow-hidden shadow-inner gap-2 animate-fadeIn">
+            <div className="relative w-full min-h-[72px] sm:min-h-[90px] max-h-[140px] bg-gradient-to-b from-slate-900 via-slate-950 to-black rounded-lg border border-slate-800 flex flex-col items-center justify-center p-2 overflow-hidden shadow-inner gap-1.5 animate-fadeIn">
               {/* Background Grid Accent */}
-              <div className="absolute inset-0 bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:16px_16px] opacity-20 pointer-events-none" />
+              <div className="absolute inset-0 bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:14px_14px] opacity-20 pointer-events-none" />
 
               {/* Primary Subtitle Sample */}
               <div
                 dir={pDir}
                 style={computeSubtitleCSS(primaryStyle, false, 1, pText)}
-                className="transition-all duration-150 shadow-md"
+                className="transition-all duration-150 shadow-md max-w-[96%] truncate text-center"
               >
                 <span>{pText}</span>
               </div>
@@ -331,7 +352,7 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
               <div
                 dir={sDir}
                 style={computeSubtitleCSS(secondaryStyle, false, 1, sText)}
-                className="transition-all duration-150 shadow-md"
+                className="transition-all duration-150 shadow-md max-w-[96%] truncate text-center"
               >
                 <span>{sText}</span>
               </div>
@@ -341,14 +362,16 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
       </div>
 
       {/* ======================================================== */}
-      {/* 2. TARGET TRACK SELECTOR (Pill Switcher) */}
+      {/* 2. TARGET TRACK SELECTOR & SECTIONS NAVIGATION */}
       {/* ======================================================== */}
-      <div className="p-3 bg-slate-900/95 border-b border-slate-800/80 space-y-2.5 shrink-0">
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] font-bold text-slate-400">تطبيق التعديلات على:</span>
+      <div className="p-2.5 sm:p-3 bg-slate-900/95 border-b border-slate-800/80 space-y-2 shrink-0">
+        
+        {/* Track Selector Bar (Mobile Friendly 3-Segment Switcher) */}
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="font-bold text-slate-400">تعديل الستايل لـ:</span>
           <button
             onClick={handleReset}
-            className="text-[10px] text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer transition-colors px-2 py-0.5 rounded-md hover:bg-slate-800"
+            className="text-[10px] text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer transition-colors px-1.5 py-0.5 rounded-md hover:bg-slate-800"
             title="استعادة الإعدادات الافتراضية"
           >
             <RotateCcw className="w-3 h-3" />
@@ -356,101 +379,103 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
           </button>
         </div>
 
-        <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
+        <div className="grid grid-cols-3 gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs font-bold">
           <button
             onClick={() => setSelectedTab("primary")}
-            className={`flex-1 py-1.5 px-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+            className={`py-1.5 px-1 rounded-md text-center transition-all cursor-pointer flex items-center justify-center gap-1 ${
               selectedTab === "primary"
-                ? "bg-indigo-600 text-white shadow-xs"
+                ? "bg-indigo-600 text-white shadow-xs font-black"
                 : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
             }`}
           >
-            <span>🇩🇪 الترجمة 1 {activeTrackLabel ? `(${activeTrackLabel.slice(0, 10)})` : ""}</span>
+            <span>🇩🇪 الأولى</span>
           </button>
 
           <button
             onClick={() => setSelectedTab("secondary")}
-            className={`flex-1 py-1.5 px-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+            className={`py-1.5 px-1 rounded-md text-center transition-all cursor-pointer flex items-center justify-center gap-1 ${
               selectedTab === "secondary"
-                ? "bg-emerald-600 text-white shadow-xs"
+                ? "bg-emerald-600 text-white shadow-xs font-black"
                 : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
             }`}
           >
-            <span>🇸🇦 الترجمة 2 {secondaryTrackLabel ? `(${secondaryTrackLabel.slice(0, 10)})` : "(العربي)"}</span>
+            <span>🇸🇦 الثانية</span>
           </button>
 
           <button
             onClick={() => setSelectedTab("both")}
-            className={`py-1.5 px-2.5 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 ${
+            className={`py-1.5 px-1 rounded-md text-center transition-all cursor-pointer flex items-center justify-center gap-1 ${
               selectedTab === "both"
-                ? "bg-amber-600 text-white shadow-xs"
+                ? "bg-amber-600 text-white shadow-xs font-black"
                 : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
             }`}
             title="تطبيق التغييرات على مساري الترجمة معاً"
           >
-            <Split className="w-3.5 h-3.5" />
+            <Split className="w-3 h-3 shrink-0" />
             <span>كلاهما</span>
           </button>
         </div>
 
-        {/* Section Navigation Tabs */}
-        <div className="grid grid-cols-4 gap-1 pt-0.5 text-[11px] font-bold">
+        {/* Sections Navigation Tabs (Responsive & Elegant) */}
+        <div className="grid grid-cols-4 gap-1 pt-0.5 text-xs font-bold">
           <button
             onClick={() => setActiveSection("presets")}
-            className={`py-1.5 px-1 rounded-md text-center transition-all cursor-pointer flex items-center justify-center gap-1 border ${
+            className={`py-2 px-1 rounded-lg text-center transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1 border ${
               activeSection === "presets"
-                ? "bg-slate-800 text-amber-300 border-amber-500/40 shadow-xs"
-                : "bg-slate-950/60 text-slate-400 border-slate-800/80 hover:text-slate-200"
+                ? "bg-slate-800 text-amber-300 border-amber-500/50 shadow-xs font-black"
+                : "bg-slate-950/60 text-slate-400 border-slate-800/80 hover:text-slate-200 hover:bg-slate-900"
             }`}
           >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>قوالب</span>
+            <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="text-[11px] sm:text-xs">قوالب</span>
           </button>
 
           <button
             onClick={() => setActiveSection("font")}
-            className={`py-1.5 px-1 rounded-md text-center transition-all cursor-pointer flex items-center justify-center gap-1 border ${
+            className={`py-2 px-1 rounded-lg text-center transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1 border ${
               activeSection === "font"
-                ? "bg-slate-800 text-indigo-300 border-indigo-500/40 shadow-xs"
-                : "bg-slate-950/60 text-slate-400 border-slate-800/80 hover:text-slate-200"
+                ? "bg-slate-800 text-indigo-300 border-indigo-500/50 shadow-xs font-black"
+                : "bg-slate-950/60 text-slate-400 border-slate-800/80 hover:text-slate-200 hover:bg-slate-900"
             }`}
           >
-            <Type className="w-3.5 h-3.5 text-indigo-400" />
-            <span>الخط والنص</span>
+            <Type className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+            <span className="text-[11px] sm:text-xs">الخط</span>
           </button>
 
           <button
             onClick={() => setActiveSection("background")}
-            className={`py-1.5 px-1 rounded-md text-center transition-all cursor-pointer flex items-center justify-center gap-1 border ${
+            className={`py-2 px-1 rounded-lg text-center transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1 border ${
               activeSection === "background"
-                ? "bg-slate-800 text-teal-300 border-teal-500/40 shadow-xs"
-                : "bg-slate-950/60 text-slate-400 border-slate-800/80 hover:text-slate-200"
+                ? "bg-slate-800 text-teal-300 border-teal-500/50 shadow-xs font-black"
+                : "bg-slate-950/60 text-slate-400 border-slate-800/80 hover:text-slate-200 hover:bg-slate-900"
             }`}
           >
-            <Box className="w-3.5 h-3.5 text-teal-400" />
-            <span>الصندوق والحشوة</span>
+            <Box className="w-3.5 h-3.5 text-teal-400 shrink-0" />
+            <span className="text-[11px] sm:text-xs">الخلفية</span>
           </button>
 
           <button
             onClick={() => setActiveSection("position")}
-            className={`py-1.5 px-1 rounded-md text-center transition-all cursor-pointer flex items-center justify-center gap-1 border ${
+            className={`py-2 px-1 rounded-lg text-center transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1 border ${
               activeSection === "position"
-                ? "bg-slate-800 text-blue-300 border-blue-500/40 shadow-xs"
-                : "bg-slate-950/60 text-slate-400 border-slate-800/80 hover:text-slate-200"
+                ? "bg-slate-800 text-blue-300 border-blue-500/50 shadow-xs font-black"
+                : "bg-slate-950/60 text-slate-400 border-slate-800/80 hover:text-slate-200 hover:bg-slate-900"
             }`}
           >
-            <ArrowUpDown className="w-3.5 h-3.5 text-blue-400" />
-            <span>الموضع</span>
+            <ArrowUpDown className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+            <span className="text-[11px] sm:text-xs">الموضع</span>
           </button>
         </div>
       </div>
 
       {/* ======================================================== */}
-      {/* 3. MAIN CONTROLS CONTENT (Clean, Organized, Highly Responsive) */}
+      {/* 3. MAIN CONTROLS CONTENT (Clean, Fully Responsive) */}
       {/* ======================================================== */}
-      <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-3.5 custom-scrollbar text-xs">
+      <div className="flex-1 overflow-y-auto p-2.5 sm:p-4 space-y-3 custom-scrollbar text-xs">
         
+        {/* ==================================================== */}
         {/* SECTION 1: PRESETS / QUICK TEMPLATES */}
+        {/* ==================================================== */}
         {activeSection === "presets" && (
           <div className="space-y-3 animate-fadeIn">
             <div className="flex items-center justify-between">
@@ -460,17 +485,23 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            {/* Responsive Templates Grid (1 col on narrow mobile, 2 col on tablets/desktops) */}
+            <div className="grid grid-cols-1 xs:grid-cols-2 gap-2">
               {STYLE_TEMPLATES.map((tmpl) => (
                 <button
                   key={tmpl.name}
                   onClick={() => handleUpdate(tmpl.style)}
-                  className="p-2.5 rounded-lg bg-slate-950/70 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/60 text-right transition-all cursor-pointer flex items-start gap-2.5 shadow-xs group"
+                  className="p-2.5 rounded-xl bg-slate-950/80 hover:bg-slate-800/90 active:scale-[0.98] border border-slate-800 hover:border-amber-500/60 text-right transition-all cursor-pointer flex items-center gap-2.5 shadow-xs group"
                 >
-                  <span className="text-lg group-hover:scale-110 transition-transform shrink-0 pt-0.5">{tmpl.icon}</span>
+                  <span className="text-xl group-hover:scale-110 transition-transform shrink-0">{tmpl.icon}</span>
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-bold text-slate-200 group-hover:text-amber-300 transition-colors truncate">{tmpl.name}</p>
-                    <p className="text-[10px] text-slate-400 line-clamp-1 mt-0.5 leading-tight">{tmpl.desc}</p>
+                    <div className="flex items-center justify-between gap-1">
+                      <p className="text-xs font-bold text-slate-100 group-hover:text-amber-300 transition-colors truncate">{tmpl.name}</p>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 group-hover:text-amber-400 font-mono shrink-0">
+                        {tmpl.tag}
+                      </span>
+                    </div>
+                    <p className="text-[10.5px] text-slate-400 line-clamp-1 mt-0.5 leading-tight">{tmpl.desc}</p>
                   </div>
                 </button>
               ))}
@@ -485,11 +516,11 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
                     onUpdatePrimaryStyle({ ...secondaryStyle });
                     setSelectedTab("primary");
                   }}
-                  className="py-2.5 px-3 bg-slate-950/80 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs font-bold border border-slate-800 hover:border-indigo-500/60 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  className="py-2 px-2 bg-slate-950/80 hover:bg-slate-800 active:scale-95 text-slate-300 hover:text-white rounded-lg text-xs font-bold border border-slate-800 hover:border-indigo-500/60 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                   title="نسخ ستايل الترجمة الثانية إلى الأولى"
                 >
-                  <Zap className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>الثانية ➔ الأولى</span>
+                  <Zap className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <span className="truncate">الثانية ➔ الأولى</span>
                 </button>
 
                 <button
@@ -497,87 +528,76 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
                     onUpdateSecondaryStyle({ ...primaryStyle });
                     setSelectedTab("secondary");
                   }}
-                  className="py-2.5 px-3 bg-slate-950/80 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs font-bold border border-slate-800 hover:border-emerald-500/60 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  className="py-2 px-2 bg-slate-950/80 hover:bg-slate-800 active:scale-95 text-slate-300 hover:text-white rounded-lg text-xs font-bold border border-slate-800 hover:border-emerald-500/60 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                   title="نسخ ستايل الترجمة الأولى إلى الثانية"
                 >
-                  <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>الأولى ➔ الثانية</span>
+                  <CheckCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span className="truncate">الأولى ➔ الثانية</span>
                 </button>
               </div>
             </div>
           </div>
         )}
 
+        {/* ==================================================== */}
         {/* SECTION 2: FONT & TEXT DETAILS */}
+        {/* ==================================================== */}
         {activeSection === "font" && (
-          <div className="space-y-3 animate-fadeIn">
-            {/* Text Direction (اتجاه النص: تلقائي ذكي / يمين لليسار / يسار لليمين) */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 space-y-2">
+          <div className="space-y-2.5 animate-fadeIn">
+            {/* Text Direction (اتجاه النص) */}
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
                   <ArrowRightLeft className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>اتجاه النص (Text Direction):</span>
+                  <span>اتجاه النص (Direction):</span>
                 </label>
-                <span className="text-[10px] text-indigo-400 font-bold bg-indigo-950/70 border border-indigo-500/30 px-2 py-0.5 rounded-full">
-                  {(currentConfig.direction === "rtl" && "RTL (يمين ➔ يسار)") ||
-                   (currentConfig.direction === "ltr" && "LTR (يسار ➔ يمين)") ||
-                   "تلقائي ذكي (Auto) ✨"}
+                <span className="text-[9.5px] text-indigo-400 font-bold bg-indigo-950/70 border border-indigo-500/30 px-1.5 py-0.5 rounded-full">
+                  {(currentConfig.direction === "rtl" && "RTL") ||
+                   (currentConfig.direction === "ltr" && "LTR") ||
+                   "Auto ✨"}
                 </span>
               </div>
-              <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+              <div className="grid grid-cols-3 gap-1 text-xs">
                 {[
-                  {
-                    id: "auto",
-                    label: "تلقائي ذكي",
-                    sub: "عربي RTL / أجنبي LTR"
-                  },
-                  {
-                    id: "rtl",
-                    label: "يمين ➔ يسار",
-                    sub: "للعربية (RTL)"
-                  },
-                  {
-                    id: "ltr",
-                    label: "يسار ➔ يمين",
-                    sub: "للأجنبية (LTR)"
-                  }
+                  { id: "auto", label: "تلقائي ذكي", sub: "Auto" },
+                  { id: "rtl", label: "يمين (RTL)", sub: "عربي" },
+                  { id: "ltr", label: "يسار (LTR)", sub: "أجنبي" }
                 ].map((d) => (
                   <button
                     key={d.id}
                     onClick={() => handleUpdate({ direction: d.id as any })}
-                    className={`py-2 px-1.5 rounded-md text-center transition-all cursor-pointer border flex flex-col items-center justify-center gap-0.5 ${
+                    className={`py-1.5 px-1 rounded-md text-center transition-all cursor-pointer border flex flex-col items-center justify-center gap-0.5 ${
                       (currentConfig.direction ?? "auto") === d.id
-                        ? "bg-indigo-600 text-white border-indigo-500 shadow-xs"
-                        : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-850"
+                        ? "bg-indigo-600 text-white border-indigo-500 shadow-xs font-bold"
+                        : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white"
                     }`}
                   >
-                    <span className="font-bold text-xs">{d.label}</span>
-                    <span className="text-[9px] opacity-75 font-normal">{d.sub}</span>
+                    <span>{d.label}</span>
                   </button>
                 ))}
               </div>
             </div>
 
             {/* Text Alignment (محاذاة النص) */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 space-y-2">
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
                   <AlignCenter className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>محاذاة النص (Text Alignment):</span>
+                  <span>محاذاة النص:</span>
                 </label>
               </div>
-              <div className="grid grid-cols-3 gap-1.5 text-xs font-bold">
+              <div className="grid grid-cols-3 gap-1 text-xs font-bold">
                 {[
                   { id: "center", label: "توسيط", icon: AlignCenter },
-                  { id: "right", label: "محاذاة لليمين", icon: AlignRight },
-                  { id: "left", label: "محاذاة لليسار", icon: AlignLeft }
+                  { id: "right", label: "يمين", icon: AlignRight },
+                  { id: "left", label: "يسار", icon: AlignLeft }
                 ].map((al) => {
                   const Icon = al.icon;
                   return (
                     <button
                       key={al.id}
                       onClick={() => handleUpdate({ textAlign: al.id as any })}
-                      className={`py-1.5 px-2 rounded-md text-center transition-all cursor-pointer border flex items-center justify-center gap-1.5 ${
+                      className={`py-1.5 px-1 rounded-md text-center transition-all cursor-pointer border flex items-center justify-center gap-1 ${
                         (currentConfig.textAlign ?? "center") === al.id
                           ? "bg-indigo-600 text-white border-indigo-500 shadow-xs"
                           : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white"
@@ -592,20 +612,20 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
             </div>
 
             {/* Font Size */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 space-y-2">
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-2">
               <div className="flex items-center justify-between text-xs font-bold text-slate-300">
                 <span>حجم الخط:</span>
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => handleUpdate({ fontSize: Math.max(12, currentConfig.fontSize - 1) })}
-                    className="w-6 h-6 rounded-md bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center font-bold cursor-pointer"
+                    className="w-6 h-6 rounded-md bg-slate-800 hover:bg-slate-700 active:scale-90 text-white flex items-center justify-center font-bold cursor-pointer"
                   >
                     -
                   </button>
-                  <span className="font-mono text-indigo-400 font-bold px-2">{currentConfig.fontSize}px</span>
+                  <span className="font-mono text-indigo-400 font-bold px-1.5 text-xs">{currentConfig.fontSize}px</span>
                   <button
                     onClick={() => handleUpdate({ fontSize: Math.min(48, currentConfig.fontSize + 1) })}
-                    className="w-6 h-6 rounded-md bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center font-bold cursor-pointer"
+                    className="w-6 h-6 rounded-md bg-slate-800 hover:bg-slate-700 active:scale-90 text-white flex items-center justify-center font-bold cursor-pointer"
                   >
                     +
                   </button>
@@ -620,13 +640,13 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
                 onChange={(e) => handleUpdate({ fontSize: parseInt(e.target.value) })}
                 className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
               />
-              <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+              <div className="grid grid-cols-5 gap-1 text-[10px] text-slate-400 font-mono">
                 {[14, 18, 22, 26, 32].map((sz) => (
                   <button
                     key={sz}
                     onClick={() => handleUpdate({ fontSize: sz })}
-                    className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
-                      currentConfig.fontSize === sz ? "bg-indigo-600 text-white font-bold" : "hover:text-white bg-slate-900"
+                    className={`py-1 rounded-md transition-colors cursor-pointer text-center ${
+                      currentConfig.fontSize === sz ? "bg-indigo-600 text-white font-bold" : "hover:text-white bg-slate-900 border border-slate-800"
                     }`}
                   >
                     {sz}px
@@ -636,11 +656,11 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
             </div>
 
             {/* Letter Spacing (تباعد الحروف) */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 space-y-2">
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-1.5">
               <div className="flex items-center justify-between text-xs font-bold text-slate-300">
                 <span className="flex items-center gap-1.5">
                   <MoveHorizontal className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>تباعد الحروف (Letter Spacing):</span>
+                  <span>تباعد الحروف:</span>
                 </span>
                 <span className="font-mono text-indigo-400 font-bold">{currentConfig.letterSpacing ?? 0}px</span>
               </div>
@@ -653,18 +673,18 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
                 onChange={(e) => handleUpdate({ letterSpacing: parseFloat(e.target.value) })}
                 className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
               />
-              <div className="grid grid-cols-5 gap-1 text-[10px] text-slate-400 font-mono">
+              <div className="grid grid-cols-5 gap-1 text-[9.5px] text-slate-400 font-mono">
                 {[
-                  { val: -1, label: "-1px ضيق" },
-                  { val: 0, label: "0px عادي" },
-                  { val: 1, label: "1px مريح" },
-                  { val: 2.5, label: "2.5px واسع" },
-                  { val: 5, label: "5px بارز" }
+                  { val: -1, label: "-1px" },
+                  { val: 0, label: "0px" },
+                  { val: 1, label: "1px" },
+                  { val: 2.5, label: "2.5px" },
+                  { val: 5, label: "5px" }
                 ].map((item) => (
                   <button
                     key={item.val}
                     onClick={() => handleUpdate({ letterSpacing: item.val })}
-                    className={`px-1 py-1 rounded-md transition-colors cursor-pointer text-center ${
+                    className={`py-1 rounded-md transition-colors cursor-pointer text-center ${
                       (currentConfig.letterSpacing ?? 0) === item.val
                         ? "bg-indigo-600 text-white font-bold"
                         : "hover:text-white bg-slate-900 border border-slate-800"
@@ -677,11 +697,11 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
             </div>
 
             {/* Word Spacing (تباعد الكلمات) */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 space-y-2">
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-1.5">
               <div className="flex items-center justify-between text-xs font-bold text-slate-300">
                 <span className="flex items-center gap-1.5">
                   <AlignLeft className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>تباعد الكلمات (Word Spacing):</span>
+                  <span>تباعد الكلمات:</span>
                 </span>
                 <span className="font-mono text-indigo-400 font-bold">{currentConfig.wordSpacing ?? 0}px</span>
               </div>
@@ -694,7 +714,7 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
                 onChange={(e) => handleUpdate({ wordSpacing: parseInt(e.target.value) })}
                 className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
               />
-              <div className="grid grid-cols-4 gap-1 text-[10px] text-slate-400 font-mono">
+              <div className="grid grid-cols-4 gap-1 text-[9.5px] text-slate-400 font-mono">
                 {[
                   { val: 0, label: "0px طبيعي" },
                   { val: 3, label: "3px خفيف" },
@@ -704,7 +724,7 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
                   <button
                     key={item.val}
                     onClick={() => handleUpdate({ wordSpacing: item.val })}
-                    className={`px-1 py-1 rounded-md transition-colors cursor-pointer text-center ${
+                    className={`py-1 rounded-md transition-colors cursor-pointer text-center ${
                       (currentConfig.wordSpacing ?? 0) === item.val
                         ? "bg-indigo-600 text-white font-bold"
                         : "hover:text-white bg-slate-900 border border-slate-800"
@@ -716,12 +736,12 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
               </div>
             </div>
 
-            {/* Line Height (ارتفاع وتباعد الأسطر) */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 space-y-2">
+            {/* Line Height (ارتفاع الأسطر) */}
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-1.5">
               <div className="flex items-center justify-between text-xs font-bold text-slate-300">
                 <span className="flex items-center gap-1.5">
                   <Sliders className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>ارتفاع وتباعد الأسطر (Line Height):</span>
+                  <span>ارتفاع الأسطر (Line Height):</span>
                 </span>
                 <span className="font-mono text-indigo-400 font-bold">{currentConfig.lineHeight ?? 1.4}</span>
               </div>
@@ -734,7 +754,7 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
                 onChange={(e) => handleUpdate({ lineHeight: parseFloat(e.target.value) })}
                 className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
               />
-              <div className="grid grid-cols-4 gap-1 text-[10px] text-slate-400 font-mono">
+              <div className="grid grid-cols-4 gap-1 text-[9.5px] text-slate-400 font-mono">
                 {[
                   { val: 1.15, label: "1.15 مكثف" },
                   { val: 1.4, label: "1.4 قياسي" },
@@ -744,7 +764,7 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
                   <button
                     key={item.val}
                     onClick={() => handleUpdate({ lineHeight: item.val })}
-                    className={`px-1 py-1 rounded-md transition-colors cursor-pointer text-center ${
+                    className={`py-1 rounded-md transition-colors cursor-pointer text-center ${
                       Math.abs((currentConfig.lineHeight ?? 1.4) - item.val) < 0.04
                         ? "bg-indigo-600 text-white font-bold"
                         : "hover:text-white bg-slate-900 border border-slate-800"
@@ -757,9 +777,9 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
             </div>
 
             {/* Font Family */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 space-y-2">
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-1.5">
               <label className="text-xs font-bold text-slate-300">نوع الخط:</label>
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="grid grid-cols-3 gap-1">
                 {[
                   { id: "tajawal", label: "تجوّل" },
                   { id: "cairo", label: "كايرو" },
@@ -771,7 +791,7 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
                   <button
                     key={f.id}
                     onClick={() => handleUpdate({ fontFamily: f.id as any })}
-                    className={`py-1.5 px-2 rounded-md text-center text-xs font-bold transition-all cursor-pointer border ${
+                    className={`py-1.5 px-1 rounded-md text-center text-xs font-bold transition-all cursor-pointer border ${
                       currentConfig.fontFamily === f.id
                         ? "bg-indigo-600 text-white border-indigo-500 shadow-xs"
                         : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white"
@@ -784,7 +804,7 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
             </div>
 
             {/* Font Weight */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 space-y-2">
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-1.5">
               <label className="text-xs font-bold text-slate-300">سماكة الخط:</label>
               <div className="grid grid-cols-4 gap-1 text-[11px]">
                 {[
@@ -809,7 +829,7 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
             </div>
 
             {/* Text Color */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 space-y-2">
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-1.5">
               <label className="text-xs font-bold text-slate-300">لون النص:</label>
               <div className="flex items-center gap-2">
                 <input
@@ -837,9 +857,9 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
             </div>
 
             {/* Text Shadows */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 space-y-2">
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-1.5">
               <label className="text-xs font-bold text-slate-300">تأثير الظلال والتوهج:</label>
-              <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+              <div className="grid grid-cols-3 gap-1 text-[11px]">
                 {[
                   { id: "none", label: "بدون ظل" },
                   { id: "subtle", label: "ظل ناعم" },
@@ -863,7 +883,7 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
             </div>
 
             {/* Text Stroke */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 flex items-center justify-between">
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 flex items-center justify-between">
               <span className="text-xs font-bold text-slate-300">تحديد خارجي داكن للحروف (Stroke):</span>
               <button
                 onClick={() => handleUpdate({ textStroke: !currentConfig.textStroke })}
@@ -881,11 +901,13 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
           </div>
         )}
 
-        {/* SECTION 3: BACKGROUND & BOX (Padding X/Y, Border Radius, Opacity, Colors) */}
+        {/* ==================================================== */}
+        {/* SECTION 3: BACKGROUND & BOX */}
+        {/* ==================================================== */}
         {activeSection === "background" && (
-          <div className="space-y-3 animate-fadeIn">
+          <div className="space-y-2.5 animate-fadeIn">
             {/* Opacity */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 space-y-2">
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-1.5">
               <div className="flex items-center justify-between text-xs font-bold text-slate-300">
                 <span>شفافية الخلفية:</span>
                 <span className="font-mono text-teal-400 font-bold">{currentConfig.bgOpacity}%</span>
@@ -899,7 +921,7 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
                 onChange={(e) => handleUpdate({ bgOpacity: parseInt(e.target.value) })}
                 className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-teal-500"
               />
-              <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+              <div className="grid grid-cols-4 gap-1 text-[9.5px] text-slate-400 font-mono">
                 {[
                   { val: 0, label: "0% شفاف" },
                   { val: 45, label: "45% زجاجي" },
@@ -909,8 +931,8 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
                   <button
                     key={op.val}
                     onClick={() => handleUpdate({ bgOpacity: op.val })}
-                    className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
-                      currentConfig.bgOpacity === op.val ? "bg-teal-600 text-white font-bold" : "hover:text-white bg-slate-900"
+                    className={`py-1 rounded-md transition-colors cursor-pointer text-center ${
+                      currentConfig.bgOpacity === op.val ? "bg-teal-600 text-white font-bold" : "hover:text-white bg-slate-900 border border-slate-800"
                     }`}
                   >
                     {op.label}
@@ -920,7 +942,7 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
             </div>
 
             {/* Background Color */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 space-y-2">
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-1.5">
               <label className="text-xs font-bold text-slate-300">لون خلفية الصندوق:</label>
               <div className="flex items-center gap-2">
                 <input
@@ -948,11 +970,11 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
             </div>
 
             {/* Padding X & Y (الحشوة الأفقية والعمودية الدقيقة) */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 space-y-3">
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-2.5">
               <div className="flex items-center justify-between text-xs font-bold text-slate-300">
                 <span className="flex items-center gap-1.5">
                   <Box className="w-3.5 h-3.5 text-teal-400" />
-                  <span>الحشوة الداخلية (Padding X & Y):</span>
+                  <span>الحشوة الداخلية (Padding):</span>
                 </span>
                 <span className="font-mono text-teal-400 font-bold text-[11px]">
                   X: {currentConfig.paddingX ?? 16}px | Y: {currentConfig.paddingY ?? 6}px
@@ -962,7 +984,7 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
               {/* Padding X Slider */}
               <div className="space-y-1">
                 <div className="flex justify-between text-[11px] text-slate-400">
-                  <span>أفقي (العرض X):</span>
+                  <span>أفقي (عرض الحشوة X):</span>
                   <span className="font-mono text-teal-400">{currentConfig.paddingX ?? 16}px</span>
                 </div>
                 <input
@@ -979,7 +1001,7 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
               {/* Padding Y Slider */}
               <div className="space-y-1">
                 <div className="flex justify-between text-[11px] text-slate-400">
-                  <span>عمودي (الارتفاع Y):</span>
+                  <span>عمودي (ارتفاع الحشوة Y):</span>
                   <span className="font-mono text-teal-400">{currentConfig.paddingY ?? 6}px</span>
                 </div>
                 <input
@@ -994,7 +1016,7 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
               </div>
 
               {/* Quick Padding Presets */}
-              <div className="grid grid-cols-4 gap-1 text-[10px]">
+              <div className="grid grid-cols-2 xs:grid-cols-4 gap-1 text-[10px]">
                 {[
                   { px: 8, py: 3, label: "مضغوط (8x3)" },
                   { px: 16, py: 6, label: "متوازن (16x6)" },
@@ -1017,9 +1039,9 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
             </div>
 
             {/* Corner Radius (استدارة الحواف) */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 space-y-2">
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-1.5">
               <div className="flex items-center justify-between text-xs font-bold text-slate-300">
-                <span>استدارة الحواف (Border Radius):</span>
+                <span>استدارة الحواف (Radius):</span>
                 <span className="font-mono text-teal-400 font-bold">{currentConfig.borderRadius ?? 14}px</span>
               </div>
               <input
@@ -1031,12 +1053,12 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
                 onChange={(e) => handleUpdate({ borderRadius: parseInt(e.target.value) })}
                 className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-teal-500"
               />
-              <div className="grid grid-cols-4 gap-1.5 text-[10px]">
+              <div className="grid grid-cols-4 gap-1 text-[10px]">
                 {[
-                  { val: 0, label: "حادة (0px)" },
-                  { val: 8, label: "خفيفة (8px)" },
-                  { val: 14, label: "ناعمة (14px)" },
-                  { val: 24, label: "كبسولة (24px)" }
+                  { val: 0, label: "0px حادة" },
+                  { val: 8, label: "8px خفيفة" },
+                  { val: 14, label: "14px ناعمة" },
+                  { val: 24, label: "24px كبسولة" }
                 ].map((r) => (
                   <button
                     key={r.val}
@@ -1055,13 +1077,15 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
           </div>
         )}
 
+        {/* ==================================================== */}
         {/* SECTION 4: POSITION ON SCREEN */}
+        {/* ==================================================== */}
         {activeSection === "position" && (
-          <div className="space-y-3 animate-fadeIn">
+          <div className="space-y-2.5 animate-fadeIn">
             {/* Placement */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 space-y-2">
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-1.5">
               <label className="text-xs font-bold text-slate-300">الموضع على الشاشة:</label>
-              <div className="grid grid-cols-3 gap-1.5 text-xs font-bold">
+              <div className="grid grid-cols-3 gap-1 text-xs font-bold">
                 {[
                   { id: "bottom", label: "أسفل الشاشة" },
                   { id: "center", label: "المنتصف" },
@@ -1070,9 +1094,9 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
                   <button
                     key={pos.id}
                     onClick={() => handleUpdate({ position: pos.id as any })}
-                    className={`py-2 px-2 rounded-md text-center transition-all cursor-pointer border ${
+                    className={`py-2 px-1 rounded-md text-center transition-all cursor-pointer border ${
                       currentConfig.position === pos.id
-                        ? "bg-blue-600 text-white border-blue-500 shadow-xs"
+                        ? "bg-blue-600 text-white border-blue-500 shadow-xs font-bold"
                         : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white"
                     }`}
                   >
@@ -1083,7 +1107,7 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
             </div>
 
             {/* Vertical Offset */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/90 space-y-2">
+            <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-1.5">
               <div className="flex items-center justify-between text-xs font-bold text-slate-300">
                 <span>إزاحة عمودية (Offset Y):</span>
                 <span className="font-mono text-blue-400 font-bold">{currentConfig.offsetY}px</span>
@@ -1097,10 +1121,25 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
                 onChange={(e) => handleUpdate({ offsetY: parseInt(e.target.value) })}
                 className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
               />
-              <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                <span>0px ملاصق</span>
-                <span>28px قياسي</span>
-                <span>140px مرتفع</span>
+              <div className="grid grid-cols-4 gap-1 text-[10px] text-slate-400 font-mono">
+                {[
+                  { val: 0, label: "0px ملاصق" },
+                  { val: 28, label: "28px قياسي" },
+                  { val: 60, label: "60px متوسط" },
+                  { val: 120, label: "120px مرتفع" }
+                ].map((item) => (
+                  <button
+                    key={item.val}
+                    onClick={() => handleUpdate({ offsetY: item.val })}
+                    className={`py-1 rounded-md transition-colors cursor-pointer text-center ${
+                      currentConfig.offsetY === item.val
+                        ? "bg-blue-600 text-white font-bold"
+                        : "hover:text-white bg-slate-900 border border-slate-800"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
@@ -1109,25 +1148,25 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
       </div>
 
       {/* ======================================================== */}
-      {/* 4. PANEL FOOTER WITH PROMINENT SAVE & RETURN ACTION */}
+      {/* 4. PANEL FOOTER WITH CLEAN ACTION */}
       {/* ======================================================== */}
-      <div className="p-3.5 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-3 text-xs shrink-0">
-        <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+      <div className="p-2.5 sm:p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2 text-xs shrink-0">
+        <div className="flex items-center gap-1 text-[10px] text-slate-400 truncate">
           <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-          <span>تُحفظ الإعدادات وتُطبّق فوراً على الفيديو</span>
+          <span className="truncate">تُطبّق فوراً على الفيديو</span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={handleSaveAction}
-            className={`px-5 py-2 rounded-lg text-white font-black text-xs shadow-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+            className={`px-4 py-2 rounded-lg text-white font-black text-xs shadow-lg transition-all cursor-pointer flex items-center gap-1.5 ${
               justSaved
                 ? "bg-emerald-500 shadow-emerald-500/40 scale-105"
-                : "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-600/30"
+                : "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-600/30 active:scale-95"
             }`}
           >
             <Check className="w-4 h-4" />
-            <span>{justSaved ? "تم الحفظ والتطبيق! ✓" : (returnModalName ? `حفظ والعودة إلى (${returnModalName})` : "حفظ التعديلات والعودة ✓")}</span>
+            <span>{justSaved ? "تم الحفظ والتطبيق! ✓" : (returnModalName ? `حفظ والعودة` : "حفظ التعديلات ✓")}</span>
           </button>
         </div>
       </div>
@@ -1162,18 +1201,16 @@ export const SubtitleStyleModal: React.FC<SubtitleStyleModalProps> = ({
   sampleSecondaryText,
   returnModalName
 }) => {
-  const [dockPosition, setDockPosition] = useState<"center" | "right" | "left">("center");
-
   if (!isOpen) return null;
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fadeIn"
+      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-fadeIn"
       dir="rtl"
     >
-      <div className="bg-slate-900 border border-slate-700/90 rounded-xl shadow-2xl overflow-hidden flex flex-col w-full max-w-lg max-h-[92vh] animate-scaleUp">
+      <div className="bg-slate-900 border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden flex flex-col w-full max-w-lg h-[94vh] max-h-[720px] animate-scaleUp">
         {/* Modal Header */}
-        <div className="p-3.5 sm:p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between shrink-0">
+        <div className="p-3 sm:p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-amber-500 via-orange-500 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-md">
               <Palette className="w-4 h-4" />
@@ -1181,23 +1218,21 @@ export const SubtitleStyleModal: React.FC<SubtitleStyleModalProps> = ({
             <div>
               <h3 className="font-bold text-xs sm:text-sm text-white flex items-center gap-2">
                 <span>تخصيص ستايل الترجمة</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-indigo-300 border border-slate-700">
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-800 text-indigo-300 border border-slate-700 font-mono">
                   Dual Subs
                 </span>
               </h3>
-              <p className="text-[11px] text-slate-400">تعديل مباشر وشامل للخط، الألوان، الخلفيات والموضع</p>
+              <p className="text-[10.5px] text-slate-400">تعديل شامل للخطوط والألوان والخلفيات والموضع</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-1">
-            <button
-              onClick={onSaveAndReturn || onClose}
-              className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-              title="إغلاق"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+          <button
+            onClick={onSaveAndReturn || onClose}
+            className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+            title="إغلاق"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
         <div className="flex-1 overflow-hidden flex flex-col min-h-0">

@@ -59,10 +59,19 @@ import {
   SkipBack,
   SkipForward,
   Zap,
+  MoreVertical,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  Folder,
+  FolderPlus,
+  FolderOpen,
+  ChevronLeft,
+  FolderInput,
+  FolderArchive,
+  FileSpreadsheet,
+  CornerUpRight
 } from "lucide-react";
-import { MediaFile, MediaSubtitleTrack, SubtitleCue } from "../types";
+import { MediaFile, MediaSubtitleTrack, SubtitleCue, MediaFolder } from "../types";
 import {
   parseSubtitleContent,
   formatSecondsToTime,
@@ -75,9 +84,10 @@ import {
 } from "../utils/subtitleParser";
 import { GradioTranscriberModal } from "./GradioTranscriberModal";
 import { SubtitleStyleModal, SubtitleStylePanel } from "./SubtitleStyleModal";
-import { SubtitleOptionsModal } from "./SubtitleOptionsModal";
+import { SubtitleOptionsModal, SubtitleOptionsPanel } from "./SubtitleOptionsModal";
 import { CleanCueEditorModal } from "./CleanCueEditorModal";
 import { ALL_AVAILABLE_MODELS, AIModelOption } from "./AICorrectorWorkspace";
+import { MediaExplorerView } from "./MediaExplorerView";
 
 export interface SubtitleTrackStyleConfig {
   fontSize: number; // in px
@@ -381,7 +391,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   });
   const [showTranscriptPanel, setShowTranscriptPanel] = useState<boolean>(true);
-  const [sidePanelView, setSidePanelView] = useState<"transcript" | "style">("transcript");
+  const [sidePanelView, setSidePanelView] = useState<"transcript" | "style" | "subtitles">("transcript");
   const [autoScrollTranscript, setAutoScrollTranscript] = useState<boolean>(true);
   // Default is FALSE (hidden timestamps for wider text space, customizable & persisted)
   const [showCueTimestamps, setShowCueTimestamps] = useState<boolean>(() => {
@@ -395,6 +405,84 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const [subtitleFontSize, setSubtitleFontSize] = useState<"sm" | "md" | "lg" | "xl">("md");
   const [subtitleStyle, setSubtitleStyle] = useState<"black" | "transparent" | "yellow" | "outline">("black");
   const [subtitleSearchQuery, setSubtitleSearchQuery] = useState<string>("");
+  const [showTranscriptSearch, setShowTranscriptSearch] = useState<boolean>(false);
+
+  // Cue Item Options Dropdown & Confirm Delete States
+  const [cueOptionsMenuId, setCueOptionsMenuId] = useState<string | null>(null);
+  const [cueMenuAnchor, setCueMenuAnchor] = useState<{
+    cue: SubtitleCue;
+    x: number;
+    y: number;
+    openAbove: boolean;
+  } | null>(null);
+  const [cueToDelete, setCueToDelete] = useState<SubtitleCue | null>(null);
+
+  // Top Video/Media Header Options Menu State
+  const [showTopOptionsMenu, setShowTopOptionsMenu] = useState<boolean>(false);
+  const topOptionsMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close cue options and top options dropdown on clicking outside or scrolling
+  useEffect(() => {
+    if (!cueOptionsMenuId && !showTopOptionsMenu) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (cueOptionsMenuId) {
+        setCueOptionsMenuId(null);
+        setCueMenuAnchor(null);
+      }
+      if (showTopOptionsMenu && topOptionsMenuRef.current && !topOptionsMenuRef.current.contains(e.target as Node)) {
+        setShowTopOptionsMenu(false);
+      }
+    };
+    const handleScrollOrResize = () => {
+      setCueOptionsMenuId(null);
+      setCueMenuAnchor(null);
+      setShowTopOptionsMenu(false);
+    };
+    window.addEventListener("click", handleOutsideClick);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      window.removeEventListener("click", handleOutsideClick);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [cueOptionsMenuId, showTopOptionsMenu]);
+
+  const handleToggleCueMenu = (cue: SubtitleCue, event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (cueOptionsMenuId === cue.id) {
+      setCueOptionsMenuId(null);
+      setCueMenuAnchor(null);
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const menuWidth = 145;
+    const menuHeight = 120;
+    const padding = 12;
+
+    // Smart vertical calculation: if close to bottom of window, flip above
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openAbove = spaceBelow < menuHeight + padding && rect.top > menuHeight + padding;
+    const y = openAbove ? rect.top - 4 : rect.bottom + 4;
+
+    // Smart horizontal calculation: ensure menu stays strictly within screen bounds
+    let x = rect.left;
+    if (x + menuWidth > window.innerWidth - padding) {
+      x = window.innerWidth - menuWidth - padding;
+    }
+    if (x < padding) {
+      x = padding;
+    }
+
+    setCueOptionsMenuId(cue.id);
+    setCueMenuAnchor({
+      cue,
+      x,
+      y,
+      openAbove,
+    });
+  };
 
   // Speed Menu Popup State
   const [showSpeedMenu, setShowSpeedMenu] = useState<boolean>(false);
@@ -477,6 +565,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     setSidePanelView("style");
   };
 
+  const openSubtitlesInSidebar = (source: "gradio" | "upload" | "style" | null = null) => {
+    if (source === "gradio") setShowGradioModal(false);
+    if (source === "upload") setShowSubtitleUploadModal(false);
+    if (source === "style") setShowSubtitleStyleModal(false);
+    setShowSubtitleOptionsModal(false);
+    setShowTranscriptPanel(true);
+    setSidePanelView("subtitles");
+  };
+
   // Save subtitle styles to localStorage whenever modified
   const updatePrimarySubStyle = (updater: Partial<SubtitleTrackStyleConfig> | ((prev: SubtitleTrackStyleConfig) => SubtitleTrackStyleConfig)) => {
     setPrimarySubStyle((prev) => {
@@ -507,7 +604,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     updateSecondarySubStyle(updater);
   };
 
-  // Subtitle Selection Preferences per file (persisted in localStorage)
+  // Subtitle Selection Preferences per file (persisted in localStorage and synced to Server)
   const getSavedSubtitlePreferences = (fileId: string): { primaryId: string | null; secondaryId: string | null } => {
     try {
       const saved = localStorage.getItem(`media_player_sub_tracks_${fileId}`);
@@ -531,16 +628,41 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   };
 
-  // Helper setters that also persist
+  const saveSubtitlePreferencesToServer = async (
+    fileId: string,
+    primaryId: string | null,
+    secondaryId: string | null,
+    showDual?: boolean
+  ) => {
+    try {
+      await fetch(`/api/media/${fileId}/subtitle-preferences`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          primaryTrackId: primaryId,
+          secondaryTrackId: secondaryId,
+          showDualSubtitles: showDual !== undefined ? showDual : showDualSubtitles
+        })
+      });
+    } catch (e) {
+      console.error("Failed to sync subtitle preferences with server:", e);
+    }
+  };
+
+  // Helper setters that also persist to both localStorage and Server
   const handleSelectPrimaryTrack = (trackId: string | null) => {
     setActiveTrackId(trackId);
     if (currentFile) {
       saveSubtitlePreferences(currentFile.id, trackId, secondaryTrackId);
+      saveSubtitlePreferencesToServer(currentFile.id, trackId, secondaryTrackId, showDualSubtitles);
+      setCurrentFile((prev) => prev ? { ...prev, primaryTrackId: trackId || undefined } : null);
+      setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, primaryTrackId: trackId || undefined } : f));
     }
   };
 
   const handleSelectSecondaryTrack = (trackId: string | null) => {
     setSecondaryTrackId(trackId);
+    const shouldShowDual = Boolean(trackId);
     if (trackId) {
       setShowDualSubtitles(true);
       try {
@@ -551,6 +673,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
     if (currentFile) {
       saveSubtitlePreferences(currentFile.id, activeTrackId, trackId);
+      saveSubtitlePreferencesToServer(currentFile.id, activeTrackId, trackId, shouldShowDual);
+      setCurrentFile((prev) => prev ? { ...prev, secondaryTrackId: trackId || undefined, showDualSubtitles: shouldShowDual } : null);
+      setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, secondaryTrackId: trackId || undefined, showDualSubtitles: shouldShowDual } : f));
     }
   };
 
@@ -562,8 +687,27 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       } catch (e) {
         console.error(e);
       }
+      if (currentFile) {
+        saveSubtitlePreferencesToServer(currentFile.id, activeTrackId, secondaryTrackId, next);
+        setCurrentFile((cf) => cf ? { ...cf, showDualSubtitles: next } : null);
+      }
       return next;
     });
+  };
+
+  const handleSwapTracks = () => {
+    if (!activeTrackId && !secondaryTrackId) return;
+    const newPrimary = secondaryTrackId;
+    const newSecondary = activeTrackId;
+    setActiveTrackId(newPrimary);
+    setSecondaryTrackId(newSecondary);
+    if (currentFile) {
+      saveSubtitlePreferences(currentFile.id, newPrimary, newSecondary);
+      saveSubtitlePreferencesToServer(currentFile.id, newPrimary, newSecondary, showDualSubtitles);
+      setCurrentFile((prev) => prev ? { ...prev, primaryTrackId: newPrimary || undefined, secondaryTrackId: newSecondary || undefined } : null);
+      setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, primaryTrackId: newPrimary || undefined, secondaryTrackId: newSecondary || undefined } : f));
+      triggerHud("تم تبديل مسارات الترجمة (1 ⇄ 2)", "🔄");
+    }
   };
 
   const handleToggleSubtitlesOverlay = () => {
@@ -655,6 +799,57 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }, 340);
   }, []);
 
+  // Active screen mode: File Manager (default) vs Active Player
+  const [isPlayerOpen, setIsPlayerOpen] = useState<boolean>(false);
+
+  // Folders State
+  const [folders, setFolders] = useState<MediaFolder[]>(() => {
+    try {
+      const saved = localStorage.getItem("media_player_folders");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
+
+  // File to Folder mapping (fileId -> folderId)
+  const [fileFolderMap, setFileFolderMap] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem("media_file_folder_map");
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  // Save folders & map whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem("media_player_folders", JSON.stringify(folders));
+    } catch (e) {
+      console.error(e);
+    }
+  }, [folders]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("media_file_folder_map", JSON.stringify(fileFolderMap));
+    } catch (e) {
+      console.error(e);
+    }
+  }, [fileFolderMap]);
+
+  // Folder Modal states
+  const [showFolderModal, setShowFolderModal] = useState<boolean>(false);
+  const [folderModalMode, setFolderModalMode] = useState<"create" | "edit">("create");
+  const [folderNameInput, setFolderNameInput] = useState<string>("");
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+
+  // Move file modal state
+  const [movingFile, setMovingFile] = useState<MediaFile | null>(null);
+
   // Edit / Add Cue Modal
   const [editingCue, setEditingCue] = useState<SubtitleCue | null>(null);
   const [syncWithSecondaryTrack, setSyncWithSecondaryTrack] = useState<boolean>(true);
@@ -664,7 +859,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   // Filters and UI states
   const [filterType, setFilterType] = useState<"all" | "video" | "audio">("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [isDragging, setIsDragging] = useState<boolean>(false);
 
   // Editing file title
@@ -691,19 +886,11 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       const loadedFiles: MediaFile[] = data.files || [];
       setFiles(loadedFiles);
 
-      // Keep currentFile synchronized or restore previously playing file
+      // Keep currentFile synchronized if already playing
       if (currentFile) {
         const updatedCurrent = loadedFiles.find((f) => f.id === currentFile.id);
         if (updatedCurrent) {
           setCurrentFile(updatedCurrent);
-        }
-      } else {
-        const lastPlayedId = localStorage.getItem("media_player_last_played_file_id");
-        if (lastPlayedId) {
-          const matched = loadedFiles.find((f) => f.id === lastPlayedId);
-          if (matched) {
-            setCurrentFile(matched);
-          }
         }
       }
     } catch (err: any) {
@@ -718,41 +905,259 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     fetchMediaFiles();
   }, []);
 
-  // Save currently selected file to localStorage
+  // Save currently selected file and open player view in direct cinematic mode
   const handleSelectFile = (file: MediaFile | null, autoPlay: boolean = true) => {
     setCurrentFile(file);
     setIsPlaying(autoPlay);
-    try {
-      if (file) {
+    if (file) {
+      setIsPlayerOpen(true);
+      setIsImmersiveMode(true);
+      try {
         localStorage.setItem("media_player_last_played_file_id", file.id);
-      } else {
-        localStorage.removeItem("media_player_last_played_file_id");
+      } catch (e) {
+        console.error("Failed to save last played file:", e);
       }
-    } catch (e) {
-      console.error("Failed to save last played file:", e);
+    } else {
+      setIsPlayerOpen(false);
+      setIsImmersiveMode(false);
     }
   };
+
+  // Close player and return to file manager
+  const handleBackToFileManager = () => {
+    smoothPause();
+    setIsPlayerOpen(false);
+    setIsImmersiveMode(false);
+  };
+
+  // Folder management functions
+  const getFolderPathName = (folder: MediaFolder): string => {
+    const parts: string[] = [folder.name];
+    let curParentId = folder.parentId;
+    const visited = new Set<string>();
+    while (curParentId && !visited.has(curParentId)) {
+      visited.add(curParentId);
+      const parent = folders.find((f) => f.id === curParentId);
+      if (parent) {
+        parts.unshift(parent.name);
+        curParentId = parent.parentId;
+      } else {
+        break;
+      }
+    }
+    return parts.join(" / ");
+  };
+
+  const handleOpenCreateFolderModal = () => {
+    setFolderModalMode("create");
+    setFolderNameInput("");
+    setEditingFolderId(null);
+    setShowFolderModal(true);
+  };
+
+  const handleOpenEditFolderModal = (folder: MediaFolder, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setFolderModalMode("edit");
+    setFolderNameInput(folder.name);
+    setEditingFolderId(folder.id);
+    setShowFolderModal(true);
+  };
+
+  const handleSaveFolder = () => {
+    if (!folderNameInput.trim()) return;
+    const cleanName = folderNameInput.trim();
+
+    if (folderModalMode === "create") {
+      const currentParent = (activeFolderId && activeFolderId !== "uncategorized") ? activeFolderId : null;
+      const newFolder: MediaFolder = {
+        id: `folder-${Date.now()}`,
+        name: cleanName,
+        createdAt: new Date().toISOString(),
+        parentId: currentParent
+      };
+      setFolders((prev) => [...prev, newFolder]);
+      setSuccessMsg(`تم إنشاء مجلد "${cleanName}" بنجاح 📁`);
+    } else if (editingFolderId) {
+      setFolders((prev) =>
+        prev.map((f) => (f.id === editingFolderId ? { ...f, name: cleanName } : f))
+      );
+      setSuccessMsg(`تم تعديل اسم المجلد إلى "${cleanName}" 📁`);
+    }
+
+    setShowFolderModal(false);
+    setFolderNameInput("");
+    setEditingFolderId(null);
+  };
+
+  const handleDeleteFolder = (folderId: string, folderName: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!window.confirm(`هل أنت متأكد من حذف مجلد "${folderName}"؟ (لن يتم حذف الملفات، ستعود للمجلد الرئيسي)`)) {
+      return;
+    }
+
+    // Recursively collect descendant folder IDs
+    const getDescendants = (id: string, all: MediaFolder[]): string[] => {
+      const children = all.filter((f) => f.parentId === id);
+      return [id, ...children.flatMap((c) => getDescendants(c.id, all))];
+    };
+
+    const idsToDelete = getDescendants(folderId, folders);
+
+    setFolders((prev) => prev.filter((f) => !idsToDelete.includes(f.id)));
+    setFileFolderMap((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((fileId) => {
+        if (idsToDelete.includes(next[fileId])) {
+          delete next[fileId];
+        }
+      });
+      return next;
+    });
+
+    if (activeFolderId && idsToDelete.includes(activeFolderId)) {
+      const target = folders.find((f) => f.id === folderId);
+      setActiveFolderId(target?.parentId || null);
+    }
+    setSuccessMsg(`تم حذف مجلد "${folderName}"`);
+  };
+
+  const handleMoveFileToFolder = (fileId: string, targetFolderId: string | null) => {
+    setFileFolderMap((prev) => {
+      const next = { ...prev };
+      if (!targetFolderId) {
+        delete next[fileId];
+      } else {
+        next[fileId] = targetFolderId;
+      }
+      return next;
+    });
+    setMovingFile(null);
+    setSuccessMsg("تم نقل الملف بنجاح 📁");
+  };
+
+  const handleBulkMoveFiles = (fileIds: string[], targetFolderId: string | null) => {
+    if (fileIds.length === 0) return;
+    setFileFolderMap((prev) => {
+      const next = { ...prev };
+      fileIds.forEach((fileId) => {
+        if (!targetFolderId) {
+          delete next[fileId];
+        } else {
+          next[fileId] = targetFolderId;
+        }
+      });
+      return next;
+    });
+    setSuccessMsg(`تم نقل ${fileIds.length} ملف بنجاح 📁`);
+  };
+
+  const handleBulkDeleteFiles = async (fileIds: string[], folderIds: string[] = []) => {
+    const totalCount = fileIds.length + folderIds.length;
+    if (totalCount === 0) return;
+
+    if (!window.confirm(`هل أنت متأكد من حذف ${fileIds.length > 0 ? `${fileIds.length} ملف` : ""} ${folderIds.length > 0 ? `${folderIds.length} مجلد` : ""} نهائياً؟`)) {
+      return;
+    }
+
+    try {
+      // Delete folders from local state
+      if (folderIds.length > 0) {
+        setFolders((prev) => prev.filter((f) => !folderIds.includes(f.id)));
+        setFileFolderMap((prev) => {
+          const next = { ...prev };
+          Object.keys(next).forEach((fid) => {
+            if (folderIds.includes(next[fid])) {
+              delete next[fid];
+            }
+          });
+          return next;
+        });
+      }
+
+      // Delete files from server & local state
+      if (fileIds.length > 0) {
+        for (const fid of fileIds) {
+          await fetch(`/api/media/files/${fid}`, { method: "DELETE" }).catch(() => {});
+        }
+        setFiles((prev) => prev.filter((f) => !fileIds.includes(f.id)));
+        if (currentFile && fileIds.includes(currentFile.id)) {
+          setCurrentFile(null);
+          setIsPlaying(false);
+        }
+      }
+
+      setSuccessMsg(`تم الحذف بنجاح 🗑️`);
+    } catch (err: any) {
+      setErrorMsg(err.message || "حدث خطأ أثناء الحذف الجماعي");
+    }
+  };
+
+  const handleOpenMoveModal = (file: MediaFile) => {
+    setMovingFile(file);
+  };
+
+  const getFolderFileCount = useCallback(
+    (folderId: string) => {
+      return files.filter((f) => fileFolderMap[f.id] === folderId).length;
+    },
+    [files, fileFolderMap]
+  );
 
   // Set active and secondary subtitle tracks when currentFile changes (restoring saved preferences)
   useEffect(() => {
     if (currentFile?.subtitles && currentFile.subtitles.length > 0) {
       const savedPrefs = getSavedSubtitlePreferences(currentFile.id);
 
-      // Restore Primary Track
-      if (savedPrefs.primaryId && currentFile.subtitles.some((t) => t.id === savedPrefs.primaryId)) {
-        setActiveTrackId(savedPrefs.primaryId);
-      } else if (!activeTrackId || !currentFile.subtitles.some((t) => t.id === activeTrackId)) {
-        setActiveTrackId(currentFile.subtitles[0].id);
+      // Determine Primary Track:
+      // 1. Check server-saved primaryTrackId on currentFile
+      // 2. Check local saved preference
+      // 3. Fallback: Prefer German/original or source!=ai or first track
+      let chosenPrimaryId: string | null = null;
+      if (currentFile.primaryTrackId && currentFile.subtitles.some((t) => t.id === currentFile.primaryTrackId)) {
+        chosenPrimaryId = currentFile.primaryTrackId;
+      } else if (savedPrefs.primaryId && currentFile.subtitles.some((t) => t.id === savedPrefs.primaryId)) {
+        chosenPrimaryId = savedPrefs.primaryId;
+      } else if (activeTrackId && currentFile.subtitles.some((t) => t.id === activeTrackId)) {
+        chosenPrimaryId = activeTrackId;
+      } else {
+        // Find German or uploaded track first
+        const germanOrOriginal = currentFile.subtitles.find(
+          (t) => t.language === "de" || t.source === "uploaded" || t.source === "manual"
+        );
+        chosenPrimaryId = germanOrOriginal ? germanOrOriginal.id : currentFile.subtitles[0].id;
       }
+      setActiveTrackId(chosenPrimaryId);
 
-      // Restore Secondary Track
-      if (savedPrefs.secondaryId && currentFile.subtitles.some((t) => t.id === savedPrefs.secondaryId)) {
-        setSecondaryTrackId(savedPrefs.secondaryId);
-      } else if (currentFile.subtitles.length > 1 && (!secondaryTrackId || !currentFile.subtitles.some((t) => t.id === secondaryTrackId))) {
-        const otherTrack = currentFile.subtitles.find((t) => t.id !== (activeTrackId || currentFile.subtitles![0].id));
-        if (otherTrack) {
-          setSecondaryTrackId(otherTrack.id);
-        }
+      // Determine Secondary Track:
+      // 1. Check server-saved secondaryTrackId on currentFile
+      // 2. Check local saved preference
+      // 3. Fallback: Prefer translated/Arabic track (different from primary)
+      let chosenSecondaryId: string | null = null;
+      if (
+        currentFile.secondaryTrackId &&
+        currentFile.secondaryTrackId !== chosenPrimaryId &&
+        currentFile.subtitles.some((t) => t.id === currentFile.secondaryTrackId)
+      ) {
+        chosenSecondaryId = currentFile.secondaryTrackId;
+      } else if (
+        savedPrefs.secondaryId &&
+        savedPrefs.secondaryId !== chosenPrimaryId &&
+        currentFile.subtitles.some((t) => t.id === savedPrefs.secondaryId)
+      ) {
+        chosenSecondaryId = savedPrefs.secondaryId;
+      } else if (currentFile.subtitles.length > 1) {
+        const arabicOrTranslated = currentFile.subtitles.find(
+          (t) => t.id !== chosenPrimaryId && (t.language === "ar" || t.source === "ai" || t.label.includes("عربي") || t.label.includes("🇸🇦"))
+        );
+        const otherTrack = arabicOrTranslated || currentFile.subtitles.find((t) => t.id !== chosenPrimaryId);
+        chosenSecondaryId = otherTrack ? otherTrack.id : null;
+      }
+      setSecondaryTrackId(chosenSecondaryId);
+
+      if (currentFile.showDualSubtitles !== undefined) {
+        setShowDualSubtitles(currentFile.showDualSubtitles);
+      } else if (chosenSecondaryId) {
+        setShowDualSubtitles(true);
       }
     } else {
       setActiveTrackId(null);
@@ -795,6 +1200,92 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       (cue) => currentTime >= cue.startTime && currentTime <= cue.endTime
     ) || null;
   }, [secondaryCues, currentTime]);
+
+  // Robust, Non-repeating 1-to-1 Mapping between Primary Cues and Secondary (e.g. Arabic) Cues
+  const secondaryCueMap = useMemo(() => {
+    const map = new Map<string, SubtitleCue>();
+    if (!showDualSubtitles || activeCues.length === 0 || secondaryCues.length === 0) {
+      return map;
+    }
+
+    // 1. Direct ID matching if tracks share cue IDs (e.g., translated track cloned from original)
+    const hasSharedIds = activeCues.some((ac) => secondaryCues.some((sc) => sc.id === ac.id));
+    if (hasSharedIds) {
+      const secIdMap = new Map(secondaryCues.map((sc) => [sc.id, sc]));
+      for (const cue of activeCues) {
+        const match = secIdMap.get(cue.id);
+        if (match) {
+          map.set(cue.id, match);
+        }
+      }
+      return map;
+    }
+
+    // 2. Parallel / Translated track matching (same cue count & aligned timestamps)
+    if (activeCues.length === secondaryCues.length) {
+      let isIndexAligned = true;
+      for (let i = 0; i < activeCues.length; i++) {
+        if (Math.abs(activeCues[i].startTime - secondaryCues[i].startTime) > 2.5) {
+          isIndexAligned = false;
+          break;
+        }
+      }
+      if (isIndexAligned) {
+        for (let i = 0; i < activeCues.length; i++) {
+          map.set(activeCues[i].id, secondaryCues[i]);
+        }
+        return map;
+      }
+    }
+
+    // 3. Temporal Overlap & Proximity matching (ensuring NO duplicate cues across different sentences)
+    const usedSecondaryIds = new Set<string>();
+
+    for (const cue of activeCues) {
+      let bestMatch: SubtitleCue | null = null;
+      let maxOverlap = 0;
+
+      for (const sc of secondaryCues) {
+        if (usedSecondaryIds.has(sc.id)) continue;
+        const overlapStart = Math.max(cue.startTime, sc.startTime);
+        const overlapEnd = Math.min(cue.endTime, sc.endTime);
+        const overlap = Math.max(0, overlapEnd - overlapStart);
+
+        if (overlap > maxOverlap) {
+          maxOverlap = overlap;
+          bestMatch = sc;
+        }
+      }
+
+      const cueDuration = Math.max(0.1, cue.endTime - cue.startTime);
+      if (bestMatch && (maxOverlap >= 0.2 || maxOverlap / cueDuration >= 0.25)) {
+        map.set(cue.id, bestMatch);
+        usedSecondaryIds.add(bestMatch.id);
+      } else {
+        // Fallback: Closest midpoint if within 0.8s
+        let closestMatch: SubtitleCue | null = null;
+        let minDiff = Infinity;
+        const cueMid = (cue.startTime + cue.endTime) / 2;
+
+        for (const sc of secondaryCues) {
+          if (usedSecondaryIds.has(sc.id)) continue;
+          const scMid = (sc.startTime + sc.endTime) / 2;
+          const diff = Math.abs(cueMid - scMid);
+          if (diff < 0.8 && diff < minDiff) {
+            minDiff = diff;
+            closestMatch = sc;
+          }
+        }
+
+        if (closestMatch) {
+          map.set(cue.id, closestMatch);
+          usedSecondaryIds.add(closestMatch.id);
+        }
+      }
+    }
+
+    return map;
+  }, [showDualSubtitles, activeCues, secondaryCues]);
 
   // Auto-scroll transcript container only to active cue (isolated from page scroll)
   useEffect(() => {
@@ -872,9 +1363,14 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       }
 
       // Automatically set the new translated track as secondary track for dual subtitles!
-      if (data.track) {
-        setSecondaryTrackId(data.track.id);
+      if (data.track && currentFile) {
+        const primaryId = activeTrack?.id || currentFile.subtitles?.[0]?.id || null;
+        const secondaryId = data.track.id;
+        if (primaryId) setActiveTrackId(primaryId);
+        setSecondaryTrackId(secondaryId);
         setShowDualSubtitles(true);
+        saveSubtitlePreferences(currentFile.id, primaryId, secondaryId);
+        saveSubtitlePreferencesToServer(currentFile.id, primaryId, secondaryId, true);
       }
       setShowTranslateModal(false);
     } catch (err: any) {
@@ -1243,12 +1739,35 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   };
 
   // Delete single cue
-  const handleDeleteCue = (cueId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDeleteCue = (cueId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (!currentFile || !activeTrack) return;
 
     const updatedCues = activeTrack.cues.filter((c) => c.id !== cueId);
     saveSubtitleTrackToServer(currentFile.id, activeTrack.label, updatedCues, "manual", activeTrack.id);
+  };
+
+  // Delete single cue with confirmation
+  const handleConfirmDeleteCue = (cueId: string) => {
+    if (!currentFile || !activeTrack) return;
+    const updatedCues = activeTrack.cues.filter((c) => c.id !== cueId);
+    saveSubtitleTrackToServer(currentFile.id, activeTrack.label, updatedCues, "manual", activeTrack.id);
+    triggerHud("تم حذف الجملة بنجاح", "🗑️");
+    setSuccessMsg("تم حذف الجملة بنجاح 🗑️");
+  };
+
+  // Copy cue text to clipboard
+  const handleCopyCueText = (cue: SubtitleCue) => {
+    const matchingSec = secondaryCueMap.get(cue.id);
+    const textToCopy = showDualSubtitles && matchingSec 
+      ? `${cue.text}\n${matchingSec.text}`
+      : cue.text;
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      triggerHud("تم نسخ الجملة", "📋");
+      setSuccessMsg("تم نسخ نص الجملة بنجاح 📋");
+    }).catch(() => {
+      triggerHud("تم نسخ الجملة", "📋");
+    });
   };
 
   // Drag and drop handlers
@@ -1747,9 +2266,19 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
   };
 
-  // Filtered files for Library view
+  const activeFolder = useMemo(() => {
+    if (!activeFolderId) return null;
+    return folders.find((f) => f.id === activeFolderId) || null;
+  }, [folders, activeFolderId]);
+
+  // Filtered files for File Manager & Library view
   const filteredFiles = useMemo(() => {
     return files.filter((f) => {
+      // Filter by active folder if inside a folder
+      if (activeFolderId) {
+        if (fileFolderMap[f.id] !== activeFolderId) return false;
+      }
+
       const matchesType =
         filterType === "all" ||
         (filterType === "video" && f.type === "video") ||
@@ -1762,7 +2291,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
       return matchesType && matchesSearch;
     });
-  }, [files, filterType, searchQuery]);
+  }, [files, activeFolderId, fileFolderMap, filterType, searchQuery]);
 
   // Filtered Subtitle Cues for search
   const filteredCues = useMemo(() => {
@@ -2009,8 +2538,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       } else if (e.key === "f" || e.key === "F") {
         handleToggleFullscreen();
       } else if (e.key === "Escape") {
-        if (isImmersiveMode) {
-          setIsImmersiveMode(false);
+        if (isFullscreen) {
+          handleToggleFullscreen();
         }
       }
     };
@@ -2384,15 +2913,25 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   const getSubtitlePositionStyle = useCallback((position: "bottom" | "top" | "center", offsetY: number): React.CSSProperties => {
     if (position === "top") {
-      return { top: `${offsetY}px`, bottom: "auto", transform: "none" };
+      const extraTop = isFullscreen && showFullscreenControls ? 60 : 0;
+      return {
+        top: `${offsetY + extraTop}px`,
+        bottom: "auto",
+        transform: "none",
+        transition: "top 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s ease"
+      };
     }
     if (position === "center") {
-      return { top: "50%", bottom: "auto", transform: "translateY(-50%)" };
+      return {
+        top: "50%",
+        bottom: "auto",
+        transform: "translateY(-50%)",
+        transition: "top 0.3s ease, transform 0.3s ease"
+      };
     }
-    // Flexible bottom positioning:
-    // When in fullscreen and floating controls are revealed, raise the subtitle smoothly (+150px)
-    // so it sits completely and cleanly above the controls bar and timeline scrubber without any overlap!
-    const extraBottom = isFullscreen && showFullscreenControls ? 150 : 0;
+    // Consistent bottom positioning across standard, immersive, and fullscreen modes
+    // When in fullscreen and floating controls are revealed, raise the subtitle smoothly (+90px) to prevent overlap
+    const extraBottom = isFullscreen && showFullscreenControls ? 90 : 0;
     return {
       bottom: `${offsetY + extraBottom}px`,
       top: "auto",
@@ -2433,7 +2972,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       />
 
       {/* Top Header Bar */}
-      <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3.5 flex items-center justify-between shadow-xs shrink-0">
+      <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 flex items-center justify-between shadow-xs shrink-0">
         <div className="flex items-center gap-3">
           {onToggleSidebar && (
             <button
@@ -2456,70 +2995,133 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
             </button>
           )}
 
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-linear-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
-              <Film className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg font-black text-slate-900 leading-tight">
-                  مشغل الوسائط والترجمة الذكية 🎬
+          {isPlayerOpen && currentFile ? (
+            /* Player Mode Header Title & Back to Manager */
+            <div className="flex items-center gap-2.5">
+              <button
+                onClick={handleBackToFileManager}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold text-xs transition-colors cursor-pointer"
+                title="العودة لمدير الملفات والمجلدات"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>مدير الملفات والمجلدات 📁</span>
+              </button>
+
+              <div className="hidden sm:flex items-center border-r border-slate-200 pr-3 mr-1">
+                <h1 className="text-xs sm:text-sm font-black text-slate-900 truncate max-w-[200px] md:max-w-xs">
+                  {currentFile.title}
                 </h1>
-                <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-[10px] font-extrabold flex items-center gap-1">
-                  <Subtitles className="w-3 h-3" />
-                  <span>دعم SRT / VTT</span>
-                </span>
               </div>
-              <p className="text-xs text-slate-500 hidden sm:block">
-                مشغل فيديو وصوت تفاعلي مع ترجمة متزامنة، تفريغ نصي مثل يوتيوب، وتحكم كامل
-              </p>
             </div>
-          </div>
+          ) : (
+            /* File Manager Mode Header Title */
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-xs">
+                <Folder className="w-4 h-4" />
+              </div>
+              <h1 className="text-sm sm:text-base font-black text-slate-900">
+                مدير الملفات
+              </h1>
+            </div>
+          )}
         </div>
 
-        {/* Upload Button & Stats */}
-        <div className="flex items-center gap-2.5">
-          <div className="hidden xl:flex items-center gap-3 px-3 py-1.5 bg-slate-100/80 rounded-xl text-xs font-semibold text-slate-600 border border-slate-200/60">
-            <div className="flex items-center gap-1.5">
-              <Film className="w-3.5 h-3.5 text-blue-600" />
-              <span>{totalVideos} فيديو</span>
-            </div>
-            <span className="text-slate-300">|</span>
-            <div className="flex items-center gap-1.5">
-              <Music className="w-3.5 h-3.5 text-violet-600" />
-              <span>{totalAudios} صوتيات</span>
-            </div>
-            <span className="text-slate-300">|</span>
-            <div className="flex items-center gap-1.5">
-              <HardDrive className="w-3.5 h-3.5 text-slate-500" />
-              <span>{formatFileSize(totalSize)}</span>
-            </div>
-          </div>
+        {/* Header Actions */}
+        <div className="flex items-center gap-2">
+          {isPlayerOpen && currentFile ? (
+            /* Actions in Player Mode */
+            <>
+              <button
+                onClick={() => {
+                  if (showTranscriptPanel && sidePanelView === "subtitles") {
+                    setSidePanelView("transcript");
+                  } else {
+                    setShowTranscriptPanel(true);
+                    setSidePanelView("subtitles");
+                  }
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-colors cursor-pointer ${
+                  showTranscriptPanel && sidePanelView === "subtitles"
+                    ? "bg-indigo-600 text-white shadow-xs"
+                    : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                }`}
+                title="خيارات وإعدادات الترجمة في اللوحة الجانبية"
+              >
+                <Languages className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">خيارات الترجمة</span>
+              </button>
 
-          {currentFile && (
-            <button
-              onClick={() => setShowSubtitleUploadModal(true)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/80 rounded-xl font-bold text-xs transition-colors cursor-pointer"
-              title="إضافة أو رفع ترجمة للمقطع الحالي"
-            >
-              <Subtitles className="w-4 h-4" />
-              <span>رفع ترجمة (SRT/VTT) 📜</span>
-            </button>
+              <button
+                onClick={() => setShowSubtitleUploadModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/80 rounded-xl font-bold text-xs transition-colors cursor-pointer"
+                title="إضافة أو رفع ترجمة للمقطع الحالي"
+              >
+                <Subtitles className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">رفع ترجمة (SRT/VTT)</span>
+              </button>
+            </>
+          ) : (
+            /* Actions in File Manager Mode */
+            <>
+              {/* Stats pill */}
+              <div className="hidden lg:flex items-center gap-2.5 px-3 py-1 bg-slate-100/80 rounded-xl text-[11px] font-semibold text-slate-600 border border-slate-200/60">
+                <div className="flex items-center gap-1">
+                  <Film className="w-3 h-3 text-blue-600" />
+                  <span>{totalVideos} فيديو</span>
+                </div>
+                <span className="text-slate-300">|</span>
+                <div className="flex items-center gap-1">
+                  <Music className="w-3 h-3 text-violet-600" />
+                  <span>{totalAudios} صوتيات</span>
+                </div>
+                <span className="text-slate-300">|</span>
+                <div className="flex items-center gap-1">
+                  <Folder className="w-3 h-3 text-amber-500" />
+                  <span>{folders.length} مجلد</span>
+                </div>
+                <span className="text-slate-300">|</span>
+                <div className="flex items-center gap-1">
+                  <HardDrive className="w-3 h-3 text-slate-500" />
+                  <span>{formatFileSize(totalSize)}</span>
+                </div>
+              </div>
+
+              {/* Create Folder Button */}
+              <button
+                onClick={handleOpenCreateFolderModal}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 rounded-xl font-bold text-xs transition-colors cursor-pointer"
+                title="إنشاء مجلد جديد لتنظيم الملفات"
+              >
+                <FolderPlus className="w-3.5 h-3.5 text-amber-600" />
+                <span>+ مجلد جديد</span>
+              </button>
+
+              {/* Gradio STT Button */}
+              <button
+                onClick={() => setShowGradioModal(true)}
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer"
+                title="تفريغ أي ملف صوتي أو فيديو بسيرفر Gradio الألماني المحلي"
+              >
+                <Mic className="w-3.5 h-3.5" />
+                <span>تفريغ Gradio 🇩🇪</span>
+              </button>
+            </>
           )}
 
+          {/* Upload Button */}
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
-            className="flex items-center gap-2 px-4 py-2 bg-[#0056f6] hover:bg-[#0047d1] text-white rounded-xl font-bold text-xs shadow-md shadow-blue-600/20 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#0056f6] hover:bg-[#0047d1] text-white rounded-xl font-bold text-xs shadow-xs transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {uploading ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>جاري الرفع ({uploadProgress}%)...</span>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>رفع ({uploadProgress}%)...</span>
               </>
             ) : (
               <>
-                <Upload className="w-4 h-4" />
+                <Upload className="w-3.5 h-3.5" />
                 <span>رفع وسائط 📤</span>
               </>
             )}
@@ -2563,14 +3165,14 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         {/* ======================================================== */}
         {/* ACTIVE MEDIA & SUBTITLES WORKSPACE (Like YouTube Player) */}
         {/* ======================================================== */}
-        {currentFile && (
+        {isPlayerOpen && currentFile ? (
           <section
             ref={playerSectionRef}
             className={
               isFullscreen
                 ? "fixed inset-0 z-50 bg-black flex flex-col h-screen w-screen p-0 m-0 overflow-hidden text-white select-none"
                 : isImmersiveMode
-                ? "fixed inset-0 z-50 bg-black flex flex-col h-screen w-screen p-2 sm:p-3 overflow-hidden text-white animate-fadeIn"
+                ? "fixed inset-0 z-50 bg-slate-950 flex flex-col h-screen w-screen p-2 sm:p-3 overflow-hidden text-white animate-fadeIn"
                 : "bg-slate-900 rounded-xl p-2 sm:p-2.5 text-white shadow-2xl border border-slate-800 overflow-hidden"
             }
           >
@@ -2580,7 +3182,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                 isFullscreen
                   ? "flex-1 w-full h-full relative overflow-hidden"
                   : isImmersiveMode
-                  ? "flex-1 flex overflow-hidden gap-2 min-h-0 relative"
+                  ? "flex-1 flex flex-col md:flex-row landscape:flex-row overflow-hidden gap-2 min-h-0 relative"
                   : "grid grid-cols-1 lg:grid-cols-12 gap-2"
               }
             >
@@ -2607,6 +3209,192 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       : "relative rounded-lg bg-black overflow-hidden flex items-center justify-center min-h-[260px] sm:min-h-[380px] group border border-slate-800 shadow-inner cursor-pointer select-none touch-none"
                   }
                 >
+                  {/* Sleek Floating Top Header (Fullscreen & Immersive Mode) */}
+                  {(isImmersiveMode || isFullscreen) && (
+                    <div
+                      className={`absolute top-0 inset-x-0 z-40 bg-gradient-to-b from-black/85 via-slate-950/60 to-transparent p-2.5 sm:p-3.5 flex items-center justify-between text-white transition-all duration-300 pointer-events-auto select-none ${
+                        isFullscreen
+                          ? showFullscreenControls
+                            ? "opacity-100 translate-y-0"
+                            : "opacity-0 -translate-y-6 pointer-events-none"
+                          : "opacity-100 translate-y-0"
+                      }`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {/* Left: Back to files + Media Title */}
+                      <div className="flex items-center gap-2 min-w-0">
+                        <button
+                          onClick={handleBackToFileManager}
+                          className="w-8 h-8 rounded-full bg-black/60 hover:bg-white/20 active:scale-95 border border-white/20 flex items-center justify-center text-white transition-all cursor-pointer shrink-0 shadow-md"
+                          title="الرجوع لمدير الملفات"
+                        >
+                          <ChevronLeft className="w-4 h-4 rtl:rotate-180" />
+                        </button>
+
+                        <h2 className="text-xs sm:text-sm font-bold text-white truncate max-w-[160px] xs:max-w-[220px] sm:max-w-md">
+                          {currentFile.title || currentFile.originalName}
+                        </h2>
+                      </div>
+
+                      {/* Right: Clean Action Controls */}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {/* Sentences / Transcript Toggle Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowTranscriptPanel(!showTranscriptPanel);
+                            if (!showTranscriptPanel) setSidePanelView("transcript");
+                          }}
+                          className={`h-7 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border-0 outline-none ${
+                            showTranscriptPanel && sidePanelView === "transcript"
+                              ? "bg-blue-600 text-white shadow-xs"
+                              : "bg-black/50 text-slate-300 hover:text-white hover:bg-black/75 backdrop-blur-md"
+                          }`}
+                          title={showTranscriptPanel ? "إخفاء لوحة الجمل" : "إظهار لوحة الجمل"}
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">الجمل</span>
+                        </button>
+
+                        {/* Fullscreen Toggle (Video only) */}
+                        {currentFile.type === "video" && (
+                          <button
+                            type="button"
+                            onClick={handleToggleFullscreen}
+                            className={`w-7 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center border-0 outline-none ${
+                              isFullscreen
+                                ? "bg-indigo-600 text-white shadow-xs"
+                                : "bg-black/50 text-slate-300 hover:text-white hover:bg-black/75 backdrop-blur-md"
+                            }`}
+                            title={isFullscreen ? "الخروج من ملء الشاشة (F / Esc)" : "ملء الشاشة بالكامل (F)"}
+                          >
+                            {isFullscreen ? (
+                              <Minimize2 className="w-3.5 h-3.5" />
+                            ) : (
+                              <Maximize2 className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        )}
+
+                        {/* Symbolic Options Button (⋮) & Unified Smart Menu */}
+                        <div className="relative" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowTopOptionsMenu(!showTopOptionsMenu);
+                            }}
+                            className={`w-7 h-7 rounded-lg transition-all cursor-pointer flex items-center justify-center border-0 outline-none ${
+                              showTopOptionsMenu
+                                ? "bg-blue-600 text-white shadow-xs"
+                                : "bg-black/50 text-slate-300 hover:text-white hover:bg-black/75 backdrop-blur-md"
+                            }`}
+                            title="خيارات"
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
+
+                          {/* Top Options Dropdown Menu (Smart, Borderless) */}
+                          {showTopOptionsMenu && (
+                            <div
+                              ref={topOptionsMenuRef}
+                              className="absolute left-0 top-full mt-2 z-50 min-w-[200px] bg-slate-900/98 backdrop-blur-md rounded-2xl p-1.5 shadow-2xl animate-scaleUp text-right border-0 shadow-black/80 ring-1 ring-white/10"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {/* 1. Toggle Subtitles / تفعيل الترجمة */}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleToggleSubtitlesOverlay();
+                                }}
+                                className="w-full px-3 py-2 hover:bg-slate-800 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition-colors flex items-center justify-between cursor-pointer border-0"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Subtitles className={`w-4 h-4 ${showSubtitlesOverlay ? "text-indigo-400" : "text-slate-400"}`} />
+                                  <span>تفعيل الترجمة</span>
+                                </div>
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                  showSubtitlesOverlay ? "bg-emerald-500/20 text-emerald-300" : "bg-slate-800 text-slate-400"
+                                }`}>
+                                  {showSubtitlesOverlay ? "مفعّلة" : "معطّلة"}
+                                </span>
+                              </button>
+
+                              {/* 2. Subtitle Tracks / المسارات */}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowTranscriptPanel(true);
+                                  setSidePanelView("subtitles");
+                                  setShowTopOptionsMenu(false);
+                                }}
+                                className="w-full px-3 py-2 hover:bg-slate-800 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition-colors flex items-center justify-between cursor-pointer border-0"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Languages className="w-4 h-4 text-blue-400" />
+                                  <span>المسارات</span>
+                                </div>
+                                {activeTrack && (
+                                  <span className="text-[10px] text-blue-300/80 max-w-[80px] truncate">
+                                    {activeTrack.label}
+                                  </span>
+                                )}
+                              </button>
+
+                              {/* 3. Subtitle Design / التصميم */}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowTranscriptPanel(true);
+                                  setSidePanelView("style");
+                                  setShowTopOptionsMenu(false);
+                                }}
+                                className="w-full px-3 py-2 hover:bg-slate-800 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0"
+                              >
+                                <Palette className="w-4 h-4 text-amber-400" />
+                                <span>التصميم</span>
+                              </button>
+
+                              <div className="my-1 border-t border-slate-800/80" />
+
+                              {/* 4. Upload Subtitle / رفع ترجمة */}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowSubtitleUploadModal(true);
+                                  setShowTopOptionsMenu(false);
+                                }}
+                                className="w-full px-3 py-2 hover:bg-slate-800 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0"
+                              >
+                                <Upload className="w-4 h-4 text-indigo-400" />
+                                <span>رفع ترجمة (SRT/VTT)</span>
+                              </button>
+
+                              {/* 5. Gemini AI Translation */}
+                              {activeTrack && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowTranslateModal(true);
+                                    setShowTopOptionsMenu(false);
+                                  }}
+                                  className="w-full px-3 py-2 hover:bg-slate-800 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0"
+                                >
+                                  <Sparkles className="w-4 h-4 text-purple-400" />
+                                  <span>ترجمة بالذكاء الاصطناعي</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   {/* YouTube-Style Dynamic Gesture Visual Overlays */}
                   {/* 1. Center Tap: Play / Pause */}
                   {activeGesture && activeGesture.side === "center" && (activeGesture.type === "play" || activeGesture.type === "pause") && (
@@ -2833,24 +3621,59 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     </div>
                   )}
 
+                  {/* MEDIA ELEMENT: VIDEO OR AUDIO */}
                   {currentFile.type === "video" ? (
-                    <>
-                      <video
-                        ref={videoRef}
+                    <video
+                      ref={videoRef}
+                      src={`/api/media/stream/${currentFile.filename}`}
+                      className={
+                        isFullscreen
+                          ? "w-full h-full object-contain pointer-events-none"
+                          : isImmersiveMode
+                          ? "w-full h-full object-contain cursor-pointer"
+                          : "w-full max-h-[500px] object-contain cursor-pointer"
+                      }
+                      preload="auto"
+                      playsInline
+                    />
+                  ) : (
+                    /* Audio Aesthetic Stage */
+                    <div
+                      className={`w-full ${
+                        isImmersiveMode ? "h-full justify-center" : "py-12 sm:py-16"
+                      } px-6 flex flex-col items-center justify-center gap-5 relative bg-linear-to-b from-slate-900 via-slate-900/90 to-slate-950`}
+                    >
+                      <audio
+                        ref={audioRef}
                         src={`/api/media/stream/${currentFile.filename}`}
-                        className={
-                          isFullscreen
-                            ? "w-full h-full object-contain pointer-events-none"
-                            : isImmersiveMode
-                            ? "w-full h-full object-contain cursor-pointer"
-                            : "w-full max-h-[500px] object-contain cursor-pointer"
-                        }
                         preload="auto"
-                        playsInline
                       />
 
-                      {/* Video Subtitles Overlay (Supports Dual Subtitles: German + Arabic with Live Custom Styling & Live Preview) */}
-                      {showSubtitlesOverlay && (currentCue || (showDualSubtitles && currentSecondaryCue) || showSwipeSamplePreview || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && (
+                      {/* Rotating Vinyl Record Graphic */}
+                      <div
+                        className={`${
+                          isImmersiveMode ? "w-36 h-36" : "w-32 h-32"
+                        } rounded-full border-4 border-slate-700/80 bg-linear-to-tr from-purple-600 via-indigo-600 to-blue-600 flex items-center justify-center shadow-xl shadow-purple-500/20 transition-transform ${
+                          isPlaying ? "animate-spin" : ""
+                        }`}
+                        style={{ animationDuration: "8s" }}
+                      >
+                        <div className="w-12 h-12 rounded-full bg-slate-900 border-2 border-slate-700 flex items-center justify-center text-purple-300">
+                          <Music className="w-6 h-6" />
+                        </div>
+                      </div>
+
+                      <div className="text-center">
+                        <p className="font-bold text-slate-100 text-base">{currentFile.title}</p>
+                        <p className="text-xs text-slate-400 mt-1">{currentFile.originalName}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* FLOATING SUBTITLES OVERLAY (Identical floating behavior & styling for BOTH Video & Audio) */}
+                  {showSubtitlesOverlay && (currentCue || (showDualSubtitles && currentSecondaryCue) || showSwipeSamplePreview || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && (
+                    <>
+                      {primarySubStyle.position === secondarySubStyle.position ? (
                         <div
                           className="absolute inset-x-0 flex flex-col items-center justify-center gap-2 px-4 pointer-events-none z-20 transition-all duration-300 ease-out"
                           style={getSubtitlePositionStyle(primarySubStyle.position, primarySubStyle.offsetY)}
@@ -2883,78 +3706,48 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                             );
                           })()}
                         </div>
+                      ) : (
+                        <>
+                          {/* Primary Subtitle in its dedicated position */}
+                          {(currentCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal || showSwipeSamplePreview) && !currentCue)) && (() => {
+                            const text = currentCue ? currentCue.text : "this is test";
+                            const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
+                            return (
+                              <div
+                                className="absolute inset-x-0 flex flex-col items-center justify-center px-4 pointer-events-none z-20 transition-all duration-300 ease-out"
+                                style={getSubtitlePositionStyle(primarySubStyle.position, primarySubStyle.offsetY)}
+                              >
+                                <div
+                                  dir={dir}
+                                  style={getSubtitleTrackComputedStyle(primarySubStyle, isImmersiveMode, text)}
+                                >
+                                  <span>{text}</span>
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          {/* Secondary Subtitle in its dedicated position */}
+                          {showDualSubtitles && (currentSecondaryCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal || showSwipeSamplePreview) && !currentSecondaryCue)) && (() => {
+                            const text = currentSecondaryCue ? currentSecondaryCue.text : "هذه تجربة كلام هنا";
+                            const dir = secondarySubStyle.direction === "rtl" ? "rtl" : secondarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
+                            return (
+                              <div
+                                className="absolute inset-x-0 flex flex-col items-center justify-center px-4 pointer-events-none z-20 transition-all duration-300 ease-out"
+                                style={getSubtitlePositionStyle(secondarySubStyle.position, secondarySubStyle.offsetY)}
+                              >
+                                <div
+                                  dir={dir}
+                                  style={getSubtitleTrackComputedStyle(secondarySubStyle, isImmersiveMode, text)}
+                                >
+                                  <span>{text}</span>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </>
                       )}
                     </>
-                  ) : (
-                    /* Audio Aesthetic Stage */
-                    <div
-                      className={`w-full ${
-                        isImmersiveMode ? "h-full justify-center" : "py-10"
-                      } px-6 flex flex-col items-center justify-center gap-5 relative bg-linear-to-b from-slate-900 via-slate-900/90 to-slate-950`}
-                    >
-                      <audio
-                        ref={audioRef}
-                        src={`/api/media/stream/${currentFile.filename}`}
-                        preload="auto"
-                      />
-
-                      {/* Rotating Vinyl Record Graphic */}
-                      <div
-                        className={`${
-                          isImmersiveMode ? "w-36 h-36" : "w-32 h-32"
-                        } rounded-full border-4 border-slate-700/80 bg-linear-to-tr from-purple-600 via-indigo-600 to-blue-600 flex items-center justify-center shadow-xl shadow-purple-500/20 transition-transform ${
-                          isPlaying ? "animate-spin" : ""
-                        }`}
-                        style={{ animationDuration: "8s" }}
-                      >
-                        <div className="w-12 h-12 rounded-full bg-slate-900 border-2 border-slate-700 flex items-center justify-center text-purple-300">
-                          <Music className="w-6 h-6" />
-                        </div>
-                      </div>
-
-                      <div className="text-center">
-                        <p className="font-bold text-slate-100 text-base">{currentFile.title}</p>
-                        <p className="text-xs text-slate-400 mt-1">{currentFile.originalName}</p>
-                      </div>
-
-                      {/* Audio Karaoke Subtitle Box (Supports Dual Subtitles with Live Custom Styling) */}
-                      {showSubtitlesOverlay && (
-                        <div className="w-full max-w-lg mt-2 min-h-[64px] flex flex-col items-center justify-center gap-2">
-                          {currentCue || (showDualSubtitles && currentSecondaryCue) || showSwipeSamplePreview ? (
-                            <>
-                              {(currentCue || (showSwipeSamplePreview && !currentCue)) && (() => {
-                                const text = currentCue ? currentCue.text : "this is test";
-                                const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
-                                return (
-                                  <div
-                                    dir={dir}
-                                    style={getSubtitleTrackComputedStyle(primarySubStyle, isImmersiveMode, text)}
-                                  >
-                                    <span>{text}</span>
-                                  </div>
-                                );
-                              })()}
-                              {showDualSubtitles && (currentSecondaryCue || (showSwipeSamplePreview && !currentSecondaryCue)) && (() => {
-                                const text = currentSecondaryCue ? currentSecondaryCue.text : "هذه تجربة كلام هنا";
-                                const dir = secondarySubStyle.direction === "rtl" ? "rtl" : secondarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
-                                return (
-                                  <div
-                                    dir={dir}
-                                    style={getSubtitleTrackComputedStyle(secondarySubStyle, isImmersiveMode, text)}
-                                  >
-                                    <span>{text}</span>
-                                  </div>
-                                );
-                              })()}
-                            </>
-                          ) : (
-                            <div className="text-xs text-slate-500 italic bg-slate-800/40 px-4 py-2 rounded-xl border border-slate-800">
-                              {activeTrack ? "جاري انتظار مقطع الترجمة التالي..." : "لا توجد ترجمة نشطة (اضغط على إضافة ترجمة بالأعلى)"}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
                   )}
                 </div>
 
@@ -3092,306 +3885,162 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     </div>
                   </div>
 
-                  {/* Primary Controls Row: Unified LTR Flow */}
-                  {/* Control Bar: Compact, Space-Efficient Icon-Driven Toolbar with consistent eye-friendly heights and colors */}
-                  <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 pt-0.5">
-                    {/* Left Controls: Play, Skips, Navigation & Volume */}
-                    <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
-                      {/* Play/Pause Main Button */}
-                      <button
-                        onClick={togglePlay}
-                        className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white flex items-center justify-center shadow-xs transition-transform active:scale-95 cursor-pointer shrink-0"
-                        title={isPlaying ? "إيقاف مؤقت (Space)" : "تشغيل (Space)"}
-                      >
-                        {isPlaying ? (
-                          <Pause className="w-3.5 h-3.5 fill-current" />
-                        ) : (
-                          <Play className="w-3.5 h-3.5 fill-current translate-x-[1px]" />
-                        )}
-                      </button>
+                  {/* Unified Compact & Centered Playback Controls Bar (Mobile Portrait, Mobile Landscape, and Desktop) */}
+                  <div className="flex items-center justify-between gap-1 sm:gap-3 pt-1 select-none">
+                    {/* Left: Sentence Navigation Group */}
+                    <div className="flex items-center shrink-0">
+                      {activeCues.length > 0 ? (
+                        <div className="flex items-center bg-slate-800/90 border border-slate-700/60 rounded-lg p-0.5 shadow-xs">
+                          {/* Previous Sentence */}
+                          <button
+                            onClick={() => jumpToPreviousSentence(true)}
+                            className="h-7 w-7 sm:h-8 sm:w-8 flex items-center justify-center text-slate-300 hover:text-white active:bg-slate-700 rounded-md transition-colors cursor-pointer"
+                            title="الجملة السابقة ([)"
+                          >
+                            <SkipBack className="w-3.5 h-3.5 text-indigo-400" />
+                          </button>
 
+                          {/* Replay Current Sentence */}
+                          <button
+                            onClick={replayCurrentSentenceOnly}
+                            className="h-7 w-7 sm:h-8 sm:w-8 flex items-center justify-center text-blue-300 hover:text-blue-200 active:bg-blue-600/30 rounded-md transition-colors cursor-pointer"
+                            title="إعادة نطق الجملة (R)"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
+                          </button>
+
+                          {/* Next Sentence */}
+                          <button
+                            onClick={() => jumpToNextSentence(true)}
+                            className="h-7 w-7 sm:h-8 sm:w-8 flex items-center justify-center text-slate-300 hover:text-white active:bg-slate-700 rounded-md transition-colors cursor-pointer"
+                            title="الجملة التالية (])"
+                          >
+                            <SkipForward className="w-3.5 h-3.5 text-indigo-400" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="w-2" />
+                      )}
+                    </div>
+
+                    {/* Center: Playback Hero Controls (Centered) */}
+                    <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                       {/* -5s Skip */}
                       <button
                         onClick={() => skipSeconds(-5)}
-                        className="h-8 px-2 bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer border border-slate-700/60 flex items-center gap-1 shrink-0 text-xs"
+                        className="h-7 px-2 sm:h-8 sm:px-2.5 bg-slate-800/90 hover:bg-slate-700/90 active:bg-slate-700 text-slate-300 hover:text-white rounded-lg border border-slate-700/60 flex items-center gap-1 text-xs font-mono font-bold transition-colors cursor-pointer"
                         title="تراجع 5 ثواني (J / ArrowLeft)"
                       >
                         <RotateCcw className="w-3 h-3 text-slate-400" />
-                        <span className="text-[10.5px] font-mono font-semibold">5s</span>
+                        <span className="text-[10px] sm:text-xs">5s</span>
+                      </button>
+
+                      {/* Main Play/Pause Button */}
+                      <button
+                        onClick={togglePlay}
+                        className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-90 text-white flex items-center justify-center shadow-lg shadow-blue-500/25 transition-transform cursor-pointer"
+                        title={isPlaying ? "إيقاف مؤقت (Space)" : "تشغيل (Space)"}
+                      >
+                        {isPlaying ? (
+                          <Pause className="w-4 h-4 fill-current" />
+                        ) : (
+                          <Play className="w-4 h-4 fill-current translate-x-[1px]" />
+                        )}
                       </button>
 
                       {/* +5s Skip */}
                       <button
                         onClick={() => skipSeconds(5)}
-                        className="h-8 px-2 bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer border border-slate-700/60 flex items-center gap-1 shrink-0 text-xs"
+                        className="h-7 px-2 sm:h-8 sm:px-2.5 bg-slate-800/90 hover:bg-slate-700/90 active:bg-slate-700 text-slate-300 hover:text-white rounded-lg border border-slate-700/60 flex items-center gap-1 text-xs font-mono font-bold transition-colors cursor-pointer"
                         title="تقديم 5 ثواني (L / ArrowRight)"
                       >
                         <RotateCw className="w-3 h-3 text-slate-400" />
-                        <span className="text-[10.5px] font-mono font-semibold">5s</span>
+                        <span className="text-[10px] sm:text-xs">5s</span>
                       </button>
-
-                      {/* Track Navigation Group (Prev & Next Track) */}
-                      <div className="flex items-center gap-0.5 bg-slate-800/80 border border-slate-700/60 rounded-lg p-0.5 shadow-xs h-8">
-                        {/* Prev Track */}
-                        <button
-                          onClick={handlePrevTrack}
-                          disabled={filteredFiles.length <= 1}
-                          className="h-7 w-7 hover:bg-slate-700/80 text-slate-300 hover:text-white rounded-md transition-colors disabled:opacity-30 cursor-pointer flex items-center justify-center shrink-0"
-                          title="المقطع السابق"
-                        >
-                          <SkipBack className="w-3 h-3" />
-                        </button>
-
-                        {/* Next Track */}
-                        <button
-                          onClick={handleNextTrack}
-                          disabled={filteredFiles.length <= 1}
-                          className="h-7 w-7 hover:bg-slate-700/80 text-slate-300 hover:text-white rounded-md transition-colors disabled:opacity-30 cursor-pointer flex items-center justify-center shrink-0"
-                          title="المقطع التالي"
-                        >
-                          <SkipForward className="w-3 h-3" />
-                        </button>
-                      </div>
-
-                      {/* Pro Subtitle Navigation Shortcuts Group (Clean Unified Icons) */}
-                      {activeCues.length > 0 && (
-                        <div className="flex items-center bg-slate-800/80 border border-slate-700/60 rounded-lg p-0.5 shadow-xs h-8">
-                          {/* Previous Sentence [ */}
-                          <button
-                            onClick={() => jumpToPreviousSentence(true)}
-                            className="h-7 px-1.5 hover:bg-slate-700/80 text-slate-300 hover:text-white rounded-md transition-all cursor-pointer flex items-center gap-1"
-                            title="القفز للجملة السابقة (اختصار: [)"
-                          >
-                            <SkipBack className="w-3 h-3 text-indigo-400" />
-                          </button>
-
-                          {/* Replay Current Sentence Only R */}
-                          <button
-                            onClick={replayCurrentSentenceOnly}
-                            className="h-7 px-1.5 hover:bg-blue-600/30 text-blue-300 hover:text-white rounded-md transition-all cursor-pointer flex items-center gap-1"
-                            title="إعادة نطق الجملة الحالية فقط (اختصار: R)"
-                          >
-                            <RefreshCw className="w-3 h-3 text-blue-400" />
-                          </button>
-
-                          {/* Next Sentence ] */}
-                          <button
-                            onClick={() => jumpToNextSentence(true)}
-                            className="h-7 px-1.5 hover:bg-slate-700/80 text-slate-300 hover:text-white rounded-md transition-all cursor-pointer flex items-center gap-1"
-                            title="القفز للجملة التالية (اختصار: ])"
-                          >
-                            <SkipForward className="w-3 h-3 text-indigo-400" />
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Volume & Mute with 200% Super Boost */}
-                      <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 h-8 rounded-lg border border-slate-700/60">
-                        <button
-                          onClick={toggleMute}
-                          className="text-slate-400 hover:text-white transition-colors cursor-pointer"
-                          title="كتم الصوت (M)"
-                        >
-                          {isMuted || volume === 0 ? (
-                            <VolumeX className="w-3.5 h-3.5 text-rose-400" />
-                          ) : volume > 1 ? (
-                            <Volume2 className="w-3.5 h-3.5 text-blue-400 font-bold" />
-                          ) : (
-                            <Volume2 className="w-3.5 h-3.5 text-slate-300" />
-                          )}
-                        </button>
-                        <input
-                          type="range"
-                          min="0"
-                          max="2"
-                          step="0.05"
-                          value={isMuted ? 0 : volume}
-                          onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-                          className="w-12 sm:w-16 h-1 bg-slate-600 rounded-md appearance-none cursor-pointer accent-blue-500"
-                          title={`مستوى الصوت: ${Math.round(volume * 100)}%`}
-                        />
-                        {volume > 1 && !isMuted && (
-                          <span className="text-[9.5px] font-mono font-bold text-blue-400 hidden sm:inline">
-                            {Math.round(volume * 100)}%
-                          </span>
-                        )}
-                      </div>
                     </div>
 
-                    {/* Right Controls: Grouped cleanly into 3 organized clusters (Subtitles Tools, Playback Settings, Viewport Modes) */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      {/* Cluster 1: Subtitle & Transcript Tools */}
-                      <div className="flex items-center bg-slate-800/80 border border-slate-700/60 rounded-lg p-0.5 shadow-xs h-8">
-                        {/* CC Toggle */}
+                    {/* Right: Quick Controls (Speed, Loop, Volume Button Only) */}
+                    <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+                      {/* Speed Popup */}
+                      <div className="relative" ref={speedMenuRef}>
                         <button
-                          onClick={handleToggleSubtitlesOverlay}
-                          className={`h-7 px-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center ${
-                            showSubtitlesOverlay
-                              ? "bg-indigo-600 text-white shadow-xs"
-                              : "text-slate-400 hover:text-white hover:bg-slate-700/60"
+                          onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+                          className={`h-7 px-1.5 sm:h-8 sm:px-2 rounded-lg text-[10.5px] sm:text-xs font-mono font-bold flex items-center gap-1 border transition-colors cursor-pointer ${
+                            playbackRate !== 1 || showSpeedMenu
+                              ? "bg-amber-500/20 text-amber-300 border-amber-500/50"
+                              : "bg-slate-800/90 hover:bg-slate-700/90 text-slate-300 border-slate-700/60"
                           }`}
-                          title={showSubtitlesOverlay ? "إخفاء شريط الترجمة (C)" : "إظهار شريط الترجمة (C)"}
+                          title="سرعة التشغيل"
                         >
-                          <Subtitles className="w-3.5 h-3.5" />
+                          <Zap className="w-3 h-3 text-amber-400" />
+                          <span>{playbackRate}x</span>
                         </button>
 
-                        {/* Subtitle Style Customization Studio Trigger */}
-                        <button
-                          onClick={() => {
-                            if (showTranscriptPanel && sidePanelView === "style") {
-                              setSidePanelView("transcript");
-                            } else {
-                              setShowTranscriptPanel(true);
-                              setSidePanelView("style");
-                            }
-                          }}
-                          className={`h-7 px-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center ${
-                            showTranscriptPanel && sidePanelView === "style"
-                              ? "bg-amber-500 text-slate-950 shadow-xs"
-                              : "text-slate-400 hover:text-amber-300 hover:bg-slate-700/60"
-                          }`}
-                          title="تخصيص ستايل ولون وخلفية الترجمة في اللوحة الجانبية"
-                        >
-                          <Palette className="w-3.5 h-3.5" />
-                        </button>
-
-                        {/* Subtitle Options & Management Hub */}
-                        <button
-                          onClick={() => setShowSubtitleOptionsModal(!showSubtitleOptionsModal)}
-                          className={`h-7 px-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center relative ${
-                            showSubtitleOptionsModal
-                              ? "bg-indigo-600 text-white shadow-xs"
-                              : "text-slate-400 hover:text-indigo-300 hover:bg-slate-700/60"
-                          }`}
-                          title="خيارات ومسارات الترجمة (المسار الأول، الترجمة المزدوجة، الذكاء الاصطناعي والتفريغ)"
-                        >
-                          <Languages className="w-3.5 h-3.5" />
-                          {/* Status indicator dot if multiple tracks exist or dual is on */}
-                          {((currentFile.subtitles?.length ?? 0) > 1 || showDualSubtitles) && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 absolute top-1 right-1" />
-                          )}
-                        </button>
-
-                        {/* Toggle Sentences / Transcript Side Panel */}
-                        <button
-                          onClick={() => setShowTranscriptPanel(!showTranscriptPanel)}
-                          className={`h-7 px-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center ${
-                            showTranscriptPanel
-                              ? "bg-blue-600 text-white shadow-xs"
-                              : "text-slate-400 hover:text-white hover:bg-slate-700/60"
-                          }`}
-                          title={showTranscriptPanel ? "إخفاء لوحة الجمل والتفريغ" : "إظهار لوحة الجمل والتفريغ"}
-                        >
-                          <FileText className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-
-                      {/* Cluster 2: Playback Settings (Speed + Loop) */}
-                      <div className="flex items-center bg-slate-800/80 border border-slate-700/60 rounded-lg p-0.5 shadow-xs h-8">
-                        {/* Playback Speed Menu Trigger & Rectangular Popup Above Button */}
-                        <div className="relative" ref={speedMenuRef}>
-                          <button
-                            onClick={() => setShowSpeedMenu(!showSpeedMenu)}
-                            className={`h-7 px-2 rounded-md text-[11px] font-mono font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                              showSpeedMenu || playbackRate !== 1
-                                ? "bg-amber-500/20 text-amber-300 border border-amber-500/50"
-                                : "text-slate-400 hover:text-white hover:bg-slate-700/60"
-                            }`}
-                            title="تغيير سرعة التشغيل"
-                          >
-                            <Zap className="w-3 h-3 text-amber-400" />
-                            <span>{playbackRate}x</span>
-                          </button>
-
-                          {/* Rectangular Speed Popup Above Button */}
-                          {showSpeedMenu && (
-                            <div className="absolute bottom-full mb-2 right-0 sm:left-1/2 sm:-translate-x-1/2 bg-slate-900/98 backdrop-blur-md border border-slate-700/90 rounded-lg p-2.5 shadow-2xl z-50 min-w-[170px] animate-scaleUp">
-                              <div className="flex items-center justify-between pb-1.5 mb-2 border-b border-slate-800 text-[11px] font-bold text-slate-300">
-                                <span className="flex items-center gap-1.5">
-                                  <Zap className="w-3.5 h-3.5 text-amber-400" />
-                                  سرعة التشغيل
-                                </span>
-                                <span className="text-[10px] text-amber-400 font-mono bg-amber-950/70 px-1.5 py-0.5 rounded border border-amber-500/30 font-bold">
-                                  {playbackRate}x
-                                </span>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-1.5 font-mono text-xs">
-                                {PLAYBACK_SPEEDS.map((rate) => (
-                                  <button
-                                    key={rate}
-                                    onClick={() => {
-                                      handleSpeedChange(rate);
-                                      setShowSpeedMenu(false);
-                                      triggerHud("سرعة التشغيل", `${rate}x`);
-                                    }}
-                                    className={`px-2 py-1.5 rounded-md text-center transition-all flex items-center justify-between cursor-pointer ${
-                                      playbackRate === rate
-                                        ? "bg-amber-500 text-slate-950 font-black shadow-xs"
-                                        : "bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/50"
-                                    }`}
-                                  >
-                                    <span>{rate === 1 ? "1.0x عادي" : `${rate}x`}</span>
-                                    {playbackRate === rate && <Check className="w-3 h-3 ml-1" />}
-                                  </button>
-                                ))}
-                              </div>
+                        {showSpeedMenu && (
+                          <div className="absolute bottom-full mb-2 right-0 sm:left-1/2 sm:-translate-x-1/2 bg-slate-900/98 backdrop-blur-md border border-slate-700/90 rounded-lg p-2.5 shadow-2xl z-50 min-w-[160px] sm:min-w-[170px] animate-scaleUp">
+                            <div className="flex items-center justify-between pb-1.5 mb-2 border-b border-slate-800 text-[11px] font-bold text-slate-300">
+                              <span className="flex items-center gap-1.5">
+                                <Zap className="w-3.5 h-3.5 text-amber-400" />
+                                سرعة التشغيل
+                              </span>
+                              <span className="text-[10px] text-amber-400 font-mono bg-amber-950/70 px-1.5 py-0.5 rounded border border-amber-500/30 font-bold">
+                                {playbackRate}x
+                              </span>
                             </div>
-                          )}
-                        </div>
-
-                        {/* Loop button */}
-                        <button
-                          onClick={() => setIsLooping(!isLooping)}
-                          className={`h-7 px-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center ${
-                            isLooping
-                              ? "bg-blue-600 text-white shadow-xs"
-                              : "text-slate-400 hover:text-white hover:bg-slate-700/60"
-                          }`}
-                          title={isLooping ? "إلغاء التكرار" : "تكرار المقطع"}
-                        >
-                          <Repeat className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-
-                      {/* Cluster 3: Screen & Display Modes */}
-                      <div className="flex items-center bg-slate-800/80 border border-slate-700/60 rounded-lg p-0.5 shadow-xs h-8">
-                        {/* Immersive Theater Mode Toggle Button (Exit / Enter) */}
-                        <button
-                          onClick={() => setIsImmersiveMode(!isImmersiveMode)}
-                          className={`h-7 px-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center justify-center ${
-                            isImmersiveMode
-                              ? "bg-purple-600 text-white shadow-xs hover:bg-purple-500"
-                              : "text-slate-400 hover:text-purple-300 hover:bg-slate-700/60"
-                          }`}
-                          title={isImmersiveMode ? "الخروج من وضع التكبير السينمائي (Esc)" : "وضع التكبير السينمائي الشامل"}
-                        >
-                          {isImmersiveMode ? (
-                            <Shrink className="w-3.5 h-3.5 text-white" />
-                          ) : (
-                            <Expand className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-
-                        {/* Fullscreen button */}
-                        {currentFile.type === "video" && (
-                          <button
-                            onClick={handleToggleFullscreen}
-                            className={`h-7 px-2 rounded-md transition-colors cursor-pointer flex items-center justify-center ${
-                              isFullscreen
-                                ? "bg-indigo-600 text-white shadow-xs"
-                                : "text-slate-400 hover:text-white hover:bg-slate-700/60"
-                            }`}
-                            title={isFullscreen ? "الخروج من ملء الشاشة (F / Esc)" : "ملء الشاشة بالكامل (F)"}
-                          >
-                            {isFullscreen ? (
-                              <Minimize2 className="w-3.5 h-3.5 text-white" />
-                            ) : (
-                              <Maximize2 className="w-3.5 h-3.5" />
-                            )}
-                          </button>
+                            <div className="grid grid-cols-2 gap-1 font-mono text-xs">
+                              {PLAYBACK_SPEEDS.map((rate) => (
+                                <button
+                                  key={rate}
+                                  onClick={() => {
+                                    handleSpeedChange(rate);
+                                    setShowSpeedMenu(false);
+                                    triggerHud("سرعة التشغيل", `${rate}x`);
+                                  }}
+                                  className={`px-1.5 py-1 sm:px-2 sm:py-1.5 rounded-md text-center transition-all flex items-center justify-between cursor-pointer ${
+                                    playbackRate === rate
+                                      ? "bg-amber-500 text-slate-950 font-black shadow-xs"
+                                      : "bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700/50"
+                                  }`}
+                                >
+                                  <span>{rate === 1 ? "1.0x عادي" : `${rate}x`}</span>
+                                  {playbackRate === rate && <Check className="w-3 h-3 ml-1" />}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
                         )}
                       </div>
+
+                      {/* Loop button */}
+                      <button
+                        onClick={() => setIsLooping(!isLooping)}
+                        className={`h-7 w-7 sm:h-8 sm:w-8 rounded-lg flex items-center justify-center border transition-colors cursor-pointer ${
+                          isLooping
+                            ? "bg-blue-600 text-white border-blue-500 shadow-xs"
+                            : "bg-slate-800/90 hover:bg-slate-700/90 text-slate-300 border-slate-700/60 active:bg-slate-700"
+                        }`}
+                        title={isLooping ? "إلغاء التكرار" : "تكرار المقطع"}
+                      >
+                        <Repeat className="w-3.5 h-3.5" />
+                      </button>
+
+                      {/* Volume / Mute Icon Button (No bulky slider track) */}
+                      <button
+                        onClick={() => {
+                          triggerSamsungVolumeBar();
+                          toggleMute();
+                        }}
+                        className="h-7 w-7 sm:h-8 sm:w-8 bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700/60 rounded-lg flex items-center justify-center text-slate-300 active:bg-slate-700 transition-colors cursor-pointer"
+                        title="كتم / تشغيل الصوت"
+                      >
+                        {isMuted || volume === 0 ? (
+                          <VolumeX className="w-3.5 h-3.5 text-rose-400" />
+                        ) : volume > 1 ? (
+                          <Volume2 className="w-3.5 h-3.5 text-blue-400 font-bold" />
+                        ) : (
+                          <Volume2 className="w-3.5 h-3.5 text-slate-300" />
+                        )}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -3405,8 +4054,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                 <div
                   className={
                     isImmersiveMode
-                      ? "w-80 sm:w-96 bg-slate-900 border border-slate-800 rounded-lg flex flex-col h-full z-20 shrink-0 shadow-2xl overflow-hidden animate-slideLeft"
-                      : "lg:col-span-5 xl:col-span-4 bg-slate-800/90 border border-slate-700/90 rounded-lg flex flex-col h-[480px] lg:h-full lg:min-h-[460px] overflow-hidden shadow-lg animate-fadeIn"
+                      ? "w-full h-[40vh] sm:h-[44vh] md:h-full landscape:h-full md:w-80 lg:w-96 landscape:w-80 lg:landscape:w-96 flex-shrink-0 bg-slate-800/90 border border-slate-700/90 rounded-lg flex flex-col overflow-hidden shadow-lg animate-fadeIn"
+                      : "lg:col-span-5 xl:col-span-4 bg-slate-800/90 border border-slate-700/90 rounded-lg flex flex-col h-[420px] sm:h-[480px] lg:h-full lg:min-h-[460px] overflow-hidden shadow-lg animate-fadeIn"
                   }
                 >
                   {/* Panel Header */}
@@ -3420,38 +4069,61 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                             تخصيص الستايل
                           </span>
                         </>
-                      ) : (
+                      ) : sidePanelView === "subtitles" ? (
                         <>
-                          {currentFile.type === "video" ? (
-                            <Film className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                          ) : (
-                            <Music className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                          )}
-                          <span
-                            className="text-xs font-bold text-slate-200 truncate max-w-[130px] sm:max-w-[180px]"
-                            title={currentFile.title || currentFile.originalName}
-                          >
-                            {currentFile.title || currentFile.originalName}
+                          <Languages className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                          <span className="text-xs font-bold text-slate-100 truncate">
+                            خيارات ومسارات الترجمة
                           </span>
                         </>
+                      ) : (
+                        <span
+                          className="text-xs font-bold text-slate-200 truncate max-w-[150px] sm:max-w-[200px]"
+                          title={currentFile.title || currentFile.originalName}
+                        >
+                          {currentFile.title || currentFile.originalName}
+                        </span>
                       )}
                     </div>
 
-                    {/* Actions: تمرير -> إخفاء/إظهار الدقائق -> نسخ -> تنزيل -> إغلاق */}
-                    <div className="flex items-center gap-2 shrink-0">
+                    {/* Actions: بحث -> تمرير -> إخفاء/إظهار الدقائق -> إغلاق */}
+                    <div className="flex items-center gap-1.5 shrink-0">
                       {sidePanelView === "transcript" ? (
                         <>
-                          {/* Simple Auto-scroll text button without badge/padding */}
+                          {/* Toggle Search Input */}
                           <button
-                            onClick={() => setAutoScrollTranscript(!autoScrollTranscript)}
-                            className={`text-xs font-medium transition-colors cursor-pointer ${
-                              autoScrollTranscript
-                                ? "text-blue-400 font-bold"
-                                : "text-slate-400 hover:text-slate-200"
+                            onClick={() => {
+                              const next = !showTranscriptSearch;
+                              setShowTranscriptSearch(next);
+                              if (!next) {
+                                setSubtitleSearchQuery("");
+                              }
+                            }}
+                            className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                              showTranscriptSearch || subtitleSearchQuery
+                                ? "text-blue-400 bg-blue-950/60 border border-blue-500/30"
+                                : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/70"
                             }`}
-                            title={autoScrollTranscript ? "إيقاف التمرير التلقائي" : "تفعيل التمرير التلقائي"}
+                            title={showTranscriptSearch ? "إخفاء شريط البحث" : "البحث داخل الجمل"}
                           >
-                            تمرير
+                            <Search className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Auto-scroll Icon Button (Down arrow) */}
+                          <button
+                            onClick={() => {
+                              const next = !autoScrollTranscript;
+                              setAutoScrollTranscript(next);
+                              triggerHud(next ? "تفعيل التمرير التلقائي" : "إيقاف التمرير التلقائي", "⬇️");
+                            }}
+                            className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                              autoScrollTranscript
+                                ? "text-blue-400 bg-blue-950/60 border border-blue-500/30"
+                                : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/70"
+                            }`}
+                            title={autoScrollTranscript ? "التمرير التلقائي: مفعل (انقر للتعطيل)" : "التمرير التلقائي: معطل (انقر للتفعيل)"}
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
                           </button>
 
                           {/* Toggle Cue Timestamps (Minutes/Seconds) - Default: OFF / Hidden to maximize sentence room */}
@@ -3466,60 +4138,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                               }
                               triggerHud(nextState ? "إظهار أرقام الدقائق" : "إخفاء أرقام الدقائق", "⏰");
                             }}
-                            className={`p-1 hover:bg-slate-700 rounded-md transition-colors cursor-pointer ${
+                            className={`p-1.5 rounded-lg transition-all cursor-pointer ${
                               showCueTimestamps
-                                ? "text-amber-400 bg-amber-950/40"
-                                : "text-slate-400 hover:text-slate-200"
+                                ? "text-amber-400 bg-amber-950/60 border border-amber-500/30"
+                                : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/70"
                             }`}
                             title={showCueTimestamps ? "إخفاء أرقام الدقائق والتوقيت (توفير مساحة أكبر للنص)" : "إظهار أرقام الدقائق والتوقيت"}
                           >
                             <Clock className="w-3.5 h-3.5" />
                           </button>
-
-                          {/* Copy full text */}
-                          <button
-                            onClick={handleCopyTranscript}
-                            disabled={activeCues.length === 0}
-                            className="p-1 hover:bg-slate-700 text-slate-400 hover:text-white rounded-md transition-colors cursor-pointer disabled:opacity-30"
-                            title="نسخ النص كاملاً"
-                          >
-                            {copiedTranscript ? (
-                              <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
-                            ) : (
-                              <Copy className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-
-                          {/* Export Subtitle Dropdown */}
-                          <div className="relative group">
-                            <button
-                              disabled={activeCues.length === 0}
-                              className="p-1 hover:bg-slate-700 text-slate-400 hover:text-white rounded-md transition-colors cursor-pointer disabled:opacity-30"
-                              title="تصدير وتحميل ملف الترجمة"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                            </button>
-                            <div className="absolute left-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-lg p-1.5 shadow-xl hidden group-hover:flex flex-col gap-1 z-30 min-w-[110px]">
-                              <button
-                                onClick={() => handleDownloadSubtitles("srt")}
-                                className="px-2 py-1 text-right text-[11px] font-bold text-slate-300 hover:bg-slate-800 rounded-md"
-                              >
-                                تحميل (.SRT)
-                              </button>
-                              <button
-                                onClick={() => handleDownloadSubtitles("vtt")}
-                                className="px-2 py-1 text-right text-[11px] font-bold text-slate-300 hover:bg-slate-800 rounded-md"
-                              >
-                                تحميل (.VTT)
-                              </button>
-                              <button
-                                onClick={() => handleDownloadSubtitles("txt")}
-                                className="px-2 py-1 text-right text-[11px] font-bold text-slate-300 hover:bg-slate-800 rounded-md"
-                              >
-                                تحميل نصي (.TXT)
-                              </button>
-                            </div>
-                          </div>
                         </>
                       ) : (
                         <button
@@ -3535,7 +4162,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       {/* Close panel button */}
                       <button
                         onClick={() => setShowTranscriptPanel(false)}
-                        className="p-1 hover:bg-slate-700 text-slate-400 hover:text-white rounded-md cursor-pointer transition-colors"
+                        className="p-1.5 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg cursor-pointer transition-colors"
                         title="إغلاق لوحة الجمل"
                       >
                         <X className="w-3.5 h-3.5" />
@@ -3543,7 +4170,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     </div>
                   </div>
 
-                  {/* Panel Body: Either Subtitle Style Studio OR Sentences / Transcript List */}
+                  {/* Panel Body: Either Subtitle Style Studio OR Subtitle Options Panel OR Sentences / Transcript List */}
                   {sidePanelView === "style" ? (
                     <div className="flex-1 min-h-0 overflow-hidden flex flex-col bg-slate-900">
                       <SubtitleStylePanel
@@ -3561,29 +4188,59 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                         sampleSecondaryText={currentSecondaryCue?.text}
                       />
                     </div>
+                  ) : sidePanelView === "subtitles" ? (
+                    <div className="flex-1 min-h-0 overflow-hidden flex flex-col bg-slate-900">
+                      <SubtitleOptionsPanel
+                        currentFile={currentFile}
+                        activeTrackId={activeTrackId}
+                        secondaryTrackId={secondaryTrackId}
+                        showDualSubtitles={showDualSubtitles}
+                        showSubtitlesOverlay={showSubtitlesOverlay}
+                        onToggleSubtitlesOverlay={handleToggleSubtitlesOverlay}
+                        onSelectPrimaryTrack={handleSelectPrimaryTrack}
+                        onSelectSecondaryTrack={handleSelectSecondaryTrack}
+                        onSwapTracks={handleSwapTracks}
+                        onToggleDualSubtitles={handleToggleDualSubtitles}
+                        onDeleteTrack={(trackId) => handleDeleteSubtitleTrack(trackId)}
+                        onOpenUploadModal={() => setShowSubtitleUploadModal(true)}
+                        onOpenGradioModal={() => setShowGradioModal(true)}
+                        onOpenTranslateModal={() => setShowTranslateModal(true)}
+                        onOpenStyleModal={() => openStyleInSidebar("options")}
+                        onDownloadSubtitles={handleDownloadSubtitles}
+                        onCopyTranscript={handleCopyTranscript}
+                        isCopiedTranscript={copiedTranscript}
+                        selectedAiModel={selectedAiModel}
+                        onSelectAiModel={handleSelectAiModel}
+                        onBackToTranscript={() => setSidePanelView("transcript")}
+                        isEmbedded={true}
+                      />
+                    </div>
                   ) : (
                     <>
-                      {/* Search inside Subtitles */}
-                      <div className="p-2.5 border-b border-slate-700/60 bg-slate-850">
-                        <div className="relative">
-                          <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
-                          <input
-                            type="text"
-                            placeholder="ابحث في نص الترجمة..."
-                            value={subtitleSearchQuery}
-                            onChange={(e) => setSubtitleSearchQuery(e.target.value)}
-                            className="w-full pl-3 pr-8 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
-                          />
-                          {subtitleSearchQuery && (
-                            <button
-                              onClick={() => setSubtitleSearchQuery("")}
-                              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          )}
+                      {/* Search inside Subtitles (Visible only when requested via search button) */}
+                      {showTranscriptSearch && (
+                        <div className="p-2 border-b border-slate-700/60 bg-slate-850 animate-fadeIn shrink-0">
+                          <div className="relative">
+                            <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                            <input
+                              type="text"
+                              autoFocus
+                              placeholder="ابحث في نص الترجمة..."
+                              value={subtitleSearchQuery}
+                              onChange={(e) => setSubtitleSearchQuery(e.target.value)}
+                              className="w-full pl-7 pr-8 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
+                            />
+                            {subtitleSearchQuery && (
+                              <button
+                                onClick={() => setSubtitleSearchQuery("")}
+                                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       {/* Cues List */}
                       <div
@@ -3618,33 +4275,28 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                         ) : (
                           filteredCues.map((cue) => {
                             const isCurrent = currentCue?.id === cue.id;
-                            // Find matching secondary cue (Gemini Arabic translation)
-                            const matchingSec = secondaryCues.find(
-                              (sc) =>
-                                (sc.startTime >= cue.startTime - 0.5 && sc.startTime <= cue.endTime + 0.5) ||
-                                (sc.endTime >= cue.startTime - 0.5 && sc.endTime <= cue.endTime + 0.5) ||
-                                (cue.startTime >= sc.startTime - 0.5 && cue.startTime <= sc.endTime + 0.5)
-                            );
+                            // Clean 1-to-1 matching secondary cue (prevents duplicate and mismatched sentences)
+                            const matchingSec = secondaryCueMap.get(cue.id);
 
                             return (
                               <div
                                 key={cue.id}
                                 ref={isCurrent ? activeCueRef : null}
                                 onClick={() => handleSeek(cue.startTime)}
-                                className={`p-2.5 rounded-lg border transition-colors duration-150 flex items-start gap-2.5 cursor-pointer group ${
+                                className={`px-2.5 py-2 rounded-lg border transition-colors duration-150 flex items-center justify-between gap-2 cursor-pointer group ${
                                   isCurrent
                                     ? "bg-blue-600/25 border-blue-500/80 text-white shadow-xs"
                                     : "border-transparent hover:bg-slate-800/80 text-slate-300 hover:text-white"
                                 }`}
                               >
-                                {/* Timestamp Badge (Click to jump) - Controlled by showCueTimestamps toggle */}
+                                {/* Left/Start: Optional Timestamp Badge (Click to jump) */}
                                 {showCueTimestamps && (
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleSeek(cue.startTime);
                                     }}
-                                    className={`px-2 py-0.5 rounded-md text-[11px] font-mono font-bold shrink-0 transition-colors cursor-pointer border ${
+                                    className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold shrink-0 transition-colors cursor-pointer border ${
                                       isCurrent
                                         ? "bg-blue-600 border-blue-500 text-white shadow-xs"
                                         : "bg-slate-950 text-blue-400 group-hover:bg-blue-950 border-slate-800"
@@ -3655,55 +4307,42 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                                   </button>
                                 )}
 
-                                {/* Text Content (Stable font-medium to prevent layout text-wrapping shifts) */}
-                                <div className="flex-1 min-w-0 space-y-1">
-                                  <p className={`text-xs leading-relaxed font-sans font-medium ${isCurrent ? "text-white font-semibold" : "text-slate-200"}`}>
+                                {/* Main Text Content: Dynamic text direction and full container utilization without dead space */}
+                                <div
+                                  className="flex-1 min-w-0 space-y-0.5"
+                                  dir={detectTextDirection(cue.text)}
+                                >
+                                  <p
+                                    className={`text-xs leading-relaxed font-sans font-medium break-words ${
+                                      isCurrent ? "text-white font-semibold" : "text-slate-200"
+                                    }`}
+                                  >
                                     {cue.text}
                                   </p>
                                   {showDualSubtitles && matchingSec && (
-                                    <p className="text-[11px] text-emerald-300 font-medium border-t border-slate-700/60 pt-1">
+                                    <p
+                                      dir={detectTextDirection(matchingSec.text)}
+                                      className="text-[11px] text-emerald-300 font-medium border-t border-slate-700/60 pt-0.5 break-words"
+                                    >
                                       {matchingSec.text}
                                     </p>
                                   )}
                                 </div>
 
-                                {/* Cue Edit/Delete Tools on Hover */}
-                                <div className="flex items-center gap-1 shrink-0">
+                                {/* Sentence Options Button (Symbolic Icon Only, Compact & Borderless) */}
+                                <div className="relative shrink-0 self-center" onClick={(e) => e.stopPropagation()}>
                                   <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      singleSentencePlaybackEndRef.current = cue.endTime;
-                                      handleSeek(cue.startTime);
-                                      smoothPlay();
-                                      triggerHud("إعادة الجملة", "R");
-                                    }}
-                                    className="p-1 bg-slate-800/80 hover:bg-blue-600/40 text-slate-300 hover:text-blue-200 rounded-md cursor-pointer transition-colors"
-                                    title="إعادة تشغيل هذه الجملة فقط (R)"
+                                    type="button"
+                                    onClick={(e) => handleToggleCueMenu(cue, e)}
+                                    className={`p-1 rounded-md transition-all cursor-pointer flex items-center justify-center border-0 outline-none ${
+                                      cueOptionsMenuId === cue.id
+                                        ? "bg-blue-600 text-white shadow-xs"
+                                        : "hover:bg-slate-700/60 text-slate-400 hover:text-white"
+                                    }`}
+                                    title="خيارات"
                                   >
-                                    <RefreshCw className="w-3 h-3 text-blue-400" />
+                                    <MoreVertical className="w-3.5 h-3.5" />
                                   </button>
-
-                                  {!isImmersiveMode && (
-                                    <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleOpenEditCue(cue);
-                                        }}
-                                        className="p-1 hover:bg-slate-700 text-slate-400 hover:text-white rounded-md cursor-pointer"
-                                        title="تعديل هذا المقطع"
-                                      >
-                                        <Edit2 className="w-3 h-3" />
-                                      </button>
-                                      <button
-                                        onClick={(e) => handleDeleteCue(cue.id, e)}
-                                        className="p-1 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-md cursor-pointer"
-                                        title="حذف"
-                                      >
-                                        <Trash2 className="w-3 h-3" />
-                                      </button>
-                                    </div>
-                                  )}
                                 </div>
                               </div>
                             );
@@ -3728,420 +4367,340 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                 </div>
               )}
             </div>
-          </section>
-        )}
 
-        {/* ======================================================== */}
-        {/* UPLOAD & DROPZONE AREA */}
-        {/* ======================================================== */}
-        <div
-          onClick={() => fileInputRef.current?.click()}
-          className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer ${
-            isDragging
-              ? "border-[#0056f6] bg-blue-50/70 scale-[1.005]"
-              : "border-slate-300 hover:border-blue-400 bg-white/70 hover:bg-white"
-          }`}
-        >
-          <div className="max-w-md mx-auto flex flex-col items-center gap-2">
-            <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
-              <Upload className="w-6 h-6" />
-            </div>
-            <p className="text-sm font-bold text-slate-800">
-              اسحب وأفلت أي ملف صوتي، فيديو، أو ملف ترجمة (SRT/VTT) هنا
-            </p>
-            <p className="text-xs text-slate-500">
-              يدعم MP4, WebM, MKV, MOV, MP3, WAV, M4A وملفات SRT / VTT المتزامنة
-            </p>
+            {/* Smart Fixed Floating Options Menu (Borderless, Boundary-Aware, Never Clipped) */}
+            {cueOptionsMenuId && cueMenuAnchor && (
+              <div
+                className={`fixed z-[95] min-w-[140px] bg-slate-900/98 backdrop-blur-md rounded-2xl p-1.5 shadow-2xl animate-scaleUp text-right border-0 shadow-black/80 ring-1 ring-white/10 ${
+                  cueMenuAnchor.openAbove ? "origin-bottom" : "origin-top"
+                }`}
+                style={{
+                  top: cueMenuAnchor.openAbove ? undefined : `${cueMenuAnchor.y}px`,
+                  bottom: cueMenuAnchor.openAbove ? `${window.innerHeight - cueMenuAnchor.y}px` : undefined,
+                  left: `${cueMenuAnchor.x}px`,
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* 1. Edit / تعديل */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const targetCue = cueMenuAnchor.cue;
+                    setCueOptionsMenuId(null);
+                    setCueMenuAnchor(null);
+                    handleOpenEditCue(targetCue);
+                  }}
+                  className="w-full px-2.5 py-2 hover:bg-slate-800 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0"
+                >
+                  <Edit2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                  <span>تعديل</span>
+                </button>
 
-            {uploading && (
-              <div className="w-full mt-3">
-                <div className="flex items-center justify-between text-xs text-slate-600 mb-1 font-bold">
-                  <span>جاري رفع الملف إلى السيرفر...</span>
-                  <span>{uploadProgress}%</span>
-                </div>
-                <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-[#0056f6] transition-all duration-200 rounded-full"
-                    style={{ width: `${uploadProgress}%` }}
-                  />
+                {/* 2. Copy Sentence / نسخ */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const targetCue = cueMenuAnchor.cue;
+                    setCueOptionsMenuId(null);
+                    setCueMenuAnchor(null);
+                    handleCopyCueText(targetCue);
+                  }}
+                  className="w-full px-2.5 py-2 hover:bg-slate-800 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0"
+                >
+                  <Copy className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                  <span>نسخ</span>
+                </button>
+
+                {/* 3. Delete with Confirmation / حذف */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const targetCue = cueMenuAnchor.cue;
+                    setCueOptionsMenuId(null);
+                    setCueMenuAnchor(null);
+                    setCueToDelete(targetCue);
+                  }}
+                  className="w-full px-2.5 py-2 hover:bg-rose-500/20 text-rose-300 hover:text-rose-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  <span>حذف</span>
+                </button>
+              </div>
+            )}
+
+            {/* MODAL: CLEAN CUE TIMING & TEXT EDITOR (MM:SS FORMAT + SYNC) */}
+            {editingCue && (
+              <CleanCueEditorModal
+                cue={editingCue}
+                activeTrackLabel={activeTrack?.label || "الترجمة"}
+                secondaryTrackLabel={secondaryTrack && secondaryTrack.id !== activeTrackId ? secondaryTrack.label : undefined}
+                currentTime={currentTime}
+                initialSyncSecondary={syncWithSecondaryTrack}
+                onSave={(cleanCue, shouldSync) => {
+                  handleSaveEditedCue(cleanCue, shouldSync);
+                }}
+                onClose={() => {
+                  setEditingCue(null);
+                  originalCueTimesRef.current = null;
+                }}
+                onPreview={(start, end) => {
+                  singleSentencePlaybackEndRef.current = end;
+                  handleSeek(start);
+                  smoothPlay();
+                  triggerHud("معاينة توقيت المقطع", "▶");
+                }}
+              />
+            )}
+
+            {/* MODAL: CONFIRM DELETE CUE */}
+            {cueToDelete && (
+              <div className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
+                <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-5 shadow-2xl text-white animate-scaleUp text-right">
+                  <div className="flex items-center gap-3 pb-3 border-b border-slate-800 mb-4">
+                    <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0 border border-rose-500/30">
+                      <Trash2 className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-bold text-sm text-slate-100">تأكيد حذف الجملة</h3>
+                      <p className="text-[11px] text-slate-400 font-mono">
+                        التوقيت: {formatSecondsToClock(cueToDelete.startTime)} - {formatSecondsToClock(cueToDelete.endTime)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 mb-4 max-h-32 overflow-y-auto">
+                    <p className="text-xs text-slate-200 font-medium leading-relaxed font-sans">
+                      "{cueToDelete.text}"
+                    </p>
+                  </div>
+
+                  <p className="text-xs text-slate-400 mb-5">
+                    هل أنت متأكد من حذف هذه الجملة من مسار الترجمة؟ لا يمكن التراجع بعد الحذف.
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleConfirmDeleteCue(cueToDelete.id);
+                        setCueToDelete(null);
+                      }}
+                      className="py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-lg shadow-rose-600/30 flex items-center justify-center gap-1.5"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>نعم، احذف</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCueToDelete(null)}
+                      className="py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer text-center"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
+          </section>
+        ) : (
+          /* ======================================================== */
+          /* WINDOWS FILE EXPLORER WORKSPACE (With Library Tools)     */
+          /* ======================================================== */
+          <div className="w-full flex-1 flex flex-col min-h-[600px] -mt-1">
+            <MediaExplorerView
+              files={files}
+              folders={folders}
+              fileFolderMap={fileFolderMap}
+              activeFolderId={activeFolderId}
+              currentFile={currentFile}
+              loading={loading}
+              onSelectFolder={(id) => setActiveFolderId(id)}
+              onSelectFile={(file, autoPlay) => {
+                if (file) {
+                  handleSelectFile(file, autoPlay !== false);
+                }
+              }}
+              onOpenCreateFolder={handleOpenCreateFolderModal}
+              onOpenEditFolder={handleOpenEditFolderModal}
+              onDeleteFolder={handleDeleteFolder}
+              onMoveFile={handleMoveFileToFolder}
+              onBulkMove={handleBulkMoveFiles}
+              onBulkDelete={handleBulkDeleteFiles}
+              onDeleteFile={handleDeleteFile}
+              onStartRename={handleStartRename}
+              editingId={editingId}
+              editTitleText={editTitleText}
+              setEditTitleText={setEditTitleText}
+              onSaveRename={handleSaveRename}
+              onUploadClick={() => fileInputRef.current?.click()}
+              onOpenGradioModalForFile={(file) => {
+                setCurrentFile(file);
+                setShowGradioModal(true);
+              }}
+              onOpenSubtitleOptionsForFile={(file) => {
+                handleSelectFile(file, false);
+                setShowTranscriptPanel(true);
+                setSidePanelView("subtitles");
+              }}
+              onRefreshFiles={fetchMediaFiles}
+              onToggleSidebar={onToggleSidebar}
+            />
           </div>
-        </div>
+        )}
+      </div>
 
-        {/* ======================================================== */}
-        {/* MEDIA LIBRARY & PLAYLIST SECTION */}
-        {/* ======================================================== */}
-        <section className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-4 sm:p-6 space-y-4">
-          {/* Section Bar: Filters & Search */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-            {/* Filter Tabs */}
-            <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl text-xs font-bold">
+
+      {/* ======================================================== */}
+      {/* MODAL: CREATE / EDIT FOLDER */}
+      {/* ======================================================== */}
+      {showFolderModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 animate-scaleUp">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center">
+                  <FolderPlus className="w-4 h-4" />
+                </div>
+                <h3 className="font-black text-slate-900 text-sm">
+                  {folderModalMode === "create" ? "إنشاء مجلد جديد" : "تعديل المجلد"}
+                </h3>
+              </div>
               <button
-                onClick={() => setFilterType("all")}
-                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                  filterType === "all"
-                    ? "bg-white text-slate-900 shadow-xs"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
+                onClick={() => setShowFolderModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600"
               >
-                الكل ({files.length})
-              </button>
-              <button
-                onClick={() => setFilterType("video")}
-                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  filterType === "video"
-                    ? "bg-white text-blue-600 shadow-xs"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <Film className="w-3.5 h-3.5" />
-                <span>فيديو ({totalVideos})</span>
-              </button>
-              <button
-                onClick={() => setFilterType("audio")}
-                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  filterType === "audio"
-                    ? "bg-white text-purple-600 shadow-xs"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <Music className="w-3.5 h-3.5" />
-                <span>صوت ({totalAudios})</span>
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Search and Layout Toggle */}
-            <div className="flex items-center gap-2.5 w-full sm:w-auto">
-              <div className="relative flex-1 sm:w-64">
-                <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+            <div className="py-4 space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  اسم المجلد
+                </label>
                 <input
                   type="text"
-                  placeholder="بحث في الملفات..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-3 pr-9 py-1.5 text-xs bg-slate-50 hover:bg-slate-100/80 focus:bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:border-[#0056f6] transition-all"
+                  placeholder="مثال: دروس المحادثة A2..."
+                  value={folderNameInput}
+                  onChange={(e) => setFolderNameInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveFolder();
+                  }}
+                  className="w-full text-xs px-3 py-2 border border-slate-200 rounded-xl focus:outline-hidden focus:border-[#0056f6] focus:ring-1 focus:ring-blue-500"
+                  autoFocus
                 />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery("")}
-                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
               </div>
 
-              <button
-                onClick={() => setShowGradioModal(true)}
-                className="px-3 py-1.5 bg-gradient-to-r from-amber-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
-                title="تفريغ أي ملف صوتي أو فيديو بسيرفر Gradio الألماني المحلي"
-              >
-                <Mic className="w-3.5 h-3.5" />
-                <span>تفريغ Gradio 🇩🇪</span>
-              </button>
-
-              <div className="flex items-center bg-slate-100 rounded-xl p-1">
+              <div className="flex items-center gap-2 pt-2">
                 <button
-                  onClick={() => setViewMode("grid")}
-                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                    viewMode === "grid" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500"
-                  }`}
-                  title="عرض شبكي"
+                  onClick={handleSaveFolder}
+                  disabled={!folderNameInput.trim()}
+                  className="flex-1 py-2 bg-[#0056f6] hover:bg-[#0047d1] text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50 cursor-pointer"
                 >
-                  <Grid className="w-4 h-4" />
+                  {folderModalMode === "create" ? "إنشاء المجلد" : "حفظ التعديل"}
                 </button>
                 <button
-                  onClick={() => setViewMode("list")}
-                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                    viewMode === "list" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500"
-                  }`}
-                  title="عرض قائمة"
+                  onClick={() => setShowFolderModal(false)}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
                 >
-                  <List className="w-4 h-4" />
+                  إلغاء
                 </button>
               </div>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Files List / Grid View */}
-          {loading ? (
-            <div className="py-16 flex flex-col items-center justify-center text-slate-400 gap-2">
-              <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-              <p className="text-xs font-semibold">جاري جلب الملفات من السيرفر...</p>
-            </div>
-          ) : filteredFiles.length === 0 ? (
-            <div className="py-16 flex flex-col items-center justify-center text-center text-slate-400 gap-3">
-              <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
-                <Film className="w-8 h-8" />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-slate-700">لا توجد ملفات مرفوعة حالياً</p>
-                <p className="text-xs text-slate-500 mt-1">
-                  قم برفع أول ملف صوتي أو فيديو لبدء التشغيل وإضافة الترجمات المتزامنة
-                </p>
+      {/* ======================================================== */}
+      {/* MODAL: MOVE FILE TO FOLDER */}
+      {/* ======================================================== */}
+      {movingFile && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 animate-scaleUp">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
+                  <FolderInput className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-black text-slate-900 text-xs truncate">
+                    نقل: {movingFile.title}
+                  </h3>
+                  <p className="text-[10px] text-slate-500">اختر المجلد المراد نقل الملف إليه</p>
+                </div>
               </div>
               <button
-                onClick={() => fileInputRef.current?.click()}
-                className="mt-2 px-4 py-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                onClick={() => setMovingFile(null)}
+                className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 shrink-0"
               >
-                + رفع ملف الآن
+                <X className="w-4 h-4" />
               </button>
             </div>
-          ) : viewMode === "grid" ? (
-            /* Grid View Cards */
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {filteredFiles.map((file) => {
-                const isSelected = currentFile?.id === file.id;
-                const hasSubtitles = file.subtitles && file.subtitles.length > 0;
 
+            <div className="py-3 space-y-1 max-h-60 overflow-y-auto">
+              <button
+                onClick={() => handleMoveFileToFolder(movingFile.id, null)}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                  !fileFolderMap[movingFile.id]
+                    ? "bg-amber-50 text-amber-900 border border-amber-200/60"
+                    : "hover:bg-slate-50 text-slate-700"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-slate-400" />
+                  <span>بدون مجلد (غير مصنف)</span>
+                </div>
+                {!fileFolderMap[movingFile.id] && <Check className="w-4 h-4 text-amber-600" />}
+              </button>
+
+              {folders.map((folder) => {
+                const isSelected = fileFolderMap[movingFile.id] === folder.id;
                 return (
-                  <div
-                    key={file.id}
-                    onClick={() => {
-                      handleSelectFile(file, true);
-                    }}
-                    className={`rounded-2xl border p-4 transition-all duration-200 flex flex-col justify-between cursor-pointer group relative overflow-hidden ${
+                  <button
+                    key={folder.id}
+                    onClick={() => handleMoveFileToFolder(movingFile.id, folder.id)}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
                       isSelected
-                        ? "bg-blue-50/50 border-blue-400 shadow-md ring-2 ring-blue-500/20"
-                        : "bg-white border-slate-200/80 hover:border-blue-300 hover:shadow-md"
+                        ? "bg-amber-100/70 text-amber-900 border border-amber-200"
+                        : "hover:bg-slate-50 text-slate-700"
                     }`}
                   >
-                    {/* Top Type Badge & Action Menu */}
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 ${
-                            file.type === "video"
-                              ? "bg-blue-100 text-blue-700"
-                              : "bg-purple-100 text-purple-700"
-                          }`}
-                        >
-                          {file.type === "video" ? (
-                            <>
-                              <FileVideo className="w-3 h-3" />
-                              <span>فيديو</span>
-                            </>
-                          ) : (
-                            <>
-                              <FileAudio className="w-3 h-3" />
-                              <span>صوت</span>
-                            </>
-                          )}
-                        </span>
-
-                        {hasSubtitles && (
-                          <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-md text-[10px] font-bold flex items-center gap-0.5">
-                            <Subtitles className="w-3 h-3" />
-                            <span>ترجمة ({file.subtitles?.length})</span>
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-1 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={(e) => handleStartRename(file, e)}
-                          className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-800 rounded-lg transition-colors"
-                          title="تعديل الاسم"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <a
-                          href={`/api/media/download/${file.id}`}
-                          onClick={(e) => e.stopPropagation()}
-                          className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-800 rounded-lg transition-colors"
-                          title="تحميل"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                        </a>
-                        <button
-                          onClick={(e) => handleDeleteFile(file.id, e)}
-                          className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"
-                          title="حذف"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className="w-3 h-3 rounded-full shrink-0"
+                        style={{ backgroundColor: folder.color || "#f59e0b" }}
+                      />
+                      <span className="truncate">{getFolderPathName(folder)}</span>
                     </div>
-
-                    {/* Media Preview Box */}
-                    <div className="w-full h-32 bg-slate-100 rounded-xl flex items-center justify-center mb-3 relative overflow-hidden group-hover:bg-slate-200/70 transition-colors">
-                      {file.type === "video" ? (
-                        <Film className="w-10 h-10 text-blue-400 group-hover:scale-110 transition-transform" />
-                      ) : (
-                        <Music className="w-10 h-10 text-purple-400 group-hover:scale-110 transition-transform" />
-                      )}
-
-                      {/* Play Button Overlay */}
-                      <div className="absolute inset-0 bg-black/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                        <div className="w-11 h-11 rounded-full bg-[#0056f6] text-white flex items-center justify-center shadow-md">
-                          <Play className="w-5 h-5 fill-current translate-x-[-1px]" />
-                        </div>
-                      </div>
-
-                      {isSelected && isPlaying && (
-                        <div className="absolute bottom-2 right-2 px-2 py-0.5 bg-blue-600 text-white rounded-md text-[10px] font-bold flex items-center gap-1 animate-pulse">
-                          <span className="w-1.5 h-1.5 bg-white rounded-full" />
-                          <span>يعمل الآن</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Title & Metadata */}
-                    <div>
-                      {editingId === file.id ? (
-                        <div
-                          className="flex items-center gap-1"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <input
-                            type="text"
-                            value={editTitleText}
-                            onChange={(e) => setEditTitleText(e.target.value)}
-                            className="w-full text-xs px-2 py-1 border border-blue-400 rounded-lg bg-white"
-                            autoFocus
-                          />
-                          <button
-                            onClick={() => handleSaveRename(file.id)}
-                            className="p-1 text-emerald-600"
-                          >
-                            <Check className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ) : (
-                        <p
-                          className="text-xs font-bold text-slate-800 line-clamp-1 group-hover:text-[#0056f6] transition-colors"
-                          title={file.title}
-                        >
-                          {file.title}
-                        </p>
-                      )}
-
-                      <div className="flex items-center justify-between text-[10px] text-slate-500 mt-2 pt-2 border-t border-slate-100 font-mono">
-                        <span>{formatFileSize(file.size)}</span>
-                        <span>{new Date(file.uploadedAt).toLocaleDateString("ar-EG")}</span>
-                      </div>
-                    </div>
-                  </div>
+                    {isSelected && <Check className="w-4 h-4 text-amber-600" />}
+                  </button>
                 );
               })}
             </div>
-          ) : (
-            /* List View */
-            <div className="divide-y divide-slate-100 border border-slate-200/80 rounded-2xl overflow-hidden">
-              {filteredFiles.map((file) => {
-                const isSelected = currentFile?.id === file.id;
-                const hasSubtitles = file.subtitles && file.subtitles.length > 0;
 
-                return (
-                  <div
-                    key={file.id}
-                    onClick={() => {
-                      handleSelectFile(file, true);
-                    }}
-                    className={`p-3.5 sm:px-4 flex items-center justify-between gap-3 transition-colors cursor-pointer ${
-                      isSelected
-                        ? "bg-blue-50/60 font-semibold"
-                        : "hover:bg-slate-50 bg-white"
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div
-                        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                          file.type === "video"
-                            ? "bg-blue-100 text-blue-600"
-                            : "bg-purple-100 text-purple-600"
-                        }`}
-                      >
-                        {file.type === "video" ? (
-                          <Film className="w-4 h-4" />
-                        ) : (
-                          <Music className="w-4 h-4" />
-                        )}
-                      </div>
-
-                      <div className="min-w-0">
-                        {editingId === file.id ? (
-                          <div
-                            className="flex items-center gap-1"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <input
-                              type="text"
-                              value={editTitleText}
-                              onChange={(e) => setEditTitleText(e.target.value)}
-                              className="text-xs px-2 py-1 border border-blue-400 rounded-lg bg-white"
-                              autoFocus
-                            />
-                            <button
-                              onClick={() => handleSaveRename(file.id)}
-                              className="p-1 text-emerald-600"
-                            >
-                              <Check className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <p
-                              className={`text-xs truncate ${
-                                isSelected ? "text-blue-700 font-bold" : "text-slate-800"
-                              }`}
-                            >
-                              {file.title}
-                            </p>
-                            {hasSubtitles && (
-                              <span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded text-[9px] font-bold">
-                                SRT ✓
-                              </span>
-                            )}
-                          </div>
-                        )}
-                        <p className="text-[10px] text-slate-400 truncate">
-                          {file.originalName} • {formatFileSize(file.size)}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      {isSelected && isPlaying && (
-                        <span className="hidden sm:inline-flex px-2 py-0.5 bg-blue-100 text-blue-700 rounded-md text-[10px] font-bold animate-pulse">
-                          مشغل الآن ⚡
-                        </span>
-                      )}
-
-                      <button
-                        onClick={(e) => handleStartRename(file, e)}
-                        className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-                        title="تعديل الاسم"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-
-                      <a
-                        href={`/api/media/download/${file.id}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-                        title="تحميل الملف"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                      </a>
-
-                      <button
-                        onClick={(e) => handleDeleteFile(file.id, e)}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                        title="حذف"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+              <button
+                onClick={() => {
+                  setMovingFile(null);
+                  handleOpenCreateFolderModal();
+                }}
+                className="text-xs text-[#0056f6] font-bold hover:underline cursor-pointer"
+              >
+                + إنشاء مجلد جديد
+              </button>
+              <button
+                onClick={() => setMovingFile(null)}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                إغلاق
+              </button>
             </div>
-          )}
-        </section>
-      </div>
+          </div>
+        </div>
+      )}
 
       {/* ======================================================== */}
       {/* MODAL: SUBTITLE UPLOADER & AI GENERATOR */}
@@ -4370,32 +4929,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       )}
 
       {/* ======================================================== */}
-      {/* MODAL: CLEAN CUE TIMING & TEXT EDITOR (MM:SS FORMAT + SYNC) */}
-      {/* ======================================================== */}
-      {editingCue && (
-        <CleanCueEditorModal
-          cue={editingCue}
-          activeTrackLabel={activeTrack?.label || "الترجمة"}
-          secondaryTrackLabel={secondaryTrack && secondaryTrack.id !== activeTrackId ? secondaryTrack.label : undefined}
-          currentTime={currentTime}
-          initialSyncSecondary={syncWithSecondaryTrack}
-          onSave={(cleanCue, shouldSync) => {
-            handleSaveEditedCue(cleanCue, shouldSync);
-          }}
-          onClose={() => {
-            setEditingCue(null);
-            originalCueTimesRef.current = null;
-          }}
-          onPreview={(start, end) => {
-            singleSentencePlaybackEndRef.current = end;
-            handleSeek(start);
-            smoothPlay();
-            triggerHud("معاينة توقيت المقطع", "▶");
-          }}
-        />
-      )}
-
-      {/* ======================================================== */}
       {/* MODAL: GEMINI SUBTITLE TRANSLATION (DUAL SUBTITLES) */}
       {/* ======================================================== */}
       {showTranslateModal && activeTrack && (
@@ -4550,6 +5083,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         onToggleSubtitlesOverlay={handleToggleSubtitlesOverlay}
         onSelectPrimaryTrack={handleSelectPrimaryTrack}
         onSelectSecondaryTrack={handleSelectSecondaryTrack}
+        onSwapTracks={handleSwapTracks}
         onToggleDualSubtitles={handleToggleDualSubtitles}
         onDeleteTrack={(trackId) => handleDeleteSubtitleTrack(trackId)}
         onOpenUploadModal={() => setShowSubtitleUploadModal(true)}
