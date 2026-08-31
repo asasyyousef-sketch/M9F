@@ -6599,6 +6599,317 @@ ${structureDirective}
     }
   });
 
+  // Dedicated AI Media Sentence Chat & Analysis Endpoint (Video / Audio Context Aware)
+  app.post("/api/ai/sentence-chat", express.json(), async (req, res) => {
+    try {
+      const {
+        mediaInfo = {},
+        cue,
+        previousCues = [],
+        nextCues = [],
+        languageInfo = {},
+        chatHistory = [],
+        message,
+        selectedModel = "gemini-3.7-flash",
+        responseLength = "auto", // 'concise' | 'auto' | 'balanced' | 'detailed'
+        useStructuredTemplate = true,
+        teachingTone = "tutor",
+        customApiKey,
+        geminiApiKey,
+        groqApiKey: bodyGroqApiKey
+      } = req.body;
+
+      if (!message || !message.trim()) {
+        return res.status(400).json({ error: "الرجاء إدخال رسالة أو سؤال لمناقشته مع المساعد الذكي." });
+      }
+
+      const effectiveGroqKey = bodyGroqApiKey || req.body.groqApiKey || (selectedModel && selectedModel.includes("groq") ? customApiKey : "") || process.env.GROQ_API_KEY || "";
+      const effectiveGeminiKey = geminiApiKey || req.body.geminiApiKey || (selectedModel && !selectedModel.includes("groq") ? customApiKey : "") || process.env.GEMINI_API_KEY || "";
+
+      const mediaTitle = mediaInfo?.title || mediaInfo?.originalName || "ملف وسائط";
+      const mediaType = mediaInfo?.type === "audio" ? "مقطع صوتي (Audio 🎵)" : "فيديو (Video 🎬)";
+      const targetText = cue?.text || "";
+      const secondaryText = cue?.secondaryText || "";
+      const startTimeFormatted = typeof cue?.startTime === "number" ? `${Math.floor(cue.startTime / 60)}:${String(Math.floor(cue.startTime % 60)).padStart(2, "0")}` : "00:00";
+      const endTimeFormatted = typeof cue?.endTime === "number" ? `${Math.floor(cue.endTime / 60)}:${String(Math.floor(cue.endTime % 60)).padStart(2, "0")}` : "00:00";
+      const targetLang = languageInfo?.targetLanguage || "de";
+      const sourceLang = languageInfo?.sourceLanguage || "ar";
+
+      let lengthDirective = "";
+      if (responseLength === "concise") {
+        lengthDirective = `⚡ **وضع الإيجاز والتركيز الذكي (Concise Mode - أولوية مطلقة)**:
+- 🚨 **قاعدة كسر نمط المحادثة**: حتى لو كانت الردود السابقة طويلة، **تجاهل طولها تماماً** وأعطِ زبدة الجواب وخلاصة المعنى أو القاعدة مباشرة دون لف أو دوران.
+- 🛑 **المحظورات**: تجنب تماماً المقدمات الإنشائية، وتجنب الجداول الطويلة وسرد تفاصيل وتصريفات إضافية لم يطلبها المستخدم.
+- **المرونة**: إذا كان السؤال بسيطاً أجب في سطر أو سطرين، وإذا كان يتطلب توضيحاً فاشرحه بأقصر عبارة كافية ووافية.`;
+      } else if (responseLength === "auto") {
+        lengthDirective = `🎯 **الوضع التلقائي الذكي (Auto Contextual Length - حسب طبيعة السؤال)**:
+- **إذا كان السؤال بسيطاً أو مباشراً** (مثل: معنى كلمة، ترجمة سريعة، إعراب، دلالة سياقية مباشرة): قدّم إجابة مباشرة وموجزة في سطر إلى سطرين دون حشو.
+- **إذا كان السؤال تحليلياً أو يطلب مقارنة أو شرحاً متعمقاً** (مثل: ما الفرق؟ اشرح النبرة أو التعبير الاصطلاحي، قواعد الجملة كاملة، بدائل وسياقات أخرى): قدّم شرحاً وافياً وغنياً بالأمثلة لخدمة السؤال بدقة.`;
+      } else if (responseLength === "detailed") {
+        lengthDirective = `📚 **وضع الشرح الشامل والمفصل (Detailed Mode - أولوية مطلقة)**:
+- قدّم شرحاً ثرياً ومتعمقاً وشاملاً يغطي القواعد النحوية، تصريفات الأفعال، الفروقات الدلالية في سياق المشهد، وأمثلة حية وجداول توضيحية.`;
+      } else {
+        lengthDirective = `⚖️ **الوضع المتوازن (Balanced Mode)**:
+- إجابة متوازنة وواضحة تركز على الفائدة اللغوية المباشرة مع مثال أو مثالين دون إطالة مفرطة.`;
+      }
+
+      // Format surrounding context (up to 20 before and 20 after)
+      const formatCueContext = (cuesList: any[]) => {
+        if (!Array.isArray(cuesList) || cuesList.length === 0) return "  (لا توجد)";
+        return cuesList.map((c: any, i: number) => {
+          const s = typeof c.startTime === "number" ? `${Math.floor(c.startTime / 60)}:${String(Math.floor(c.startTime % 60)).padStart(2, "0")}` : "00:00";
+          const sec = c.secondaryText ? ` -> [ترجمة: ${c.secondaryText}]` : "";
+          return `  ${i + 1}. [${s}] "${c.text}"${sec}`;
+        }).join("\n");
+      };
+
+      const prevContext = formatCueContext(previousCues);
+      const nextContext = formatCueContext(nextCues);
+
+      const wantsImages = req.body.includeImages !== false;
+
+      let imageInstruction = "";
+      if (wantsImages) {
+        imageInstruction = `
+6. 🖼️ **إدراج وتوزيع الصور التوضيحية البصرية لتثبيت المعلومات (Visual Anchors 🎨)**:
+   - عامل عنصر الصورة كأداة شرح طبيعية لترسيخ المفردات والمعاني البصرية في ذهن المتعلم.
+   - أرفق صورة مناسبة \`$$IMAGE:{...}\` مع كل نقطة أو مثال أو مفهوم تشرحه.
+   - الصيغة: \`$$IMAGE:{"query":"clear concrete english search terms","caption":"شرح موجز","size":"medium","keyword":"الكلمة المستهدفة"}$$\``;
+      } else {
+        imageInstruction = `
+6. 🖼️ **الدعم البصري**:
+   - لك كامل الحرية في إدراج عنصر صورة بيني \`$$IMAGE:{...}$$\` مع أي نقطة أو مثال إذا كان يعزز الفهم البصري للمتعلم.`;
+      }
+
+      let structureDirective = "";
+      if (useStructuredTemplate && responseLength !== "concise") {
+        structureDirective = `
+2. **التنسيق الهيكلي (Structured Markdown)**:
+   - قسّم الرد إلى أقسام وعناوين فرعية منظمة بالأرقام مثل: \`### 1. **المعنى في سياق المشهد**\` أو \`### 2. **القواعد والتراكيب النحوية**\`
+   - استخدم الفواصل الأفقية \`---\` والقوائم النقطية (\`*\` أو \`-\`) والجداول عند الحاجة لترتيب القراءة.`;
+      } else {
+        structureDirective = `
+2. **الأسلوب التفاعلي المباشر (Free Natural Form - بدون قالب إجباري)**:
+   - أجب بشكل طبيعي وسلس ومباشر دون التقيّد بهيكل عناوين إجباري، مع التركيز على سؤال المستخدم.`;
+      }
+
+      const systemInstruction = `أنت "المساعد والمحلل اللغوي الذكي لمقاطع الوسائط (Interactive AI Video & Audio Sentence Tutor)".
+أنت ترافق الطالب أثناء مشاهدته واستماعه لمقطع وسائط (${mediaType}) بعنوان "${mediaTitle}".
+مهمتك شرح الجملة المختارة بدقة، توضيح المعنى السياقي في هذا المشهد بالتحديد، شرح القواعد، توضيح ما إذا كان التعبير عامياً أو فصيحاً أو اصطلاحياً، وتصحيح أي تساؤلات يطرحها الطالب.
+
+🎬 **معلومات وسياق المقطع والملف الحالي**:
+- 🏷️ **نوع الملف**: ${mediaType}
+- 📌 **عنوان المقطع**: "${mediaTitle}"
+- 🌐 **اللغة الأساسية للمقطع**: "${targetLang}"
+- 🌐 **لغة الشرح والترجمة**: "${sourceLang}"
+
+💬 **الجملة المستهدفة الحالية في المشهد (Focus Sentence)**:
+- ⏱️ **التوقيت**: [${startTimeFormatted} - ${endTimeFormatted}]
+- 🗣️ **نص الجملة**: "${targetText}"
+- 📝 **الترجمة المرفقة (إن وجدت)**: "${secondaryText || 'غير متوفرة'}"
+
+📜 **السياق الدرامي والحواري الكامل للمقطع (20 جملة سابقة و 20 جملة تالية)**:
+- ◀️ **الجمل العشرون السابقة (قبل هذه الجملة)**:
+${prevContext}
+
+- ▶️ **الجمل العشرون التالية (بعد هذه الجملة)**:
+${nextContext}
+
+🛑 **قاعدة التركيز على الجملة وسياقها (Strict Context Awareness)**:
+- استعن بالجمل العشرين السابقة واللاحقة لفهم مجرى الحوار وسياق المشهد والشخصيات، لكن ركز إجابتك حصراً على خدمة وفهم **الجملة المستهدفة الحالية ("${targetText}")** وسؤال المستخدم عنها.
+
+✨ **تعليمات التنسيق والأداء**:
+1. **طول الإجابة وتنسيقها**:
+${lengthDirective}
+${structureDirective}
+3. **اقتباس المفردات والكلمات (مهم جداً للتفاعل)**:
+   - عندما تذكر أي كلمة أو عبارة باللغة الأجنبية (${targetLang}) مثل "Hallo" أو "auf jeden Fall"، ضعها بين علامتي تنصيص \`"word"\` أو \`«word»\` حتى يتمكن المستخدم من النقر عليها فوراً للاستماع إليها أو نسخها أو تحويلها إلى بطاقة فلاش كارد.
+4. **تنبيه**:
+   - لا تستخدم وسوم HTML مثل <br> أو <p>. استخدم أسطر \`\\n\` ورموز Markdown القياسية.
+   - استخدم الرموز التعبيرية (Emojis) بلطف لتنشيط الحوار.${imageInstruction}`;
+
+      const limitedHistory = (Array.isArray(chatHistory) ? chatHistory : []).slice(-30);
+
+      let currentTurnPrompt = message;
+      const runtimeDirectives: string[] = [];
+
+      if (responseLength === "concise") {
+        runtimeDirectives.push(`⚡ إيجاز ذكي: أجب بأقصر عبارة وافية مباشرة دون حشو.`);
+      } else if (responseLength === "auto") {
+        runtimeDirectives.push(`🎯 تلقائي ذكي: حدد عمق الإجابة حسب طبيعة السؤال.`);
+      } else if (responseLength === "detailed") {
+        runtimeDirectives.push(`📚 مفصل وشامل: قدم شرحاً ثرياً وتفصيلياً لسياق الجملة.`);
+      }
+
+      if (runtimeDirectives.length > 0) {
+        runtimeDirectives.push(`🛑 ركّز على جملة المشهد الحالية "${targetText}" في ${mediaType}.`);
+        currentTurnPrompt = `${message}\n\n[🚨 توجيهات فورية ملزمة لهذا الرد: ${runtimeDirectives.join(" | ")}]`;
+      } else {
+        currentTurnPrompt = `${message}\n\n[🚨 ركّز على جملة المشهد الحالية "${targetText}" في ${mediaType}]`;
+      }
+
+      let responseText = "";
+      let usedModelName = selectedModel;
+      const modelWarnings: string[] = [];
+
+      // Check Groq
+      const isGroq = selectedModel.includes("groq") || selectedModel === "groq-llama-3.3-70b";
+      if (isGroq && effectiveGroqKey) {
+        try {
+          const groqMessages = [
+            { role: "system", content: systemInstruction },
+            ...limitedHistory.map((m: any) => ({
+              role: m.role === "assistant" || m.role === "ai" ? "assistant" : "user",
+              content: m.content || m.text || ""
+            })),
+            { role: "user", content: currentTurnPrompt }
+          ];
+
+          const resGroq = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${effectiveGroqKey}`
+            },
+            body: JSON.stringify({
+              model: "llama-3.3-70b-versatile",
+              messages: groqMessages,
+              temperature: responseLength === "concise" ? 0.3 : 0.5
+            })
+          });
+
+          if (resGroq.ok) {
+            const dataGroq = await resGroq.json();
+            responseText = dataGroq?.choices?.[0]?.message?.content || "";
+            if (responseText) usedModelName = "groq-llama-3.3-70b";
+          } else {
+            const errTxt = await resGroq.text();
+            modelWarnings.push(`Groq Llama 3.3: ${resGroq.status} ${errTxt}`);
+          }
+        } catch (groqErr: any) {
+          console.warn("Groq attempt failed, falling back to Gemini:", groqErr);
+          modelWarnings.push(`Groq failed: ${groqErr?.message || groqErr}`);
+        }
+      }
+
+      // Gemini execution with multi-model fallback
+      if (!responseText) {
+        let aiClient: GoogleGenAI | null = null;
+        if (effectiveGeminiKey) {
+          aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
+        }
+
+        if (!aiClient) {
+          if (effectiveGroqKey && !isGroq) {
+            try {
+              const groqMessages = [
+                { role: "system", content: systemInstruction },
+                ...limitedHistory.map((m: any) => ({
+                  role: m.role === "assistant" || m.role === "ai" ? "assistant" : "user",
+                  content: m.content || m.text || ""
+                })),
+                { role: "user", content: currentTurnPrompt }
+              ];
+              const resGroq = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${effectiveGroqKey}`
+                },
+                body: JSON.stringify({
+                  model: "llama-3.3-70b-versatile",
+                  messages: groqMessages,
+                  temperature: responseLength === "concise" ? 0.3 : 0.5
+                })
+              });
+              if (resGroq.ok) {
+                const dataGroq = await resGroq.json();
+                responseText = dataGroq?.choices?.[0]?.message?.content || "";
+                if (responseText) usedModelName = "groq-llama-3.3-70b";
+              }
+            } catch (e) {}
+          }
+
+          if (!responseText) {
+            return res.status(400).json({ error: "مفتاح Gemini API غير مكوّن. يرجى إضافته في إعدادات التطبيق." });
+          }
+        }
+
+        if (!responseText && aiClient) {
+          let primaryModel = selectedModel;
+          if (primaryModel.includes("groq")) primaryModel = "gemini-3.7-flash";
+          if (primaryModel.includes("grok")) primaryModel = "gemini-3.7-flash";
+
+          const candidateModels = Array.from(new Set([
+            primaryModel,
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-1.5-pro",
+            "gemini-2.5-pro"
+          ]));
+
+          const contents: any[] = [];
+          for (const item of limitedHistory) {
+            contents.push({
+              role: item.role === "assistant" || item.role === "ai" ? "model" : "user",
+              parts: [{ text: item.content || item.text || "" }]
+            });
+          }
+          contents.push({
+            role: "user",
+            parts: [{ text: currentTurnPrompt }]
+          });
+
+          for (const modelToTry of candidateModels) {
+            try {
+              const geminiRes = await aiClient.models.generateContent({
+                model: modelToTry,
+                contents: contents,
+                config: {
+                  systemInstruction: systemInstruction,
+                  temperature: responseLength === "concise" ? 0.3 : 0.6
+                }
+              });
+
+              responseText = geminiRes.text || "";
+              if (responseText) {
+                usedModelName = modelToTry;
+                break;
+              }
+            } catch (err: any) {
+              const errMsg = err?.message || String(err);
+              console.warn(`[Sentence Chat] Model '${modelToTry}' failed (${errMsg}). Trying next candidate...`);
+              modelWarnings.push(`الموديل '${modelToTry}' واجه خطأ: ${errMsg}`);
+            }
+          }
+        }
+      }
+
+      if (!responseText) {
+        return res.status(500).json({
+          error: "تعذر توليد رد من نماذج الذكاء الاصطناعي. يرجى المحاولة بعد لحظات.",
+          warnings: modelWarnings
+        });
+      }
+
+      return res.json({
+        success: true,
+        reply: responseText,
+        usedModel: usedModelName,
+        warnings: modelWarnings
+      });
+
+    } catch (err: any) {
+      console.error("AI Sentence Chat error:", err);
+      return res.status(500).json({ error: err.message || "حدث خطأ أثناء الاتصال بالمساعد الذكي." });
+    }
+  });
+
   // Add a simple in-memory cache for DuckDuckGo search queries
   const ddgImageCache = new Map<string, any[]>();
 

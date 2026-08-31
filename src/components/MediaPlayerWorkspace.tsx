@@ -88,6 +88,8 @@ import { SubtitleOptionsModal, SubtitleOptionsPanel } from "./SubtitleOptionsMod
 import { CleanCueEditorModal } from "./CleanCueEditorModal";
 import { ALL_AVAILABLE_MODELS, AIModelOption } from "./AICorrectorWorkspace";
 import { MediaExplorerView } from "./MediaExplorerView";
+import { ReviewChatModal, ReviewChatMessage } from "./ReviewChatModal";
+import { speakClient } from "./Modals";
 
 export interface SubtitleTrackStyleConfig {
   fontSize: number; // in px
@@ -354,6 +356,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [uploading, setUploading] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [uploadingFolderName, setUploadingFolderName] = useState<string | null>(null);
+  const [uploadingFileName, setUploadingFileName] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
@@ -434,6 +438,49 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     openAbove: boolean;
   } | null>(null);
   const [cueToDelete, setCueToDelete] = useState<SubtitleCue | null>(null);
+
+  // Transient In-Memory AI Sentence Chat State (Cleared when exiting or switching video/audio)
+  const [sentenceChatHistories, setSentenceChatHistories] = useState<Record<string, ReviewChatMessage[]>>({});
+  const [isSentenceChatOpen, setIsSentenceChatOpen] = useState<boolean>(false);
+  const [chatTargetCue, setChatTargetCue] = useState<(SubtitleCue & { secondaryText?: string }) | null>(null);
+  const [chatPreviousCues, setChatPreviousCues] = useState<(SubtitleCue & { secondaryText?: string })[]>([]);
+  const [chatNextCues, setChatNextCues] = useState<(SubtitleCue & { secondaryText?: string })[]>([]);
+
+  // Open Sentence AI Chat with full 20-previous & 20-next surrounding context
+  const handleOpenSentenceChat = (targetCue: SubtitleCue) => {
+    const targetIdx = activeCues.findIndex((c) => c.id === targetCue.id);
+    const getSecText = (c: SubtitleCue) => {
+      if (!secondaryCues || secondaryCues.length === 0) return undefined;
+      const match = secondaryCues.find(
+        (sc) => Math.abs(sc.startTime - c.startTime) < 0.5 || (sc.startTime <= c.endTime && sc.endTime >= c.startTime)
+      );
+      return match?.text;
+    };
+
+    const enrichedTarget: SubtitleCue & { secondaryText?: string } = {
+      ...targetCue,
+      secondaryText: getSecText(targetCue)
+    };
+
+    let prevCues: (SubtitleCue & { secondaryText?: string })[] = [];
+    let nextCuesList: (SubtitleCue & { secondaryText?: string })[] = [];
+
+    if (targetIdx !== -1) {
+      prevCues = activeCues.slice(Math.max(0, targetIdx - 20), targetIdx).map((c) => ({
+        ...c,
+        secondaryText: getSecText(c)
+      }));
+      nextCuesList = activeCues.slice(targetIdx + 1, Math.min(activeCues.length, targetIdx + 21)).map((c) => ({
+        ...c,
+        secondaryText: getSecText(c)
+      }));
+    }
+
+    setChatTargetCue(enrichedTarget);
+    setChatPreviousCues(prevCues);
+    setChatNextCues(nextCuesList);
+    setIsSentenceChatOpen(true);
+  };
 
   // Top Video/Media Header Options Menu State
   const [showTopOptionsMenu, setShowTopOptionsMenu] = useState<boolean>(false);
@@ -890,6 +937,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
   const subtitleFileInputRef = useRef<HTMLInputElement | null>(null);
   const progressBarRef = useRef<HTMLDivElement | null>(null);
   const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
@@ -926,6 +974,19 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   // Save currently selected file and open player view in direct cinematic mode
   const handleSelectFile = (file: MediaFile | null, autoPlay: boolean = true) => {
+    // Reset transient in-memory sentence chat conversations and clear transient media chat storage when switching/opening a file
+    setSentenceChatHistories({});
+    setIsSentenceChatOpen(false);
+    setChatTargetCue(null);
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith("review_chat_history_media_cue_")) {
+          localStorage.removeItem(key);
+        }
+      }
+    } catch (e) {}
+
     setCurrentFile(file);
     setIsPlaying(autoPlay);
     if (file) {
@@ -942,9 +1003,20 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   };
 
-  // Close player and return to file manager
+  // Close player and return to file manager (Strictly wipe transient sentence chat memory)
   const handleBackToFileManager = () => {
     smoothPause();
+    setSentenceChatHistories({});
+    setIsSentenceChatOpen(false);
+    setChatTargetCue(null);
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith("review_chat_history_media_cue_")) {
+          localStorage.removeItem(key);
+        }
+      }
+    } catch (e) {}
     setIsPlayerOpen(false);
     setIsImmersiveMode(false);
   };
@@ -1400,18 +1472,86 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   };
 
-  // Upload handler for Media Files
-  const handleUploadFiles = (fileList: FileList | File[]) => {
+  // Folder Upload Handler (Uploads entire folder with automatic folder creation & assignment)
+  const handleFolderUploadSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
 
+    const validMediaExtensions = [".mp4", ".webm", ".mkv", ".mov", ".avi", ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".m4v", ".3gp"];
+    const mediaFiles: File[] = [];
+    let detectedFolderName = "";
+
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      const name = file.name.toLowerCase();
+      const isMedia = file.type.startsWith("video/") || file.type.startsWith("audio/") || validMediaExtensions.some((ext) => name.endsWith(ext));
+      if (isMedia) {
+        mediaFiles.push(file);
+      }
+      if (!detectedFolderName && (file as any).webkitRelativePath) {
+        const parts = (file as any).webkitRelativePath.split("/");
+        if (parts.length > 1) {
+          detectedFolderName = parts[0];
+        }
+      }
+    }
+
+    if (mediaFiles.length === 0) {
+      setErrorMsg("لم يتم العثور على ملفات وسائط (فيديو أو صوت) مدعومة داخل المجلد المحدد");
+      e.target.value = "";
+      return;
+    }
+
+    let targetFolderId: string | null = activeFolderId;
+    if (detectedFolderName) {
+      const existing = folders.find((f) => f.name.trim().toLowerCase() === detectedFolderName.trim().toLowerCase());
+      if (existing) {
+        targetFolderId = existing.id;
+      } else {
+        const newFolder: MediaFolder = {
+          id: `folder-${Date.now()}`,
+          name: detectedFolderName,
+          createdAt: new Date().toISOString()
+        };
+        setFolders((prev) => [...prev, newFolder]);
+        targetFolderId = newFolder.id;
+      }
+    }
+
+    handleUploadFiles(mediaFiles, targetFolderId, detectedFolderName || undefined);
+    e.target.value = "";
+  };
+
+  // Upload handler for Media Files (with folder binding & progress labels)
+  const handleUploadFiles = (fileList: FileList | File[], targetFolderId?: string | null, customFolderName?: string) => {
+    if (!fileList || fileList.length === 0) return;
+
+    const filesArray = Array.from(fileList);
+    const validMediaExtensions = [".mp4", ".webm", ".mkv", ".mov", ".avi", ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".m4v", ".3gp"];
+    const mediaFiles = filesArray.filter(f => {
+      const name = f.name.toLowerCase();
+      return f.type.startsWith("video/") || f.type.startsWith("audio/") || validMediaExtensions.some(ext => name.endsWith(ext));
+    });
+
+    if (mediaFiles.length === 0) {
+      setErrorMsg("يرجى اختيار ملفات فيديو أو صوت مدعومة");
+      return;
+    }
+
+    const folderToUse = targetFolderId !== undefined ? targetFolderId : activeFolderId;
+    const destFolder = folders.find(f => f.id === folderToUse);
+    const folderLabel = customFolderName || (destFolder ? destFolder.name : null);
+
+    setUploadingFolderName(folderLabel);
+    setUploadingFileName(mediaFiles.length === 1 ? mediaFiles[0].name : `${mediaFiles.length} ملفات`);
     setErrorMsg(null);
     setSuccessMsg(null);
     setUploading(true);
     setUploadProgress(0);
 
     const formData = new FormData();
-    for (let i = 0; i < fileList.length; i++) {
-      formData.append("files", fileList[i]);
+    for (let i = 0; i < mediaFiles.length; i++) {
+      formData.append("files", mediaFiles[i]);
     }
 
     const xhr = new XMLHttpRequest();
@@ -1426,12 +1566,23 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
     xhr.onload = () => {
       setUploading(false);
+      setUploadingFolderName(null);
+      setUploadingFileName(null);
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const res = JSON.parse(xhr.responseText);
-          setSuccessMsg(res.message || "تم رفع الملف بنجاح!");
+          setSuccessMsg(res.message || "تم رفع الملفات بنجاح! 📁");
           fetchMediaFiles();
           if (res.files && res.files.length > 0) {
+            if (folderToUse) {
+              setFileFolderMap((prev) => {
+                const next = { ...prev };
+                res.files.forEach((f: MediaFile) => {
+                  next[f.id] = folderToUse;
+                });
+                return next;
+              });
+            }
             setCurrentFile(res.files[0]);
             setIsPlaying(true);
           }
@@ -1450,6 +1601,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
     xhr.onerror = () => {
       setUploading(false);
+      setUploadingFolderName(null);
+      setUploadingFileName(null);
       setErrorMsg("حدث خطأ في الاتصال بالسيرفر أثناء الرفع");
     };
 
@@ -2924,6 +3077,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       />
 
       <input
+        ref={folderInputRef}
+        type="file"
+        multiple
+        {...({ webkitdirectory: "", directory: "" } as any)}
+        className="hidden"
+        onChange={handleFolderUploadSelect}
+      />
+
+      <input
         ref={subtitleFileInputRef}
         type="file"
         accept=".srt,.vtt,.txt,.sbv,.sub"
@@ -3084,6 +3246,17 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
             </>
           )}
 
+          {/* Upload Folder Button */}
+          <button
+            onClick={() => folderInputRef.current?.click()}
+            disabled={uploading}
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl font-bold text-xs shadow-2xs transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            title="رفع مجلد كامل من جهازك يحتوي على مقاطع فيديو أو صوت"
+          >
+            <FolderInput className="w-3.5 h-3.5 text-blue-600" />
+            <span>+ 📁 رفع مجلد</span>
+          </button>
+
           {/* Upload Button */}
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -3107,6 +3280,45 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
       {/* Main Workspace Body */}
       <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-5">
+        {/* Real-time Upload Progress Banner when Player is active */}
+        {uploading && currentFile && (
+          <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 text-white rounded-2xl p-3.5 shadow-lg border border-blue-400/30 animate-fadeIn">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-black text-xs sm:text-sm">
+                      {uploadingFolderName ? `جاري رفع مجلد "${uploadingFolderName}"...` : "جاري رفع ملفات الوسائط..."}
+                    </span>
+                    <span className="bg-white/20 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
+                      {uploadProgress}%
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-blue-100 truncate mt-0.5">
+                    {uploadingFileName && `الملف: ${uploadingFileName} • `}
+                    {uploadingFolderName
+                      ? `المجلد المستهدف: 📁 ${uploadingFolderName}`
+                      : activeFolderId && folders.find(f => f.id === activeFolderId)
+                      ? `المجلد المستهدف: 📁 ${folders.find(f => f.id === activeFolderId)?.name}`
+                      : "المجلد المستهدف: 📁 المجلد الرئيسي"}
+                  </p>
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <span className="text-sm font-black text-white/95">{uploadProgress}%</span>
+              </div>
+            </div>
+            <div className="w-full h-2 bg-black/25 rounded-full overflow-hidden p-0.5">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-400 to-teal-300 rounded-full transition-all duration-300 shadow-xs"
+                style={{ width: `${Math.max(6, uploadProgress)}%` }}
+              />
+            </div>
+          </div>
+        )}
         {/* Notifications */}
         {errorMsg && (
           <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl flex items-center justify-between text-xs font-semibold animate-fadeIn shadow-xs">
@@ -4460,7 +4672,23 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   <span>نسخ</span>
                 </button>
 
-                {/* 3. Delete with Confirmation / حذف */}
+                {/* 3. AI Sentence Chat / سؤال الذكاء 🤖 (الخيار الرابع التفاعلي مع 20 جملة قبل وبعد) */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const targetCue = cueMenuAnchor.cue;
+                    setCueOptionsMenuId(null);
+                    setCueMenuAnchor(null);
+                    handleOpenSentenceChat(targetCue);
+                  }}
+                  className="w-full px-2.5 py-2 hover:bg-emerald-500/20 text-emerald-300 hover:text-emerald-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>سؤال الذكاء 🤖</span>
+                </button>
+
+                {/* 4. Delete with Confirmation / حذف */}
                 <button
                   type="button"
                   onClick={(e) => {
@@ -4564,6 +4792,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
               activeFolderId={activeFolderId}
               currentFile={currentFile}
               loading={loading}
+              uploading={uploading}
+              uploadProgress={uploadProgress}
+              uploadingFolderName={uploadingFolderName}
+              uploadingFileName={uploadingFileName}
               onSelectFolder={(id) => setActiveFolderId(id)}
               onSelectFile={(file, autoPlay) => {
                 if (file) {
@@ -4583,6 +4815,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
               setEditTitleText={setEditTitleText}
               onSaveRename={handleSaveRename}
               onUploadClick={() => fileInputRef.current?.click()}
+              onUploadFolderClick={() => folderInputRef.current?.click()}
               onOpenYouTubeDownload={() => {
                 setGradioInitialMode("youtube");
                 setShowGradioModal(true);
@@ -5155,6 +5388,63 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         selectedAiModel={selectedAiModel}
         onSelectAiModel={handleSelectAiModel}
       />
+
+      {/* ======================================================== */}
+      {/* MODAL: AI MEDIA SENTENCE & CONTEXT DIALOGUE CHAT MODAL  */}
+      {/* ======================================================== */}
+      {isSentenceChatOpen && chatTargetCue && (
+        <ReviewChatModal
+          isOpen={isSentenceChatOpen}
+          onClose={() => {
+            setIsSentenceChatOpen(false);
+            setChatTargetCue(null);
+          }}
+          card={{
+            id: `media_cue_${currentFile?.id || 'temp'}_${chatTargetCue.id}`,
+            frontText: chatTargetCue.text,
+            backText: chatTargetCue.secondaryText || "",
+            frontLang: activeTrack?.language || "de",
+            backLang: secondaryTrack?.language || "ar"
+          }}
+          previousCards={chatPreviousCues.map((c) => ({
+            id: `media_cue_${currentFile?.id || 'temp'}_${c.id}`,
+            frontText: c.text,
+            backText: c.secondaryText || "",
+            frontLang: activeTrack?.language || "de",
+            backLang: secondaryTrack?.language || "ar"
+          }))}
+          nextCards={chatNextCues.map((c) => ({
+            id: `media_cue_${currentFile?.id || 'temp'}_${c.id}`,
+            frontText: c.text,
+            backText: c.secondaryText || "",
+            frontLang: activeTrack?.language || "de",
+            backLang: secondaryTrack?.language || "ar"
+          }))}
+          folderInfo={{
+            name: currentFile?.title || currentFile?.originalName || "ملف وسائط",
+            description: `مقطع ${currentFile?.type === "audio" ? "صوتي" : "فيديو"}`
+          }}
+          mediaContext={{
+            mediaId: currentFile?.id,
+            mediaTitle: currentFile?.title || currentFile?.originalName || "ملف وسائط",
+            originalName: currentFile?.originalName,
+            mediaType: currentFile?.type || "video",
+            duration: duration,
+            cueStartTime: chatTargetCue.startTime,
+            cueEndTime: chatTargetCue.endTime,
+            onPlayMediaSegment: (start, end) => {
+              if (videoRef.current) {
+                videoRef.current.currentTime = start;
+                videoRef.current.play().catch(() => {});
+                setIsPlaying(true);
+              }
+            }
+          }}
+          onPlayPronunciation={(text, lang) => {
+            speakClient(text, lang || activeTrack?.language || "de");
+          }}
+        />
+      )}
     </div>
   );
 };

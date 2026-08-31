@@ -54,6 +54,10 @@ export interface MediaExplorerViewProps {
   activeFolderId: string | null;
   currentFile: MediaFile | null;
   loading: boolean;
+  uploading?: boolean;
+  uploadProgress?: number;
+  uploadingFolderName?: string | null;
+  uploadingFileName?: string | null;
   onSelectFolder: (id: string | null) => void;
   onSelectFile: (file: MediaFile | null, autoPlay?: boolean) => void;
   onOpenCreateFolder: () => void;
@@ -69,6 +73,7 @@ export interface MediaExplorerViewProps {
   setEditTitleText: (val: string) => void;
   onSaveRename: (id: string) => void;
   onUploadClick: () => void;
+  onUploadFolderClick?: () => void;
   onOpenYouTubeDownload?: () => void;
   onOpenGradioModalForFile: (file: MediaFile) => void;
   onOpenSubtitleOptionsForFile: (file: MediaFile) => void;
@@ -87,6 +92,10 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
   activeFolderId,
   currentFile,
   loading,
+  uploading = false,
+  uploadProgress = 0,
+  uploadingFolderName = null,
+  uploadingFileName = null,
   onSelectFolder,
   onSelectFile,
   onOpenCreateFolder,
@@ -102,6 +111,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
   setEditTitleText,
   onSaveRename,
   onUploadClick,
+  onUploadFolderClick,
   onOpenYouTubeDownload,
   onOpenGradioModalForFile,
   onOpenSubtitleOptionsForFile,
@@ -927,12 +937,36 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
           {/* Primary Upload Button */}
           <button
             onClick={onUploadClick}
-            className="px-3 py-1.5 bg-[#0056f6] hover:bg-[#0047d1] text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+            disabled={uploading}
+            className="px-3 py-1.5 bg-[#0056f6] hover:bg-[#0047d1] text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-75"
             title="رفع مقاطع فيديو أو صوتية جديدة"
           >
-            <Film className="w-3.5 h-3.5" />
-            <span>+ رفع وسائط</span>
+            {uploading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>رفع ({uploadProgress}%)...</span>
+              </>
+            ) : (
+              <>
+                <Film className="w-3.5 h-3.5" />
+                <span>+ رفع وسائط</span>
+              </>
+            )}
           </button>
+
+          {/* Upload Entire Folder Button (رفع مجلد كامل) */}
+          {onUploadFolderClick && (
+            <button
+              onClick={onUploadFolderClick}
+              disabled={uploading}
+              className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200/80 rounded-lg text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-75"
+              title="رفع مجلد كامل من جهازك بجميع ملفات الفيديو والصوت"
+            >
+              <FolderInput className="w-3.5 h-3.5 text-blue-600" />
+              <span className="hidden sm:inline">+ 📁 رفع مجلد</span>
+              <span className="sm:hidden">+ مجلد</span>
+            </button>
+          )}
 
           {/* YouTube Download & Transcribe Button */}
           {onOpenYouTubeDownload && (
@@ -1328,6 +1362,47 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
             setInspectedFolder(null);
           }}
         >
+          {/* Real-time Upload Progress Banner */}
+          {uploading && (
+            <div className="mb-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 text-white rounded-2xl p-3.5 shadow-lg border border-blue-400/30 animate-fadeIn shrink-0">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-black text-xs sm:text-sm">
+                        {uploadingFolderName ? `جاري رفع مجلد "${uploadingFolderName}"...` : "جاري رفع ملفات الوسائط..."}
+                      </span>
+                      <span className="bg-white/20 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
+                        {uploadProgress}%
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-blue-100 truncate mt-0.5">
+                      {uploadingFileName && `الملف: ${uploadingFileName} • `}
+                      {uploadingFolderName
+                        ? `المجلد المستهدف: 📁 ${uploadingFolderName}`
+                        : activeFolder
+                        ? `المجلد المستهدف: 📁 ${activeFolder.name}`
+                        : "المجلد المستهدف: 📁 المجلد الرئيسي (بدون تصنيف)"}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-sm font-black text-white/95">{uploadProgress}%</span>
+                </div>
+              </div>
+              {/* Animated Progress Bar */}
+              <div className="w-full h-2 bg-black/25 rounded-full overflow-hidden p-0.5">
+                <div
+                  className="h-full bg-gradient-to-r from-emerald-400 to-teal-300 rounded-full transition-all duration-300 shadow-xs"
+                  style={{ width: `${Math.max(6, uploadProgress)}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           {loading ? (
             <div className="py-20 flex flex-col items-center justify-center text-slate-400 gap-2">
               <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
@@ -1349,11 +1424,22 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
               <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
                 <button
                   onClick={onUploadClick}
-                  className="px-4 py-2 bg-[#0056f6] hover:bg-[#0047d1] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  disabled={uploading}
+                  className="px-4 py-2 bg-[#0056f6] hover:bg-[#0047d1] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-75"
                 >
                   <Film className="w-3.5 h-3.5" />
                   <span>+ رفع مقطع جديد</span>
                 </button>
+                {onUploadFolderClick && (
+                  <button
+                    onClick={onUploadFolderClick}
+                    disabled={uploading}
+                    className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-75"
+                  >
+                    <FolderInput className="w-3.5 h-3.5 text-blue-600" />
+                    <span>+ 📁 رفع مجلد كامل</span>
+                  </button>
+                )}
                 {onOpenYouTubeDownload && (
                   <button
                     onClick={onOpenYouTubeDownload}

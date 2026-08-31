@@ -23,7 +23,11 @@ import {
   ChevronRight,
   Eye,
   AlertCircle,
-  Settings
+  Settings,
+  Play,
+  Clock,
+  Film,
+  Music
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Flashcard, Folder } from "../types";
@@ -31,18 +35,46 @@ import { speakClient } from "./Modals";
 
 export interface ReviewChatMessage {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "model";
   content: string;
   modelUsed?: string;
   timestamp: number;
+  images?: string[];
+  imageUrls?: string[];
+  suggestions?: string[];
 }
 
-interface ReviewChatModalProps {
+export interface ReviewChatCardItem {
+  id: string;
+  frontText: string;
+  backText?: string;
+  translationHint?: string;
+  correctArticle?: string;
+  pluralText?: string;
+  frontLang?: string;
+  backLang?: string;
+  audioUrl?: string;
+  [key: string]: any;
+}
+
+export interface ReviewChatModalMediaContext {
+  mediaId?: string;
+  mediaTitle: string;
+  originalName?: string;
+  mediaType: "video" | "audio";
+  duration?: number;
+  cueStartTime?: number;
+  cueEndTime?: number;
+  onPlayMediaSegment?: (startTime: number, endTime?: number) => void;
+  onSeekMedia?: (time: number) => void;
+}
+
+export interface ReviewChatModalProps {
   isOpen: boolean;
   onClose: () => void;
-  card: Flashcard;
-  previousCards: Flashcard[];
-  nextCards: Flashcard[];
+  card: Flashcard | ReviewChatCardItem;
+  previousCards?: (Flashcard | ReviewChatCardItem)[];
+  nextCards?: (Flashcard | ReviewChatCardItem)[];
   folderInfo?: {
     name?: string;
     description?: string;
@@ -50,6 +82,7 @@ interface ReviewChatModalProps {
     sourceLanguage?: string;
   };
   onPlayPronunciation?: (text: string, lang?: string, voice?: string) => void;
+  mediaContext?: ReviewChatModalMediaContext;
 }
 
 const AVAILABLE_MODELS = [
@@ -1406,10 +1439,11 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
   isOpen,
   onClose,
   card,
-  previousCards,
-  nextCards,
+  previousCards = [],
+  nextCards = [],
   folderInfo,
-  onPlayPronunciation
+  onPlayPronunciation,
+  mediaContext
 }) => {
   const [messages, setMessages] = useState<ReviewChatMessage[]>(() => {
     try {
@@ -1459,13 +1493,24 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isInitialOpenRef = useRef(true);
 
-  // Reset pagination and initial scroll flag when card or modal changes
+  // Reset pagination and reload chat history when card or modal changes
   useEffect(() => {
     if (isOpen) {
       setVisibleCount(10);
       isInitialOpenRef.current = true;
       setIsImageMenuOpen(false);
       setIsPromptsMenuOpen(false);
+      try {
+        const saved = localStorage.getItem(`review_chat_history_${card.id}`);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            setMessages(parsed);
+            return;
+          }
+        }
+      } catch (e) {}
+      setMessages([]);
     }
   }, [isOpen, card.id]);
 
@@ -1488,10 +1533,6 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
   useEffect(() => {
     localStorage.setItem("settings_review_chat_voice", selectedVoice);
   }, [selectedVoice]);
-
-  useEffect(() => {
-    localStorage.setItem("settings_review_chat_length", responseLength);
-  }, [responseLength]);
 
   // Save chat history per card (max 30 messages)
   useEffect(() => {
@@ -1585,24 +1626,33 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
             frontLang: card.frontLang,
             backLang: card.backLang
           },
-          previousCards: previousCards.slice(-5).map((c) => ({
+          previousCards: (previousCards || []).slice(-5).map((c) => ({
             frontText: c.frontText,
             backText: c.backText,
             translationHint: c.translationHint,
             correctArticle: c.correctArticle
           })),
-          nextCards: nextCards.slice(0, 5).map((c) => ({
+          nextCards: (nextCards || []).slice(0, 5).map((c) => ({
             frontText: c.frontText,
             backText: c.backText,
             translationHint: c.translationHint,
             correctArticle: c.correctArticle
           })),
           folderInfo: {
-            name: folderInfo?.name || "مجموعة البطاقات",
-            description: folderInfo?.description || "",
+            name: folderInfo?.name || (mediaContext ? mediaContext.mediaTitle : "مجموعة البطاقات"),
+            description: folderInfo?.description || (mediaContext ? `مقطع ${mediaContext.mediaType === 'audio' ? 'صوتي' : 'فيديو'}` : ""),
             targetLanguage: card.frontLang || folderInfo?.targetLanguage || "de",
             sourceLanguage: card.backLang || folderInfo?.sourceLanguage || "ar"
           },
+          mediaInfo: mediaContext ? {
+            id: mediaContext.mediaId,
+            title: mediaContext.mediaTitle,
+            originalName: mediaContext.originalName,
+            type: mediaContext.mediaType,
+            duration: mediaContext.duration,
+            cueStartTime: mediaContext.cueStartTime,
+            cueEndTime: mediaContext.cueEndTime
+          } : undefined,
           chatHistory: historyPayload,
           message: query,
           includeImages: shouldIncludeImages,
@@ -2042,21 +2092,63 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
 
   if (!isOpen) return null;
 
-  const quickPrompts = responseLength === "concise" ? [
-    { icon: "💡", label: "معنى سريع ومباشر", prompt: `وضح لي باختصار شديد معنى وأصل الكلمة "${card.frontText}" وترجمتها الدقيقة.` },
-    { icon: "✍️", label: "مثال سياقي واحد", prompt: `أعطني مثالاً واقعياً واحداً فقط يحتوي على "${card.frontText}" مع الترجمة.` },
-    { icon: "🔍", label: "الأداة والقاعدة بإيجاز", prompt: `وضح لي باختصار الأداة وقاعدة "${card.frontText}" ${card.correctArticle ? `(${card.correctArticle})` : ''}.` },
-    { icon: "⚖️", label: "أقرب مرادف", prompt: `ما هو أقرب مرادف لـ "${card.frontText}" في جملة سريعة؟` },
-    { icon: "🎯", label: "سؤال اختبار سريع", prompt: `اطرح علي سؤال اختبار سريع في سطر لاختبار فهمي للكلمة "${card.frontText}".` }
-  ] : [
-    { icon: "💡", label: "شرح الكلمة والأصل", prompt: `اشرح لي بالتفصيل معنى وأصل الكلمة "${card.frontText}" واستخداماتها الدقيقة.` },
-    { icon: "✍️", label: "3 جمل سياقية واقعية", prompt: `أعطني 3 جمل يومية واقعية ومتنوعة مستخدمة من قبل الناطقين الأصليين تحتوي على "${card.frontText}" مع الترجمة.` },
-    { icon: "🔍", label: "القواعد والإعراب والأداة", prompt: `اشرح لي القواعد النحوية المرتبطة بـ "${card.frontText}" ${card.correctArticle ? `(أداة التعريف ${card.correctArticle})` : ''} وصيغ الجمع أو تصريفات الفعل مع الضمائر.` },
-    { icon: "⚖️", label: "الفروقات والمرادفات", prompt: `ما هي أهم المرادفات لـ "${card.frontText}" وما الفرق الدقيق بينها في الاستخدام اليومي؟` },
-    { icon: "🎯", label: "اختبرني بسؤال أو تمرين", prompt: `اطرح علي سؤالاً أو تمرين إكمال فراغ لاختبار فهمي للكلمة "${card.frontText}".` }
-  ];
+  const formatSeconds = (sec?: number) => {
+    if (sec === undefined || isNaN(sec)) return "00:00";
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
 
-  const imageQuickPrompts = [
+  const quickPrompts = mediaContext
+    ? (responseLength === "concise" ? [
+        { icon: "💡", label: "معنى وسياق سريع", prompt: `وضح لي باختصار شديد المعنى الدقيق لجملة "${card.frontText}" وسياق استخدامها في هذا المشهد مع الترجمة.` },
+        { icon: "🔊", label: "نطق ونبرة الجملة", prompt: `كيف ينطق المتحدثون الأصليون جملة "${card.frontText}" وما هي نبرتها وسرعتها الطبيعية؟` },
+        { icon: "🔍", label: "القواعد والتراكيب", prompt: `وضح لي باختصار القواعد النحوية وتصريف الأفعال في الجملة "${card.frontText}".` },
+        { icon: "✍️", label: "أقرب بديل يومي", prompt: `ما هو البديل الأكثر شيوعاً وعفوية عند الناطقين الأصليين للتعبير عن "${card.frontText}"؟` },
+        { icon: "🎯", label: "اختبار فهم المشهد", prompt: `اطرح علي سؤال اختبار سريع للتأكد من فهمي لمقصد جملة "${card.frontText}" في هذا المقطع.` }
+      ] : [
+        { icon: "💡", label: "شرح الجملة وسياق المشهد", prompt: `اشرح لي بالتفصيل المعنى الدقيق لجملة "${card.frontText}" وسياق استخدامها في هذا المشهد وما تحمله من دلالات.` },
+        { icon: "✍️", label: "3 بدائل حوارية واقعية", prompt: `أعطني 3 بدائل يومية متنوعة مستخدمة من قبل الناطقين الأصليين للتعبير عن معنى "${card.frontText}" مع الترجمة.` },
+        { icon: "🔍", label: "القواعد والتراكيب والإعراب", prompt: `اشرح القواعد النحوية والتراكيب المستخدمة في جملة "${card.frontText}" وتصريفات الأفعال وأدوات الربط بالتفصيل.` },
+        { icon: "⚖️", label: "الفروقات والتعبيرات الاصطلاحية", prompt: `هل تحتوي الجملة "${card.frontText}" على تعبيرات اصطلاحية (Idioms) أو مفردات مميزة؟ وضحها بدقة.` },
+        { icon: "🎯", label: "اختبرني بسؤال أو تمرين", prompt: `اطرح علي سؤالاً أو تمرين إكمال فراغ لاختبار فهمي لجملة "${card.frontText}" واستخدامها الصحيح.` }
+      ])
+    : (responseLength === "concise" ? [
+        { icon: "💡", label: "معنى سريع ومباشر", prompt: `وضح لي باختصار شديد معنى وأصل الكلمة "${card.frontText}" وترجمتها الدقيقة.` },
+        { icon: "✍️", label: "مثال سياقي واحد", prompt: `أعطني مثالاً واقعياً واحداً فقط يحتوي على "${card.frontText}" مع الترجمة.` },
+        { icon: "🔍", label: "الأداة والقاعدة بإيجاز", prompt: `وضح لي باختصار الأداة وقاعدة "${card.frontText}" ${card.correctArticle ? `(${card.correctArticle})` : ''}.` },
+        { icon: "⚖️", label: "أقرب مرادف", prompt: `ما هو أقرب مرادف لـ "${card.frontText}" في جملة سريعة؟` },
+        { icon: "🎯", label: "سؤال اختبار سريع", prompt: `اطرح علي سؤال اختبار سريع في سطر لاختبار فهمي للكلمة "${card.frontText}".` }
+      ] : [
+        { icon: "💡", label: "شرح الكلمة والأصل", prompt: `اشرح لي بالتفصيل معنى وأصل الكلمة "${card.frontText}" واستخداماتها الدقيقة.` },
+        { icon: "✍️", label: "3 جمل سياقية واقعية", prompt: `أعطني 3 جمل يومية واقعية ومتنوعة مستخدمة من قبل الناطقين الأصليين تحتوي على "${card.frontText}" مع الترجمة.` },
+        { icon: "🔍", label: "القواعد والإعراب والأداة", prompt: `اشرح لي القواعد النحوية المرتبطة بـ "${card.frontText}" ${card.correctArticle ? `(أداة التعريف ${card.correctArticle})` : ''} وصيغ الجمع أو تصريفات الفعل مع الضمائر.` },
+        { icon: "⚖️", label: "الفروقات والمرادفات", prompt: `ما هي أهم المرادفات لـ "${card.frontText}" وما الفرق الدقيق بينها في الاستخدام اليومي؟` },
+        { icon: "🎯", label: "اختبرني بسؤال أو تمرين", prompt: `اطرح علي سؤالاً أو تمرين إكمال فراغ لاختبار فهمي للكلمة "${card.frontText}".` }
+      ]);
+
+  const imageQuickPrompts = mediaContext ? [
+    {
+      icon: "🖼️",
+      label: "شرح بصري للمشهد مع صور",
+      prompt: `اشرح لي الجملة "${card.frontText}" بالتفصيل مع إرفاق صور توضيحية عالية الجودة للأشياء والمفاهيم المرتبطة بسياقها.`
+    },
+    {
+      icon: "🧩",
+      label: "صور للمفاهيم والكلمات الرئيسية",
+      prompt: `اعرض لي صوراً توضيحية للمفردات والمفاهيم الرئيسية في "${card.frontText}" مع تسمية ونطق كل جزء باللغة ${card.frontLang === 'de' ? 'الألمانية' : 'الإنجليزية'}.`
+    },
+    {
+      icon: "📸",
+      label: "صور لمواقف وسياقات الاستخدام",
+      prompt: `أريد صوراً توضيحية لمواقف وسياقات واقعية تُستخدم فيها هذه العبارة "${card.frontText}" في الحياة اليومية.`
+    },
+    {
+      icon: "⚖️",
+      label: "مقارنة بصرية بالصور",
+      prompt: `قارن بالصور التوضيحية بين معاني ومفردات "${card.frontText}" وتطبيقاتها الحياتية المختلفة.`
+    }
+  ] : [
     {
       icon: "🖼️",
       label: "شرح بصري شامل مع صور",
@@ -2198,27 +2290,80 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
       >
         {/* TOP HEADER */}
         <div className="px-4 sm:px-6 py-3 bg-slate-950/90 border-b border-slate-800/80 flex items-center justify-between gap-3 shrink-0">
-          {/* Right: AI Title & Active Word */}
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
-              <Bot className="w-4 h-4" />
+          {/* Right: AI Title & Active Word/Sentence */}
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+              {mediaContext ? (
+                mediaContext.mediaType === "audio" ? <Music className="w-4 h-4 text-emerald-400" /> : <Film className="w-4 h-4 text-blue-400" />
+              ) : (
+                <Bot className="w-4 h-4" />
+              )}
             </div>
-            <div className="flex items-center gap-2">
-              <h3 className="font-bold text-sm text-white">المساعد اللغوي</h3>
-              <span className="text-slate-600">•</span>
-              <span className="text-xs font-extrabold text-indigo-300 font-sans dir-ltr">
+            <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+              <h3 className="font-bold text-xs sm:text-sm text-white shrink-0">
+                {mediaContext ? "مساعد المشهد والسكربت" : "المساعد اللغوي"}
+              </h3>
+              <span className="text-slate-600 shrink-0">•</span>
+              {mediaContext && mediaContext.cueStartTime !== undefined && mediaContext.cueEndTime !== undefined && (
+                <span className="bg-blue-950/80 border border-blue-600/40 text-blue-300 font-mono text-[10px] sm:text-xs px-2 py-0.5 rounded-full shrink-0 flex items-center gap-1 dir-ltr">
+                  <Clock className="w-2.5 h-2.5" />
+                  {formatSeconds(mediaContext.cueStartTime)} - {formatSeconds(mediaContext.cueEndTime)}
+                </span>
+              )}
+              <span className="text-xs font-bold text-indigo-300 font-sans dir-ltr truncate max-w-[140px] sm:max-w-[240px]" title={card.frontText}>
                 {card.correctArticle ? `${card.correctArticle} ` : ''}{card.frontText}
               </span>
             </div>
           </div>
 
-          {/* Left: Actions (Settings, Context, Clear, Close) */}
-          <div className="flex items-center gap-1.5">
+          {/* Left: Actions (Play clip, Pronounce, Settings, Context, Clear, Close) */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Play Media Segment / Audio Clip Button */}
+            {mediaContext?.onPlayMediaSegment && mediaContext.cueStartTime !== undefined && (
+              <button
+                type="button"
+                onClick={() => mediaContext.onPlayMediaSegment!(mediaContext.cueStartTime!, mediaContext.cueEndTime)}
+                title="سماع المقطع الصوتي/الفيديو الحقيقي من المشهد"
+                className="px-2.5 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition-all cursor-pointer flex items-center gap-1 active:scale-95 shadow-xs"
+              >
+                <Play className="w-3.5 h-3.5 fill-emerald-400 text-emerald-400" />
+                <span className="hidden sm:inline">سماع المقطع</span>
+              </button>
+            )}
+
+            {/* TTS Pronunciation Button */}
+            <button
+              type="button"
+              onClick={() => handlePlayChatVoice(card.frontText, card.frontLang || "de")}
+              title="نطق الجملة بصوت الذكاء الاصطناعي"
+              className="p-1.5 sm:px-2 sm:py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/60 text-xs font-medium transition-all cursor-pointer flex items-center gap-1"
+            >
+              <Volume2 className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden md:inline">نطق</span>
+            </button>
+
+            {/* Context Drawer Button */}
+            <button
+              type="button"
+              onClick={() => setIsContextDrawerOpen(!isContextDrawerOpen)}
+              title={mediaContext ? "عرض سياق السكربت والجمل السابقة والتالية" : "عرض سياق البطاقات السابقة والتالية"}
+              className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs transition-all cursor-pointer flex items-center gap-1 border ${
+                isContextDrawerOpen
+                  ? "bg-indigo-600/25 text-indigo-300 border-indigo-500/50"
+                  : "bg-slate-800/80 hover:bg-slate-700 text-slate-300 border-slate-700/60"
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline text-xs font-medium">
+                {mediaContext ? "السكربت" : "السياق"}
+              </span>
+            </button>
+
             {/* Model & Settings Button */}
             <button
               type="button"
               onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-              title="اختيار الموديل"
+              title="اختيار الموديل والإعدادات"
               className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs transition-all cursor-pointer flex items-center gap-1 border ${
                 isSettingsOpen
                   ? "bg-indigo-600/20 text-indigo-300 border-indigo-500/40"
@@ -2260,63 +2405,109 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="bg-slate-950/95 border-b border-slate-800 p-4 shrink-0 overflow-y-auto max-h-60 z-20 text-xs"
+              className="bg-slate-950/95 border-b border-slate-800 p-4 shrink-0 overflow-y-auto max-h-64 z-20 text-xs"
             >
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-slate-400 border-b border-slate-800/80 pb-1.5">
-                  <span className="font-bold text-indigo-400">سياق البيئة والبطاقات (Context Awareness):</span>
-                  <span>المجلد: {folderInfo?.name || "بدون اسم"}</span>
+                  <span className="font-bold text-indigo-400 flex items-center gap-1.5">
+                    {mediaContext ? (
+                      <>
+                        <Film className="w-3.5 h-3.5 text-blue-400" />
+                        <span>سياق السكربت والمشهد (Script & Scene Context):</span>
+                      </>
+                    ) : (
+                      <>
+                        <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>سياق البيئة والبطاقات (Context Awareness):</span>
+                      </>
+                    )}
+                  </span>
+                  <span className="truncate max-w-[200px]">
+                    {mediaContext ? `🎬 ${mediaContext.mediaTitle}` : `المجلد: ${folderInfo?.name || "بدون اسم"}`}
+                  </span>
                 </div>
 
-                {/* Previous 5 */}
+                {/* Previous 5 Items */}
                 <div>
                   <span className="text-[11px] font-bold text-slate-400 block mb-1">
-                    ⏮️ البطاقات السابقة (الـ 5 السابقة):
+                    {mediaContext ? "⏮️ الجمل السابقة في السكربت:" : "⏮️ البطاقات السابقة (الـ 5 السابقة):"}
                   </span>
-                  {previousCards.length > 0 ? (
+                  {(previousCards && previousCards.length > 0) ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                       {previousCards.slice(-5).map((c, i) => (
-                        <div key={c.id || i} className="bg-slate-900/90 border border-slate-800 px-2.5 py-1.5 rounded-lg text-[11px] flex justify-between">
-                          <span className="font-sans font-bold text-slate-300">{c.correctArticle ? `${c.correctArticle} ` : ''}{c.frontText}</span>
-                          <span className="text-slate-400">{c.backText}</span>
+                        <div key={c.id || i} className="bg-slate-900/90 border border-slate-800 px-2.5 py-1.5 rounded-lg text-[11px] flex items-center justify-between gap-2">
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-sans font-bold text-slate-300 truncate dir-ltr">{c.correctArticle ? `${c.correctArticle} ` : ''}{c.frontText}</span>
+                            {c.backText && <span className="text-[10px] text-slate-400 truncate">{c.backText}</span>}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handlePlayChatVoice(c.frontText, c.frontLang || "de")}
+                            className="p-1 text-slate-400 hover:text-white shrink-0"
+                            title="استماع"
+                          >
+                            <Volume2 className="w-3 h-3" />
+                          </button>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <span className="text-slate-500 text-[10px]">لا توجد بطاقات سابقة</span>
+                    <span className="text-slate-500 text-[10px]">لا توجد عناصر سابقة</span>
                   )}
                 </div>
 
-                {/* Current */}
-                <div className="p-2 bg-indigo-950/40 border border-indigo-600/40 rounded-xl">
-                  <span className="text-[11px] font-bold text-indigo-300 block mb-1">
-                    🃏 البطاقة الحالية النشطة:
-                  </span>
-                  <div className="flex items-center justify-between text-white font-bold font-sans">
-                    <span>{card.correctArticle ? `${card.correctArticle} ` : ''}{card.frontText} {card.pluralText ? `(جمع: ${card.pluralText})` : ''}</span>
-                    <span className="text-indigo-200 font-normal">{card.backText}</span>
+                {/* Current Active Item */}
+                <div className="p-2.5 bg-indigo-950/40 border border-indigo-600/40 rounded-xl">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-[11px] font-bold text-indigo-300 flex items-center gap-1.5">
+                      {mediaContext ? "🎬 الجملة الحالية في المشهد:" : "🃏 البطاقة الحالية النشطة:"}
+                    </span>
+                    {mediaContext?.onPlayMediaSegment && mediaContext.cueStartTime !== undefined && (
+                      <button
+                        type="button"
+                        onClick={() => mediaContext.onPlayMediaSegment!(mediaContext.cueStartTime!, mediaContext.cueEndTime)}
+                        className="px-2 py-0.5 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Play className="w-2.5 h-2.5 fill-emerald-400" />
+                        <span>تشغيل المقطع</span>
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between text-white font-bold font-sans gap-2">
+                    <span className="dir-ltr text-xs sm:text-sm">{card.correctArticle ? `${card.correctArticle} ` : ''}{card.frontText} {card.pluralText ? `(جمع: ${card.pluralText})` : ''}</span>
+                    <span className="text-indigo-200 font-normal text-xs">{card.backText}</span>
                   </div>
                   {card.translationHint && (
                     <p className="text-[10px] text-slate-400 mt-1">تلميح/وصف: {card.translationHint}</p>
                   )}
                 </div>
 
-                {/* Next 5 */}
+                {/* Next 5 Items */}
                 <div>
                   <span className="text-[11px] font-bold text-slate-400 block mb-1">
-                    ⏭️ البطاقات التالية (الـ 5 التالية):
+                    {mediaContext ? "⏭️ الجمل التالية في السكربت:" : "⏭️ البطاقات التالية (الـ 5 التالية):"}
                   </span>
-                  {nextCards.length > 0 ? (
+                  {(nextCards && nextCards.length > 0) ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                       {nextCards.slice(0, 5).map((c, i) => (
-                        <div key={c.id || i} className="bg-slate-900/90 border border-slate-800 px-2.5 py-1.5 rounded-lg text-[11px] flex justify-between">
-                          <span className="font-sans font-bold text-slate-300">{c.correctArticle ? `${c.correctArticle} ` : ''}{c.frontText}</span>
-                          <span className="text-slate-400">{c.backText}</span>
+                        <div key={c.id || i} className="bg-slate-900/90 border border-slate-800 px-2.5 py-1.5 rounded-lg text-[11px] flex items-center justify-between gap-2">
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-sans font-bold text-slate-300 truncate dir-ltr">{c.correctArticle ? `${c.correctArticle} ` : ''}{c.frontText}</span>
+                            {c.backText && <span className="text-[10px] text-slate-400 truncate">{c.backText}</span>}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handlePlayChatVoice(c.frontText, c.frontLang || "de")}
+                            className="p-1 text-slate-400 hover:text-white shrink-0"
+                            title="استماع"
+                          >
+                            <Volume2 className="w-3 h-3" />
+                          </button>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <span className="text-slate-500 text-[10px]">لا توجد بطاقات تالية</span>
+                    <span className="text-slate-500 text-[10px]">لا توجد عناصر تالية</span>
                   )}
                 </div>
               </div>
