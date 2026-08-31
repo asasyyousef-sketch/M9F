@@ -4111,16 +4111,16 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                         style={{ left: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
                       />
 
-                      {/* 6. Live YouTube-Grade Hover Frame Bubble Preview */}
+                      {/* 6. Live YouTube-Grade Hover Frame Bubble Preview (Fixed Dimensions & Zero Shaking) */}
                       {hoverPosition !== null && hoverTime !== null && (
                         <div
-                          style={{ left: `${Math.max(10, Math.min(90, hoverPosition))}%` }}
-                          className="absolute bottom-full mb-3.5 -translate-x-1/2 flex flex-col items-center pointer-events-none z-40 animate-fadeIn"
+                          style={{ left: `${Math.max(12, Math.min(88, hoverPosition))}%` }}
+                          className="absolute bottom-full mb-3 -translate-x-1/2 flex flex-col items-center pointer-events-none z-40"
                         >
-                          <div className="bg-slate-950/95 border border-slate-600/90 rounded-lg p-1.5 shadow-2xl flex flex-col items-center gap-1.5 backdrop-blur-md">
+                          <div className="w-48 bg-slate-950/95 border border-white/10 rounded-xl p-1.5 shadow-2xl flex flex-col items-center gap-1.5 backdrop-blur-md">
                             {/* Video Live Frame Thumbnail */}
                             {currentFile.type === "video" && (
-                              <div className="w-40 sm:w-44 h-24 sm:h-26 bg-black rounded-md overflow-hidden relative border border-slate-800">
+                              <div className="w-full h-28 bg-black rounded-lg overflow-hidden relative border border-white/10 shrink-0">
                                 <video
                                   ref={previewVideoRef}
                                   src={resolveMediaStreamUrl(currentFile)}
@@ -4129,32 +4129,32 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                                   preload="metadata"
                                   playsInline
                                 />
-                                <div className="absolute bottom-1 right-1 bg-black/80 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold text-white">
+                                <div className="absolute bottom-1 right-1 bg-black/85 backdrop-blur-xs px-1.5 py-0.5 rounded text-[10px] font-mono font-bold text-white border border-white/10">
                                   {formatSecondsToTime(hoverTime)}
                                 </div>
                               </div>
                             )}
 
-                            {/* Timestamp for Audio or Video */}
+                            {/* Timestamp for Audio */}
                             {currentFile.type === "audio" && (
-                              <div className="px-2 py-0.5 bg-indigo-950/80 border border-indigo-500/40 rounded-md">
+                              <div className="w-full py-1 bg-indigo-950/80 border border-indigo-500/30 rounded-lg text-center shrink-0">
                                 <span className="font-mono text-xs font-bold text-indigo-300">
                                   {formatSecondsToTime(hoverTime)}
                                 </span>
                               </div>
                             )}
 
-                            {/* Subtitle cue text preview at hover timestamp */}
-                            {hoverCueText && (
-                              <div className="max-w-[200px] text-center px-2 py-1 bg-slate-900/90 rounded-md border border-slate-700/60">
-                                <p className="text-[11px] text-slate-200 font-sans font-medium line-clamp-2 leading-tight">
-                                  {hoverCueText}
+                            {/* Subtitle cue text preview (Locked size container to prevent any jitter/flicker) */}
+                            {activeCues.length > 0 && (
+                              <div className="w-full h-8 px-2 bg-slate-900/90 rounded-lg border border-white/10 flex items-center justify-center text-center overflow-hidden shrink-0">
+                                <p className="text-[11px] text-slate-200 font-sans font-medium line-clamp-1 leading-tight select-none">
+                                  {hoverCueText || <span className="text-slate-500 text-[10px]">بدون نص</span>}
                                 </p>
                               </div>
                             )}
                           </div>
                           {/* Triangle Arrow */}
-                          <div className="w-2.5 h-2.5 bg-slate-950 rotate-45 border-r border-b border-slate-600/90 -mt-1.5" />
+                          <div className="w-2.5 h-2.5 bg-slate-950 rotate-45 border-r border-b border-white/10 -mt-1.5" />
                         </div>
                       )}
                     </div>

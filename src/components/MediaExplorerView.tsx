@@ -1736,8 +1736,8 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                           <div className="flex items-center gap-2.5 min-w-0">
                             {/* Real Thumbnail / Video Frame snapshot */}
                             <div
-                              className={`w-12 h-8 rounded-lg flex items-center justify-center shrink-0 text-white shadow-2xs overflow-hidden relative ${
-                                file.type === "video" ? "bg-blue-600" : "bg-purple-600"
+                              className={`w-12 h-8 rounded-lg flex items-center justify-center shrink-0 text-white shadow-2xs overflow-hidden relative border border-slate-200/60 ${
+                                file.type === "video" ? "bg-slate-900" : "bg-purple-600"
                               }`}
                             >
                               {file.type === "video" && videoThumb ? (
@@ -1997,7 +1997,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                         ? "bg-slate-100/90 border-slate-300 shadow-xs"
                         : isPlaying
                         ? "bg-indigo-50/50 border-indigo-400 shadow-xs"
-                        : "bg-white border-slate-200/90 hover:border-blue-300 hover:shadow-xs"
+                        : "bg-white border-slate-200/70 hover:border-slate-300 hover:shadow-xs"
                     }`}
                   >
                     {/* Top Header: Checkbox (shown only in selection mode) + Badges */}
@@ -2032,7 +2032,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                     </div>
 
                     {/* Media Card Thumbnail Banner with Video Snapshot or Waveform */}
-                    <div className="w-full h-28 bg-slate-900 rounded-xl flex items-center justify-center mb-2.5 relative overflow-hidden group-hover:opacity-95 transition-all">
+                    <div className="w-full h-28 bg-slate-900 rounded-xl flex items-center justify-center mb-2.5 relative overflow-hidden group-hover:opacity-95 transition-all border border-slate-200/60">
                       {file.type === "video" && videoThumb ? (
                         <img
                           src={videoThumb}
