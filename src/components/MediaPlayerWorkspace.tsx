@@ -505,6 +505,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   // Subtitle Modals
   const [showSubtitleUploadModal, setShowSubtitleUploadModal] = useState<boolean>(false);
   const [showGradioModal, setShowGradioModal] = useState<boolean>(false);
+  const [gradioInitialMode, setGradioInitialMode] = useState<"youtube" | "current" | "upload">("youtube");
   const [subtitleUploadMode, setSubtitleUploadMode] = useState<"file" | "paste" | "ai" | "gradio">("gradio");
   const [pastedSubtitleText, setPastedSubtitleText] = useState<string>("");
   const [subtitleTrackLabel, setSubtitleTrackLabel] = useState<string>("");
@@ -3096,9 +3097,25 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                 <span>+ مجلد جديد</span>
               </button>
 
+              {/* YouTube Download & Transcribe Button */}
+              <button
+                onClick={() => {
+                  setGradioInitialMode("youtube");
+                  setShowGradioModal(true);
+                }}
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer"
+                title="تنزيل وتفريغ أي فيديو من يوتيوب بالدقة المحددة"
+              >
+                <Tv className="w-3.5 h-3.5" />
+                <span>تنزيل من يوتيوب 🎥⚡</span>
+              </button>
+
               {/* Gradio STT Button */}
               <button
-                onClick={() => setShowGradioModal(true)}
+                onClick={() => {
+                  setGradioInitialMode("current");
+                  setShowGradioModal(true);
+                }}
                 className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer"
                 title="تفريغ أي ملف صوتي أو فيديو بسيرفر Gradio الألماني المحلي"
               >
@@ -4536,8 +4553,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
               setEditTitleText={setEditTitleText}
               onSaveRename={handleSaveRename}
               onUploadClick={() => fileInputRef.current?.click()}
+              onOpenYouTubeDownload={() => {
+                setGradioInitialMode("youtube");
+                setShowGradioModal(true);
+              }}
               onOpenGradioModalForFile={(file) => {
                 setCurrentFile(file);
+                setGradioInitialMode("current");
                 setShowGradioModal(true);
               }}
               onOpenSubtitleOptionsForFile={(file) => {
@@ -5054,13 +5076,20 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       )}
 
       {/* ======================================================== */}
-      {/* MODAL: LOCAL GRADIO SPEECH-TO-TEXT GERMAN SERVER */}
+      {/* MODAL: LOCAL GRADIO SPEECH-TO-TEXT GERMAN & YOUTUBE SERVER */}
       {/* ======================================================== */}
       <GradioTranscriberModal
         isOpen={showGradioModal}
         onClose={() => setShowGradioModal(false)}
         currentFile={currentFile}
+        initialMode={gradioInitialMode}
         onOpenStyleModal={() => openStyleInSidebar("gradio")}
+        onVideoDownloaded={async (newFile, rawSrt, cues) => {
+          await fetchMediaFiles();
+          setCurrentFile(newFile);
+          setIsPlaying(true);
+          setShowGradioModal(false);
+        }}
         onSubtitlesGenerated={async (trackLabel, cues, rawSrt) => {
           if (currentFile) {
             await saveSubtitleTrackToServer(currentFile.id, trackLabel, cues, "ai");

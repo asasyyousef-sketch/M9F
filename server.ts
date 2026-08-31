@@ -282,6 +282,9 @@ async function startServer() {
     type: "video" | "audio";
     uploadedAt: string;
     url: string;
+    thumbnailUrl?: string;
+    author?: string;
+    description?: string;
     duration?: number;
     subtitles?: ServerSubtitleTrack[];
     primaryTrackId?: string;
@@ -458,6 +461,95 @@ async function startServer() {
       res.json({ success: true, file: item });
     } catch (e: any) {
       res.status(500).json({ error: e.message || "فشل تعديل الاسم" });
+    }
+  });
+
+  // 5. Add Media File directly from YouTube with Subtitles
+  app.post("/api/media/from-youtube", (req, res) => {
+    try {
+      const { title, videoUrl, videoId, srtText, cues, duration, thumbnailUrl, formatId, author, description } = req.body;
+      if (!title && !videoId) {
+        return res.status(400).json({ error: "بيانات الفيديو غير مكتملة" });
+      }
+
+      const currentList = loadMediaMeta();
+      const cleanTitle = (title || `فيديو يوتيوب ${videoId || ""}`).trim();
+      const isAudioOnly = formatId === "audio_only";
+
+      // Parse cues if needed
+      let cleanCues: ServerSubtitleCue[] = [];
+      if (Array.isArray(cues) && cues.length > 0) {
+        cleanCues = cues.map((c: any, idx: number) => ({
+          id: c.id || `cue-${idx + 1}`,
+          startTime: Math.max(0, parseFloat(c.startTime) || 0),
+          endTime: Math.max(0.1, parseFloat(c.endTime) || 1),
+          text: (c.text || "").trim()
+        })).filter(c => c.text.length > 0);
+      } else if (srtText && typeof srtText === "string") {
+        // Simple srt parser
+        const blocks = srtText.trim().split(/\n\s*\n/);
+        cleanCues = blocks.map((b, idx) => {
+          const lines = b.trim().split("\n");
+          const timeLine = lines.find(l => l.includes("-->")) || "";
+          const textLines = lines.filter(l => !l.includes("-->") && !/^\d+$/.test(l.trim()));
+          const [startStr, endStr] = timeLine.split("-->").map(s => s?.trim());
+          const parseTime = (t?: string) => {
+            if (!t) return 0;
+            const parts = t.replace(",", ".").split(":");
+            if (parts.length === 3) {
+              return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
+            }
+            return 0;
+          };
+          return {
+            id: `cue-${idx + 1}`,
+            startTime: parseTime(startStr),
+            endTime: parseTime(endStr) || parseTime(startStr) + 3,
+            text: textLines.join(" ").trim()
+          };
+        }).filter(c => c.text.length > 0);
+      }
+
+      const subTrack: ServerSubtitleTrack = {
+        id: "sub-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
+        label: "🇩🇪 تفريغ يوتيوب (Gradio)",
+        language: "de",
+        cues: cleanCues,
+        source: "ai",
+        uploadedAt: new Date().toISOString()
+      };
+
+      const finalUrl = videoUrl || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : "");
+
+      const newItem: ServerMediaFile = {
+        id: "media-yt-" + (videoId || Date.now()) + "-" + Math.random().toString(36).substring(2, 6),
+        filename: `youtube_${videoId || Date.now()}.${isAudioOnly ? "mp3" : "mp4"}`,
+        originalName: `${cleanTitle}.${isAudioOnly ? "mp3" : "mp4"}`,
+        title: cleanTitle,
+        size: 0,
+        mimeType: isAudioOnly ? "audio/mpeg" : "video/mp4",
+        type: isAudioOnly ? "audio" : "video",
+        uploadedAt: new Date().toISOString(),
+        url: finalUrl,
+        duration: duration || undefined,
+        thumbnailUrl: thumbnailUrl || (videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : undefined),
+        author: author || undefined,
+        description: description || undefined,
+        subtitles: cleanCues.length > 0 ? [subTrack] : [],
+        primaryTrackId: cleanCues.length > 0 ? subTrack.id : undefined
+      };
+
+      currentList.unshift(newItem);
+      saveMediaMeta(currentList);
+
+      res.json({
+        success: true,
+        message: "تم حفظ فيديو اليوتيوب والتفريغ في المكتبة بنجاح!",
+        file: newItem
+      });
+    } catch (e: any) {
+      console.error("Save from YouTube error:", e);
+      res.status(500).json({ error: e.message || "حدث خطأ أثناء حفظ فيديو اليوتيوب" });
     }
   });
 
@@ -7153,46 +7245,6 @@ ${structureDirective}
       return null;
     }
   }
-
-  // API Route - Get YouTube Video Information (Only Image and Title)
-  app.get("/api/youtube/info", async (req, res) => {
-    const url = req.query.url as string;
-    if (!url) {
-      return res.status(400).json({ error: "الرجاء توفير رابط فيديو يوتيوب." });
-    }
-
-    const videoId = extractVideoId(url);
-    if (!videoId) {
-      return res.status(400).json({ error: "الرابط المدخل غير صالح. يرجى توفير رابط فيديو يوتيوب صحيح." });
-    }
-
-    try {
-      console.log(`[YouTube Info] Fetching title & thumbnail only for video ID: ${videoId}`);
-      let title = "فيديو يوتيوب";
-      const thumbnailUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-
-      try {
-        const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
-        const response = await fetch(oembedUrl);
-        if (response.ok) {
-          const data = await response.json();
-          title = data.title || "فيديو يوتيوب";
-        }
-      } catch (e) {
-        console.warn("[YouTube Info] oEmbed fetch failed, using fallback:", e);
-      }
-
-      res.json({
-        videoId,
-        title,
-        thumbnailUrl,
-        captionTracks: []
-      });
-    } catch (err: any) {
-      console.error("[YouTube Info Error]", err);
-      res.status(500).json({ error: err.message || "حدث خطأ غير متوقع أثناء جلب معلومات الفيديو." });
-    }
-  });
 
   // API Route - Fetch and Parse YouTube Transcript XML
   app.post("/api/youtube/transcript", async (req, res) => {

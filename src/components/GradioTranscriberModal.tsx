@@ -24,13 +24,23 @@ import {
   ChevronUp,
   Server,
   Info,
-  Palette
+  Palette,
+  Tv,
+  ExternalLink,
+  Zap,
+  ArrowRight,
+  Layers
 } from "lucide-react";
 import { MediaFile, SubtitleCue } from "../types";
 import {
   transcribeFileWithGradio,
+  getYouTubeInfo,
+  processYouTubeLink,
+  pollYouTubeStatus,
   DEFAULT_GRADIO_URL,
-  GradioTranscribeResult
+  GradioTranscribeResult,
+  YouTubeVideoInfo,
+  YouTubeVideoFormat
 } from "../utils/gradioTranscription";
 import { parseSubtitleContent } from "../utils/subtitleParser";
 
@@ -38,7 +48,9 @@ interface GradioTranscriberModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentFile: MediaFile | null;
+  initialMode?: "youtube" | "current" | "upload";
   onSubtitlesGenerated: (trackLabel: string, cues: SubtitleCue[], rawSrt: string) => Promise<void>;
+  onVideoDownloaded?: (mediaFile: MediaFile, rawSrt: string, cues: SubtitleCue[]) => Promise<void>;
   onOpenStyleModal?: () => void;
 }
 
@@ -46,13 +58,41 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
   isOpen,
   onClose,
   currentFile,
+  initialMode,
   onSubtitlesGenerated,
+  onVideoDownloaded,
   onOpenStyleModal
 }) => {
-  // Source Selection: 'current' (active media file) or 'upload' (new file from device)
-  const [sourceMode, setSourceMode] = useState<"current" | "upload">(
-    currentFile ? "current" : "upload"
+  // Source Selection: 'youtube' (YouTube URL download & transcribe), 'current' (active media file), or 'upload' (file from device)
+  const [sourceMode, setSourceMode] = useState<"youtube" | "current" | "upload">(
+    initialMode || (currentFile ? "current" : "youtube")
   );
+
+  // Sync initialMode when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      if (initialMode) {
+        setSourceMode(initialMode);
+      } else if (currentFile) {
+        setSourceMode("current");
+      } else {
+        setSourceMode("youtube");
+      }
+    }
+  }, [isOpen, initialMode, currentFile]);
+
+  // YouTube Mode state
+  const [youtubeUrl, setYoutubeUrl] = useState<string>("");
+  const [youtubeInfo, setYoutubeInfo] = useState<YouTubeVideoInfo | null>(null);
+  const [isLoadingYtInfo, setIsLoadingYtInfo] = useState<boolean>(false);
+  const [selectedFormatId, setSelectedFormatId] = useState<string>("22");
+  const [showFullDescription, setShowFullDescription] = useState<boolean>(false);
+  const [liveVideoUrl, setLiveVideoUrl] = useState<string | null>(null);
+  const [liveVttTrackUrl, setLiveVttTrackUrl] = useState<string | null>(null);
+  const [liveStage, setLiveStage] = useState<string>("idle");
+  const [liveStageLabel, setLiveStageLabel] = useState<string>("");
+
+  // Local File state
   const [selectedLocalFile, setSelectedLocalFile] = useState<File | null>(null);
 
   // Server URL
@@ -60,7 +100,7 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
     return localStorage.getItem("gradio_local_stt_url") || DEFAULT_GRADIO_URL;
   });
 
-  // Hyperparameters
+  // Whisper Hyperparameters
   const [beamSize, setBeamSize] = useState<number>(5);
   const [bestOf, setBestOf] = useState<number>(5);
   const [temperature, setTemperature] = useState<number>(0.0);
@@ -76,11 +116,13 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [currentStep, setCurrentStep] = useState<"idle" | "uploading" | "calling" | "processing" | "completed" | "error">("idle");
   const [statusMessage, setStatusMessage] = useState<string>("");
+  const [progressPercent, setProgressPercent] = useState<number>(0);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Output Result
   const [result, setResult] = useState<GradioTranscribeResult | null>(null);
+  const [downloadedMediaFile, setDownloadedMediaFile] = useState<MediaFile | null>(null);
   const [parsedCuesCount, setParsedCuesCount] = useState<number>(0);
   const [copiedText, setCopiedText] = useState<boolean>(false);
   const [activeTabResult, setActiveTabResult] = useState<"text" | "subtitles" | "videoHtml">("text");
@@ -118,11 +160,190 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
     }
     setIsProcessing(false);
     setCurrentStep("idle");
-    setStatusMessage("تم إلغاء عملية التفريغ.");
+    setStatusMessage("تم إلغاء عملية المعالجة.");
   };
 
-  // Trigger Transcription
+  // Fetch YouTube Info (Step 1)
+  const handleFetchYouTubeInfo = async () => {
+    if (!youtubeUrl.trim()) {
+      setErrorMessage("يرجى إدخال رابط فيديو يوتيوب صحيح أولاً.");
+      return;
+    }
+    setErrorMessage(null);
+    setIsLoadingYtInfo(true);
+    setYoutubeInfo(null);
+    setLiveVideoUrl(null);
+    setLiveVttTrackUrl(null);
+    setLiveStage("idle");
+
+    try {
+      const info = await getYouTubeInfo(youtubeUrl.trim(), serverUrl);
+      setYoutubeInfo(info);
+      if (info.qualities && info.qualities.length > 0) {
+        // Pick 720p or highest available format by default
+        const has720 = info.qualities.find((q) => q.label === "720p" || q.formatId === "22");
+        setSelectedFormatId(has720 ? has720.formatId : info.qualities[0].formatId);
+      } else if (info.formats && info.formats.length > 0) {
+        const has720 = info.formats.find((f) => f.formatId === "720p" || f.resolution.includes("720"));
+        setSelectedFormatId(has720 ? "720p" : info.formats[0].formatId);
+      }
+    } catch (err: any) {
+      console.error("YouTube Info error:", err);
+      setErrorMessage(err.message || "فشل جلب معلومات الفيديو من السيرفر. تحقق من الرابط والسيرفر.");
+    } finally {
+      setIsLoadingYtInfo(false);
+    }
+  };
+
+  // Trigger YouTube Download & Transcription Pipeline (Step 2 & Step 3)
+  const handleStartYouTubeDownloadAndTranscribe = async () => {
+    if (!youtubeUrl.trim()) {
+      setErrorMessage("يرجى إدخال رابط فيديو يوتيوب أولاً.");
+      return;
+    }
+
+    setErrorMessage(null);
+    setResult(null);
+    setDownloadedMediaFile(null);
+    setLiveVttTrackUrl(null);
+    setIsProcessing(true);
+    setCurrentStep("uploading");
+    setLiveStage("downloading");
+    setLiveStageLabel("جاري التحميل");
+    setProgressPercent(5);
+    setStatusMessage("جاري الاتصال بالسيرفر لبدء مهمة تنزيل الفيديو وتفريغه بالدقة المحددة...");
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      // 1. Trigger process job
+      const jobId = await processYouTubeLink(youtubeUrl.trim(), selectedFormatId, {
+        serverUrl,
+        includeSubtitles: true,
+        beamSize,
+        bestOf,
+        temperature,
+        vadFilter,
+        minSilenceDurationMs,
+        signal: controller.signal
+      });
+
+      setCurrentStep("processing");
+
+      // 2. Poll for completion
+      const completedJob = await pollYouTubeStatus(
+        jobId,
+        (status) => {
+          setStatusMessage(status.statusMsg || status.message || "جاري المعالجة...");
+          setProgressPercent(status.percent ?? status.progress ?? 0);
+          setLiveStage(status.stage);
+          if (status.stageLabel) setLiveStageLabel(status.stageLabel);
+
+          // Early video display: as soon as videoUrl is present, set it!
+          if (status.videoUrl) {
+            setLiveVideoUrl(status.videoUrl);
+          }
+        },
+        serverUrl,
+        controller.signal
+      );
+
+      const srtText = completedJob.srtText || "";
+      const plainText = completedJob.plainText || "";
+      const vttContent = completedJob.vttContent || completedJob.vttText || "";
+
+      if (completedJob.videoUrl) {
+        setLiveVideoUrl(completedJob.videoUrl);
+      }
+
+      // Attach WebVTT track if available
+      if (vttContent) {
+        try {
+          const vttBlob = new Blob([vttContent], { type: "text/vtt;charset=utf-8" });
+          const blobUrl = URL.createObjectURL(vttBlob);
+          setLiveVttTrackUrl(blobUrl);
+        } catch (e) {
+          console.warn("Could not create WebVTT blob track:", e);
+        }
+      }
+
+      const resObj: GradioTranscribeResult = {
+        plainText,
+        srtText,
+        vttText: vttContent,
+        audioFileUrl: completedJob.videoUrl
+      };
+      setResult(resObj);
+      setCurrentStep("completed");
+      setLiveStage("done");
+      setLiveStageLabel("اكتمل");
+      setProgressPercent(100);
+
+      // Parse Subtitle cues
+      const cues = parseSubtitleContent(srtText);
+      setParsedCuesCount(cues.length);
+
+      // 3. Save as MediaFile to Express backend library
+      try {
+        const saveRes = await fetch("/api/media/from-youtube", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: completedJob.title || youtubeInfo?.title || "فيديو يوتيوب مفرغ",
+            videoId: completedJob.videoId || youtubeInfo?.videoId,
+            videoUrl: completedJob.videoUrl || liveVideoUrl,
+            srtText,
+            cues,
+            duration: completedJob.duration || youtubeInfo?.duration,
+            thumbnailUrl: completedJob.thumbnailUrl || youtubeInfo?.thumbnailUrl,
+            formatId: selectedFormatId,
+            author: completedJob.author || youtubeInfo?.author,
+            description: youtubeInfo?.description
+          })
+        });
+
+        if (saveRes.ok) {
+          const savedData = await saveRes.json();
+          if (savedData.file) {
+            setDownloadedMediaFile(savedData.file);
+            // Notify parent workspace to auto-load newly created media file
+            if (onVideoDownloaded) {
+              await onVideoDownloaded(savedData.file, srtText, cues);
+            }
+          }
+        }
+      } catch (saveErr) {
+        console.warn("Could not auto-save media to backend:", saveErr);
+      }
+
+      // If there is an active file, also save subtitles directly
+      if (currentFile && cues.length > 0) {
+        const trackLabel = `🇩🇪 تفريغ يوتيوب (${selectedFormatId})`;
+        await onSubtitlesGenerated(trackLabel, cues, srtText);
+      }
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        setStatusMessage("تم إلغاء العملية.");
+      } else {
+        console.error("YouTube download & transcribe error:", err);
+        setErrorMessage(err.message || "حدث خطأ أثناء تنزيل وتفريغ الفيديو.");
+        setCurrentStep("error");
+        setLiveStage("error");
+        setLiveStageLabel("فشل");
+      }
+    } finally {
+      setIsProcessing(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  // Trigger File Transcription (Active File or Uploaded Local File)
   const handleStartTranscribe = async () => {
+    if (sourceMode === "youtube") {
+      return handleStartYouTubeDownloadAndTranscribe();
+    }
+
     setErrorMessage(null);
     setResult(null);
 
@@ -131,7 +352,7 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
 
     if (sourceMode === "current") {
       if (!currentFile) {
-        setErrorMessage("لا يوجد مقطع مشغل حالياً. يرجى اختيار ملف من جهازك.");
+        setErrorMessage("لا يوجد مقطع مشغل حالياً. يرجى اختيار ملف من جهازك أو من يوتيوب.");
         return;
       }
       targetFileName = currentFile.originalName || `${currentFile.title}.${currentFile.type === "video" ? "mp4" : "mp3"}`;
@@ -139,6 +360,7 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
       setStatusMessage("جاري تحضير ملف الوسائط من السيرفر...");
       setIsProcessing(true);
       setCurrentStep("uploading");
+      setProgressPercent(20);
 
       try {
         const streamUrl = `/api/media/download/${currentFile.id}`;
@@ -182,11 +404,16 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
         onStatusUpdate: (msg, step) => {
           setStatusMessage(msg);
           setCurrentStep(step);
+          if (step === "uploading") setProgressPercent(30);
+          else if (step === "calling") setProgressPercent(60);
+          else if (step === "processing") setProgressPercent(85);
+          else if (step === "completed") setProgressPercent(100);
         }
       });
 
       setResult(res);
       setCurrentStep("completed");
+      setProgressPercent(100);
 
       // Parse SRT and automatically save to subtitles
       if (res.srtText && res.srtText.trim().length > 0) {
@@ -242,26 +469,26 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-fadeIn">
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-fadeIn">
       <div className="bg-slate-900 border border-slate-700/80 rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden text-slate-100 animate-scaleUp">
         
         {/* MODAL HEADER */}
         <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-900/90 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-amber-500 via-rose-500 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-500/20">
-              <Mic className="w-6 h-6" />
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-rose-600 via-amber-500 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-rose-500/20">
+              <Tv className="w-6 h-6" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="font-black text-slate-100 text-base sm:text-lg">
-                  التفريغ الصوتي بالسيرفر المحلي (Gradio 🇩🇪)
+                  تنزيل وتفريغ الوسائط (Gradio 🇩🇪 & YouTube)
                 </h2>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/30">
-                  Local Network
+                  v2.0 Updated
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                ربط مباشر بنظام Speech-to-Text الألماني عبر منفذ الشبكة المحلية
+                تنزيل مقاطع يوتيوب بالدقة المحددة مع استخراج وتوليد ترجمة Whisper المتزامنة
               </p>
             </div>
           </div>
@@ -290,12 +517,12 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
         </div>
 
         {/* MODAL BODY (SCROLLABLE) */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-5 custom-scrollbar">
-
-          {/* SERVER CONNECTION BANNER & URL SETTING */}
-          <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-3.5 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
+        <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-5 text-xs sm:text-sm">
+          
+          {/* SERVER CONFIGURATION BAR */}
+          <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-3 sm:p-4 space-y-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2 text-slate-300 font-bold text-xs">
                 <Server className="w-4 h-4 text-indigo-400" />
                 <span>عنوان سيرفر Gradio على شبكتك:</span>
               </div>
@@ -321,19 +548,34 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
             </div>
           </div>
 
-          {/* SOURCE SELECTION TABS */}
+          {/* 3 SOURCE SELECTION TABS: YOUTUBE, CURRENT FILE, LOCAL UPLOAD */}
           <div>
             <label className="block text-xs font-bold text-slate-300 mb-2">
-              اختر مصدر الملف للتفريغ:
+              اختر مصدر المحتوى للتحميل والتفريغ:
             </label>
-            <div className="grid grid-cols-2 gap-2 bg-slate-800/80 p-1.5 rounded-2xl border border-slate-700">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-slate-800/80 p-1.5 rounded-2xl border border-slate-700">
+              {/* Tab 1: YouTube */}
+              <button
+                type="button"
+                onClick={() => setSourceMode("youtube")}
+                className={`py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  sourceMode === "youtube"
+                    ? "bg-gradient-to-r from-rose-600 to-red-600 text-white shadow-md shadow-rose-600/30 font-black"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Tv className="w-4 h-4 text-red-300" />
+                <span>تنزيل من يوتيوب 🎥⚡</span>
+              </button>
+
+              {/* Tab 2: Current File */}
               <button
                 type="button"
                 onClick={() => setSourceMode("current")}
                 disabled={!currentFile}
                 className={`py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
                   sourceMode === "current"
-                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30 font-black"
                     : "text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
                 }`}
               >
@@ -341,21 +583,177 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
                 <span>المقطع المشغل حالياً</span>
               </button>
 
+              {/* Tab 3: Local Upload */}
               <button
                 type="button"
                 onClick={() => setSourceMode("upload")}
                 className={`py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
                   sourceMode === "upload"
-                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30 font-black"
                     : "text-slate-400 hover:text-white"
                 }`}
               >
                 <Upload className="w-4 h-4" />
-                <span>رفع ملف جديد من الجهاز</span>
+                <span>رفع ملف من الجهاز</span>
               </button>
             </div>
 
-            {/* Source Details Card */}
+            {/* TAB CONTENT: 1. YOUTUBE MODE */}
+            {sourceMode === "youtube" && (
+              <div className="mt-3.5 space-y-3 bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                    <span>رابط فيديو يوتيوب (YouTube URL):</span>
+                    <span className="text-[10px] text-slate-400">مثال: https://youtube.com/watch?v=...</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="url"
+                      value={youtubeUrl}
+                      onChange={(e) => setYoutubeUrl(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleFetchYouTubeInfo();
+                      }}
+                      placeholder="https://www.youtube.com/watch?v=..."
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-rose-500 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleFetchYouTubeInfo}
+                      disabled={isLoadingYtInfo || !youtubeUrl.trim()}
+                      className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shrink-0 shadow-sm shadow-rose-600/20"
+                    >
+                      {isLoadingYtInfo ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>جلب البيانات...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" />
+                          <span>فحص الفيديو 🔍</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Fetched YouTube Metadata Card */}
+                {youtubeInfo && (
+                  <div className="mt-3 bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 space-y-3 animate-fadeIn">
+                    <div className="flex flex-col sm:flex-row items-start gap-3.5">
+                      {/* Thumbnail with duration badge */}
+                      <div className="relative w-full sm:w-44 aspect-video rounded-xl overflow-hidden bg-black shrink-0 border border-slate-700">
+                        <img
+                          src={youtubeInfo.thumbnailUrl}
+                          alt={youtubeInfo.title}
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                        {youtubeInfo.durationFormatted && (
+                          <div className="absolute bottom-1.5 left-1.5 px-2 py-0.5 bg-black/85 backdrop-blur-xs text-white text-[10px] font-mono font-bold rounded-md">
+                            {youtubeInfo.durationFormatted}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Video Details */}
+                      <div className="flex-1 space-y-1 overflow-hidden">
+                        <h3 className="font-bold text-sm text-slate-100 leading-snug line-clamp-2">
+                          {youtubeInfo.title}
+                        </h3>
+                        {youtubeInfo.author && (
+                          <p className="text-xs text-rose-400 font-medium flex items-center gap-1">
+                            <span>القناة:</span>
+                            <span className="text-slate-300">{youtubeInfo.author}</span>
+                          </p>
+                        )}
+                        <p className="text-[11px] text-slate-400">
+                          معرف الفيديو: <span className="font-mono text-slate-300">{youtubeInfo.videoId}</span>
+                        </p>
+
+                        {/* Collapsible description */}
+                        {youtubeInfo.description && (
+                          <div className="pt-1">
+                            <button
+                              type="button"
+                              onClick={() => setShowFullDescription(!showFullDescription)}
+                              className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 cursor-pointer font-bold"
+                            >
+                              <span>{showFullDescription ? "إخفاء وصف الفيديو" : "عرض وصف الفيديو الكامل 📜"}</span>
+                              {showFullDescription ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                            </button>
+                            {showFullDescription && (
+                              <div className="mt-1.5 p-2.5 bg-slate-950 rounded-xl text-[11px] text-slate-300 max-h-32 overflow-y-auto whitespace-pre-wrap font-sans border border-slate-800">
+                                {youtubeInfo.description}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* SELECT RESOLUTION / FORMAT (تحديد الدقة) */}
+                    <div className="pt-2 border-t border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                          <Sliders className="w-3.5 h-3.5 text-rose-400" />
+                          <span>اختر جودة ودقة الفيديو المطلوبة (الخطوة 2):</span>
+                        </label>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {youtubeInfo.qualities?.length || youtubeInfo.formats?.length || 0} دقات متوفرة
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                        {((youtubeInfo.qualities && youtubeInfo.qualities.length > 0)
+                          ? youtubeInfo.qualities
+                          : (youtubeInfo.formats || []).map((f) => ({
+                              label: f.resolution,
+                              formatId: f.formatId,
+                              note: f.note,
+                              filesizeFormatted: f.filesizeFormatted
+                            }))
+                        ).map((qual) => {
+                          const isSelected = selectedFormatId === qual.formatId;
+                          return (
+                            <button
+                              key={qual.formatId}
+                              type="button"
+                              onClick={() => setSelectedFormatId(qual.formatId)}
+                              className={`p-2.5 rounded-xl text-center border transition-all cursor-pointer flex flex-col items-center justify-between gap-1 ${
+                                isSelected
+                                  ? "bg-rose-950/50 border-rose-500 text-white shadow-sm ring-2 ring-rose-500/50"
+                                  : "bg-slate-950/60 border-slate-800 hover:border-slate-700 text-slate-300 hover:bg-slate-900"
+                              }`}
+                            >
+                              <div className="flex items-center gap-1">
+                                <span className="font-bold text-xs text-rose-300">
+                                  {qual.label}
+                                </span>
+                                {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
+                              </div>
+                              {qual.note && (
+                                <span className="text-[9px] text-slate-400 line-clamp-1">
+                                  {qual.note}
+                                </span>
+                              )}
+                              {qual.filesizeFormatted && (
+                                <span className="font-mono text-[9px] text-slate-500">
+                                  {qual.filesizeFormatted}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB CONTENT: 2. CURRENT FILE */}
             {sourceMode === "current" && currentFile && (
               <div className="mt-2.5 bg-slate-950/60 border border-slate-800 rounded-2xl p-3 flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-indigo-900/40 text-indigo-400 flex items-center justify-center shrink-0">
@@ -368,6 +766,7 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
               </div>
             )}
 
+            {/* TAB CONTENT: 3. LOCAL UPLOAD */}
             {sourceMode === "upload" && (
               <div className="mt-2.5">
                 <input
@@ -381,382 +780,396 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
                   }}
                   className="hidden"
                 />
+
                 <div
                   onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-indigo-500/40 hover:border-indigo-400 bg-indigo-950/20 hover:bg-indigo-950/40 rounded-2xl p-5 text-center cursor-pointer transition-all"
+                  className={`border-2 border-dashed rounded-2xl p-4 text-center cursor-pointer transition-all ${
+                    selectedLocalFile
+                      ? "border-emerald-500/50 bg-emerald-950/20"
+                      : "border-slate-700 hover:border-indigo-500/50 bg-slate-950/40 hover:bg-slate-950/70"
+                  }`}
                 >
-                  <Upload className="w-8 h-8 text-indigo-400 mx-auto mb-2" />
-                  {selectedLocalFile ? (
-                    <div>
-                      <p className="text-xs font-bold text-emerald-400 flex items-center justify-center gap-1">
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>تم اختيار: {selectedLocalFile.name}</span>
-                      </p>
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        الحجم: {(selectedLocalFile.size / (1024 * 1024)).toFixed(2)} MB
-                      </p>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="w-10 h-10 rounded-xl bg-slate-800 text-indigo-400 flex items-center justify-center">
+                      <Upload className="w-5 h-5" />
                     </div>
-                  ) : (
-                    <div>
-                      <p className="text-xs font-bold text-slate-200">
-                        انقر لاختيار ملف صوتي أو فيديو من حاسوبك
-                      </p>
-                      <p className="text-[11px] text-slate-500 mt-1">
-                        يدعم صيغ MP4, MP3, WAV, M4A, WEBM, MKV
-                      </p>
-                    </div>
-                  )}
+                    {selectedLocalFile ? (
+                      <div>
+                        <p className="font-bold text-emerald-300 text-xs truncate max-w-sm">
+                          {selectedLocalFile.name}
+                        </p>
+                        <p className="text-[11px] text-slate-400 font-mono">
+                          {(selectedLocalFile.size / (1024 * 1024)).toFixed(2)} MB • جاهز للتفريغ
+                        </p>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="font-bold text-slate-300 text-xs">
+                          اضغط لاختيار ملف صوتي أو فيديو من جهازك
+                        </p>
+                        <p className="text-[10px] text-slate-500">
+                          يدعم MP4, MP3, WAV, M4A, WEBM, MKV, OGG
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
           </div>
 
           {/* ADVANCED PARAMETERS ACCORDION */}
-          <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-950/40">
+          <div className="border border-slate-800 rounded-2xl bg-slate-950/50 overflow-hidden">
             <button
               type="button"
               onClick={() => setShowAdvanced(!showAdvanced)}
-              className="w-full p-3 flex items-center justify-between text-xs font-bold text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition-colors"
+              className="w-full p-3 flex items-center justify-between text-slate-300 hover:text-white transition-colors cursor-pointer"
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 font-bold text-xs">
                 <Sliders className="w-4 h-4 text-indigo-400" />
-                <span>إعدادات المودل المتقدمة (Beam Size, VAD, Temperature...)</span>
+                <span>إعدادات نموذج Whisper المتقدمة (اختياري)</span>
               </div>
               {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </button>
 
             {showAdvanced && (
-              <div className="p-4 border-t border-slate-800 bg-slate-900/60 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                {/* Beam Size */}
-                <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">
-                    Beam Size (الافتراضي 5):
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="10"
-                    value={beamSize}
-                    onChange={(e) => setBeamSize(parseInt(e.target.value) || 5)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none"
-                  />
-                </div>
+              <div className="p-4 pt-2 border-t border-slate-800/80 space-y-4 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Beam Size */}
+                  <div>
+                    <div className="flex justify-between mb-1">
+                      <span className="text-slate-400">حجم الشعاع (Beam Size):</span>
+                      <span className="font-mono text-indigo-400 font-bold">{beamSize}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={1}
+                      max={10}
+                      value={beamSize}
+                      onChange={(e) => setBeamSize(Number(e.target.value))}
+                      className="w-full accent-indigo-500"
+                    />
+                  </div>
 
-                {/* Best Of */}
-                <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">
-                    Best Of (الافتراضي 5):
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="10"
-                    value={bestOf}
-                    onChange={(e) => setBestOf(parseInt(e.target.value) || 5)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none"
-                  />
-                </div>
+                  {/* Best Of */}
+                  <div>
+                    <div className="flex justify-between mb-1">
+                      <span className="text-slate-400">أفضل العينات (Best Of):</span>
+                      <span className="font-mono text-indigo-400 font-bold">{bestOf}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={1}
+                      max={10}
+                      value={bestOf}
+                      onChange={(e) => setBestOf(Number(e.target.value))}
+                      className="w-full accent-indigo-500"
+                    />
+                  </div>
 
-                {/* Temperature */}
-                <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">
-                    Temperature (الافتراضي 0.0):
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0.0"
-                    max="1.0"
-                    value={temperature}
-                    onChange={(e) => setTemperature(parseFloat(e.target.value) || 0.0)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none"
-                  />
-                </div>
+                  {/* Temperature */}
+                  <div>
+                    <div className="flex justify-between mb-1">
+                      <span className="text-slate-400">درجة الحرارة (Temperature):</span>
+                      <span className="font-mono text-indigo-400 font-bold">{temperature.toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.0}
+                      max={1.0}
+                      step={0.1}
+                      value={temperature}
+                      onChange={(e) => setTemperature(Number(e.target.value))}
+                      className="w-full accent-indigo-500"
+                    />
+                  </div>
 
-                {/* Min Silence ms */}
-                <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">
-                    Min Silence Duration ms (الافتراضي 2000):
-                  </label>
-                  <input
-                    type="number"
-                    step="100"
-                    value={minSilenceDurationMs}
-                    onChange={(e) => setMinSilenceDurationMs(parseInt(e.target.value) || 2000)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none"
-                  />
+                  {/* Min Silence Duration MS */}
+                  <div>
+                    <div className="flex justify-between mb-1">
+                      <span className="text-slate-400">الحد الأدنى للصمت (ms):</span>
+                      <span className="font-mono text-indigo-400 font-bold">{minSilenceDurationMs} ms</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={500}
+                      max={5000}
+                      step={250}
+                      value={minSilenceDurationMs}
+                      onChange={(e) => setMinSilenceDurationMs(Number(e.target.value))}
+                      className="w-full accent-indigo-500"
+                    />
+                  </div>
                 </div>
 
                 {/* Toggles */}
-                <div className="flex items-center gap-2 pt-2">
-                  <input
-                    type="checkbox"
-                    id="vadCheck"
-                    checked={vadFilter}
-                    onChange={(e) => setVadFilter(e.target.checked)}
-                    className="rounded text-indigo-600 accent-indigo-500 cursor-pointer"
-                  />
-                  <label htmlFor="vadCheck" className="text-[11px] text-slate-300 cursor-pointer">
-                    تفعيل VAD Filter لتصفية الصمت
+                <div className="flex items-center gap-6 pt-2">
+                  <label className="flex items-center gap-2 cursor-pointer text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={vadFilter}
+                      onChange={(e) => setVadFilter(e.target.checked)}
+                      className="rounded accent-indigo-500 w-4 h-4"
+                    />
+                    <span>فلتر كشف الصوت والصمت (VAD Filter)</span>
                   </label>
-                </div>
 
-                <div className="flex items-center gap-2 pt-2">
-                  <input
-                    type="checkbox"
-                    id="condCheck"
-                    checked={conditionOnPreviousText}
-                    onChange={(e) => setConditionOnPreviousText(e.target.checked)}
-                    className="rounded text-indigo-600 accent-indigo-500 cursor-pointer"
-                  />
-                  <label htmlFor="condCheck" className="text-[11px] text-slate-300 cursor-pointer">
-                    Condition On Previous Text
+                  <label className="flex items-center gap-2 cursor-pointer text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={conditionOnPreviousText}
+                      onChange={(e) => setConditionOnPreviousText(e.target.checked)}
+                      className="rounded accent-indigo-500 w-4 h-4"
+                    />
+                    <span>الاعتماد على السياق السابق للجمل</span>
                   </label>
                 </div>
               </div>
             )}
           </div>
 
-          {/* PROGRESS & LIVE STATUS TRACKER */}
+          {/* STATUS & LIVE PROGRESS BAR */}
           {isProcessing && (
-            <div className="bg-indigo-950/40 border border-indigo-500/40 rounded-2xl p-4 space-y-3 animate-pulse">
+            <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-2xl p-4 space-y-3 animate-fadeIn">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2.5">
                   <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
-                  <span className="text-xs font-black text-indigo-200">
-                    جاري المعالجة على سيرفر Gradio...
-                  </span>
+                  <div>
+                    <span className="font-bold text-xs text-indigo-200 block">
+                      {liveStageLabel ? `${liveStageLabel}: ${statusMessage}` : (statusMessage || "جاري المعالجة...")}
+                    </span>
+                    {liveStage === "transcribing" && liveVideoUrl && (
+                      <span className="text-[10px] text-emerald-400 font-bold block mt-0.5">
+                        ⚡ تم اكتمال تحميل الفيديو — جاري تفريغ الصوت وإنشاء السكربت...
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5 bg-indigo-900/60 text-indigo-300 px-2.5 py-1 rounded-xl text-xs font-mono font-bold">
+                <div className="flex items-center gap-2 text-xs font-mono text-slate-400 shrink-0">
                   <Clock className="w-3.5 h-3.5" />
                   <span>{formatTimer(elapsedSeconds)}</span>
                 </div>
               </div>
 
-              {/* Progress Steps Visual */}
-              <div className="grid grid-cols-3 gap-2 text-[10px] text-center font-bold">
-                <div className={`p-2 rounded-xl border ${currentStep === "uploading" ? "bg-indigo-600 text-white border-indigo-400" : "bg-slate-800/80 text-slate-400 border-slate-700"}`}>
-                  1. رفع الملف 📤
+              {/* Progress Line */}
+              <div className="space-y-1">
+                <div className="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
+                  <div
+                    className="bg-gradient-to-r from-rose-500 via-amber-500 to-emerald-500 h-full rounded-full transition-all duration-300"
+                    style={{ width: `${Math.max(5, progressPercent)}%` }}
+                  />
                 </div>
-                <div className={`p-2 rounded-xl border ${currentStep === "calling" ? "bg-indigo-600 text-white border-indigo-400" : "bg-slate-800/80 text-slate-400 border-slate-700"}`}>
-                  2. استدعاء المودل ⚙️
-                </div>
-                <div className={`p-2 rounded-xl border ${currentStep === "processing" ? "bg-indigo-600 text-white border-indigo-400" : "bg-slate-800/80 text-slate-400 border-slate-700"}`}>
-                  3. البث والتفريغ 🇩🇪
+                <div className="flex justify-between text-[10px] text-slate-400 font-mono">
+                  <span>التقدم: {progressPercent}%</span>
+                  <span>{liveStageLabel || (currentStep === "uploading" ? "1/3 التحميل" : currentStep === "processing" ? "2/3 التفريغ" : "3/3 الانتهاء")}</span>
                 </div>
               </div>
 
-              {/* Status Message Text */}
-              <p className="text-xs text-indigo-300 font-mono bg-slate-950/80 p-2.5 rounded-xl border border-indigo-900">
-                {statusMessage}
-              </p>
-
-              <div className="text-left">
-                <button
-                  onClick={handleCancel}
-                  className="text-xs text-rose-400 hover:text-rose-300 font-bold underline cursor-pointer"
-                >
-                  إلغاء العملية
-                </button>
-              </div>
+              {/* Early Video Player Preview (appears as soon as videoUrl is available) */}
+              {liveVideoUrl && (
+                <div className="mt-3 pt-3 border-t border-indigo-900/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                      <Film className="w-3.5 h-3.5" />
+                      <span>معاينة الفيديو المباشرة (جاهز للتشغيل):</span>
+                    </span>
+                    <span className="text-[10px] text-emerald-400 font-mono font-bold">
+                      {liveStage === "transcribing" ? "جاري إنشاء الترجمة..." : "✓ الفيديو جاهز"}
+                    </span>
+                  </div>
+                  <div className="aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-700 relative">
+                    <video
+                      src={liveVideoUrl}
+                      controls
+                      className="w-full h-full object-contain"
+                      playsInline
+                    >
+                      {liveVttTrackUrl && (
+                        <track
+                          kind="subtitles"
+                          src={liveVttTrackUrl}
+                          srcLang="de"
+                          label="ترجمة متزامنة"
+                          default
+                        />
+                      )}
+                      متصفحك لا يدعم مشغل الفيديو.
+                    </video>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           {/* ERROR ALERT */}
           {errorMessage && (
-            <div className="bg-rose-950/60 border border-rose-600/50 rounded-2xl p-4 flex items-start gap-3 text-xs text-rose-200">
+            <div className="p-3.5 bg-rose-950/60 border border-rose-800 text-rose-200 rounded-2xl flex items-start gap-3 animate-fadeIn">
               <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <p className="font-bold">تعذر إكمال عملية التفريغ:</p>
-                <p className="text-[11px] leading-relaxed text-rose-300">{errorMessage}</p>
-                <p className="text-[10px] text-rose-400/80 mt-1">
-                  💡 تلميح: تأكد أن سيرفر Gradio يعمل على العنوان المحدد وأن متصفحك يستطيع الوصول للعنوان (192.168.0.159).
-                </p>
+              <div className="flex-1 space-y-1">
+                <p className="font-bold text-xs">تعذر إكمال العملية</p>
+                <p className="text-[11px] text-rose-300/90 leading-relaxed font-sans">{errorMessage}</p>
               </div>
             </div>
           )}
 
-          {/* RESULTS DISPLAY PANEL */}
+          {/* COMPLETED RESULTS DISPLAY */}
           {result && (
-            <div className="bg-slate-800/90 border border-emerald-500/40 rounded-2xl p-4 space-y-4 shadow-xl">
-              <div className="flex items-center justify-between border-b border-slate-700 pb-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                    <Check className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-black text-slate-100">
-                      اكتمل التفريغ بنجاح!
-                    </h4>
-                    <p className="text-[10px] text-emerald-400">
-                      تم استخراج {parsedCuesCount} مقطع ترجمة متزامن وتثبيتها بالمشغل
-                    </p>
-                  </div>
+            <div className="bg-slate-950/90 border border-emerald-500/40 rounded-2xl p-4 space-y-4 animate-fadeIn">
+              <div className="flex items-center justify-between flex-wrap gap-2 border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs sm:text-sm">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                  <span>تم التنزيل والتفريغ النصي بنجاح! ({parsedCuesCount} سطر ترجمة)</span>
                 </div>
 
-                {/* Sub-tabs for result view */}
-                <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700 text-[11px] font-bold">
-                  <button
-                    onClick={() => setActiveTabResult("text")}
-                    className={`px-2.5 py-1 rounded-lg transition-all ${
-                      activeTabResult === "text" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
-                    }`}
-                  >
-                    النص الألماني (Plain Text)
-                  </button>
-                  <button
-                    onClick={() => setActiveTabResult("subtitles")}
-                    className={`px-2.5 py-1 rounded-lg transition-all ${
-                      activeTabResult === "subtitles" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
-                    }`}
-                  >
-                    نص الترجمة (SRT)
-                  </button>
-                  {result.videoHtml && (
-                    <button
-                      onClick={() => setActiveTabResult("videoHtml")}
-                      className={`px-2.5 py-1 rounded-lg transition-all ${
-                        activeTabResult === "videoHtml" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
-                      }`}
+                {downloadedMediaFile && (
+                  <span className="text-[11px] px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-lg font-bold">
+                    ✓ تمت إضافة الفيديو للمكتبة
+                  </span>
+                )}
+              </div>
+
+              {/* Final Video Player Preview with attached <track> */}
+              {(liveVideoUrl || result.audioFileUrl) && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                      <Film className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>مشغل الفيديو مع الترجمة المتزامنة المدمجة:</span>
+                    </span>
+                    {liveVttTrackUrl && (
+                      <span className="text-[10px] px-2 py-0.5 bg-emerald-500/20 text-emerald-300 rounded font-mono font-bold">
+                        CC Subtitles Active
+                      </span>
+                    )}
+                  </div>
+                  <div className="aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-800 relative">
+                    <video
+                      src={liveVideoUrl || result.audioFileUrl}
+                      controls
+                      className="w-full h-full object-contain"
+                      playsInline
                     >
-                      فيديو مع الترجمة (HTML)
+                      {liveVttTrackUrl && (
+                        <track
+                          kind="subtitles"
+                          src={liveVttTrackUrl}
+                          srcLang="de"
+                          label="الألمانية (الأصلية)"
+                          default
+                        />
+                      )}
+                      متصفحك لا يدعم مشغل الفيديو.
+                    </video>
+                  </div>
+                </div>
+              )}
+
+              {/* TABS: PLAIN TEXT vs SRT SUBTITLES */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTabResult("text")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      activeTabResult === "text"
+                        ? "bg-indigo-600 text-white shadow-xs"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    النص الكامل (Text)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTabResult("subtitles")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      activeTabResult === "subtitles"
+                        ? "bg-indigo-600 text-white shadow-xs"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    ملف الترجمة (SRT)
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleCopyPlainText}
+                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    {copiedText ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedText ? "تم النسخ" : "نسخ النص"}</span>
+                  </button>
+                  {result.srtText && (
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadFile(result.srtText, "subtitles.srt", "text/plain")}
+                      className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>تنزيل SRT</span>
                     </button>
                   )}
                 </div>
               </div>
 
-              {/* TAB 1: PLAIN TEXT */}
-              {activeTabResult === "text" && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-slate-400">
-                      النص المفرغ كاملاً:
-                    </span>
-                    <button
-                      onClick={handleCopyPlainText}
-                      className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors"
-                    >
-                      {copiedText ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedText ? "تم النسخ!" : "نسخ النص"}</span>
-                    </button>
-                  </div>
-                  <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-700 text-xs font-mono text-slate-200 leading-relaxed max-h-48 overflow-y-auto select-text">
-                    {result.plainText || "لا يوجد نص عادي متاح."}
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 2: SRT FORMATTED */}
-              {activeTabResult === "subtitles" && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-slate-400">
-                      ملف الترجمة المتزامنة (SRT):
-                    </span>
-                    <button
-                      onClick={() => handleDownloadFile(result.srtText, "transcript.srt", "text/plain")}
-                      className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>تحميل SRT</span>
-                    </button>
-                  </div>
-                  <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-700 text-xs font-mono text-emerald-300/90 leading-relaxed max-h-48 overflow-y-auto select-text whitespace-pre-wrap">
-                    {result.srtText || "لا يوجد نص SRT."}
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 3: VIDEO HTML IF AVAILABLE */}
-              {activeTabResult === "videoHtml" && result.videoHtml && (
-                <div className="space-y-2">
-                  <p className="text-[11px] text-slate-400">
-                    معاينة الفيديو المولد من سيرفر Gradio مع الترجمة المتزامنة:
-                  </p>
-                  <div
-                    className="bg-black rounded-xl overflow-hidden p-2 border border-slate-700 max-h-60 flex items-center justify-center"
-                    dangerouslySetInnerHTML={{ __html: result.videoHtml }}
-                  />
-                </div>
-              )}
-
-              {/* DOWNLOAD LINKS ROW */}
-              <div className="pt-2 border-t border-slate-700/80 flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-bold text-slate-400 ml-1">
-                  تحميل النتائج:
-                </span>
-
-                {result.plainText && (
-                  <button
-                    onClick={() => handleDownloadFile(result.plainText, "german_transcript.txt", "text/plain")}
-                    className="px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-colors"
-                  >
-                    <Download className="w-3 h-3" />
-                    <span>ملف نص (.TXT)</span>
-                  </button>
-                )}
-
-                {result.srtText && (
-                  <button
-                    onClick={() => handleDownloadFile(result.srtText, "subtitles.srt", "text/plain")}
-                    className="px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-colors"
-                  >
-                    <Download className="w-3 h-3" />
-                    <span>ملف ترجمة (.SRT)</span>
-                  </button>
-                )}
+              {/* Text Area */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 max-h-48 overflow-y-auto text-xs text-slate-200 font-sans leading-relaxed whitespace-pre-wrap">
+                {activeTabResult === "text"
+                  ? result.plainText || "لا يوجد نص مفرغ"
+                  : result.srtText || "لا يوجد ملف ترجمة"}
               </div>
             </div>
           )}
-
         </div>
 
         {/* MODAL FOOTER */}
         <div className="p-4 sm:p-5 border-t border-slate-800 bg-slate-900/95 flex items-center justify-between gap-3 shrink-0">
-          <div className="text-[11px] text-slate-400 flex items-center gap-1">
-            <Info className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-            <span>يتم التفريغ مباشرة على المعالج (CPU/GPU) لسيرفرك المحلي.</span>
-          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+          >
+            إغلاق
+          </button>
 
           <div className="flex items-center gap-2">
-            {result ? (
+            {isProcessing ? (
               <button
-                onClick={onClose}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs shadow-lg shadow-emerald-600/30 transition-all cursor-pointer flex items-center gap-2"
+                type="button"
+                onClick={handleCancel}
+                className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
-                <Check className="w-4 h-4" />
-                <span>العودة إلى المشغل والتفريغ التفاعلي</span>
+                إلغاء المعالجة ✕
               </button>
             ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  disabled={isProcessing}
-                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer"
-                >
-                  إلغاء
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleStartTranscribe}
-                  disabled={isProcessing || (sourceMode === "upload" && !selectedLocalFile) || (sourceMode === "current" && !currentFile)}
-                  className="px-6 py-2.5 bg-gradient-to-r from-indigo-600 via-rose-600 to-amber-500 hover:from-indigo-500 hover:to-amber-400 text-white rounded-xl font-black text-xs shadow-lg shadow-indigo-500/25 transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer"
-                >
-                  {isProcessing ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>جاري التفريغ ({formatTimer(elapsedSeconds)})...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4" />
-                      <span>بدء التفريغ بالذكاء الاصطناعي (Transcribe) ⚡</span>
-                    </>
-                  )}
-                </button>
-              </>
+              <button
+                type="button"
+                onClick={handleStartTranscribe}
+                disabled={
+                  isProcessing ||
+                  (sourceMode === "youtube" && !youtubeUrl.trim()) ||
+                  (sourceMode === "upload" && !selectedLocalFile) ||
+                  (sourceMode === "current" && !currentFile)
+                }
+                className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-md disabled:opacity-40 disabled:cursor-not-allowed ${
+                  sourceMode === "youtube"
+                    ? "bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white shadow-rose-600/30 font-black"
+                    : "bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white shadow-indigo-600/30"
+                }`}
+              >
+                {sourceMode === "youtube" ? (
+                  <>
+                    <Tv className="w-4 h-4" />
+                    <span>بدء تنزيل وتفريغ يوتيوب ⚡</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>بدء التفريغ الصوتي الآن</span>
+                  </>
+                )}
+              </button>
             )}
           </div>
         </div>

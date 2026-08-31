@@ -321,6 +321,9 @@ export interface MediaFile {
   uploadedAt: string;
   url: string;
   duration?: number;
+  thumbnailUrl?: string;
+  author?: string;
+  description?: string;
   subtitles?: MediaSubtitleTrack[];
   folderId?: string;
   primaryTrackId?: string;

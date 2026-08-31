@@ -69,6 +69,7 @@ export interface MediaExplorerViewProps {
   setEditTitleText: (val: string) => void;
   onSaveRename: (id: string) => void;
   onUploadClick: () => void;
+  onOpenYouTubeDownload?: () => void;
   onOpenGradioModalForFile: (file: MediaFile) => void;
   onOpenSubtitleOptionsForFile: (file: MediaFile) => void;
   onRefreshFiles: () => void;
@@ -101,6 +102,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
   setEditTitleText,
   onSaveRename,
   onUploadClick,
+  onOpenYouTubeDownload,
   onOpenGradioModalForFile,
   onOpenSubtitleOptionsForFile,
   onRefreshFiles,
@@ -932,6 +934,18 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
             <span>+ رفع وسائط</span>
           </button>
 
+          {/* YouTube Download & Transcribe Button */}
+          {onOpenYouTubeDownload && (
+            <button
+              onClick={onOpenYouTubeDownload}
+              className="px-3 py-1.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+              title="تنزيل وتفريغ مقطع من يوتيوب بالدقة المحددة"
+            >
+              <Tv className="w-3.5 h-3.5" />
+              <span>تنزيل من يوتيوب 🎥⚡</span>
+            </button>
+          )}
+
           {/* New Folder Button */}
           <button
             onClick={onOpenCreateFolder}
@@ -1332,7 +1346,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                   ? "قم بسحب وإفلات الوسائط داخل هذا المجلد أو انقر على زر الرفع أدناه"
                   : "قم بسحب وإفلات مقاطع الفيديو أو الصوت أو إنشاء مجلد جديد لتنظيم المحتوى"}
               </p>
-              <div className="flex items-center gap-2 mt-2">
+              <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
                 <button
                   onClick={onUploadClick}
                   className="px-4 py-2 bg-[#0056f6] hover:bg-[#0047d1] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
@@ -1340,6 +1354,15 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                   <Film className="w-3.5 h-3.5" />
                   <span>+ رفع مقطع جديد</span>
                 </button>
+                {onOpenYouTubeDownload && (
+                  <button
+                    onClick={onOpenYouTubeDownload}
+                    className="px-4 py-2 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Tv className="w-3.5 h-3.5" />
+                    <span>تنزيل وتفريغ من يوتيوب 🎥⚡</span>
+                  </button>
+                )}
                 <button
                   onClick={onOpenCreateFolder}
                   className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"

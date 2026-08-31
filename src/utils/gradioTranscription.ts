@@ -1,5 +1,5 @@
 /**
- * Client-side integration utility for local Gradio Speech-to-Text Server
+ * Client-side integration utility for local Gradio Speech-to-Text Server & YouTube Processor
  * Default Local Server: http://192.168.0.159:7861
  */
 
@@ -14,14 +14,21 @@ export interface GradioTranscribeOptions {
   noSpeechThreshold?: number;
   compressionRatioThreshold?: number;
   logProbThreshold?: number;
-  onStatusUpdate?: (statusMessage: string, step: "uploading" | "calling" | "processing" | "completed" | "error") => void;
+  onUploadProgress?: (percent: number, loadedBytes: number, totalBytes: number) => void;
+  onStatusUpdate?: (
+    statusMessage: string,
+    step: "uploading" | "calling" | "processing" | "completed" | "error",
+    progressPercent?: number
+  ) => void;
   signal?: AbortSignal;
 }
 
 export interface GradioTranscribeResult {
   plainText: string;
   srtText: string;
+  vttText?: string;
   videoHtml?: string;
+  audioFileUrl?: string;
   txtFile?: any;
   srtFile?: any;
   vttFile?: any;
@@ -29,11 +36,173 @@ export interface GradioTranscribeResult {
   logs?: string;
 }
 
+export interface YouTubeQuality {
+  label: string; // e.g. "1080p", "720p", "480p"
+  formatId: string; // e.g. "137", "22", "135"
+  note?: string;
+  filesizeFormatted?: string;
+}
+
+export interface YouTubeVideoFormat {
+  formatId: string;
+  resolution: string;
+  note?: string;
+  ext?: string;
+  filesize?: number;
+  filesizeFormatted?: string;
+  hasVideo?: boolean;
+  hasAudio?: boolean;
+}
+
+export interface YouTubeVideoInfo {
+  success?: boolean;
+  videoId: string;
+  title: string;
+  author?: string;
+  duration?: number; // duration in seconds
+  durationFormatted?: string;
+  thumbnailUrl: string;
+  description?: string;
+  qualities: YouTubeQuality[];
+  formats?: YouTubeVideoFormat[]; // backwards compatibility
+}
+
+export interface YouTubeSubtitleCue {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface YouTubeSubtitleTrack {
+  id: string;
+  label: string;
+  language: string;
+  format: string; // "vtt" | "srt"
+  cues: YouTubeSubtitleCue[];
+}
+
+export interface YouTubeJobStatus {
+  jobId: string;
+  stage: "idle" | "queued" | "downloading" | "transcribing" | "done" | "error";
+  stageLabel?: string; // "جاري التحميل" | "جاري إنشاء السكربت" | "اكتمل" | "فشل"
+  percent?: number; // 0 to 100
+  progress: number; // 0 to 100
+  message?: string;
+  statusMsg: string;
+  success?: boolean | null;
+  videoUrl?: string; // Available as soon as download completes (during transcribing stage)
+  title?: string;
+  duration?: number;
+  videoId?: string;
+  thumbnailUrl?: string;
+  author?: string;
+  subtitles?: YouTubeSubtitleTrack[];
+  vttContent?: string;
+  plainText?: string;
+  srtText?: string;
+  vttText?: string;
+  videoHtml?: string;
+  txtFile?: any;
+  srtFile?: any;
+  vttFile?: any;
+  speed?: string;
+  eta?: string;
+  error?: string;
+}
+
+export interface YouTubeProcessOptions {
+  serverUrl?: string;
+  quality?: string;
+  formatId?: string;
+  includeSubtitles?: boolean;
+  beamSize?: number;
+  bestOf?: number;
+  temperature?: number;
+  vadFilter?: boolean;
+  minSilenceDurationMs?: number;
+  onProgress?: (stageLabel: string, percent: number, message: string, videoUrl?: string) => void;
+  onStatusUpdate?: (status: YouTubeJobStatus) => void;
+  signal?: AbortSignal;
+}
+
 export const DEFAULT_GRADIO_URL = "http://192.168.0.159:7861";
 
 /**
+ * Uploads a file with real-time XMLHttpRequest progress (0% - 100%)
+ */
+function uploadFileWithProgress(
+  url: string,
+  fileOrBlob: File | Blob,
+  fileName: string,
+  onProgress?: (percent: number, loaded: number, total: number) => void,
+  signal?: AbortSignal
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url, true);
+
+    if (signal) {
+      signal.addEventListener("abort", () => {
+        xhr.abort();
+        reject(new DOMException("Aborted", "AbortError"));
+      });
+    }
+
+    if (xhr.upload && onProgress) {
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && event.total > 0) {
+          const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
+          onProgress(percent, event.loaded, event.total);
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const json = JSON.parse(xhr.responseText);
+          const uploadedPath = Array.isArray(json)
+            ? json[0]
+            : json?.path || json?.[0]?.path;
+          if (uploadedPath) {
+            resolve(uploadedPath);
+          } else {
+            reject(new Error("لم يرجع سيرفر Gradio مسار الملف المرفوع بشكل صحيح."));
+          }
+        } catch (e: any) {
+          reject(new Error(`فشل تحليل استجابة الرفع: ${e.message}`));
+        }
+      } else {
+        reject(
+          new Error(
+            `فشل رفع الملف إلى سيرفر Gradio (رمز الخطأ ${xhr.status}): ${xhr.statusText || xhr.responseText}`
+          )
+        );
+      }
+    };
+
+    xhr.onerror = () => {
+      reject(
+        new Error(
+          `تعذر الاتصال بسيرفر Gradio على العنوان (${url}). تأكد من تشغيل السيرفر ومن اتصال جهازك بالشبكة المحلية.`
+        )
+      );
+    };
+
+    const formData = new FormData();
+    if (fileOrBlob instanceof File) {
+      formData.append("files", fileOrBlob);
+    } else {
+      formData.append("files", fileOrBlob, fileName);
+    }
+
+    xhr.send(formData);
+  });
+}
+
+/**
  * Executes the 3-step Gradio transcription API:
- * 1. Upload media file to /gradio_api/upload
+ * 1. Upload media file to /gradio_api/upload with real-time progress bar (0% - 100%)
  * 2. Initiate transcribe call to /gradio_api/call/transcribe
  * 3. Stream SSE events from /gradio_api/call/transcribe/{event_id}
  */
@@ -53,50 +222,45 @@ export async function transcribeFileWithGradio(
     noSpeechThreshold = 0.6,
     compressionRatioThreshold = 2.4,
     logProbThreshold = -1.0,
+    onUploadProgress,
     onStatusUpdate,
     signal
   } = options;
 
   const baseUrl = serverUrl.replace(/\/+$/, "");
 
-  // 1) Step 1: Upload File to Gradio
-  onStatusUpdate?.("1/3 جاري رفع الملف إلى سيرفر التفريغ المحلي...", "uploading");
+  // 1) Step 1: Upload File to Gradio with live progress tracking
+  onStatusUpdate?.("1/3 جاري رفع الملف إلى سيرفر التفريغ المحلي...", "uploading", 0);
 
-  const formData = new FormData();
-  // Ensure file has proper name if it's a raw blob
-  if (fileOrBlob instanceof File) {
-    formData.append("files", fileOrBlob);
-  } else {
-    formData.append("files", fileOrBlob, fileName);
-  }
-
-  let uploadRes: Response;
+  let uploadedPath: string;
   try {
-    uploadRes = await fetch(`${baseUrl}/gradio_api/upload`, {
-      method: "POST",
-      body: formData,
+    uploadedPath = await uploadFileWithProgress(
+      `${baseUrl}/gradio_api/upload`,
+      fileOrBlob,
+      fileName,
+      (percent, loaded, total) => {
+        onUploadProgress?.(percent, loaded, total);
+        const mbLoaded = (loaded / (1024 * 1024)).toFixed(1);
+        const mbTotal = (total / (1024 * 1024)).toFixed(1);
+        onStatusUpdate?.(
+          `1/3 جاري رفع الملف (${percent}% - ${mbLoaded} / ${mbTotal} MB)...`,
+          "uploading",
+          percent
+        );
+      },
       signal
-    });
+    );
   } catch (err: any) {
+    if (err.name === "AbortError") throw err;
     throw new Error(
-      `تعذر الاتصال بسيرفر Gradio على العنوان (${baseUrl}). تأكد من تشغيل السيرفر ومن اتصال جهازك بالشبكة المحلية (192.168.0.159). تفاصيل: ${err.message}`
+      `تعذر رفع الملف إلى سيرفر Gradio (${baseUrl}). تأكد من تشغيل السيرفر وأن جهازك متصل بنفس الشبكة (192.168.0.159). التفاصيل: ${err.message}`
     );
   }
 
-  if (!uploadRes.ok) {
-    const errText = await uploadRes.text().catch(() => "");
-    throw new Error(`فشل رفع الملف إلى سيرفر Gradio (رمز الخطأ ${uploadRes.status}): ${errText || uploadRes.statusText}`);
-  }
-
-  const uploadJson = await uploadRes.json();
-  const uploadedPath = Array.isArray(uploadJson) ? uploadJson[0] : uploadJson?.path || uploadJson?.[0]?.path;
-
-  if (!uploadedPath) {
-    throw new Error("لم يرجع سيرفر Gradio مسار الملف المرفوع بشكل صحيح.");
-  }
+  onStatusUpdate?.("1/3 اكتمل رفع الملف بنجاح (100%)", "uploading", 100);
 
   // 2) Step 2: Call Transcribe Endpoint
-  onStatusUpdate?.("2/3 تم رفع الملف، جاري تهيئة طلب المعالجة والتفريغ...", "calling");
+  onStatusUpdate?.("2/3 تم رفع الملف، جاري تهيئة طلب المعالجة والتفريغ...", "calling", 35);
 
   const payloadData = [
     { path: uploadedPath, meta: { _type: "gradio.FileData" } },
@@ -134,7 +298,7 @@ export async function transcribeFileWithGradio(
   }
 
   // 3) Step 3: Stream SSE to receive the final result
-  onStatusUpdate?.("3/3 جاري معالجة الصوت بالذكاء الاصطناعي (قد يستغرق دقائق حسب طول المقطع)...", "processing");
+  onStatusUpdate?.("3/3 جاري معالجة الصوت بالذكاء الاصطناعي على السيرفر المحلي...", "processing", 50);
 
   let streamRes: Response;
   try {
@@ -158,6 +322,7 @@ export async function transcribeFileWithGradio(
   let buffer = "";
 
   let finalResult: GradioTranscribeResult | null = null;
+  let processingPercent = 50;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -165,7 +330,6 @@ export async function transcribeFileWithGradio(
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
-    // Keep last incomplete segment in buffer
     buffer = lines.pop() || "";
 
     for (const line of lines) {
@@ -181,9 +345,8 @@ export async function transcribeFileWithGradio(
           if (Array.isArray(parsed) && parsed.length >= 2) {
             const [plainText, srtText, videoHtml, txtFile, srtFile, vttFile, statusMsg, logs] = parsed;
 
-            // Update status if provided
             if (statusMsg) {
-              onStatusUpdate?.(`الحالة: ${statusMsg}`, "processing");
+              onStatusUpdate?.(`الحالة: ${statusMsg}`, "processing", 95);
             }
 
             finalResult = {
@@ -197,21 +360,21 @@ export async function transcribeFileWithGradio(
               logs: typeof logs === "string" ? logs : undefined
             };
 
-            onStatusUpdate?.("تم استلام النتيجة النهائية بنجاح!", "completed");
+            onStatusUpdate?.("تم استلام النتيجة النهائية بنجاح!", "completed", 100);
             return finalResult;
           } else if (parsed && typeof parsed === "object") {
             // Check for progress / queue messages
             if (parsed.msg === "process_generating" || parsed.stage === "generating") {
-              onStatusUpdate?.("جاري استخراج وتوليد النصوص الألمانية المتزامنة...", "processing");
+              processingPercent = Math.min(92, processingPercent + 5);
+              onStatusUpdate?.("جاري استخراج وتوليد النصوص الألمانية المتزامنة...", "processing", processingPercent);
             } else if (parsed.msg === "queued") {
-              onStatusUpdate?.("الطلب في قائمة الانتظار على السيرفر...", "processing");
+              onStatusUpdate?.("الطلب في قائمة الانتظار على السيرفر...", "processing", 40);
             } else if (parsed.error) {
               throw new Error(`خطأ من سيرفر Gradio: ${parsed.error}`);
             }
           }
         } catch (e: any) {
           if (e.message?.includes("خطأ من سيرفر Gradio")) throw e;
-          // Ignore json parse error for non-json data lines
         }
       }
     }
@@ -223,3 +386,363 @@ export async function transcribeFileWithGradio(
 
   throw new Error("انتهى البث دون تلقي نتيجة التفريغ النهائية من السيرفر.");
 }
+
+/**
+ * Fetches YouTube video metadata and available qualities from the external Gradio server
+ */
+export async function getYouTubeInfo(
+  youtubeUrl: string,
+  serverUrl: string = DEFAULT_GRADIO_URL
+): Promise<YouTubeVideoInfo> {
+  const baseUrl = serverUrl.replace(/\/+$/, "");
+  const trimmedUrl = youtubeUrl.trim();
+
+  let lastError = "";
+
+  // 1. Try POST /api/youtube-info on the user's Gradio server
+  try {
+    const res = await fetch(`${baseUrl}/api/youtube-info`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: trimmedUrl })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      return normalizeYouTubeInfo(data, trimmedUrl);
+    } else {
+      const errJson = await res.json().catch(() => ({}));
+      lastError = errJson.error || `رمز الاستجابة: ${res.status}`;
+    }
+  } catch (err: any) {
+    lastError = err.message || "فشل الاتصال بالشبكة";
+  }
+
+  // 2. Try GET /api/youtube-info?url=... on the user's Gradio server
+  try {
+    const res = await fetch(`${baseUrl}/api/youtube-info?url=${encodeURIComponent(trimmedUrl)}`);
+    if (res.ok) {
+      const data = await res.json();
+      return normalizeYouTubeInfo(data, trimmedUrl);
+    } else {
+      const errJson = await res.json().catch(() => ({}));
+      lastError = errJson.error || lastError || `رمز الاستجابة: ${res.status}`;
+    }
+  } catch (err: any) {
+    lastError = err.message || lastError;
+  }
+
+  throw new Error(
+    `تعذر الاتصال بالسيرفر (${baseUrl}). يرجى التأكد من تشغيل السيرفر والاتصال بنفس الشبكة. (السبب: ${lastError})`
+  );
+}
+
+function formatDurationSeconds(sec?: number): string {
+  if (!sec || isNaN(sec) || sec <= 0) return "";
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  }
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function normalizeYouTubeInfo(data: any, originalUrl: string): YouTubeVideoInfo {
+  const videoId = data.videoId || extractYTId(originalUrl) || "";
+  const title = data.title || "";
+  const author = data.author || data.channel || data.uploader || "";
+  const duration = typeof data.duration === "number" ? data.duration : (data.duration ? Number(data.duration) : 0);
+  const durationFormatted = data.durationFormatted || formatDurationSeconds(duration);
+  const thumbnailUrl = data.thumbnailUrl || data.thumbnail || (videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : "");
+  const description = data.description || "";
+
+  // Available qualities strictly from server response
+  let qualities: YouTubeQuality[] = [];
+
+  if (Array.isArray(data.qualities) && data.qualities.length > 0) {
+    qualities = data.qualities.map((q: any) => ({
+      label: q.label || q.resolution || q.formatId || "720p",
+      formatId: q.formatId || q.format_id || q.id || "22",
+      note: q.note || (q.label?.includes("p") ? `دقة ${q.label}` : ""),
+      filesizeFormatted: q.filesizeFormatted || (q.filesize ? `${(q.filesize / (1024 * 1024)).toFixed(1)} MB` : undefined)
+    }));
+  } else if (Array.isArray(data.formats) && data.formats.length > 0) {
+    qualities = data.formats.map((f: any) => ({
+      label: f.resolution || f.quality || (f.height ? `${f.height}p` : f.formatId || "720p"),
+      formatId: f.formatId || f.format_id || f.id || "22",
+      note: f.note || f.format_note || "",
+      filesizeFormatted: f.filesizeFormatted || (f.filesize ? `${(f.filesize / (1024 * 1024)).toFixed(1)} MB` : undefined)
+    }));
+  }
+
+  return {
+    success: data.success !== false,
+    videoId,
+    title,
+    author,
+    duration,
+    durationFormatted,
+    thumbnailUrl,
+    description,
+    qualities
+  };
+}
+
+function extractYTId(url: string): string | null {
+  const p = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/shorts\/|youtube\.com\/live\/)([^#\?&"'>]+)/;
+  const match = url.match(p);
+  return match ? match[1] : null;
+}
+
+/**
+ * Converts VTT / WebVTT text to standard SRT text
+ */
+export function convertVttToSrt(vtt: string): string {
+  if (!vtt) return "";
+  let clean = vtt.replace(/^WEBVTT[^\n]*\n+/i, "").trim();
+  // Replace decimal dot in timestamps with comma: 00:00:01.500 -> 00:00:01,500
+  clean = clean.replace(/(\d{2}:\d{2}:\d{2})\.(\d{3})/g, "$1,$2");
+  // Also handle MM:SS.mmm
+  clean = clean.replace(/(\d{2}:\d{2})\.(\d{3})/g, "00:$1,$2");
+
+  const blocks = clean.split(/\n\s*\n/);
+  const srtBlocks: string[] = [];
+
+  let idx = 1;
+  for (const block of blocks) {
+    const lines = block.trim().split("\n");
+    if (lines.length >= 2) {
+      // Check if first line is time or cue id
+      let timeLineIdx = 0;
+      if (lines[0].includes("-->")) {
+        timeLineIdx = 0;
+      } else if (lines.length > 1 && lines[1].includes("-->")) {
+        timeLineIdx = 1;
+      } else {
+        continue;
+      }
+
+      const timeLine = lines[timeLineIdx].trim();
+      const textLines = lines.slice(timeLineIdx + 1).join("\n").trim();
+      if (timeLine && textLines) {
+        srtBlocks.push(`${idx}\n${timeLine}\n${textLines}`);
+        idx++;
+      }
+    }
+  }
+
+  return srtBlocks.join("\n\n");
+}
+
+/**
+ * Converts SRT text to WebVTT format
+ */
+export function convertSrtToVtt(srt: string): string {
+  if (!srt) return "WEBVTT\n\n";
+  let vtt = "WEBVTT\n\n" + srt.trim();
+  // Replace comma in timestamps with dot: 00:00:01,500 -> 00:00:01.500
+  vtt = vtt.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+  return vtt;
+}
+
+/**
+ * Starts a YouTube download and transcription job on the server
+ * Endpoint: POST {serverUrl}/api/youtube-process
+ * Body: { url, includeSubtitles: true, formatId }
+ */
+export async function processYouTubeLink(
+  youtubeUrl: string,
+  formatId?: string,
+  options: YouTubeProcessOptions = {}
+): Promise<string> {
+  const {
+    serverUrl = DEFAULT_GRADIO_URL,
+    includeSubtitles = true,
+    beamSize = 5,
+    bestOf = 5,
+    temperature = 0.0,
+    vadFilter = true,
+    minSilenceDurationMs = 2000,
+    signal
+  } = options;
+
+  const baseUrl = serverUrl.replace(/\/+$/, "");
+
+  // Payload for server following user spec
+  const payload: any = {
+    url: youtubeUrl.trim(),
+    includeSubtitles
+  };
+
+  if (formatId) {
+    payload.formatId = formatId;
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/youtube-process`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal
+    });
+  } catch (err: any) {
+    throw new Error(
+      `تعذر إرسال طلب معالجة اليوتيوب إلى السيرفر (${baseUrl}). تأكد من تشغيل السيرفر ومن اتصال الجهاز بنفس الشبكة.`
+    );
+  }
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`فشل بدء مهمة معالجة اليوتيوب على السيرفر (رمز ${res.status}): ${errText || res.statusText}`);
+  }
+
+  const data = await res.json();
+  const jobId = data.jobId || data.job_id || data.id;
+  if (!jobId) {
+    throw new Error("لم يرجع السيرفر معرف المهمة (jobId).");
+  }
+  return jobId;
+}
+
+/**
+ * Polls YouTube Job status periodically (~1 second) until "done" or "error"
+ * Endpoint: GET {serverUrl}/api/youtube-status/{jobId}
+ */
+export async function pollYouTubeStatus(
+  jobId: string,
+  onProgress: (status: YouTubeJobStatus) => void,
+  serverUrl: string = DEFAULT_GRADIO_URL,
+  signal?: AbortSignal
+): Promise<YouTubeJobStatus> {
+  const baseUrl = serverUrl.replace(/\/+$/, "");
+
+  return new Promise((resolve, reject) => {
+    let timer: any = null;
+    let isFinished = false;
+
+    const cleanup = () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    if (signal) {
+      signal.addEventListener("abort", () => {
+        cleanup();
+        reject(new DOMException("Aborted", "AbortError"));
+      });
+    }
+
+    const checkStatus = async () => {
+      if (isFinished) return;
+
+      try {
+        const res = await fetch(`${baseUrl}/api/youtube-status/${encodeURIComponent(jobId)}`, { signal });
+
+        if (!res.ok) {
+          return; // retry on next tick
+        }
+
+        const data = await res.json();
+        const stage = data.stage || (data.success ? "done" : "transcribing");
+        const stageLabel = data.stageLabel || (stage === "downloading" ? "جاري التحميل" : stage === "transcribing" ? "جاري إنشاء السكربت" : stage === "done" ? "اكتمل" : "معالجة");
+        const percent = typeof data.percent === "number" ? data.percent : (typeof data.progress === "number" ? data.progress : (stage === "done" ? 100 : 50));
+        const message = data.message || data.statusMsg || (stage === "downloading" ? `جاري تحميل الفيديو... ${percent}%` : "جاري إنشاء السكربت والتفريغ...");
+
+        // Parse subtitles if present
+        let srtText = data.srtText || "";
+        let vttText = data.vttText || data.vttContent || "";
+        let plainText = data.plainText || "";
+
+        if (Array.isArray(data.subtitles) && data.subtitles.length > 0) {
+          const primarySub = data.subtitles[0];
+          if (primarySub.cues && Array.isArray(primarySub.cues)) {
+            if (!srtText) {
+              srtText = primarySub.cues.map((c: any, idx: number) => {
+                const startStr = formatTimestamp(c.start || 0);
+                const endStr = formatTimestamp(c.end || 0);
+                return `${idx + 1}\n${startStr} --> ${endStr}\n${c.text || ""}`;
+              }).join("\n\n");
+            }
+            if (!plainText) {
+              plainText = primarySub.cues.map((c: any) => c.text || "").join(" ");
+            }
+          }
+        }
+
+        if (vttText && !srtText) {
+          srtText = convertVttToSrt(vttText);
+        }
+        if (srtText && !vttText) {
+          vttText = convertSrtToVtt(srtText);
+        }
+
+        const jobStatus: YouTubeJobStatus = {
+          jobId,
+          stage,
+          stageLabel,
+          percent,
+          progress: percent,
+          message,
+          statusMsg: message,
+          success: data.success,
+          videoUrl: data.videoUrl,
+          title: data.title,
+          duration: data.duration,
+          thumbnailUrl: data.thumbnailUrl,
+          author: data.author,
+          subtitles: data.subtitles,
+          vttContent: vttText || data.vttContent,
+          plainText,
+          srtText,
+          vttText,
+          speed: data.speed,
+          eta: data.eta,
+          error: data.error
+        };
+
+        // Notify caller about live status (including videoUrl as soon as downloading completes!)
+        onProgress(jobStatus);
+
+        // Check completion
+        if (stage === "done" || data.success === true) {
+          isFinished = true;
+          cleanup();
+          resolve(jobStatus);
+          return;
+        }
+
+        // Check error
+        if (stage === "error" || data.success === false) {
+          isFinished = true;
+          cleanup();
+          reject(new Error(data.message || data.error || "فشلت معالجة فيديو اليوتيوب على السيرفر."));
+          return;
+        }
+      } catch (err: any) {
+        if (err.name === "AbortError") {
+          cleanup();
+          reject(err);
+          return;
+        }
+        console.warn("[YouTube Poll Warning]", err);
+      }
+    };
+
+    // Execute immediately and set 1-second interval
+    checkStatus();
+    timer = setInterval(checkStatus, 1000);
+  });
+}
+
+function formatTimestamp(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const ms = Math.floor((seconds % 1) * 1000);
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")},${ms.toString().padStart(3, "0")}`;
+}
+
