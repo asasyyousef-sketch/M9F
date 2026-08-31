@@ -475,7 +475,7 @@ async function startServer() {
   });
 
   // 5. Add Media File directly from YouTube with Subtitles
-  app.post("/api/media/from-youtube", (req, res) => {
+  app.post("/api/media/from-youtube", async (req, res) => {
     try {
       const { title, videoUrl, videoId, srtText, cues, duration, thumbnailUrl, formatId, author, description } = req.body;
       if (!title && !videoId) {
@@ -485,6 +485,8 @@ async function startServer() {
       const currentList = loadMediaMeta();
       const cleanTitle = (title || `فيديو يوتيوب ${videoId || ""}`).trim();
       const isAudioOnly = formatId === "audio_only";
+      const targetFilename = `youtube_${videoId || Date.now()}.${isAudioOnly ? "mp3" : "mp4"}`;
+      const targetFilePath = path.join(MEDIA_DIR, targetFilename);
 
       // Parse cues if needed
       let cleanCues: ServerSubtitleCue[] = [];
@@ -530,10 +532,11 @@ async function startServer() {
       };
 
       const finalUrl = videoUrl || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : "");
+      let localFileSize = 0;
 
       const newItem: ServerMediaFile = {
         id: "media-yt-" + (videoId || Date.now()) + "-" + Math.random().toString(36).substring(2, 6),
-        filename: `youtube_${videoId || Date.now()}.${isAudioOnly ? "mp3" : "mp4"}`,
+        filename: targetFilename,
         originalName: `${cleanTitle}.${isAudioOnly ? "mp3" : "mp4"}`,
         title: cleanTitle,
         size: 0,
@@ -552,6 +555,42 @@ async function startServer() {
       currentList.unshift(newItem);
       saveMediaMeta(currentList);
 
+      // Asynchronously attempt to cache/download remote file locally in background if possible
+      if (videoUrl && (videoUrl.startsWith("http://") || videoUrl.startsWith("https://"))) {
+        (async () => {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 60000);
+            const dlRes = await fetch(videoUrl, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            if (dlRes.ok && dlRes.body) {
+              if (!fs.existsSync(MEDIA_DIR)) {
+                fs.mkdirSync(MEDIA_DIR, { recursive: true });
+              }
+              const fileStream = fs.createWriteStream(targetFilePath);
+              const { Readable } = await import("stream");
+              const nodeStream = Readable.fromWeb(dlRes.body as any);
+              nodeStream.pipe(fileStream);
+              await new Promise<void>((resolve, reject) => {
+                fileStream.on("finish", () => resolve());
+                fileStream.on("error", (err) => reject(err));
+              });
+              const stat = fs.statSync(targetFilePath);
+              if (stat.size > 1000) {
+                const refreshedList = loadMediaMeta();
+                const target = refreshedList.find(m => m.id === newItem.id);
+                if (target) {
+                  target.size = stat.size;
+                  saveMediaMeta(refreshedList);
+                }
+              }
+            }
+          } catch (dlErr) {
+            console.warn("Background remote media cache notice:", dlErr);
+          }
+        })();
+      }
+
       res.json({
         success: true,
         message: "تم حفظ فيديو اليوتيوب والتفريغ في المكتبة بنجاح!",
@@ -564,16 +603,41 @@ async function startServer() {
   });
 
   // 5. Stream media file with HTTP Range support for instant seeking & scrubbing
-  app.get("/api/media/stream/:filename", (req, res) => {
+  app.get("/api/media/stream/:filename", async (req, res) => {
     try {
       const filename = path.basename(req.params.filename);
       const filePath = path.join(MEDIA_DIR, filename);
+
+      // Always set CORS headers for media streaming
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type, Accept");
 
       if (!fs.existsSync(filePath)) {
         // Check if this is an external/YouTube media file with a remote URL
         const list = loadMediaMeta();
         const found = list.find(m => m.filename === filename || m.id === filename || m.originalName === filename);
         if (found && found.url && (found.url.startsWith("http://") || found.url.startsWith("https://"))) {
+          try {
+            const range = req.headers.range;
+            const remoteHeaders: Record<string, string> = {};
+            if (range) remoteHeaders["Range"] = range;
+            const remoteRes = await fetch(found.url, { headers: remoteHeaders });
+            
+            res.status(remoteRes.status);
+            remoteRes.headers.forEach((value, key) => {
+              if (["content-type", "content-length", "content-range", "accept-ranges"].includes(key.toLowerCase())) {
+                res.setHeader(key, value);
+              }
+            });
+            if (remoteRes.body) {
+              const { Readable } = await import("stream");
+              Readable.fromWeb(remoteRes.body as any).pipe(res);
+              return;
+            }
+          } catch (proxyErr) {
+            console.warn("Proxy stream fallback to redirect:", proxyErr);
+          }
           return res.redirect(found.url);
         }
         return res.status(404).send("File not found");
@@ -617,6 +681,7 @@ async function startServer() {
           "Content-Length": chunksize,
           "Content-Type": contentType,
           "Cache-Control": "public, max-age=86400, no-transform",
+          "Access-Control-Allow-Origin": "*"
         };
         
         res.writeHead(206, head);
@@ -631,6 +696,7 @@ async function startServer() {
           "Content-Type": contentType,
           "Accept-Ranges": "bytes",
           "Cache-Control": "public, max-age=86400, no-transform",
+          "Access-Control-Allow-Origin": "*"
         };
         res.writeHead(200, head);
         const fullStream = fs.createReadStream(filePath);
