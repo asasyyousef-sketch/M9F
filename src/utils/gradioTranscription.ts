@@ -680,6 +680,19 @@ export async function pollYouTubeStatus(
           vttText = convertSrtToVtt(srtText);
         }
 
+        // Normalize video URL from server response
+        let resolvedVideoUrl = data.videoUrl || data.url || data.video_url || data.mediaUrl || "";
+        if (typeof resolvedVideoUrl === "object" && resolvedVideoUrl !== null) {
+          resolvedVideoUrl = resolvedVideoUrl.url || resolvedVideoUrl.path || resolvedVideoUrl.name || "";
+        }
+        if (resolvedVideoUrl && typeof resolvedVideoUrl === "string") {
+          if (resolvedVideoUrl.startsWith("/")) {
+            resolvedVideoUrl = `${baseUrl}${resolvedVideoUrl}`;
+          } else if (!resolvedVideoUrl.startsWith("http://") && !resolvedVideoUrl.startsWith("https://") && !resolvedVideoUrl.startsWith("blob:")) {
+            resolvedVideoUrl = `${baseUrl}/${resolvedVideoUrl}`;
+          }
+        }
+
         const jobStatus: YouTubeJobStatus = {
           jobId,
           stage,
@@ -689,7 +702,7 @@ export async function pollYouTubeStatus(
           message,
           statusMsg: message,
           success: data.success,
-          videoUrl: data.videoUrl,
+          videoUrl: resolvedVideoUrl,
           title: data.title,
           duration: data.duration,
           thumbnailUrl: data.thumbnailUrl,
