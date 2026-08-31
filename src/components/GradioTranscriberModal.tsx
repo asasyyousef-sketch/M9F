@@ -316,12 +316,6 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
       } catch (saveErr) {
         console.warn("Could not auto-save media to backend:", saveErr);
       }
-
-      // If there is an active file, also save subtitles directly
-      if (currentFile && cues.length > 0) {
-        const trackLabel = `🇩🇪 تفريغ يوتيوب (${selectedFormatId})`;
-        await onSubtitlesGenerated(trackLabel, cues, srtText);
-      }
     } catch (err: any) {
       if (err.name === "AbortError") {
         setStatusMessage("تم إلغاء العملية.");

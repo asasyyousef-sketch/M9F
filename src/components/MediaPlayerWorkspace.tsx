@@ -3642,7 +3642,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   {currentFile.type === "video" ? (
                     <video
                       ref={videoRef}
-                      src={`/api/media/stream/${currentFile.filename}`}
+                      src={currentFile.url && (currentFile.url.startsWith("http://") || currentFile.url.startsWith("https://") || currentFile.url.startsWith("blob:")) ? currentFile.url : `/api/media/stream/${currentFile.filename}`}
                       className={
                         isFullscreen
                           ? "w-full h-full object-contain pointer-events-none"
@@ -3662,7 +3662,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     >
                       <audio
                         ref={audioRef}
-                        src={`/api/media/stream/${currentFile.filename}`}
+                        src={currentFile.url && (currentFile.url.startsWith("http://") || currentFile.url.startsWith("https://") || currentFile.url.startsWith("blob:")) ? currentFile.url : `/api/media/stream/${currentFile.filename}`}
                         preload="auto"
                       />
 
@@ -3852,7 +3852,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                               <div className="w-40 sm:w-44 h-24 sm:h-26 bg-black rounded-md overflow-hidden relative border border-slate-800">
                                 <video
                                   ref={previewVideoRef}
-                                  src={`/api/media/stream/${currentFile.filename}`}
+                                  src={currentFile.url && (currentFile.url.startsWith("http://") || currentFile.url.startsWith("https://") || currentFile.url.startsWith("blob:")) ? currentFile.url : `/api/media/stream/${currentFile.filename}`}
                                   className="w-full h-full object-cover"
                                   muted
                                   preload="metadata"
@@ -5086,9 +5086,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         onOpenStyleModal={() => openStyleInSidebar("gradio")}
         onVideoDownloaded={async (newFile, rawSrt, cues) => {
           await fetchMediaFiles();
-          setCurrentFile(newFile);
-          setIsPlaying(true);
+          handleSelectFile(newFile, true);
           setShowGradioModal(false);
+          triggerHud("تم حفظ وتشغيل الفيديو بنجاح", "⚡");
         }}
         onSubtitlesGenerated={async (trackLabel, cues, rawSrt) => {
           if (currentFile) {

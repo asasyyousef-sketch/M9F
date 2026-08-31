@@ -299,8 +299,18 @@ async function startServer() {
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed)) {
-            // Check if file still exists on disk
+            // Keep media item if it exists on local disk OR if it has a valid external/YouTube/network URL
             return parsed.filter((item: ServerMediaFile) => {
+              if (
+                item.url &&
+                (item.url.startsWith("http://") ||
+                  item.url.startsWith("https://") ||
+                  item.url.startsWith("blob:") ||
+                  item.id?.startsWith("media-yt-") ||
+                  (item as any).isExternal)
+              ) {
+                return true;
+              }
               const filePath = path.join(MEDIA_DIR, item.filename);
               return fs.existsSync(filePath);
             });
@@ -560,6 +570,12 @@ async function startServer() {
       const filePath = path.join(MEDIA_DIR, filename);
 
       if (!fs.existsSync(filePath)) {
+        // Check if this is an external/YouTube media file with a remote URL
+        const list = loadMediaMeta();
+        const found = list.find(m => m.filename === filename || m.id === filename || m.originalName === filename);
+        if (found && found.url && (found.url.startsWith("http://") || found.url.startsWith("https://"))) {
+          return res.redirect(found.url);
+        }
         return res.status(404).send("File not found");
       }
 
