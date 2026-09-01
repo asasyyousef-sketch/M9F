@@ -142,6 +142,38 @@ export const SubtitleOptionsPanel: React.FC<SubtitleOptionsPanelProps> = ({
         {/* ==================================================== */}
         {activeTab === "tracks" && (
           <div className="space-y-3 animate-fadeIn">
+            {/* Master Floating Subtitles Display Switch */}
+            <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-2.5 sm:p-3 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className={`w-6 h-6 rounded-md flex items-center justify-center font-bold text-xs border shrink-0 ${
+                  showSubtitlesOverlay
+                    ? "bg-blue-600/20 text-blue-400 border-blue-500/30"
+                    : "bg-slate-800 text-slate-500 border-slate-700"
+                }`}>
+                  <Subtitles className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-slate-200">
+                    عرض الترجمة العائمة على الشاشة
+                  </h3>
+                  <p className="text-[10px] text-slate-400">
+                    {showSubtitlesOverlay ? "الترجمة معروضة حالياً على الفيديو" : "الترجمة مخفية من العرض (معطلة)"}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={onToggleSubtitlesOverlay}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                  showSubtitlesOverlay
+                    ? "bg-blue-600 text-white border-blue-500 shadow-xs"
+                    : "bg-slate-800 text-slate-400 border-slate-700 hover:text-white"
+                }`}
+              >
+                {showSubtitlesOverlay ? "معروضة ✓" : "مخفية (معطلة)"}
+              </button>
+            </div>
+
             {/* Primary Track Selection Card */}
             <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-2.5 sm:p-3 space-y-2.5">
               <div className="flex items-center justify-between">
