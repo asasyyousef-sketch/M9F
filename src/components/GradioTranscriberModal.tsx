@@ -118,6 +118,11 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
   const [currentStep, setCurrentStep] = useState<"idle" | "uploading" | "calling" | "processing" | "completed" | "error">("idle");
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [progressPercent, setProgressPercent] = useState<number>(0);
+  const [uploadStats, setUploadStats] = useState<{ percent: number; loadedMb: string; totalMb: string }>({
+    percent: 0,
+    loadedMb: "0",
+    totalMb: "0"
+  });
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -341,6 +346,7 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
 
     setErrorMessage(null);
     setResult(null);
+    setUploadStats({ percent: 0, loadedMb: "0", totalMb: "0" });
 
     let targetFileBlob: File | Blob | null = null;
     let targetFileName = "media_audio.mp4";
@@ -355,7 +361,7 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
       setStatusMessage("جاري تحضير ملف الوسائط من السيرفر...");
       setIsProcessing(true);
       setCurrentStep("uploading");
-      setProgressPercent(20);
+      setProgressPercent(15);
 
       try {
         const streamUrl = `/api/media/download/${currentFile.id}`;
@@ -397,13 +403,22 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
         compressionRatioThreshold,
         logProbThreshold,
         signal: controller.signal,
-        onStatusUpdate: (msg, step) => {
+        onUploadProgress: (percent, loadedBytes, totalBytes) => {
+          const mbLoaded = (loadedBytes / (1024 * 1024)).toFixed(1);
+          const mbTotal = (totalBytes / (1024 * 1024)).toFixed(1);
+          setUploadStats({ percent, loadedMb: mbLoaded, totalMb: mbTotal });
+        },
+        onStatusUpdate: (msg, step, pct) => {
           setStatusMessage(msg);
           setCurrentStep(step);
-          if (step === "uploading") setProgressPercent(30);
-          else if (step === "calling") setProgressPercent(60);
-          else if (step === "processing") setProgressPercent(85);
-          else if (step === "completed") setProgressPercent(100);
+          if (typeof pct === "number") {
+            setProgressPercent(pct);
+          } else {
+            if (step === "uploading") setProgressPercent(25);
+            else if (step === "calling") setProgressPercent(40);
+            else if (step === "processing") setProgressPercent(70);
+            else if (step === "completed") setProgressPercent(100);
+          }
         }
       });
 
@@ -934,56 +949,269 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
             )}
           </div>
 
-          {/* STATUS & LIVE PROGRESS BAR */}
+          {/* STATUS & 3-STEP DEDICATED PIPELINE PROGRESS */}
           {isProcessing && (
-            <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-2xl p-4 space-y-3 animate-fadeIn">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
-                  <div>
-                    <span className="font-bold text-xs text-indigo-200 block">
-                      {liveStageLabel ? `${liveStageLabel}: ${statusMessage}` : (statusMessage || "جاري المعالجة...")}
-                    </span>
-                    {liveStage === "transcribing" && liveVideoUrl && (
-                      <span className="text-[10px] text-emerald-400 font-bold block mt-0.5">
-                        ⚡ تم اكتمال تحميل الفيديو — جاري تفريغ الصوت وإنشاء السكربت...
-                      </span>
-                    )}
-                  </div>
+            <div className="bg-slate-950/70 border border-slate-800/90 rounded-3xl p-4 sm:p-5 space-y-4 animate-fadeIn shadow-xl">
+              {/* Header: Title & Elapsed Timer */}
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
+                  <span className="text-xs font-black text-slate-200">
+                    {sourceMode === "youtube"
+                      ? "مراحل تنزيل وتفريغ يوتيوب (3 عمليات متتالية):"
+                      : "مراحل رفع وتفريغ ملف الوسائط (3 عمليات متتالية):"}
+                  </span>
                 </div>
-                <div className="flex items-center gap-2 text-xs font-mono text-slate-400 shrink-0">
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>{formatTimer(elapsedSeconds)}</span>
+                <div className="flex items-center gap-2 bg-slate-900 px-3 py-1 rounded-xl text-xs font-mono text-indigo-300 border border-slate-800">
+                  <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>الوقت: {formatTimer(elapsedSeconds)}</span>
                 </div>
               </div>
 
-              {/* Progress Line */}
-              <div className="space-y-1">
-                <div className="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
-                  <div
-                    className="bg-gradient-to-r from-rose-500 via-amber-500 to-emerald-500 h-full rounded-full transition-all duration-300"
-                    style={{ width: `${Math.max(5, progressPercent)}%` }}
-                  />
+              {/* 3 DISTINCT OPERATION LINES */}
+              <div className="space-y-3">
+                {/* ───────────────────────────────────────────────────────────── */}
+                {/* LINE 1: STEP 1 (Upload or YouTube Download) */}
+                {/* ───────────────────────────────────────────────────────────── */}
+                <div className={`p-3.5 rounded-2xl border transition-all ${
+                  sourceMode === "youtube"
+                    ? liveStage === "downloading" || currentStep === "uploading"
+                      ? "bg-indigo-950/50 border-indigo-500/60 shadow-sm shadow-indigo-500/10"
+                      : liveStage === "transcribing" || liveStage === "done" || currentStep === "completed"
+                      ? "bg-emerald-950/20 border-emerald-500/30"
+                      : "bg-slate-900/40 border-slate-800 text-slate-500"
+                    : currentStep === "uploading"
+                    ? "bg-indigo-950/50 border-indigo-500/60 shadow-sm shadow-indigo-500/10"
+                    : currentStep === "calling" || currentStep === "processing" || currentStep === "completed"
+                    ? "bg-emerald-950/20 border-emerald-500/30"
+                    : "bg-slate-900/40 border-slate-800 text-slate-500"
+                }`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold shrink-0 ${
+                        sourceMode === "youtube"
+                          ? liveStage === "transcribing" || liveStage === "done" || currentStep === "completed"
+                            ? "bg-emerald-500 text-white"
+                            : liveStage === "downloading" || currentStep === "uploading"
+                            ? "bg-indigo-600 text-white animate-pulse"
+                            : "bg-slate-800 text-slate-400"
+                          : currentStep === "calling" || currentStep === "processing" || currentStep === "completed"
+                          ? "bg-emerald-500 text-white"
+                          : currentStep === "uploading"
+                          ? "bg-indigo-600 text-white animate-pulse"
+                          : "bg-slate-800 text-slate-400"
+                      }`}>
+                        {(sourceMode === "youtube"
+                          ? liveStage === "transcribing" || liveStage === "done" || currentStep === "completed"
+                          : currentStep === "calling" || currentStep === "processing" || currentStep === "completed") ? (
+                          <Check className="w-4 h-4 stroke-[3]" />
+                        ) : (sourceMode === "youtube"
+                          ? liveStage === "downloading" || currentStep === "uploading"
+                          : currentStep === "uploading") ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          "1"
+                        )}
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-bold text-slate-200 flex items-center gap-2">
+                          <span>
+                            {sourceMode === "youtube"
+                              ? "1. تنزيل فيديو يوتيوب بالدقة المحددة"
+                              : "1. رفع ونقل ملف الوسائط إلى السيرفر المحلي"}
+                          </span>
+                          {currentStep === "uploading" && (
+                            <span className="text-[10px] px-2 py-0.5 bg-indigo-500/20 text-indigo-300 rounded font-mono">
+                              {uploadStats.percent > 0 ? `${uploadStats.percent}%` : "جاري النقل..."}
+                            </span>
+                          )}
+                          {sourceMode === "youtube" && liveStage === "downloading" && (
+                            <span className="text-[10px] px-2 py-0.5 bg-indigo-500/20 text-indigo-300 rounded font-mono">
+                              {progressPercent > 0 ? `${progressPercent}%` : "جاري التنزيل..."}
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          {sourceMode === "youtube"
+                            ? liveStage === "downloading"
+                              ? (statusMessage || "جاري تنزيل الفيديو عبر السيرفر...")
+                              : liveStage === "transcribing" || liveStage === "done" || currentStep === "completed"
+                              ? "✓ تم تنزيل الفيديو بنجاح وجاهز للمعالجة"
+                              : "بانتظار بدء التنزيل"
+                            : currentStep === "uploading"
+                            ? uploadStats.loadedMb && uploadStats.totalMb && uploadStats.loadedMb !== "0"
+                              ? `جاري نقل البيانات (${uploadStats.percent}% — ${uploadStats.loadedMb} MB من ${uploadStats.totalMb} MB)...`
+                              : "جاري نقل البيانات إلى سيرفر Gradio المحلي..."
+                            : currentStep === "calling" || currentStep === "processing" || currentStep === "completed"
+                            ? "✓ تم نقل ورفع الملف بالكامل إلى السيرفر المحلي (100%)"
+                            : "بانتظار بدء الرفع ونقل الملف"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Mini Upload Progress Bar */}
+                    {currentStep === "uploading" && sourceMode !== "youtube" && (
+                      <div className="w-24 sm:w-32 shrink-0">
+                        <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                          <div
+                            className="bg-indigo-500 h-full rounded-full transition-all duration-200"
+                            style={{ width: `${Math.max(5, uploadStats.percent)}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="flex justify-between text-[10px] text-slate-400 font-mono">
-                  <span>التقدم: {progressPercent}%</span>
-                  <span>{liveStageLabel || (currentStep === "uploading" ? "1/3 التحميل" : currentStep === "processing" ? "2/3 التفريغ" : "3/3 الانتهاء")}</span>
+
+                {/* ───────────────────────────────────────────────────────────── */}
+                {/* LINE 2: STEP 2 (Model Setup / Audio Extraction) */}
+                {/* ───────────────────────────────────────────────────────────── */}
+                <div className={`p-3.5 rounded-2xl border transition-all ${
+                  currentStep === "calling"
+                    ? "bg-indigo-950/50 border-indigo-500/60 shadow-sm shadow-indigo-500/10"
+                    : currentStep === "processing" || currentStep === "completed" || liveStage === "transcribing" || liveStage === "done"
+                    ? "bg-emerald-950/20 border-emerald-500/30"
+                    : "bg-slate-900/40 border-slate-800 text-slate-500"
+                }`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold shrink-0 ${
+                        currentStep === "processing" || currentStep === "completed" || liveStage === "transcribing" || liveStage === "done"
+                          ? "bg-emerald-500 text-white"
+                          : currentStep === "calling"
+                          ? "bg-indigo-600 text-white animate-pulse"
+                          : "bg-slate-800 text-slate-400"
+                      }`}>
+                        {(currentStep === "processing" || currentStep === "completed" || liveStage === "transcribing" || liveStage === "done") ? (
+                          <Check className="w-4 h-4 stroke-[3]" />
+                        ) : currentStep === "calling" ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          "2"
+                        )}
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-bold text-slate-200 flex items-center gap-2">
+                          <span>
+                            {sourceMode === "youtube"
+                              ? "2. استخراج المسار الصوتي وتجهيز معايير التفريغ"
+                              : "2. تهيئة نموذج Whisper وتجهيز المعايير الصوتية"}
+                          </span>
+                          {currentStep === "calling" && (
+                            <span className="text-[10px] px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded font-bold animate-pulse">
+                              قيد التهيئة...
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          {currentStep === "calling"
+                            ? `جاري فحص المعاملات وحجز الدور على السيرفر (Beam: ${beamSize}, VAD: ${vadFilter ? "مفعل" : "معطل"}, Word Timestamps: مفعل)...`
+                            : currentStep === "processing" || currentStep === "completed" || liveStage === "transcribing" || liveStage === "done"
+                            ? "✓ تم استخراج الصوت وتجهيز نموذج Whisper بنجاح"
+                            : "بانتظار اكتمال المرحلة الأولى وتهيئة المعايير"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ───────────────────────────────────────────────────────────── */}
+                {/* LINE 3: STEP 3 (AI Audio Transcription with Live Tracking) */}
+                {/* ───────────────────────────────────────────────────────────── */}
+                <div className={`p-4 rounded-2xl border transition-all space-y-3.5 ${
+                  currentStep === "processing" || liveStage === "transcribing"
+                    ? "bg-gradient-to-br from-indigo-950/70 via-slate-900 to-slate-950 border-indigo-500/70 shadow-lg shadow-indigo-500/20"
+                    : currentStep === "completed" || liveStage === "done"
+                    ? "bg-emerald-950/30 border-emerald-500/40 text-slate-300"
+                    : "bg-slate-900/40 border-slate-800 text-slate-500"
+                }`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold shrink-0 ${
+                        currentStep === "completed" || liveStage === "done"
+                          ? "bg-emerald-500 text-white"
+                          : currentStep === "processing" || liveStage === "transcribing"
+                          ? "bg-gradient-to-r from-rose-500 to-indigo-500 text-white animate-pulse"
+                          : "bg-slate-800 text-slate-400"
+                      }`}>
+                        {(currentStep === "completed" || liveStage === "done") ? (
+                          <Check className="w-4 h-4 stroke-[3]" />
+                        ) : (currentStep === "processing" || liveStage === "transcribing") ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          "3"
+                        )}
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-black text-slate-100 flex items-center gap-2">
+                          <span>3. تفريغ الصوت بالذكاء الاصطناعي ومزامنة الترجمة (Whisper STT)</span>
+                          {(currentStep === "processing" || liveStage === "transcribing") && (
+                            <span className="text-[10px] px-2.5 py-0.5 bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-full font-mono font-bold">
+                              {progressPercent}%
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          {(currentStep === "processing" || liveStage === "transcribing")
+                            ? (statusMessage || "جاري استخراج الكلمات الألمانية وتوليد التوقيتات...")
+                            : (currentStep === "completed" || liveStage === "done")
+                            ? "✓ تم اكتمال التفريغ وتوليد ملفات الترجمة والنصوص بنجاح 100%"
+                            : "بانتظار بدء التفريغ الصوتي بالذكاء الاصطناعي"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Animated Audio Equalizer Waveform during active AI inference */}
+                    {(currentStep === "processing" || liveStage === "transcribing") && (
+                      <div className="flex items-center gap-1 shrink-0 px-2.5 py-1.5 bg-indigo-900/40 rounded-xl border border-indigo-700/50">
+                        <span className="w-1 h-3.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                        <span className="w-1 h-5 bg-rose-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                        <span className="w-1 h-4 bg-amber-400 rounded-full animate-bounce" />
+                        <span className="w-1 h-6 bg-emerald-400 rounded-full animate-bounce [animation-delay:-0.25s]" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* LIVE PROGRESS BAR & STATUS MONITOR FOR STEP 3 (As in YouTube Workspace) */}
+                  {(currentStep === "processing" || liveStage === "transcribing") && (
+                    <div className="space-y-2 pt-2 border-t border-indigo-900/50">
+                      <div className="w-full bg-slate-800/90 rounded-full h-3 overflow-hidden p-0.5 border border-slate-700/60">
+                        <div
+                          className="bg-gradient-to-r from-indigo-500 via-rose-500 to-emerald-500 h-full rounded-full transition-all duration-300 shadow-md shadow-rose-500/20"
+                          style={{ width: `${Math.max(5, progressPercent)}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-slate-300">
+                        <span className="text-indigo-200 font-bold flex items-center gap-1.5">
+                          <Radio className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+                          <span>أين وصل المفرغ: {statusMessage || "جاري معالجة الصوت بالذكاء الاصطناعي..."}</span>
+                        </span>
+                        <span className="font-mono font-bold text-emerald-400">{progressPercent}%</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* Early Video Player Preview (appears as soon as videoUrl is available) */}
               {liveVideoUrl && (
-                <div className="mt-3 pt-3 border-t border-indigo-900/50 space-y-2">
+                <div className="mt-3 pt-3 border-t border-slate-800 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
-                      <Film className="w-3.5 h-3.5" />
-                      <span>معاينة الفيديو المباشرة (جاهز للتشغيل):</span>
+                      <Film className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>معاينة الفيديو المباشرة (جاهز للتشغيل أثناء التفريغ):</span>
                     </span>
                     <span className="text-[10px] text-emerald-400 font-mono font-bold">
                       {liveStage === "transcribing" ? "جاري إنشاء الترجمة..." : "✓ الفيديو جاهز"}
                     </span>
                   </div>
-                  <div className="aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-700 relative">
+                  <div className="aspect-video w-full rounded-2xl overflow-hidden bg-black border border-slate-700 relative shadow-md">
                     <video
                       src={liveVideoUrl}
                       controls
@@ -1004,6 +1232,17 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* Cancel Button */}
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="text-xs text-rose-400 hover:text-rose-300 font-bold hover:underline cursor-pointer transition-colors"
+                >
+                  إلغاء العملية
+                </button>
+              </div>
             </div>
           )}
 

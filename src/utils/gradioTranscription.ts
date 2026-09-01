@@ -232,7 +232,7 @@ export async function transcribeFileWithGradio(
   const baseUrl = serverUrl.replace(/\/+$/, "");
 
   // 1) Step 1: Upload File to Gradio with live progress tracking
-  onStatusUpdate?.("1/3 جاري رفع الملف إلى سيرفر التفريغ المحلي...", "uploading", 0);
+  onStatusUpdate?.("جاري رفع ونقل الملف إلى سيرفر التفريغ المحلي...", "uploading", 0);
 
   let uploadedPath: string;
   try {
@@ -245,7 +245,7 @@ export async function transcribeFileWithGradio(
         const mbLoaded = (loaded / (1024 * 1024)).toFixed(1);
         const mbTotal = (total / (1024 * 1024)).toFixed(1);
         onStatusUpdate?.(
-          `1/3 جاري رفع الملف (${percent}% - ${mbLoaded} / ${mbTotal} MB)...`,
+          `جاري رفع ونقل الملف (${percent}% - ${mbLoaded} / ${mbTotal} MB)...`,
           "uploading",
           percent
         );
@@ -259,10 +259,10 @@ export async function transcribeFileWithGradio(
     );
   }
 
-  onStatusUpdate?.("1/3 اكتمل رفع الملف بنجاح (100%)", "uploading", 100);
+  onStatusUpdate?.("اكتمل رفع الملف بنجاح إلى السيرفر (100%)", "uploading", 100);
 
   // 2) Step 2: Call Transcribe Endpoint (11 values matching Gradio's exact signature: File, 3 Sliders, 3 Checkboxes, 4 Sliders)
-  onStatusUpdate?.("2/3 تم رفع الملف، جاري تهيئة طلب المعالجة والتفريغ...", "calling", 35);
+  onStatusUpdate?.("تم استلام الملف، جاري تهيئة نموذج Whisper وحجز الدور على السيرفر...", "calling", 35);
 
   const payload11 = [
     { path: uploadedPath, meta: { _type: "gradio.FileData" } }, // 0: File
@@ -326,8 +326,8 @@ export async function transcribeFileWithGradio(
     throw new Error("لم يتم استلام event_id من سيرفر Gradio.");
   }
 
-  // 3) Step 3: Stream SSE to receive the final result
-  onStatusUpdate?.("3/3 جاري معالجة الصوت بالذكاء الاصطناعي على السيرفر المحلي...", "processing", 50);
+  // 3) Step 3: Stream SSE to receive the final result with continuous progress updates
+  onStatusUpdate?.("جاري تهيئة الصوت بالذكاء الاصطناعي على السيرفر المحلي...", "processing", 40);
 
   let streamRes: Response;
   try {
@@ -351,62 +351,89 @@ export async function transcribeFileWithGradio(
   let buffer = "";
 
   let finalResult: GradioTranscribeResult | null = null;
-  let processingPercent = 50;
+  let processingPercent = 42;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  // Active smooth ticker that tracks and updates AI transcription progress
+  const progressInterval = setInterval(() => {
+    if (processingPercent < 94) {
+      processingPercent += processingPercent < 70 ? 2 : 1;
+      let phaseMsg = "جاري استخراج وتوليد النصوص الألمانية المتزامنة...";
+      if (processingPercent < 55) {
+        phaseMsg = "جاري تحليل الإشارات الصوتية وتطبيق كاشف الصوت VAD...";
+      } else if (processingPercent < 75) {
+        phaseMsg = "جاري تفريغ الكلمات الألمانية وتوليد المقاطع الصوتية...";
+      } else if (processingPercent < 90) {
+        phaseMsg = "جاري مزامنة الطوابع الزمنية الدقيقة (Word Timestamps)...";
+      } else {
+        phaseMsg = "جاري تجميع مخرجات النصوص وملفات SRT و WebVTT...";
+      }
+      onStatusUpdate?.(phaseMsg, "processing", processingPercent);
+    }
+  }, 1200);
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("data:")) {
-        const jsonStr = trimmed.slice(5).trim();
-        if (!jsonStr) continue;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
 
-        try {
-          const parsed = JSON.parse(jsonStr);
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("data:")) {
+          const jsonStr = trimmed.slice(5).trim();
+          if (!jsonStr) continue;
 
-          // If array returned with transcription results
-          if (Array.isArray(parsed) && parsed.length >= 2) {
-            const [plainText, srtText, videoHtml, txtFile, srtFile, vttFile, statusMsg, logs] = parsed;
+          try {
+            const parsed = JSON.parse(jsonStr);
 
-            if (statusMsg) {
-              onStatusUpdate?.(`الحالة: ${statusMsg}`, "processing", 95);
+            // If array returned with transcription results
+            if (Array.isArray(parsed) && parsed.length >= 2) {
+              const [plainText, srtText, videoHtml, txtFile, srtFile, vttFile, statusMsg, logs] = parsed;
+
+              if (statusMsg) {
+                onStatusUpdate?.(`الحالة: ${statusMsg}`, "processing", 98);
+              }
+
+              finalResult = {
+                plainText: typeof plainText === "string" ? plainText : "",
+                srtText: typeof srtText === "string" ? srtText : "",
+                videoHtml: typeof videoHtml === "string" ? videoHtml : undefined,
+                txtFile,
+                srtFile,
+                vttFile,
+                statusMsg,
+                logs: typeof logs === "string" ? logs : undefined
+              };
+
+              clearInterval(progressInterval);
+              onStatusUpdate?.("تم استلام النتيجة النهائية واكتمال التفريغ بنجاح!", "completed", 100);
+              return finalResult;
+            } else if (parsed && typeof parsed === "object") {
+              // Check for progress / queue messages
+              if (parsed.msg === "process_generating" || parsed.stage === "generating") {
+                processingPercent = Math.max(processingPercent, Math.min(94, processingPercent + 5));
+                onStatusUpdate?.("جاري استخراج وتوليد النصوص الألمانية المتزامنة...", "processing", processingPercent);
+              } else if (parsed.msg === "queued") {
+                onStatusUpdate?.("الطلب في قائمة الانتظار على السيرفر...", "processing", 38);
+              } else if (parsed.error) {
+                clearInterval(progressInterval);
+                throw new Error(`خطأ من سيرفر Gradio: ${parsed.error}`);
+              }
             }
-
-            finalResult = {
-              plainText: typeof plainText === "string" ? plainText : "",
-              srtText: typeof srtText === "string" ? srtText : "",
-              videoHtml: typeof videoHtml === "string" ? videoHtml : undefined,
-              txtFile,
-              srtFile,
-              vttFile,
-              statusMsg,
-              logs: typeof logs === "string" ? logs : undefined
-            };
-
-            onStatusUpdate?.("تم استلام النتيجة النهائية بنجاح!", "completed", 100);
-            return finalResult;
-          } else if (parsed && typeof parsed === "object") {
-            // Check for progress / queue messages
-            if (parsed.msg === "process_generating" || parsed.stage === "generating") {
-              processingPercent = Math.min(92, processingPercent + 5);
-              onStatusUpdate?.("جاري استخراج وتوليد النصوص الألمانية المتزامنة...", "processing", processingPercent);
-            } else if (parsed.msg === "queued") {
-              onStatusUpdate?.("الطلب في قائمة الانتظار على السيرفر...", "processing", 40);
-            } else if (parsed.error) {
-              throw new Error(`خطأ من سيرفر Gradio: ${parsed.error}`);
+          } catch (e: any) {
+            if (e.message?.includes("خطأ من سيرفر Gradio")) {
+              clearInterval(progressInterval);
+              throw e;
             }
           }
-        } catch (e: any) {
-          if (e.message?.includes("خطأ من سيرفر Gradio")) throw e;
         }
       }
     }
+  } finally {
+    clearInterval(progressInterval);
   }
 
   if (finalResult) {
