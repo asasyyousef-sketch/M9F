@@ -1469,25 +1469,53 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   }, [showDualSubtitles, activeCues, secondaryCues]);
 
   // Auto-scroll transcript container only to active cue (isolated from page scroll)
+  const scrollToActiveCue = useCallback((instant = false) => {
+    if (!transcriptContainerRef.current) return;
+    const container = transcriptContainerRef.current;
+    const element =
+      activeCueRef.current ||
+      (container.querySelector('[data-active-cue="true"]') as HTMLElement | null);
+    if (!element) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const elementRect = element.getBoundingClientRect();
+
+    if (containerRect.height === 0 || elementRect.height === 0) return;
+
+    // Calculate relative vertical offset inside the subtitles list container only
+    const relativeTop = elementRect.top - containerRect.top;
+    const targetScrollTop =
+      container.scrollTop + relativeTop - container.clientHeight / 2 + element.clientHeight / 2;
+
+    container.scrollTo({
+      top: Math.max(0, targetScrollTop),
+      behavior: instant ? "auto" : "smooth"
+    });
+  }, []);
+
+  // Continuous playback auto-scroll when current cue changes
   useEffect(() => {
-    if (autoScrollTranscript && activeCueRef.current && transcriptContainerRef.current) {
-      const container = transcriptContainerRef.current;
-      const element = activeCueRef.current;
-
-      const containerRect = container.getBoundingClientRect();
-      const elementRect = element.getBoundingClientRect();
-
-      // Calculate relative vertical offset inside the subtitles list container only
-      const relativeTop = elementRect.top - containerRect.top;
-      const targetScrollTop =
-        container.scrollTop + relativeTop - container.clientHeight / 2 + element.clientHeight / 2;
-
-      container.scrollTo({
-        top: Math.max(0, targetScrollTop),
-        behavior: "smooth"
-      });
+    if (autoScrollTranscript && showTranscriptPanel && sidePanelView === "transcript") {
+      scrollToActiveCue(false);
     }
-  }, [currentCue, autoScrollTranscript]);
+  }, [currentCue, autoScrollTranscript, showTranscriptPanel, sidePanelView, scrollToActiveCue]);
+
+  // Instant centering without animation whenever the transcript panel is opened or made active
+  useEffect(() => {
+    if (showTranscriptPanel && sidePanelView === "transcript") {
+      // Run immediately on render frame and with quick fallback to guarantee container has mounted & measured
+      const rafId = requestAnimationFrame(() => {
+        scrollToActiveCue(true);
+      });
+      const timeoutId = window.setTimeout(() => {
+        scrollToActiveCue(true);
+      }, 40);
+      return () => {
+        cancelAnimationFrame(rafId);
+        window.clearTimeout(timeoutId);
+      };
+    }
+  }, [showTranscriptPanel, sidePanelView, activeTrackId, scrollToActiveCue]);
 
   // Get user-configured Gemini API key from Settings / localStorage
   const getSavedGeminiKey = (): string => {
@@ -4691,6 +4719,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                               <div
                                 key={cue.id}
                                 ref={isCurrent ? activeCueRef : null}
+                                data-active-cue={isCurrent ? "true" : undefined}
                                 onClick={() => handleSeek(cue.startTime)}
                                 className={`px-2.5 py-2 rounded-lg border transition-colors duration-150 flex items-center justify-between gap-2 cursor-pointer group ${
                                   isCurrent
