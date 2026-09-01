@@ -833,20 +833,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const [hudToast, setHudToast] = useState<{ text: string; sub?: string } | null>(null);
   const hudTimerRef = useRef<number | null>(null);
 
-  // Transient Sample Subtitle Preview on Swipe (Shows what appeared/disappeared with current styling when no cue is active)
-  const [showSwipeSamplePreview, setShowSwipeSamplePreview] = useState<boolean>(false);
-  const swipeSampleTimerRef = useRef<number | null>(null);
-
-  const triggerSwipeSamplePreview = useCallback(() => {
-    if (swipeSampleTimerRef.current) {
-      window.clearTimeout(swipeSampleTimerRef.current);
-    }
-    setShowSwipeSamplePreview(true);
-    swipeSampleTimerRef.current = window.setTimeout(() => {
-      setShowSwipeSamplePreview(false);
-    }, 1800);
-  }, []);
-
   // Floating Samsung One UI-style Horizontal Volume Slider Bar State
   const [showSamsungVolumeBar, setShowSamsungVolumeBar] = useState<boolean>(false);
   const samsungVolumeTimerRef = useRef<number | null>(null);
@@ -2843,7 +2829,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   // Center Swipe UP / DOWN (Subtitles)
   const handleCenterSwipeUp = useCallback(() => {
-    triggerSwipeSamplePreview();
     const availableSubtitles = currentFile?.subtitles || [];
 
     if (availableSubtitles.length === 0) {
@@ -2851,12 +2836,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       return;
     }
 
-    const hasValidPrimary = Boolean(activeTrackId && availableSubtitles.some((t) => t.id === activeTrackId));
-    const isPrimaryActive = showSubtitlesOverlay && hasValidPrimary;
+    // Subtitle Visibility State Machine:
+    // State 0: All Hidden (showSubtitlesOverlay === false)
+    // State 1: Primary Subtitle 1 Visible (showSubtitlesOverlay === true && showDualSubtitles === false)
+    // State 2: Both Subtitles 1 & 2 Visible (showSubtitlesOverlay === true && showDualSubtitles === true)
 
-    if (!isPrimaryActive) {
-      // Step 1: Activate & Show Primary Subtitle (الترجمة الأولى)
+    if (!showSubtitlesOverlay) {
+      // 1st Swipe UP -> Reveal Primary Subtitle 1 ONLY
       let targetPrimaryId = activeTrackId;
+      const hasValidPrimary = Boolean(targetPrimaryId && availableSubtitles.some((t) => t.id === targetPrimaryId));
       if (!hasValidPrimary) {
         const savedPrefs = currentFile ? getSavedSubtitlePreferences(currentFile.id) : { primaryId: null, secondaryId: null };
         if (currentFile?.primaryTrackId && availableSubtitles.some((t) => t.id === currentFile.primaryTrackId)) {
@@ -2871,15 +2859,24 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         }
       }
 
-      handleSelectPrimaryTrack(targetPrimaryId);
+      setActiveTrackId(targetPrimaryId);
       setShowSubtitlesOverlay(true);
       setShowDualSubtitles(false);
+
       try {
         localStorage.setItem("media_player_show_subtitles_overlay", JSON.stringify(true));
         localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(false));
       } catch (e) {
         console.error(e);
       }
+
+      if (currentFile && targetPrimaryId) {
+        saveSubtitlePreferences(currentFile.id, targetPrimaryId, secondaryTrackId);
+        saveSubtitlePreferencesToServer(currentFile.id, targetPrimaryId, secondaryTrackId, false);
+        setCurrentFile((prev) => prev ? { ...prev, primaryTrackId: targetPrimaryId, showDualSubtitles: false } : null);
+        setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, primaryTrackId: targetPrimaryId, showDualSubtitles: false } : f));
+      }
+
       triggerVisualFeedback({
         type: "swipe_up_sub1",
         side: "center",
@@ -2888,7 +2885,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       });
       triggerHud("إظهار الترجمة الأولى", "سحب ⬆️");
     } else if (!showDualSubtitles) {
-      // Step 2: Activate & Show Dual Subtitles (الترجمة الثانية / المزدوجة)
+      // 2nd Swipe UP -> Reveal Secondary / Dual Subtitle 2
       if (availableSubtitles.length <= 1) {
         triggerHud("يوجد مسار ترجمة واحد فقط متاح", "ℹ️");
         return;
@@ -2911,14 +2908,23 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       }
 
       if (targetSecId) {
-        handleSelectSecondaryTrack(targetSecId);
+        setSecondaryTrackId(targetSecId);
       }
       setShowDualSubtitles(true);
+
       try {
         localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(true));
       } catch (e) {
         console.error(e);
       }
+
+      if (currentFile) {
+        saveSubtitlePreferences(currentFile.id, activeTrackId, targetSecId);
+        saveSubtitlePreferencesToServer(currentFile.id, activeTrackId, targetSecId, true);
+        setCurrentFile((prev) => prev ? { ...prev, secondaryTrackId: targetSecId || undefined, showDualSubtitles: true } : null);
+        setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, secondaryTrackId: targetSecId || undefined, showDualSubtitles: true } : f));
+      }
+
       triggerVisualFeedback({
         type: "swipe_up_sub2",
         side: "center",
@@ -2935,16 +2941,19 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     activeTrackId,
     secondaryTrackId,
     currentFile,
-    handleSelectPrimaryTrack,
-    handleSelectSecondaryTrack,
     triggerVisualFeedback,
-    triggerHud,
-    triggerSwipeSamplePreview
+    triggerHud
   ]);
 
   const handleCenterSwipeDown = useCallback(() => {
+    const availableSubtitles = currentFile?.subtitles || [];
+    if (availableSubtitles.length === 0) {
+      triggerHud("لا توجد مسارات ترجمة", "⚠️");
+      return;
+    }
+
     if (showSubtitlesOverlay && showDualSubtitles) {
-      triggerSwipeSamplePreview();
+      // 1st Swipe DOWN -> Hide Subtitle 2, keep Subtitle 1 active
       setShowDualSubtitles(false);
       try {
         localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(false));
@@ -2953,6 +2962,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       }
       if (currentFile) {
         saveSubtitlePreferencesToServer(currentFile.id, activeTrackId, secondaryTrackId, false);
+        setCurrentFile((cf) => cf ? { ...cf, showDualSubtitles: false } : null);
+        setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, showDualSubtitles: false } : f));
       }
       triggerVisualFeedback({
         type: "swipe_down_sub2",
@@ -2962,6 +2973,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       });
       triggerHud("إخفاء الترجمة الثانية", "سحب ⬇️");
     } else if (showSubtitlesOverlay) {
+      // 2nd Swipe DOWN -> Hide Subtitle 1 (All subtitles hidden)
       setShowSubtitlesOverlay(false);
       setShowDualSubtitles(false);
       try {
@@ -2969,6 +2981,11 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(false));
       } catch (e) {
         console.error(e);
+      }
+      if (currentFile) {
+        saveSubtitlePreferencesToServer(currentFile.id, activeTrackId, secondaryTrackId, false);
+        setCurrentFile((cf) => cf ? { ...cf, showDualSubtitles: false } : null);
+        setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, showDualSubtitles: false } : f));
       }
       triggerVisualFeedback({
         type: "swipe_down_all",
@@ -2987,8 +3004,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     activeTrackId,
     secondaryTrackId,
     triggerVisualFeedback,
-    triggerHud,
-    triggerSwipeSamplePreview
+    triggerHud
   ]);
 
   // Left Swipe UP / DOWN (Sentence navigation)
@@ -3135,10 +3151,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       target.closest("button") ||
       target.closest("input") ||
       target.closest("textarea") ||
-      target.closest("[data-ignore-stage-click]")
+      target.closest("[data-ignore-stage-click]") ||
+      target.closest("[data-interactive-control]")
     ) {
       return;
     }
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch (err) {}
 
     pointerStartRef.current = {
       x: e.clientX,
@@ -3149,6 +3170,12 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   };
 
   const handleStagePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch (err) {}
+
     if (!pointerStartRef.current) return;
     const start = pointerStartRef.current;
     pointerStartRef.current = null;
@@ -3165,29 +3192,29 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const duration = Date.now() - start.time;
     const startXRatio = (start.x - rect.left) / rect.width;
 
-    // Vertical Swipe Detection: Drag >= 35px, mostly vertical, under 700ms
-    if (absDeltaY >= 35 && absDeltaY > absDeltaX * 1.1 && duration < 700) {
+    // Vertical Swipe Detection: Drag >= 25px, predominantly vertical, under 1000ms
+    if (absDeltaY >= 25 && absDeltaY > absDeltaX * 0.7 && duration < 1000) {
       if (tapTrackerRef.current?.timer) {
         window.clearTimeout(tapTrackerRef.current.timer);
         tapTrackerRef.current = null;
       }
 
-      if (startXRatio < 0.20) {
-        // LEFT ZONE SWIPE (Sentence Navigation)
+      if (startXRatio < 0.15) {
+        // LEFT ZONE SWIPE (Sentence Navigation - Left 15% edge)
         if (deltaY > 0) {
           handleLeftSwipeUp(); // Next sentence
         } else {
           handleLeftSwipeDown(); // Prev sentence
         }
-      } else if (startXRatio > 0.80) {
-        // RIGHT ZONE SWIPE (Volume Control)
+      } else if (startXRatio > 0.85) {
+        // RIGHT ZONE SWIPE (Volume Control - Right 15% edge)
         if (deltaY > 0) {
           handleRightSwipeUp(); // Volume Up
         } else {
           handleRightSwipeDown(); // Volume Down
         }
       } else {
-        // CENTER ZONE SWIPE (Subtitles)
+        // CENTER ZONE SWIPE (Subtitles - Wide 70% Center Area)
         if (deltaY > 0) {
           handleCenterSwipeUp();
         } else {
@@ -3197,14 +3224,19 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       return;
     }
 
-    // Tap Detection: Minimal movement (< 25px)
-    if (absDeltaX < 25 && absDeltaY < 25) {
+    // Tap Detection: Minimal movement (< 20px)
+    if (absDeltaX < 20 && absDeltaY < 20) {
       const xRatio = (endX - rect.left) / rect.width;
       handleStageTap(xRatio);
     }
   };
 
-  const handleStagePointerCancel = () => {
+  const handleStagePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch (err) {}
     pointerStartRef.current = null;
   };
 
@@ -4007,8 +4039,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                         isFullscreen
                           ? "w-full h-full object-contain pointer-events-none"
                           : isImmersiveMode
-                          ? "w-full h-full object-contain cursor-pointer"
-                          : "w-full max-h-[500px] object-contain cursor-pointer"
+                          ? "w-full h-full object-contain pointer-events-none"
+                          : "w-full max-h-[500px] object-contain pointer-events-none"
                       }
                       preload="metadata"
                       playsInline
@@ -4018,7 +4050,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     <div
                       className={`w-full ${
                         isImmersiveMode ? "h-full justify-center" : "py-12 sm:py-16"
-                      } px-6 flex flex-col items-center justify-center gap-5 relative bg-linear-to-b from-slate-900 via-slate-900/90 to-slate-950`}
+                      } px-6 flex flex-col items-center justify-center gap-5 relative bg-linear-to-b from-slate-900 via-slate-900/90 to-slate-950 pointer-events-none`}
                     >
                       <audio
                         ref={audioRef}
@@ -4048,7 +4080,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   )}
 
                   {/* FLOATING SUBTITLES OVERLAY (Identical floating behavior & styling for BOTH Video & Audio) */}
-                  {showSubtitlesOverlay && (currentCue || (showDualSubtitles && currentSecondaryCue) || showSwipeSamplePreview || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && (
+                  {showSubtitlesOverlay && (currentCue || (showDualSubtitles && currentSecondaryCue) || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && (
                     <>
                       {primarySubStyle.position === secondarySubStyle.position ? (
                         <div
@@ -4056,7 +4088,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           style={getSubtitlePositionStyle(primarySubStyle.position, primarySubStyle.offsetY)}
                         >
                           {/* Primary Subtitle (e.g., German / Original) */}
-                          {(currentCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal || showSwipeSamplePreview) && !currentCue)) && (() => {
+                          {(currentCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && !currentCue)) && (() => {
                             const text = currentCue ? currentCue.text : "this is test";
                             const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
@@ -4070,7 +4102,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           })()}
 
                           {/* Secondary Subtitle (e.g., Arabic / Translated with Gemini) */}
-                          {showDualSubtitles && (currentSecondaryCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal || showSwipeSamplePreview) && !currentSecondaryCue)) && (() => {
+                          {showDualSubtitles && (currentSecondaryCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && !currentSecondaryCue)) && (() => {
                             const text = currentSecondaryCue ? currentSecondaryCue.text : "هذه تجربة كلام هنا";
                             const dir = secondarySubStyle.direction === "rtl" ? "rtl" : secondarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
@@ -4086,7 +4118,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       ) : (
                         <>
                           {/* Primary Subtitle in its dedicated position */}
-                          {(currentCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal || showSwipeSamplePreview) && !currentCue)) && (() => {
+                          {(currentCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && !currentCue)) && (() => {
                             const text = currentCue ? currentCue.text : "this is test";
                             const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
@@ -4105,7 +4137,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           })()}
 
                           {/* Secondary Subtitle in its dedicated position */}
-                          {showDualSubtitles && (currentSecondaryCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal || showSwipeSamplePreview) && !currentSecondaryCue)) && (() => {
+                          {showDualSubtitles && (currentSecondaryCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && !currentSecondaryCue)) && (() => {
                             const text = currentSecondaryCue ? currentSecondaryCue.text : "هذه تجربة كلام هنا";
                             const dir = secondarySubStyle.direction === "rtl" ? "rtl" : secondarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
