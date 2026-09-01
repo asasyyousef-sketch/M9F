@@ -277,15 +277,20 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
   const [justSaved, setJustSaved] = useState<boolean>(false);
   const [previewProgress, setPreviewProgress] = useState<number>(0.35);
 
-  // Smooth live animation loop for previewing the reading progress highlight in real time
+  // Smooth, relaxed animation loop for previewing the reading progress highlight in real time
   useEffect(() => {
     let animationFrameId: number;
     const startTimestamp = performance.now();
-    const cycleDuration = 3600; // 3.6s smooth cycle
+    const cycleDuration = 4500; // 4.5s natural comfortable cycle
 
     const updateAnimation = (now: number) => {
       const elapsed = (now - startTimestamp) % cycleDuration;
-      setPreviewProgress(elapsed / cycleDuration);
+      // 0 to 3.8s: smooth progress (0 to 1), 3.8s to 4.5s: brief gentle resting pause (1)
+      const activeDuration = 3800;
+      let ratio = Math.min(1, elapsed / activeDuration);
+      // Soft ease curve (cubic-bezier like)
+      const smoothVal = ratio < 1 ? Math.sin((ratio * Math.PI) / 2) : 1;
+      setPreviewProgress(smoothVal);
       animationFrameId = requestAnimationFrame(updateAnimation);
     };
 

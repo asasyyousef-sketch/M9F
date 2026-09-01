@@ -274,6 +274,7 @@ export function computeSubtitleCSS(
 
 // ---------------------------------------------------------
 // Subtitle Cue Box Component (Supports Sentence Reading Progress Highlight)
+// Features: 60FPS fluid continuous time interpolation + Ultra-soft, feathered, eye-comfort styling
 // ---------------------------------------------------------
 export interface SubtitleCueBoxProps {
   text: string;
@@ -282,6 +283,7 @@ export interface SubtitleCueBoxProps {
   currentTime?: number;
   cueStartTime?: number;
   cueEndTime?: number;
+  isPlaying?: boolean;
   previewProgress?: number;
   className?: string;
 }
@@ -293,27 +295,108 @@ export const SubtitleCueBox: React.FC<SubtitleCueBoxProps> = ({
   currentTime,
   cueStartTime,
   cueEndTime,
+  isPlaying = false,
   previewProgress,
   className = ""
 }) => {
   const dir = config.direction === "rtl" ? "rtl" : config.direction === "ltr" ? "ltr" : detectTextDirection(text);
   const isRtl = dir === "rtl";
 
-  let progressRatio = 0;
-  if (previewProgress !== undefined) {
-    progressRatio = Math.max(0, Math.min(1, previewProgress));
-  } else if (
-    currentTime !== undefined &&
-    cueStartTime !== undefined &&
-    cueEndTime !== undefined &&
-    cueEndTime > cueStartTime
-  ) {
-    const duration = cueEndTime - cueStartTime;
-    const elapsed = Math.max(0, Math.min(duration, currentTime - cueStartTime));
-    progressRatio = duration > 0 ? elapsed / duration : 0;
-  }
+  // Initial ratio calculation
+  const getCalculatedRatio = () => {
+    if (previewProgress !== undefined) return Math.max(0, Math.min(1, previewProgress));
+    if (
+      currentTime !== undefined &&
+      cueStartTime !== undefined &&
+      cueEndTime !== undefined &&
+      cueEndTime > cueStartTime
+    ) {
+      const duration = cueEndTime - cueStartTime;
+      return Math.max(0, Math.min(1, (currentTime - cueStartTime) / duration));
+    }
+    return 0;
+  };
 
-  const progressPercent = Math.min(100, Math.max(0, progressRatio * 100));
+  const [smoothRatio, setSmoothRatio] = useState<number>(getCalculatedRatio);
+
+  // Keep a reference to playback state for the 60fps animation frame loop
+  const trackingRef = useRef({
+    currentTime: currentTime ?? 0,
+    cueStartTime: cueStartTime ?? 0,
+    cueEndTime: cueEndTime ?? 0,
+    isPlaying,
+    lastUpdatePerf: performance.now(),
+    previewProgress
+  });
+
+  useEffect(() => {
+    trackingRef.current = {
+      currentTime: currentTime ?? 0,
+      cueStartTime: cueStartTime ?? 0,
+      cueEndTime: cueEndTime ?? 0,
+      isPlaying,
+      lastUpdatePerf: performance.now(),
+      previewProgress
+    };
+  }, [currentTime, cueStartTime, cueEndTime, isPlaying, previewProgress]);
+
+  // Silky-Smooth Continuous 60/120 FPS Extrapolation Loop
+  useEffect(() => {
+    if (previewProgress !== undefined) {
+      setSmoothRatio(Math.max(0, Math.min(1, previewProgress)));
+      return;
+    }
+
+    let animId: number;
+    let isMounted = true;
+
+    const renderFrame = () => {
+      if (!isMounted) return;
+
+      const {
+        currentTime: cur,
+        cueStartTime: start,
+        cueEndTime: end,
+        isPlaying: active,
+        lastUpdatePerf,
+        previewProgress: prevProg
+      } = trackingRef.current;
+
+      if (prevProg !== undefined) {
+        setSmoothRatio(Math.max(0, Math.min(1, prevProg)));
+      } else if (end > start) {
+        const duration = end - start;
+        let extrapolatedTime = cur;
+        if (active) {
+          const deltaSec = (performance.now() - lastUpdatePerf) / 1000;
+          extrapolatedTime = cur + Math.min(0.5, Math.max(0, deltaSec));
+        }
+        const targetRatio = Math.max(0, Math.min(1, (extrapolatedTime - start) / duration));
+
+        setSmoothRatio(prev => {
+          const diff = targetRatio - prev;
+          // If large sudden jump (seek or new sentence), snap immediately
+          if (Math.abs(diff) > 0.25 || diff < -0.05) {
+            return targetRatio;
+          }
+          // Smooth fluid exponential moving average (60fps glide)
+          return prev + diff * 0.35;
+        });
+      } else {
+        setSmoothRatio(0);
+      }
+
+      animId = requestAnimationFrame(renderFrame);
+    };
+
+    animId = requestAnimationFrame(renderFrame);
+    return () => {
+      isMounted = false;
+      cancelAnimationFrame(animId);
+    };
+  }, [previewProgress]);
+
+  const progressPercent = Math.min(100, Math.max(0, smoothRatio * 100));
   const showProgress = Boolean(config.enableTimingProgress);
   const pStyle = config.timingProgressStyle || "background_sweep";
   const pColor = config.timingProgressColor || "#ffffff";
@@ -327,61 +410,77 @@ export const SubtitleCueBox: React.FC<SubtitleCueBoxProps> = ({
         position: "relative",
         overflow: "hidden"
       }}
-      className={`relative overflow-hidden ${className}`}
+      className={`relative overflow-hidden transition-all duration-150 ease-out select-none ${className}`}
     >
       {/* Background Reading Progress Highlight Layer */}
       {showProgress && (
         <>
+          {/* 1. Background Sweep: Soft Feathered Gradient Wave (موجة تعبئة ناعمة ومخملية مريحة للعين) */}
           {pStyle === "background_sweep" && (
             <div
-              className="absolute inset-y-0 pointer-events-none transition-[width] duration-75 ease-linear"
+              className="absolute inset-y-0 pointer-events-none rounded-[inherit]"
               style={{
                 [isRtl ? "right" : "left"]: 0,
                 width: `${progressPercent}%`,
                 background: isRtl
-                  ? `linear-gradient(to left, ${hexToRgba(pColor, pOpacity * 0.35)} 0%, ${hexToRgba(pColor, pOpacity)} 100%)`
-                  : `linear-gradient(to right, ${hexToRgba(pColor, pOpacity * 0.35)} 0%, ${hexToRgba(pColor, pOpacity)} 100%)`,
-                borderLeft: isRtl ? `2px solid ${hexToRgba(pColor, Math.min(1, pOpacity * 1.8))}` : "none",
-                borderRight: !isRtl ? `2px solid ${hexToRgba(pColor, Math.min(1, pOpacity * 1.8))}` : "none",
-                boxShadow: `0 0 14px ${hexToRgba(pColor, pOpacity * 0.8)}`
+                  ? `linear-gradient(to left, ${hexToRgba(pColor, pOpacity * 0.15)} 0%, ${hexToRgba(pColor, pOpacity * 0.55)} 60%, ${hexToRgba(pColor, pOpacity)} 100%)`
+                  : `linear-gradient(to right, ${hexToRgba(pColor, pOpacity * 0.15)} 0%, ${hexToRgba(pColor, pOpacity * 0.55)} 60%, ${hexToRgba(pColor, pOpacity)} 100%)`,
+                boxShadow: isRtl
+                  ? `-4px 0 16px 2px ${hexToRgba(pColor, pOpacity * 0.75)}`
+                  : `4px 0 16px 2px ${hexToRgba(pColor, pOpacity * 0.75)}`,
+                backdropFilter: "blur(0.5px)"
               }}
-            />
-          )}
-
-          {pStyle === "glow_sweep" && (
-            <div
-              className="absolute inset-y-0 w-16 pointer-events-none transition-[left,right] duration-75 ease-linear"
-              style={{
-                [isRtl ? "right" : "left"]: `calc(${progressPercent}% - 32px)`,
-                background: `radial-gradient(ellipse at center, ${hexToRgba(pColor, pOpacity * 1.5)} 0%, ${hexToRgba(pColor, pOpacity * 0.5)} 50%, transparent 100%)`,
-                boxShadow: `0 0 20px ${hexToRgba(pColor, pOpacity)}`
-              }}
-            />
-          )}
-
-          {pStyle === "bottom_bar" && (
-            <div className="absolute bottom-0 inset-x-0 h-1 bg-black/25 pointer-events-none">
+            >
+              {/* Soft Feathered Leading Tip Edge (تلاشي ناعم في المقدمة لمنع أي خطوط حادة) */}
               <div
-                className="h-full rounded-full transition-[width] duration-75 ease-linear"
+                className="absolute inset-y-0 w-3 pointer-events-none"
                 style={{
-                  [isRtl ? "marginRight" : "marginLeft"]: 0,
-                  width: `${progressPercent}%`,
-                  backgroundColor: pColor,
-                  boxShadow: `0 0 8px ${pColor}`
+                  [isRtl ? "left" : "right"]: "-2px",
+                  background: `radial-gradient(ellipse at center, ${hexToRgba(pColor, Math.min(1, pOpacity * 1.3))} 0%, ${hexToRgba(pColor, 0)} 100%)`,
+                  filter: "blur(2px)"
                 }}
               />
             </div>
           )}
 
-          {pStyle === "top_bar" && (
-            <div className="absolute top-0 inset-x-0 h-1 bg-black/25 pointer-events-none">
+          {/* 2. Glow Sweep: Soft Ambient Aura Beam (شعاع توهج سحابي ناعم ينساب بهدوء) */}
+          {pStyle === "glow_sweep" && (
+            <div
+              className="absolute inset-y-0 w-24 pointer-events-none rounded-full"
+              style={{
+                [isRtl ? "right" : "left"]: `calc(${progressPercent}% - 48px)`,
+                background: `radial-gradient(ellipse at center, ${hexToRgba(pColor, pOpacity * 1.6)} 0%, ${hexToRgba(pColor, pOpacity * 0.6)} 40%, transparent 80%)`,
+                filter: "blur(4px)",
+                boxShadow: `0 0 24px ${hexToRgba(pColor, pOpacity * 0.8)}`
+              }}
+            />
+          )}
+
+          {/* 3. Bottom Bar: Soft Luminous Track (شريط سفلي مضيء بنهايات دائرية وتوهج هادئ) */}
+          {pStyle === "bottom_bar" && (
+            <div className="absolute bottom-0 inset-x-0 h-1.5 bg-black/30 backdrop-blur-xs pointer-events-none rounded-b-md overflow-hidden">
               <div
-                className="h-full rounded-full transition-[width] duration-75 ease-linear"
+                className="h-full rounded-full"
                 style={{
                   [isRtl ? "marginRight" : "marginLeft"]: 0,
                   width: `${progressPercent}%`,
                   backgroundColor: pColor,
-                  boxShadow: `0 0 8px ${pColor}`
+                  boxShadow: `0 0 10px 1px ${hexToRgba(pColor, 0.9)}`
+                }}
+              />
+            </div>
+          )}
+
+          {/* 4. Top Bar: Soft Luminous Track (شريط علوي مضيء بنهايات دائرية وتوهج هادئ) */}
+          {pStyle === "top_bar" && (
+            <div className="absolute top-0 inset-x-0 h-1.5 bg-black/30 backdrop-blur-xs pointer-events-none rounded-t-md overflow-hidden">
+              <div
+                className="h-full rounded-full"
+                style={{
+                  [isRtl ? "marginRight" : "marginLeft"]: 0,
+                  width: `${progressPercent}%`,
+                  backgroundColor: pColor,
+                  boxShadow: `0 0 10px 1px ${hexToRgba(pColor, 0.9)}`
                 }}
               />
             </div>
@@ -389,7 +488,7 @@ export const SubtitleCueBox: React.FC<SubtitleCueBoxProps> = ({
         </>
       )}
 
-      {/* Main Text Content */}
+      {/* Main Text Content (Smooth typography with subtle depth) */}
       <span className="relative z-10">{text}</span>
     </div>
   );
@@ -4187,6 +4286,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                                 currentTime={currentTime}
                                 cueStartTime={currentCue?.startTime}
                                 cueEndTime={currentCue?.endTime}
+                                isPlaying={isPlaying}
                                 previewProgress={!currentCue ? 0.45 : undefined}
                               />
                             );
@@ -4203,6 +4303,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                                 currentTime={currentTime}
                                 cueStartTime={currentSecondaryCue?.startTime}
                                 cueEndTime={currentSecondaryCue?.endTime}
+                                isPlaying={isPlaying}
                                 previewProgress={!currentSecondaryCue ? 0.45 : undefined}
                               />
                             );
@@ -4225,6 +4326,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                                   currentTime={currentTime}
                                   cueStartTime={currentCue?.startTime}
                                   cueEndTime={currentCue?.endTime}
+                                  isPlaying={isPlaying}
                                   previewProgress={!currentCue ? 0.45 : undefined}
                                 />
                               </div>
@@ -4246,6 +4348,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                                   currentTime={currentTime}
                                   cueStartTime={currentSecondaryCue?.startTime}
                                   cueEndTime={currentSecondaryCue?.endTime}
+                                  isPlaying={isPlaying}
                                   previewProgress={!currentSecondaryCue ? 0.45 : undefined}
                                 />
                               </div>
