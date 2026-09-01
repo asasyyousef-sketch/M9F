@@ -3418,7 +3418,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
     });
   });
 
-  // Class to manage persistent warm Piper process with 60s idle timeout
+  // Class to manage persistent warm Piper process with configurable standby mode (60s idle vs always ready)
   class PersistentPiperManager {
     private activeProc: any = null;
     private currentModelPath: string | null = null;
@@ -3429,7 +3429,117 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       resolve: (buffer: Buffer | null) => void;
     }> = [];
     private isProcessing = false;
-    private readonly IDLE_TIMEOUT_MS = 60000; // 60 seconds (1 minute) idle timeout
+    private mode: "idle_60s" | "always_ready" = "idle_60s";
+    private idleTimeoutSeconds = 60;
+    private configPath = path.join(process.cwd(), "piper_engine_config.json");
+
+    constructor() {
+      this.loadConfig();
+    }
+
+    private loadConfig() {
+      try {
+        if (fs.existsSync(this.configPath)) {
+          const raw = JSON.parse(fs.readFileSync(this.configPath, "utf-8"));
+          if (raw.mode === "always_ready" || raw.mode === "idle_60s") {
+            this.mode = raw.mode;
+          }
+          if (typeof raw.idleTimeoutSeconds === "number" && raw.idleTimeoutSeconds > 0) {
+            this.idleTimeoutSeconds = raw.idleTimeoutSeconds;
+          }
+        }
+      } catch (e) {
+        console.warn("Could not read piper_engine_config.json:", e);
+      }
+    }
+
+    private saveConfig() {
+      try {
+        fs.writeFileSync(
+          this.configPath,
+          JSON.stringify({ mode: this.mode, idleTimeoutSeconds: this.idleTimeoutSeconds }, null, 2),
+          "utf-8"
+        );
+      } catch (e) {
+        console.warn("Could not write piper_engine_config.json:", e);
+      }
+    }
+
+    public setMode(mode: "idle_60s" | "always_ready", idleTimeoutSeconds?: number) {
+      this.mode = mode === "always_ready" ? "always_ready" : "idle_60s";
+      if (typeof idleTimeoutSeconds === "number" && idleTimeoutSeconds > 0) {
+        this.idleTimeoutSeconds = idleTimeoutSeconds;
+      }
+      this.saveConfig();
+
+      if (this.mode === "always_ready") {
+        if (this.idleTimer) {
+          clearTimeout(this.idleTimer);
+          this.idleTimer = null;
+        }
+        console.log("⚡ [PersistentPiper Engine] Mode set to ALWAYS_READY (جاهز دائماً بكل الحالات بدون خمول).");
+      } else {
+        console.log(`⏰ [PersistentPiper Engine] Mode set to IDLE_${this.idleTimeoutSeconds}S (جاهز لـ 60 ثانية ثم يخمل لتوفير الذاكرة).`);
+        if (this.activeProc) {
+          this.touchIdleTimer();
+        }
+      }
+    }
+
+    public getStatus() {
+      return {
+        mode: this.mode,
+        idleTimeoutSeconds: this.idleTimeoutSeconds,
+        isProcessActive: !!this.activeProc && !this.activeProc.killed,
+        currentModel: this.currentModelPath ? path.basename(this.currentModelPath) : null,
+        queueLength: this.pendingQueue.length
+      };
+    }
+
+    public async warmUp(modelPath?: string): Promise<{ success: boolean; model: string | null; message: string }> {
+      const piperBinDir = path.join(process.cwd(), "piper_bin");
+      const piperExecutable = path.join(piperBinDir, "piper");
+
+      if (!fs.existsSync(piperExecutable)) {
+        return { success: false, model: null, message: "الملف التنفيذي لمحرك Piper غير متوفر في السيرفر" };
+      }
+
+      let targetModelPath = modelPath;
+      if (!targetModelPath) {
+        const modelsDir = path.join(process.cwd(), "piper_models");
+        const defaultModels = ["de_DE-thorsten-medium.onnx", "ar_JO-kareem-medium.onnx", "en_US-lessac-medium.onnx"];
+        for (const def of defaultModels) {
+          const p = path.join(modelsDir, def);
+          if (fs.existsSync(p)) {
+            targetModelPath = p;
+            break;
+          }
+        }
+        if (!targetModelPath && fs.existsSync(modelsDir)) {
+          const files = fs.readdirSync(modelsDir);
+          const firstOnnx = files.find(f => f.endsWith(".onnx"));
+          if (firstOnnx) targetModelPath = path.join(modelsDir, firstOnnx);
+        }
+      }
+
+      if (!targetModelPath || !fs.existsSync(targetModelPath)) {
+        return { success: false, model: null, message: "لم يتم العثور على نموذج صوتي ONNX صالح لتهيئته" };
+      }
+
+      if (this.activeProc && this.currentModelPath === targetModelPath) {
+        this.touchIdleTimer();
+        return { success: true, model: path.basename(targetModelPath), message: "المحرك محمل ودافئ مسبقاً في الذاكرة" };
+      }
+
+      this.closeProcess();
+      const started = await this.startProcess(piperExecutable, piperBinDir, targetModelPath);
+      if (started) {
+        this.touchIdleTimer();
+        return { success: true, model: path.basename(targetModelPath), message: `تم تجهيز النموذج (${path.basename(targetModelPath)}) بنجاح في الذاكرة` };
+      }
+
+      return { success: false, model: path.basename(targetModelPath), message: "تعذر بدء عملية المعالج" };
+    }
 
     public async generateAudio(
       piperExecutable: string,
@@ -3438,7 +3548,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       cleanText: string,
       tempFile: string
     ): Promise<Buffer | null> {
-      // Touch/reset 60s idle timer on every request
+      // Touch/reset idle timer on every request
       this.touchIdleTimer();
 
       // If a process is active for a DIFFERENT voice model, close it first
@@ -3464,16 +3574,19 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         clearTimeout(this.idleTimer);
         this.idleTimer = null;
       }
-      this.idleTimer = setTimeout(() => {
-        console.log("⏰ [PersistentPiper Engine] Idle timeout (60s) reached with no active requests. Closing background engine & releasing RAM...");
-        this.closeProcess();
-      }, this.IDLE_TIMEOUT_MS);
+      if (this.mode === "idle_60s") {
+        const timeoutMs = (this.idleTimeoutSeconds || 60) * 1000;
+        this.idleTimer = setTimeout(() => {
+          console.log(`⏰ [PersistentPiper Engine] Idle timeout (${this.idleTimeoutSeconds}s) reached with no active requests. Closing background engine & releasing RAM...`);
+          this.closeProcess();
+        }, timeoutMs);
+      }
     }
 
     private startProcess(piperExecutable: string, piperBinDir: string, modelPath: string): Promise<boolean> {
       return new Promise((resolve) => {
         try {
-          console.log(`🚀 [PersistentPiper Engine] Initializing persistent Piper worker for model: ${path.basename(modelPath)}...`);
+          console.log(`🚀 [PersistentPiper Engine] Initializing persistent Piper worker for model: ${path.basename(modelPath)} (Mode: ${this.mode})...`);
           const espeakDataDir = path.join(piperBinDir, "espeak-ng-data");
 
           const proc = spawn(
@@ -3631,6 +3744,35 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
   }
 
   const persistentPiperManager = new PersistentPiperManager();
+
+  // API Routes for Persistent Piper Engine Mode & Status Control
+  app.get("/api/tts/piper/engine-status", (req, res) => {
+    res.json(persistentPiperManager.getStatus());
+  });
+
+  app.post("/api/tts/piper/engine-mode", express.json(), (req, res) => {
+    const { mode, idleTimeoutSeconds } = req.body || {};
+    if (mode === "always_ready" || mode === "idle_60s") {
+      persistentPiperManager.setMode(mode, idleTimeoutSeconds);
+      return res.json({ success: true, ...persistentPiperManager.getStatus() });
+    }
+    return res.status(400).json({ error: "Invalid mode. Allowed: 'idle_60s' or 'always_ready'" });
+  });
+
+  app.post("/api/tts/piper/engine-flush", (req, res) => {
+    persistentPiperManager.closeProcess();
+    res.json({ success: true, message: "تم تفريغ الذاكرة وإغلاق محرك Piper بنجاح", ...persistentPiperManager.getStatus() });
+  });
+
+  app.post("/api/tts/piper/engine-warmup", express.json(), async (req, res) => {
+    const { modelName } = req.body || {};
+    let modelPath: string | undefined;
+    if (modelName) {
+      modelPath = path.join(process.cwd(), "piper_models", modelName.endsWith(".onnx") ? modelName : `${modelName}.onnx`);
+    }
+    const result = await persistentPiperManager.warmUp(modelPath);
+    res.json({ ...result, ...persistentPiperManager.getStatus() });
+  });
 
   const stripEmojis = (str: string): string => {
     if (!str) return "";

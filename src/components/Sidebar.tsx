@@ -1,5 +1,29 @@
-import React, { useState } from "react";
-import { Home, Folder, FolderOpen, History, Star, Settings, ChevronLeft, ChevronDown, BookOpen, X, Database, AlertTriangle, CheckCircle, Copy, Check, Sparkles, Trash2, Youtube, PenTool, Film } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import {
+  Folder,
+  FolderOpen,
+  History,
+  Star,
+  Settings,
+  ChevronLeft,
+  ChevronDown,
+  X,
+  Database,
+  AlertTriangle,
+  CheckCircle,
+  Copy,
+  Check,
+  Sparkles,
+  Trash2,
+  Youtube,
+  PenTool,
+  Film,
+  PanelRightClose,
+  PanelRightOpen,
+  Layers,
+  Search,
+  BookOpen
+} from "lucide-react";
 import { Folder as FolderType, DbStatus } from "../types";
 
 interface SidebarProps {
@@ -37,12 +61,37 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   onSelectMedia,
   onDataReloaded
 }) => {
+  // Collapsible Mini-Rail state (Slim Icon Bar)
+  const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("sidebar_collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleCollapsed = () => {
+    setIsCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("sidebar_collapsed", String(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  // Folder search filter in sidebar
+  const [searchQuery, setSearchQuery] = useState("");
+
   // Keep track of expanded state for collapsible folders
   const [isLibraryExpanded, setIsLibraryExpanded] = useState(true);
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
     "folder-chemistry-root": true,
     "folder-organic": true,
   });
+
+  // Mini rail quick folder popover
+  const [isMiniFolderMenuOpen, setIsMiniFolderMenuOpen] = useState(false);
 
   const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -99,16 +148,28 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
     (f) => !f.parentId || !folders.some((p) => p.id === f.parentId)
   );
 
+  // Filter folders by search query if present
+  const filteredRootFolders = searchQuery.trim()
+    ? rootFolders.filter((f) =>
+        f.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        folders.some(
+          (sub) =>
+            sub.parentId === f.id &&
+            sub.name.toLowerCase().includes(searchQuery.toLowerCase())
+        )
+      )
+    : rootFolders;
+
   // Consistent sorting: predefined folders first, then custom folders by creation date
-  const sortedRootFolders = [...rootFolders].sort((a, b) => {
+  const sortedRootFolders = [...filteredRootFolders].sort((a, b) => {
     const predefinedOrder = ["folder-math", "folder-chemistry-root", "folder-physics"];
     const indexA = predefinedOrder.indexOf(a.id);
     const indexB = predefinedOrder.indexOf(b.id);
-    
+
     if (indexA !== -1 && indexB !== -1) return indexA - indexB;
     if (indexA !== -1) return -1;
     if (indexB !== -1) return 1;
-    
+
     return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
   });
 
@@ -119,16 +180,14 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
       const predefinedOrder = ["folder-organic", "folder-inorganic", "folder-alkanes"];
       const indexA = predefinedOrder.indexOf(a.id);
       const indexB = predefinedOrder.indexOf(b.id);
-      
+
       if (indexA !== -1 && indexB !== -1) return indexA - indexB;
       if (indexA !== -1) return -1;
       if (indexB !== -1) return 1;
-      
+
       return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
     });
   };
-
-  const isLibraryActive = activeFolderId !== "";
 
   // Recursive dynamic folder tree renderer
   const renderFolderTree = (folder: FolderType, depth: number) => {
@@ -149,21 +208,21 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
               setExpandedFolders((prev) => ({ ...prev, [folder.id]: true }));
             }
           }}
-          className={`flex items-center justify-between px-3 py-2 mr-6 ml-3 rounded-xl text-right transition-all text-xs cursor-pointer ${
+          className={`group flex items-center justify-between px-2.5 py-1.5 rounded-lg text-right transition-all text-xs cursor-pointer ${
             isActive
-              ? "bg-[#e2ecf9] text-[#0056f6] font-black"
+              ? "bg-[#0056f6]/10 text-[#0056f6] font-bold"
               : isHighlight
-              ? "text-[#0056f6] font-bold hover:bg-slate-100"
-              : "text-on-surface hover:bg-slate-100 font-semibold"
+              ? "text-[#0056f6] font-semibold hover:bg-slate-200/50"
+              : "text-slate-700 hover:bg-slate-200/50 font-medium"
           }`}
-          style={{ width: "calc(100% - 36px)" }}
+          style={{ marginRight: `${depth * 10}px` }}
         >
-          <div className="flex items-center gap-3">
-            <Folder
-              className="w-4 h-4 shrink-0"
-              style={{ color: isActive || isHighlight ? "#0056f6" : folder.color || "#64748b" }}
+          <div className="flex items-center gap-2 min-w-0 truncate">
+            <span
+              className="w-2 h-2 rounded-full shrink-0"
+              style={{ backgroundColor: folder.color || "#64748b" }}
             />
-            <span>{folder.name}</span>
+            <span className="truncate">{folder.name}</span>
           </div>
 
           {hasKids && (
@@ -172,10 +231,10 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                 e.stopPropagation();
                 setExpandedFolders((prev) => ({ ...prev, [folder.id]: !prev[folder.id] }));
               }}
-              className="p-1 hover:bg-black/5 rounded-md transition-colors cursor-pointer"
+              className="p-1 hover:bg-black/5 rounded-md transition-colors cursor-pointer shrink-0"
             >
               <ChevronDown
-                className={`w-3.5 h-3.5 text-outline transition-transform ${
+                className={`w-3 h-3 text-slate-400 transition-transform ${
                   isExpanded ? "transform rotate-0" : "transform -rotate-90"
                 }`}
               />
@@ -183,9 +242,9 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
           )}
         </button>
 
-        {/* Nested Children (indented dynamically with a visual tree line) */}
+        {/* Nested Children */}
         {hasKids && isExpanded && (
-          <div className="flex flex-col mr-4 border-r border-slate-200/50 pr-1 mt-0.5 mb-1">
+          <div className="flex flex-col mr-3 border-r border-slate-200 pr-1.5 mt-0.5 mb-1">
             {children.map((child) => renderFolderTree(child, depth + 1))}
           </div>
         )}
@@ -198,249 +257,429 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
       {/* Mobile Backdrop Overlay */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/45 backdrop-blur-xs z-40 md:hidden transition-all duration-300 animate-fade-in"
+          className="fixed inset-0 bg-black/40 backdrop-blur-xs z-40 md:hidden transition-opacity duration-200"
           onClick={onClose}
         />
       )}
 
       {/* Sidebar aside */}
       <aside
-        className={`fixed inset-y-0 right-0 z-50 bg-[#f3f6fc] font-sans text-sm w-64 flex flex-col border-l border-outline-variant/30 shrink-0 h-full overflow-y-auto transition-transform duration-300 ease-in-out md:translate-x-0 md:relative md:flex ${
+        className={`fixed inset-y-0 right-0 z-50 bg-[#f8fafc] font-sans text-sm flex flex-col border-l border-slate-200/80 shrink-0 h-full overflow-hidden transition-all duration-300 ease-in-out md:translate-x-0 md:relative md:flex ${
           isOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"
-        }`}
+        } ${isCollapsed ? "md:w-[68px] w-64" : "w-64"}`}
         dir="rtl"
       >
-        {/* Sidebar Header Brand Logo */}
-        <div className="px-6 pt-6 pb-4 flex items-center justify-between">
-          <h1 className="text-2xl font-black text-[#0056f6] tracking-tight font-sans">
-            StudySmarter
-          </h1>
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="md:hidden p-1.5 text-outline hover:text-on-surface hover:bg-slate-200/50 rounded-lg transition-colors cursor-pointer"
-            >
-              <X className="w-5 h-5 text-slate-500" />
-            </button>
+        {/* ========================================================================= */}
+        {/* 1. SIDEBAR HEADER */}
+        {/* ========================================================================= */}
+        <div className={`pt-4 pb-3 flex items-center border-b border-slate-200/60 ${isCollapsed ? "px-2.5 justify-center md:flex-col gap-2" : "px-4 justify-between"}`}>
+          {!isCollapsed ? (
+            <>
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#0056f6] to-indigo-600 flex items-center justify-center text-white shadow-xs">
+                  <BookOpen className="w-4 h-4" />
+                </div>
+                <div>
+                  <h1 className="text-base font-extrabold text-slate-900 tracking-tight leading-none">
+                    StudySmarter
+                  </h1>
+                  <span className="text-[10px] text-slate-400 font-medium">المنصة التعليمية</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1">
+                {/* Desktop Collapse Toggle */}
+                <button
+                  type="button"
+                  onClick={toggleCollapsed}
+                  className="hidden md:flex p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
+                  title="طي القائمة الجانبية (Slim Rail)"
+                >
+                  <PanelRightClose className="w-4 h-4" />
+                </button>
+
+                {/* Mobile Close Button */}
+                {onClose && (
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="md:hidden p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#0056f6] to-indigo-600 flex items-center justify-center text-white shadow-xs" title="StudySmarter">
+                <BookOpen className="w-4 h-4" />
+              </div>
+              <button
+                type="button"
+                onClick={toggleCollapsed}
+                className="hidden md:flex p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
+                title="توسيع القائمة الجانبية"
+              >
+                <PanelRightOpen className="w-4 h-4" />
+              </button>
+            </>
           )}
         </div>
 
-        <nav className="py-2 flex flex-col flex-1">
-          {/* Section: Main Folders Label */}
-          <div className="px-6 py-2 text-[11px] font-bold text-outline uppercase tracking-wider">
-            المكتبة التعليمية
+        {/* ========================================================================= */}
+        {/* 2. SEARCH BAR (EXPANDED ONLY) */}
+        {/* ========================================================================= */}
+        {!isCollapsed && (
+          <div className="px-3 pt-2.5 pb-1">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="بحث في المجلدات..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-2.5 pr-8 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-700 placeholder-slate-400 focus:outline-none focus:border-[#0056f6] transition-all"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           </div>
+        )}
 
-          {/* المكتبة / Library (Clickable to select root and toggle hierarchy) */}
-          <div className="mt-1">
-            <button
-              onClick={() => {
-                onSelectFolder("");
-                onClose?.();
-                setIsLibraryExpanded(true);
-              }}
-              className={`w-[calc(100%-24px)] flex items-center justify-between px-4 py-2 mx-3 rounded-xl text-right transition-all font-bold text-xs cursor-pointer ${
-                activeFolderId === ""
-                  ? "bg-[#e2ecf9] text-[#0056f6]"
-                  : "text-on-surface hover:bg-surface-container-low"
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <FolderOpen className={`w-4 h-4 shrink-0 ${activeFolderId === "" ? "text-[#0056f6]" : "text-outline"}`} style={{ color: activeFolderId === "" ? "#0056f6" : "#64748b" }} />
-                <span>المكتبة</span>
-              </div>
-              <div
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsLibraryExpanded(!isLibraryExpanded);
-                }}
-                className="p-1 hover:bg-black/5 rounded-md transition-colors cursor-pointer"
-              >
-                {isLibraryExpanded ? (
-                  <ChevronDown className="w-3.5 h-3.5 text-outline transition-transform" />
-                ) : (
-                  <ChevronLeft className="w-3.5 h-3.5 text-outline transition-transform" />
-                )}
-              </div>
-            </button>
-
-            {/* Collapsible content of Library */}
-            {isLibraryExpanded && (
-              <div className="flex flex-col mr-2">
-                {sortedRootFolders.map((rootFolder) => renderFolderTree(rootFolder, 0))}
+        {/* ========================================================================= */}
+        {/* 3. NAVIGATION ITEMS */}
+        {/* ========================================================================= */}
+        <nav className="py-2 px-2 flex-1 overflow-y-auto space-y-4 custom-scrollbar">
+          
+          {/* SECTION: WORKSPACE & AI TOOLS */}
+          <div className="space-y-0.5">
+            {!isCollapsed && (
+              <div className="px-2 pb-1.5 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider">
+                مساحة العمل والذكاء
               </div>
             )}
-          </div>
 
-          {/* Section: AI Assistant */}
-          <div className="px-6 py-2 text-[11px] font-bold text-outline uppercase tracking-wider mt-4">
-            الذكاء الاصطناعي
-          </div>
-
-          <button
-            onClick={() => {
-              onSelectAI?.();
-              onClose?.();
-            }}
-            className={`flex items-center gap-3 px-4 py-2 mx-3 rounded-xl text-right transition-all font-bold text-xs cursor-pointer w-[calc(100%-24px)] ${
-              activeTab === "ai"
-                ? "bg-[#e2ecf9] text-[#0056f6]"
-                : "text-on-surface hover:bg-surface-container-low"
-            }`}
-          >
-            <Sparkles className="w-4 h-4 text-violet-600 animate-pulse" />
-            <span>المساعد الذكي ⚡</span>
-          </button>
-
-          <button
-            onClick={() => {
-              onSelectYoutube?.();
-              onClose?.();
-            }}
-            className={`flex items-center gap-3 px-4 py-2 mx-3 rounded-xl text-right transition-all font-bold text-xs cursor-pointer w-[calc(100%-24px)] mt-1.5 ${
-              activeTab === "youtube"
-                ? "bg-[#e2ecf9] text-[#0056f6]"
-                : "text-on-surface hover:bg-surface-container-low"
-            }`}
-          >
-            <Youtube className="w-4 h-4 text-rose-600" />
-            <span>تفريغ اليوتيوب (spT) 🎥</span>
-          </button>
-
-          <button
-            onClick={() => {
-              onSelectCorrector?.();
-              onClose?.();
-            }}
-            className={`flex items-center gap-3 px-4 py-2 mx-3 rounded-xl text-right transition-all font-bold text-xs cursor-pointer w-[calc(100%-24px)] mt-1.5 ${
-              activeTab === "corrector"
-                ? "bg-[#e2ecf9] text-[#0056f6]"
-                : "text-on-surface hover:bg-surface-container-low"
-            }`}
-          >
-            <PenTool className="w-4 h-4 text-emerald-600" />
-            <span>صحح بالذكاء ✍️</span>
-          </button>
-
-          <button
-            onClick={() => {
-              onSelectMedia?.();
-              onClose?.();
-            }}
-            className={`flex items-center gap-3 px-4 py-2 mx-3 rounded-xl text-right transition-all font-bold text-xs cursor-pointer w-[calc(100%-24px)] mt-1.5 ${
-              activeTab === "media"
-                ? "bg-[#e2ecf9] text-[#0056f6]"
-                : "text-on-surface hover:bg-surface-container-low"
-            }`}
-          >
-            <Film className="w-4 h-4 text-blue-600" />
-            <span>مشغل الوسائط 🎬</span>
-          </button>
-
-          {/* Section: Trash */}
-          <div className="px-6 py-2 text-[11px] font-bold text-outline uppercase tracking-wider mt-4">
-            المهملات
-          </div>
-
-          <button
-            onClick={() => {
-              onSelectTrash?.();
-              onClose?.();
-            }}
-            className={`flex items-center gap-3 px-4 py-2 mx-3 rounded-xl text-right transition-all font-bold text-xs cursor-pointer w-[calc(100%-24px)] ${
-              activeTab === "trash"
-                ? "bg-rose-50 text-rose-700 border border-rose-100"
-                : "text-on-surface hover:bg-surface-container-low"
-            }`}
-          >
-            <Trash2 className="w-4 h-4 text-rose-500" />
-            <span>سلة المهملات 🗑️</span>
-          </button>
-
-          {/* Section: Quick Access */}
-          <div className="px-6 py-2 text-[11px] font-bold text-outline uppercase tracking-wider mt-4">
-            وصول سريع
-          </div>
-
-          <button
-            onClick={() => {
-              onSelectFolder("");
-              onClose?.();
-            }}
-            className="flex items-center gap-3 px-4 py-2 mx-3 rounded-xl text-right text-on-surface hover:bg-surface-container-low transition-colors font-semibold text-xs cursor-pointer"
-          >
-            <History className="w-4 h-4 text-outline" />
-            <span>العناصر الأخيرة</span>
-          </button>
-
-          <button
-            onClick={() => {
-              onSelectFolder("");
-              onClose?.();
-            }}
-            className="flex items-center gap-3 px-4 py-2 mx-3 rounded-xl text-right text-on-surface hover:bg-surface-container-low transition-colors font-semibold text-xs cursor-pointer"
-          >
-            <Star className="w-4 h-4 text-outline" />
-            <span>المفضلة</span>
-          </button>
-        </nav>
-
-        {/* Database Sync Status Component */}
-        {dbStatus && dbStatus.supabaseActive && (
-          <div className="mx-4 my-2 p-3 bg-[#f8fafc] border border-slate-200/80 rounded-xl text-right">
-            <div className="flex items-center gap-2 mb-1">
-              <Database className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">مزامنة البيانات السحابية</span>
-            </div>
-            
-            {dbStatus.tablesExist ? (
-              <div className="flex items-start gap-2 mt-1.5 text-emerald-800">
-                <CheckCircle className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" />
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold leading-tight">قاعدة البيانات نشطة</span>
-                  <span className="text-[9px] text-emerald-600 leading-snug">تتم مزامنة بطاقاتك ومجلداتك مع Supabase بنجاح!</span>
-                </div>
+            {/* AI Assistant */}
+            <button
+              type="button"
+              onClick={() => {
+                onSelectAI?.();
+                onClose?.();
+              }}
+              title="المساعد الذكي"
+              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-right transition-all font-semibold text-xs cursor-pointer group ${
+                isCollapsed ? "justify-center px-0" : ""
+              } ${
+                activeTab === "ai"
+                  ? "bg-violet-600/10 text-violet-700 font-bold shadow-xs border border-violet-200/50"
+                  : "text-slate-700 hover:bg-slate-200/60"
+              }`}
+            >
+              <div className={`p-1 rounded-lg ${activeTab === "ai" ? "bg-violet-600 text-white" : "bg-violet-100 text-violet-600 group-hover:bg-violet-200"}`}>
+                <Sparkles className="w-3.5 h-3.5" />
               </div>
-            ) : (
-              <div className="flex flex-col gap-2 mt-1.5">
-                <div className="flex items-start gap-2 text-amber-800">
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold leading-tight">الجداول مفقودة</span>
-                    <span className="text-[9px] text-amber-600 leading-snug">الجداول غير منشأة في Supabase. اضغط أدناه للتهيئة:</span>
-                  </div>
+              {!isCollapsed && (
+                <div className="flex items-center justify-between flex-1 min-w-0">
+                  <span className="truncate">المساعد الذكي</span>
+                  <span className="text-[9.5px] font-mono font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">AI</span>
                 </div>
-                
+              )}
+            </button>
+
+            {/* YouTube Transcription */}
+            <button
+              type="button"
+              onClick={() => {
+                onSelectYoutube?.();
+                onClose?.();
+              }}
+              title="تفريغ اليوتيوب"
+              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-right transition-all font-semibold text-xs cursor-pointer group ${
+                isCollapsed ? "justify-center px-0" : ""
+              } ${
+                activeTab === "youtube"
+                  ? "bg-rose-600/10 text-rose-700 font-bold shadow-xs border border-rose-200/50"
+                  : "text-slate-700 hover:bg-slate-200/60"
+              }`}
+            >
+              <div className={`p-1 rounded-lg ${activeTab === "youtube" ? "bg-rose-600 text-white" : "bg-rose-100 text-rose-600 group-hover:bg-rose-200"}`}>
+                <Youtube className="w-3.5 h-3.5" />
+              </div>
+              {!isCollapsed && (
+                <div className="flex items-center justify-between flex-1 min-w-0">
+                  <span className="truncate">تفريغ اليوتيوب</span>
+                  <span className="text-[9.5px] font-mono font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-700">spT</span>
+                </div>
+              )}
+            </button>
+
+            {/* AI Corrector */}
+            <button
+              type="button"
+              onClick={() => {
+                onSelectCorrector?.();
+                onClose?.();
+              }}
+              title="المصحح الذكي"
+              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-right transition-all font-semibold text-xs cursor-pointer group ${
+                isCollapsed ? "justify-center px-0" : ""
+              } ${
+                activeTab === "corrector"
+                  ? "bg-emerald-600/10 text-emerald-700 font-bold shadow-xs border border-emerald-200/50"
+                  : "text-slate-700 hover:bg-slate-200/60"
+              }`}
+            >
+              <div className={`p-1 rounded-lg ${activeTab === "corrector" ? "bg-emerald-600 text-white" : "bg-emerald-100 text-emerald-600 group-hover:bg-emerald-200"}`}>
+                <PenTool className="w-3.5 h-3.5" />
+              </div>
+              {!isCollapsed && (
+                <div className="flex items-center justify-between flex-1 min-w-0">
+                  <span className="truncate">المصحح الذكي</span>
+                  <span className="text-[9.5px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">Grammar</span>
+                </div>
+              )}
+            </button>
+
+            {/* Media Player */}
+            <button
+              type="button"
+              onClick={() => {
+                onSelectMedia?.();
+                onClose?.();
+              }}
+              title="مشغل الوسائط"
+              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-right transition-all font-semibold text-xs cursor-pointer group ${
+                isCollapsed ? "justify-center px-0" : ""
+              } ${
+                activeTab === "media"
+                  ? "bg-blue-600/10 text-blue-700 font-bold shadow-xs border border-blue-200/50"
+                  : "text-slate-700 hover:bg-slate-200/60"
+              }`}
+            >
+              <div className={`p-1 rounded-lg ${activeTab === "media" ? "bg-blue-600 text-white" : "bg-blue-100 text-blue-600 group-hover:bg-blue-200"}`}>
+                <Film className="w-3.5 h-3.5" />
+              </div>
+              {!isCollapsed && (
+                <div className="flex items-center justify-between flex-1 min-w-0">
+                  <span className="truncate">مشغل الوسائط</span>
+                  <span className="text-[9.5px] font-mono font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">Media</span>
+                </div>
+              )}
+            </button>
+          </div>
+
+          {/* SECTION: EDUCATIONAL LIBRARY & FOLDERS */}
+          <div className="space-y-1">
+            {!isCollapsed ? (
+              <>
+                <div className="px-2 pb-1 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                  <span>المكتبة التعليمية</span>
+                  <span className="text-[10px] text-slate-400 font-mono">({folders.length})</span>
+                </div>
+
+                {/* Root Library Button */}
                 <button
-                  onClick={() => setIsSqlModalOpen(true)}
-                  className="w-full py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 font-bold text-[10px] rounded-lg transition-colors cursor-pointer text-center"
+                  type="button"
+                  onClick={() => {
+                    onSelectFolder("");
+                    onClose?.();
+                    setIsLibraryExpanded(true);
+                  }}
+                  className={`w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-right transition-all font-bold text-xs cursor-pointer ${
+                    activeFolderId === "" && activeTab === "library"
+                      ? "bg-[#0056f6]/10 text-[#0056f6] border border-[#0056f6]/20"
+                      : "text-slate-700 hover:bg-slate-200/60"
+                  }`}
                 >
-                  عرض كود SQL للإعداد 📋
+                  <div className="flex items-center gap-2">
+                    <FolderOpen className="w-4 h-4 text-[#0056f6]" />
+                    <span>كافة البطاقات والمجلدات</span>
+                  </div>
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsLibraryExpanded(!isLibraryExpanded);
+                    }}
+                    className="p-1 hover:bg-black/5 rounded-md transition-colors cursor-pointer"
+                  >
+                    {isLibraryExpanded ? (
+                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                    ) : (
+                      <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
+                    )}
+                  </div>
+                </button>
+
+                {/* Folder Tree */}
+                {isLibraryExpanded && (
+                  <div className="pr-1 space-y-0.5 max-h-60 overflow-y-auto custom-scrollbar">
+                    {sortedRootFolders.map((rootFolder) => renderFolderTree(rootFolder, 0))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSelectFolder("");
+                    onClose?.();
+                  }}
+                  title="المكتبة التعليمية"
+                  className={`w-full flex items-center justify-center py-2 rounded-xl transition-all cursor-pointer ${
+                    activeFolderId === "" && activeTab === "library"
+                      ? "bg-[#0056f6]/10 text-[#0056f6]"
+                      : "text-slate-700 hover:bg-slate-200/60"
+                  }`}
+                >
+                  <FolderOpen className="w-4 h-4 text-[#0056f6]" />
                 </button>
               </div>
             )}
           </div>
-        )}
 
-        {/* Settings Bottom Option */}
-        <div className="mt-auto py-3 border-t border-outline-variant/20">
+          {/* SECTION: SYSTEM & UTILITY */}
+          <div className="space-y-0.5">
+            {!isCollapsed && (
+              <div className="px-2 pb-1.5 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider">
+                النظام والوصول السريع
+              </div>
+            )}
+
+            {/* Recents */}
+            <button
+              type="button"
+              onClick={() => {
+                onSelectFolder("");
+                onClose?.();
+              }}
+              title="العناصر الأخيرة"
+              className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl text-right transition-all font-medium text-xs cursor-pointer text-slate-700 hover:bg-slate-200/60 ${
+                isCollapsed ? "justify-center px-0" : ""
+              }`}
+            >
+              <History className="w-4 h-4 text-slate-400 shrink-0" />
+              {!isCollapsed && <span>العناصر الأخيرة</span>}
+            </button>
+
+            {/* Favorites */}
+            <button
+              type="button"
+              onClick={() => {
+                onSelectFolder("");
+                onClose?.();
+              }}
+              title="المفضلة"
+              className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl text-right transition-all font-medium text-xs cursor-pointer text-slate-700 hover:bg-slate-200/60 ${
+                isCollapsed ? "justify-center px-0" : ""
+              }`}
+            >
+              <Star className="w-4 h-4 text-amber-500 shrink-0" />
+              {!isCollapsed && <span>المفضلة</span>}
+            </button>
+
+            {/* Trash */}
+            <button
+              type="button"
+              onClick={() => {
+                onSelectTrash?.();
+                onClose?.();
+              }}
+              title="سلة المهملات"
+              className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl text-right transition-all font-medium text-xs cursor-pointer ${
+                isCollapsed ? "justify-center px-0" : ""
+              } ${
+                activeTab === "trash"
+                  ? "bg-rose-50 text-rose-700 border border-rose-200 font-bold"
+                  : "text-slate-700 hover:bg-slate-200/60"
+              }`}
+            >
+              <Trash2 className="w-4 h-4 text-rose-500 shrink-0" />
+              {!isCollapsed && <span>سلة المهملات</span>}
+            </button>
+          </div>
+        </nav>
+
+        {/* ========================================================================= */}
+        {/* 4. SLEEK COMPACT FOOTER (SUPABASE PILL + SETTINGS) */}
+        {/* ========================================================================= */}
+        <div className={`p-2.5 border-t border-slate-200/80 bg-white/70 backdrop-blur-xs space-y-2 shrink-0 ${isCollapsed ? "flex flex-col items-center" : ""}`}>
+          
+          {/* Compact Supabase Sync Status Indicator */}
+          {dbStatus && dbStatus.supabaseActive ? (
+            !isCollapsed ? (
+              <div className="p-2 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2 min-w-0">
+                  {dbStatus.tablesExist ? (
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                  ) : (
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                  )}
+                  <span className="font-bold text-[11px] text-slate-800 truncate">
+                    {dbStatus.tablesExist ? "مزامنة سحابية نشطة" : "إعداد جداول Supabase"}
+                  </span>
+                </div>
+
+                {!dbStatus.tablesExist && (
+                  <button
+                    type="button"
+                    onClick={() => setIsSqlModalOpen(true)}
+                    className="px-2 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold text-[10px] rounded-lg transition-colors cursor-pointer shrink-0"
+                  >
+                    SQL
+                  </button>
+                )}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => !dbStatus.tablesExist && setIsSqlModalOpen(true)}
+                title={dbStatus.tablesExist ? "مزامنة سحابية نشطة (Supabase Connected)" : "جداول Supabase مفقودة - اضغط للتهيئة"}
+                className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors cursor-pointer relative"
+              >
+                <Database className="w-4 h-4 text-slate-600" />
+                <span
+                  className={`absolute top-1 right-1 w-2 h-2 rounded-full ${
+                    dbStatus.tablesExist ? "bg-emerald-500" : "bg-amber-500"
+                  }`}
+                />
+              </button>
+            )
+          ) : null}
+
+          {/* Settings Button */}
           <button
+            type="button"
             onClick={() => {
               onSettingsClick?.();
               onClose?.();
             }}
-            className="flex items-center gap-3 px-4 py-2.5 mx-3 rounded-xl text-right text-on-surface hover:bg-surface-container-low transition-colors font-semibold text-xs cursor-pointer w-[calc(100%-24px)]"
+            title="إعدادات النظام"
+            className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-right text-slate-700 hover:bg-slate-100 transition-colors font-semibold text-xs cursor-pointer ${
+              isCollapsed ? "justify-center px-0 w-9 h-9" : ""
+            }`}
           >
-            <Settings className="w-4 h-4 text-outline" />
-            <span>إعدادات النظام</span>
+            <Settings className="w-4 h-4 text-slate-500 shrink-0" />
+            {!isCollapsed && <span>إعدادات النظام</span>}
           </button>
         </div>
       </aside>
 
       {/* SQL SCHEMA GENERATOR MODAL */}
       {isSqlModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[9999]" dir="rtl">
-          <div className="bg-white rounded-2xl max-w-xl w-full max-h-[85vh] overflow-hidden flex flex-col shadow-2xl border border-slate-100">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-[9999]" dir="rtl">
+          <div className="bg-white rounded-2xl max-w-xl w-full max-h-[85vh] overflow-hidden flex flex-col shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
             {/* Header */}
             <div className="p-4 border-b border-slate-100 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -448,6 +687,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                 <h3 className="font-bold text-sm text-slate-800">تهيئة قاعدة بيانات Supabase</h3>
               </div>
               <button 
+                type="button"
                 onClick={() => setIsSqlModalOpen(false)}
                 className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
               >
@@ -462,7 +702,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
               </p>
 
               <div className="bg-blue-50/50 border border-blue-100 p-3 rounded-xl space-y-2">
-                <span className="font-bold text-blue-900 block">💡 خطوات الإعداد السريعة:</span>
+                <span className="font-bold text-blue-900 block">خطوات الإعداد السريعة:</span>
                 <ol className="list-decimal list-inside space-y-1 text-slate-700 leading-relaxed pr-2">
                   <li>افتح لوحة تحكم <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline font-bold">Supabase Dashboard</a> وانتقل إلى مشروعك.</li>
                   <li>من القائمة الجانبية اليسرى، انتقل إلى <strong>SQL Editor</strong>.</li>
@@ -476,6 +716,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                 <div className="flex items-center justify-between px-4 py-2 bg-slate-800 border-b border-slate-700 text-[10px] font-mono text-slate-400">
                   <span>supabase_schema.sql</span>
                   <button
+                    type="button"
                     onClick={() => {
                       const sql = `
 -- 1. Create decks table
@@ -538,7 +779,7 @@ DROP POLICY IF EXISTS "Allow public write access" ON public.cards;
 CREATE POLICY "Allow public read access" ON public.cards FOR SELECT USING (true);
 CREATE POLICY "Allow public write access" ON public.cards FOR ALL USING (true);
 
--- 3. MIGRATION FOR EXISTING TABLES (Run this if you already have the tables to add plural features!)
+-- 3. MIGRATION FOR EXISTING TABLES
 ALTER TABLE public.cards ADD COLUMN IF NOT EXISTS "isPluralMode" BOOLEAN DEFAULT false;
 ALTER TABLE public.cards ADD COLUMN IF NOT EXISTS "pluralText" TEXT DEFAULT '';
 ALTER TABLE public.cards ADD COLUMN IF NOT EXISTS "pluralLang" TEXT DEFAULT 'de';
@@ -624,7 +865,7 @@ DROP POLICY IF EXISTS "Allow public write access" ON public.cards;
 CREATE POLICY "Allow public read access" ON public.cards FOR SELECT USING (true);
 CREATE POLICY "Allow public write access" ON public.cards FOR ALL USING (true);
 
--- 3. MIGRATION FOR EXISTING TABLES (Run if you have existing tables!)
+-- 3. MIGRATION FOR EXISTING TABLES
 ALTER TABLE public.cards ADD COLUMN IF NOT EXISTS "isPluralMode" BOOLEAN DEFAULT false;
 ALTER TABLE public.cards ADD COLUMN IF NOT EXISTS "pluralText" TEXT DEFAULT '';
 ALTER TABLE public.cards ADD COLUMN IF NOT EXISTS "pluralLang" TEXT DEFAULT 'de';`}
@@ -635,6 +876,7 @@ ALTER TABLE public.cards ADD COLUMN IF NOT EXISTS "pluralLang" TEXT DEFAULT 'de'
             {/* Footer */}
             <div className="p-4 border-t border-slate-100 flex justify-end">
               <button
+                type="button"
                 onClick={() => setIsSqlModalOpen(false)}
                 className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl cursor-pointer transition-all"
               >

@@ -28,7 +28,9 @@ import {
   FileAudio,
   Radio,
   Clock,
-  Gauge
+  Gauge,
+  Zap,
+  Timer
 } from "lucide-react";
 import { configureOnnxRuntime, stopActiveAudio, addDiagnosticLog, playGradioClientAudio } from "./Modals";
 import { DEFAULT_GRADIO_VOICES, GRADIO_LANGUAGES } from "../types";
@@ -285,9 +287,102 @@ export const LivePiperSandboxModal: React.FC<LivePiperSandboxModalProps> = ({
   const [customSuccessMsg, setCustomSuccessMsg] = useState<string | null>(null);
   const [customErrorMsg, setCustomErrorMsg] = useState<string | null>(null);
 
-  // 4. Server Repair States
+  // 4. Server Repair & Piper Standby Engine States
   const [isRepairingServer, setIsRepairingServer] = useState(false);
   const [repairStatusMsg, setRepairStatusMsg] = useState<string | null>(null);
+
+  const [piperStandbyMode, setPiperStandbyMode] = useState<"idle_60s" | "always_ready">(
+    () => (localStorage.getItem("settings_piper_standby_mode") as "idle_60s" | "always_ready") || "idle_60s"
+  );
+  const [piperEngineStatus, setPiperEngineStatus] = useState<{
+    mode: "idle_60s" | "always_ready";
+    idleTimeoutSeconds: number;
+    isProcessActive: boolean;
+    currentModel: string | null;
+    queueLength: number;
+  } | null>(null);
+  const [isUpdatingEngineMode, setIsUpdatingEngineMode] = useState(false);
+  const [isWarmingUpEngine, setIsWarmingUpEngine] = useState(false);
+  const [isFlushingEngine, setIsFlushingEngine] = useState(false);
+
+  const fetchPiperEngineStatus = async () => {
+    try {
+      const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const apiBase = isLocalhost ? "http://localhost:3000/api/tts/piper/engine-status" : "/api/tts/piper/engine-status";
+      const res = await fetch(apiBase);
+      if (res.ok) {
+        const data = await res.json();
+        setPiperEngineStatus(data);
+        if (data.mode) {
+          setPiperStandbyMode(data.mode);
+          localStorage.setItem("settings_piper_standby_mode", data.mode);
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  const handleChangePiperEngineMode = async (newMode: "idle_60s" | "always_ready") => {
+    setPiperStandbyMode(newMode);
+    localStorage.setItem("settings_piper_standby_mode", newMode);
+    setIsUpdatingEngineMode(true);
+    try {
+      const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const apiBase = isLocalhost ? "http://localhost:3000/api/tts/piper/engine-mode" : "/api/tts/piper/engine-mode";
+      const res = await fetch(apiBase, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: newMode })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPiperEngineStatus(data);
+      }
+    } catch (e) {
+      console.warn("Failed to update Piper engine mode:", e);
+    } finally {
+      setIsUpdatingEngineMode(false);
+    }
+  };
+
+  const handleWarmupPiperEngine = async () => {
+    setIsWarmingUpEngine(true);
+    try {
+      const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const apiBase = isLocalhost ? "http://localhost:3000/api/tts/piper/engine-warmup" : "/api/tts/piper/engine-warmup";
+      const res = await fetch(apiBase, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelName: selectedModel || "de_DE-thorsten-medium" })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setPiperEngineStatus(data);
+      }
+    } catch (e: any) {
+      console.warn("Warmup error:", e);
+    } finally {
+      setIsWarmingUpEngine(false);
+    }
+  };
+
+  const handleFlushPiperEngine = async () => {
+    setIsFlushingEngine(true);
+    try {
+      const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const apiBase = isLocalhost ? "http://localhost:3000/api/tts/piper/engine-flush" : "/api/tts/piper/engine-flush";
+      const res = await fetch(apiBase, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setPiperEngineStatus(data);
+      }
+    } catch (e) {
+      console.warn("Failed to flush Piper engine:", e);
+    } finally {
+      setIsFlushingEngine(false);
+    }
+  };
 
   // 5. Gradio TTS Server States
   const [gradioTtsUrl, setGradioTtsUrl] = useState<string>(
@@ -443,6 +538,7 @@ export const LivePiperSandboxModal: React.FC<LivePiperSandboxModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       fetchCatalog();
+      fetchPiperEngineStatus();
     } else {
       if (activeAudioRef.current) {
         activeAudioRef.current.pause();
@@ -1403,6 +1499,101 @@ export const LivePiperSandboxModal: React.FC<LivePiperSandboxModalProps> = ({
                       }`}
                     >
                       ☁️ خادم السيرفر
+                    </button>
+                  </div>
+                </div>
+
+                {/* PIPER ENGINE PERSISTENCE & STANDBY MODE CARD */}
+                <div className="p-3.5 rounded-xl bg-purple-50/70 border border-purple-200 space-y-2.5">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-purple-600" />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-extrabold text-slate-900">جاهزية وسرعة المحرك في الذاكرة (RAM Mode):</span>
+                          {piperEngineStatus?.isProcessActive ? (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center gap-1 border border-emerald-300">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+                              <span>نشط بالذاكرة</span>
+                            </span>
+                          ) : (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 font-bold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                              <span>خامل (مفرغ)</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={handleWarmupPiperEngine}
+                        disabled={isWarmingUpEngine}
+                        className="px-2 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-[10.5px] font-bold transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        title="تحميل النموذج بالذاكرة مسبقاً"
+                      >
+                        <Zap className={`w-3 h-3 ${isWarmingUpEngine ? "animate-spin" : ""}`} />
+                        <span>{isWarmingUpEngine ? "تهيئة..." : "⚡ تهيئة بالرام"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleFlushPiperEngine}
+                        disabled={isFlushingEngine}
+                        className="px-2 py-1 rounded-lg bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-600 border border-slate-300 text-[10.5px] font-bold transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        title="تفريغ الذاكرة وإغلاق المحرك"
+                      >
+                        <Trash2 className={`w-3 h-3 ${isFlushingEngine ? "animate-spin" : ""}`} />
+                        <span>{isFlushingEngine ? "تفريغ..." : "🧹 تفريغ الرام"}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Mode Toggles */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleChangePiperEngineMode("idle_60s")}
+                      disabled={isUpdatingEngineMode}
+                      className={`p-2 rounded-xl border text-right transition-all cursor-pointer flex flex-col justify-between gap-1 ${
+                        piperStandbyMode === "idle_60s"
+                          ? "border-purple-600 bg-purple-100/90 font-bold text-purple-950 shadow-xs"
+                          : "border-slate-200 bg-white hover:border-purple-300 text-slate-700"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-extrabold flex items-center gap-1">
+                          <Timer className="w-3.5 h-3.5 text-purple-600" />
+                          <span>⏱️ 60 ثانية ثم يخمل</span>
+                        </span>
+                        {piperStandbyMode === "idle_60s" && <Check className="w-3.5 h-3.5 text-purple-700" />}
+                      </div>
+                      <span className="text-[10px] text-slate-500 font-normal leading-tight">
+                        يخمل تلقائياً بعد 60 ثانية لتوفير الذاكرة
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleChangePiperEngineMode("always_ready")}
+                      disabled={isUpdatingEngineMode}
+                      className={`p-2 rounded-xl border text-right transition-all cursor-pointer flex flex-col justify-between gap-1 ${
+                        piperStandbyMode === "always_ready"
+                          ? "border-indigo-600 bg-indigo-100/90 font-bold text-indigo-950 shadow-xs"
+                          : "border-slate-200 bg-white hover:border-indigo-300 text-slate-700"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-extrabold flex items-center gap-1">
+                          <Zap className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>⚡ جاهز دائماً بكل الحالات</span>
+                        </span>
+                        {piperStandbyMode === "always_ready" && <Check className="w-3.5 h-3.5 text-indigo-700" />}
+                      </div>
+                      <span className="text-[10px] text-slate-500 font-normal leading-tight">
+                        محفوظ بالذاكرة باستمرار لتوليد فوري
+                      </span>
                     </button>
                   </div>
                 </div>

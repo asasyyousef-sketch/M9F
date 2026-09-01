@@ -4783,6 +4783,109 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   const [isRepairingServer, setIsRepairingServer] = useState(false);
   const [repairStatusMsg, setRepairStatusMsg] = useState<string | null>(null);
 
+  // Piper Engine Readiness & Standby Mode state (idle_60s vs always_ready)
+  const [piperStandbyMode, setPiperStandbyMode] = useState<"idle_60s" | "always_ready">(
+    () => (localStorage.getItem("settings_piper_standby_mode") as "idle_60s" | "always_ready") || "idle_60s"
+  );
+  const [piperEngineStatus, setPiperEngineStatus] = useState<{
+    mode: "idle_60s" | "always_ready";
+    idleTimeoutSeconds: number;
+    isProcessActive: boolean;
+    currentModel: string | null;
+    queueLength: number;
+  } | null>(null);
+  const [isUpdatingEngineMode, setIsUpdatingEngineMode] = useState(false);
+  const [isWarmingUpEngine, setIsWarmingUpEngine] = useState(false);
+  const [isFlushingEngine, setIsFlushingEngine] = useState(false);
+
+  const fetchPiperEngineStatus = async () => {
+    try {
+      const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const apiBase = isLocalhost ? "http://localhost:3000/api/tts/piper/engine-status" : "/api/tts/piper/engine-status";
+      const res = await fetch(apiBase);
+      if (res.ok) {
+        const data = await res.json();
+        setPiperEngineStatus(data);
+        if (data.mode) {
+          setPiperStandbyMode(data.mode);
+          localStorage.setItem("settings_piper_standby_mode", data.mode);
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  const handleChangePiperEngineMode = async (newMode: "idle_60s" | "always_ready") => {
+    setPiperStandbyMode(newMode);
+    localStorage.setItem("settings_piper_standby_mode", newMode);
+    setIsUpdatingEngineMode(true);
+    try {
+      const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const apiBase = isLocalhost ? "http://localhost:3000/api/tts/piper/engine-mode" : "/api/tts/piper/engine-mode";
+      const res = await fetch(apiBase, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: newMode })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPiperEngineStatus(data);
+        setDownloadSuccessMsg(
+          newMode === "always_ready"
+            ? "⚡ تم ضبط محرك Piper ليبقى جاهزاً باستمرار في كل الحالات (بدون خمول) لتوليد فوري ومباشر!"
+            : "⏱️ تم ضبط محرك Piper ليبقى جاهزاً لمدة 60 ثانية ثم يخمل تلقائياً لتوفير الذاكرة والموارد."
+        );
+      }
+    } catch (e) {
+      console.warn("Failed to update Piper engine mode:", e);
+    } finally {
+      setIsUpdatingEngineMode(false);
+    }
+  };
+
+  const handleWarmupPiperEngine = async () => {
+    setIsWarmingUpEngine(true);
+    try {
+      const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const apiBase = isLocalhost ? "http://localhost:3000/api/tts/piper/engine-warmup" : "/api/tts/piper/engine-warmup";
+      const res = await fetch(apiBase, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelName: selectedPiperModel || "de_DE-thorsten-medium" })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setPiperEngineStatus(data);
+        setDownloadSuccessMsg(data.message || "تم تهيئة وتشغيل محرك Piper في الذاكرة بنجاح!");
+      } else {
+        setDownloadError(data.message || "فشلت تهيئة المحرك.");
+      }
+    } catch (e: any) {
+      setDownloadError(e?.message || "خطأ أثناء محاولة تهيئة المحرك.");
+    } finally {
+      setIsWarmingUpEngine(false);
+    }
+  };
+
+  const handleFlushPiperEngine = async () => {
+    setIsFlushingEngine(true);
+    try {
+      const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const apiBase = isLocalhost ? "http://localhost:3000/api/tts/piper/engine-flush" : "/api/tts/piper/engine-flush";
+      const res = await fetch(apiBase, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setPiperEngineStatus(data);
+        setDownloadSuccessMsg("🧹 تم تفريغ الذاكرة وإغلاق محرك Piper بنجاح (المحرك خامل الآن لتوفير الرام).");
+      }
+    } catch (e) {
+      console.warn("Failed to flush Piper engine:", e);
+    } finally {
+      setIsFlushingEngine(false);
+    }
+  };
+
   const handleRepairServerPiper = async () => {
     setIsRepairingServer(true);
     setRepairStatusMsg("جاري فحص وتنزيل الملحقات والمكتبات النواقص في السيرفر...");
@@ -5473,6 +5576,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       
       calculateCacheStats();
       fetchCatalog();
+      fetchPiperEngineStatus();
     }
   }, [isOpen]);
 
@@ -6357,6 +6461,132 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                     </p>
                   </div>
                 )}
+
+                {/* PIPER ENGINE PERSISTENCE & STANDBY MODE CARD */}
+                <div className="p-4 rounded-xl bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-blue-500/10 border border-purple-500/30 space-y-3.5 shadow-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-purple-500/20 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded-lg bg-purple-500/20 text-purple-600 dark:text-purple-400">
+                        <Zap className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-xs text-on-surface flex items-center gap-1.5">
+                          <span>⚡ وضع جاهزية وسرعة محرك Piper في الذاكرة (Piper Engine Standby & Memory Mode)</span>
+                          {piperEngineStatus?.isProcessActive ? (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 font-bold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                              <span>المعالج نشط ودافئ في الرام</span>
+                            </span>
+                          ) : (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-500/20 text-on-surface-variant font-bold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                              <span>المعالج خامل (الذاكرة مفرغة)</span>
+                            </span>
+                          )}
+                        </h4>
+                        <p className="text-[11px] text-on-surface-variant">
+                          اختر سلوك محرك Piper: إما الإبقاء عليه جاهزاً لـ 60 ثانية ثم الخمول لتوفير الرام، أو البقاء جاهزاً دائماً في كل الحالات لأقصى سرعة
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleWarmupPiperEngine}
+                        disabled={isWarmingUpEngine}
+                        className="px-2.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-bold transition-all shadow-xs flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        title="تهيئة النموذج الصوتي في الذاكرة مسبقاً"
+                      >
+                        <Zap className={`w-3.5 h-3.5 ${isWarmingUpEngine ? "animate-spin" : ""}`} />
+                        <span>{isWarmingUpEngine ? "جاري التهيئة..." : "⚡ تهيئة بالذاكرة الآن"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleFlushPiperEngine}
+                        disabled={isFlushingEngine}
+                        className="px-2.5 py-1.5 rounded-xl bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-rose-500 border border-outline text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        title="إغلاق المعالج فوراً وتفريغ الذاكرة RAM"
+                      >
+                        <Trash2 className={`w-3.5 h-3.5 ${isFlushingEngine ? "animate-spin" : ""}`} />
+                        <span>{isFlushingEngine ? "جاري التفريغ..." : "🧹 تفريغ الرام"}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* TWO MODE SELECTOR CARDS */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                    {/* OPTION 1: 60s IDLE TIMEOUT */}
+                    <div
+                      onClick={() => handleChangePiperEngineMode("idle_60s")}
+                      className={`p-3 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                        piperStandbyMode === "idle_60s"
+                          ? "border-purple-600 bg-purple-500/15 shadow-sm"
+                          : "border-outline-variant bg-surface hover:border-purple-300"
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-xs text-on-surface flex items-center gap-1.5">
+                            <Timer className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                            <span>⏱️ جاهز لـ 60 ثانية ثم يخمل (توفير الذاكرة)</span>
+                          </span>
+                          {piperStandbyMode === "idle_60s" && (
+                            <span className="w-4 h-4 rounded-full bg-purple-600 text-white flex items-center justify-center text-[10px]">
+                              ✓
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                          يبقى المحرك محملاً ودافئاً في الذاكرة فور تشغيله لنطق سريع ومكرر أثناء المذاكرة، ويغلق نفسه تلقائياً بعد مرور <strong>60 ثانية</strong> من التوقف لتوفير موارد الجهاز والرام.
+                        </p>
+                      </div>
+                      <div className="flex items-center justify-between pt-1 text-[10px] text-purple-700 dark:text-purple-300 font-mono font-medium">
+                        <span>خمول تلقائي: 60s</span>
+                        <span className="px-1.5 py-0.5 rounded bg-purple-500/10">موصى به لتوفير الموارد</span>
+                      </div>
+                    </div>
+
+                    {/* OPTION 2: ALWAYS READY */}
+                    <div
+                      onClick={() => handleChangePiperEngineMode("always_ready")}
+                      className={`p-3 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                        piperStandbyMode === "always_ready"
+                          ? "border-indigo-600 bg-indigo-500/15 shadow-sm"
+                          : "border-outline-variant bg-surface hover:border-indigo-300"
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-xs text-on-surface flex items-center gap-1.5">
+                            <Zap className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                            <span>⚡ جاهز دائماً في كل الحالات (أقصى سرعة)</span>
+                          </span>
+                          {piperStandbyMode === "always_ready" && (
+                            <span className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px]">
+                              ✓
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                          يظل محرك Piper محملاً ومحفوظاً في الذاكرة (RAM) دائماً بدون أي خمول أو إغلاق، لإنتاج ونطق الصوت فورا بأقل من <strong>0.05s</strong> في أي لحظة.
+                        </p>
+                      </div>
+                      <div className="flex items-center justify-between pt-1 text-[10px] text-indigo-700 dark:text-indigo-300 font-mono font-medium">
+                        <span>بدون أي خمول: دائم بالذاكرة</span>
+                        <span className="px-1.5 py-0.5 rounded bg-indigo-500/10">استجابة فورية فائقة السرعة</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {piperEngineStatus?.currentModel && (
+                    <div className="text-[10.5px] px-3 py-1 rounded-lg bg-surface/80 border border-outline-variant flex items-center justify-between text-on-surface-variant">
+                      <span>النموذج الصوتي النشط في الذاكرة حالياً:</span>
+                      <span className="font-mono font-bold text-on-surface">{piperEngineStatus.currentModel}</span>
+                    </div>
+                  )}
+                </div>
 
                 {/* SERVER REPAIR & HEALTH CHECK CARD */}
                 <div className="p-4 rounded-xl bg-gradient-to-r from-amber-500/10 via-blue-500/10 to-indigo-500/10 border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
