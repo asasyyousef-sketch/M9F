@@ -110,6 +110,11 @@ export interface SubtitleTrackStyleConfig {
   lineHeight?: number; // e.g. 1.2, 1.4, 1.6, 1.8
   direction?: "auto" | "rtl" | "ltr";
   textAlign?: "center" | "right" | "left";
+  // --- Sentence Reading Progress Background Indicator (مؤشر تقدم قراءة الجملة في الخلفية) ---
+  enableTimingProgress?: boolean;
+  timingProgressStyle?: "background_sweep" | "bottom_bar" | "top_bar" | "glow_sweep";
+  timingProgressColor?: string; // hex color for the highlight
+  timingProgressOpacity?: number; // 10 to 100%
 }
 
 export const DEFAULT_PRIMARY_STYLE: SubtitleTrackStyleConfig = {
@@ -130,7 +135,11 @@ export const DEFAULT_PRIMARY_STYLE: SubtitleTrackStyleConfig = {
   wordSpacing: 0,
   lineHeight: 1.4,
   direction: "auto",
-  textAlign: "center"
+  textAlign: "center",
+  enableTimingProgress: false,
+  timingProgressStyle: "background_sweep",
+  timingProgressColor: "#ffffff",
+  timingProgressOpacity: 35
 };
 
 export const DEFAULT_SECONDARY_STYLE: SubtitleTrackStyleConfig = {
@@ -151,7 +160,11 @@ export const DEFAULT_SECONDARY_STYLE: SubtitleTrackStyleConfig = {
   wordSpacing: 0,
   lineHeight: 1.4,
   direction: "auto",
-  textAlign: "center"
+  textAlign: "center",
+  enableTimingProgress: false,
+  timingProgressStyle: "background_sweep",
+  timingProgressColor: "#6ee7b7",
+  timingProgressOpacity: 40
 };
 
 export function hexToRgba(hex: string, opacity: number): string {
@@ -258,6 +271,129 @@ export function computeSubtitleCSS(
     transition: "all 0.1s ease-out"
   };
 }
+
+// ---------------------------------------------------------
+// Subtitle Cue Box Component (Supports Sentence Reading Progress Highlight)
+// ---------------------------------------------------------
+export interface SubtitleCueBoxProps {
+  text: string;
+  config: SubtitleTrackStyleConfig;
+  isImmersive?: boolean;
+  currentTime?: number;
+  cueStartTime?: number;
+  cueEndTime?: number;
+  previewProgress?: number;
+  className?: string;
+}
+
+export const SubtitleCueBox: React.FC<SubtitleCueBoxProps> = ({
+  text,
+  config,
+  isImmersive = false,
+  currentTime,
+  cueStartTime,
+  cueEndTime,
+  previewProgress,
+  className = ""
+}) => {
+  const dir = config.direction === "rtl" ? "rtl" : config.direction === "ltr" ? "ltr" : detectTextDirection(text);
+  const isRtl = dir === "rtl";
+
+  let progressRatio = 0;
+  if (previewProgress !== undefined) {
+    progressRatio = Math.max(0, Math.min(1, previewProgress));
+  } else if (
+    currentTime !== undefined &&
+    cueStartTime !== undefined &&
+    cueEndTime !== undefined &&
+    cueEndTime > cueStartTime
+  ) {
+    const duration = cueEndTime - cueStartTime;
+    const elapsed = Math.max(0, Math.min(duration, currentTime - cueStartTime));
+    progressRatio = duration > 0 ? elapsed / duration : 0;
+  }
+
+  const progressPercent = Math.min(100, Math.max(0, progressRatio * 100));
+  const showProgress = Boolean(config.enableTimingProgress);
+  const pStyle = config.timingProgressStyle || "background_sweep";
+  const pColor = config.timingProgressColor || "#ffffff";
+  const pOpacity = (config.timingProgressOpacity ?? 35) / 100;
+
+  return (
+    <div
+      dir={dir}
+      style={{
+        ...computeSubtitleCSS(config, isImmersive, 1, text),
+        position: "relative",
+        overflow: "hidden"
+      }}
+      className={`relative overflow-hidden ${className}`}
+    >
+      {/* Background Reading Progress Highlight Layer */}
+      {showProgress && (
+        <>
+          {pStyle === "background_sweep" && (
+            <div
+              className="absolute inset-y-0 pointer-events-none transition-[width] duration-75 ease-linear"
+              style={{
+                [isRtl ? "right" : "left"]: 0,
+                width: `${progressPercent}%`,
+                background: isRtl
+                  ? `linear-gradient(to left, ${hexToRgba(pColor, pOpacity * 0.35)} 0%, ${hexToRgba(pColor, pOpacity)} 100%)`
+                  : `linear-gradient(to right, ${hexToRgba(pColor, pOpacity * 0.35)} 0%, ${hexToRgba(pColor, pOpacity)} 100%)`,
+                borderLeft: isRtl ? `2px solid ${hexToRgba(pColor, Math.min(1, pOpacity * 1.8))}` : "none",
+                borderRight: !isRtl ? `2px solid ${hexToRgba(pColor, Math.min(1, pOpacity * 1.8))}` : "none",
+                boxShadow: `0 0 14px ${hexToRgba(pColor, pOpacity * 0.8)}`
+              }}
+            />
+          )}
+
+          {pStyle === "glow_sweep" && (
+            <div
+              className="absolute inset-y-0 w-16 pointer-events-none transition-[left,right] duration-75 ease-linear"
+              style={{
+                [isRtl ? "right" : "left"]: `calc(${progressPercent}% - 32px)`,
+                background: `radial-gradient(ellipse at center, ${hexToRgba(pColor, pOpacity * 1.5)} 0%, ${hexToRgba(pColor, pOpacity * 0.5)} 50%, transparent 100%)`,
+                boxShadow: `0 0 20px ${hexToRgba(pColor, pOpacity)}`
+              }}
+            />
+          )}
+
+          {pStyle === "bottom_bar" && (
+            <div className="absolute bottom-0 inset-x-0 h-1 bg-black/25 pointer-events-none">
+              <div
+                className="h-full rounded-full transition-[width] duration-75 ease-linear"
+                style={{
+                  [isRtl ? "marginRight" : "marginLeft"]: 0,
+                  width: `${progressPercent}%`,
+                  backgroundColor: pColor,
+                  boxShadow: `0 0 8px ${pColor}`
+                }}
+              />
+            </div>
+          )}
+
+          {pStyle === "top_bar" && (
+            <div className="absolute top-0 inset-x-0 h-1 bg-black/25 pointer-events-none">
+              <div
+                className="h-full rounded-full transition-[width] duration-75 ease-linear"
+                style={{
+                  [isRtl ? "marginRight" : "marginLeft"]: 0,
+                  width: `${progressPercent}%`,
+                  backgroundColor: pColor,
+                  boxShadow: `0 0 8px ${pColor}`
+                }}
+              />
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Main Text Content */}
+      <span className="relative z-10">{text}</span>
+    </div>
+  );
+};
 
 // ---------------------------------------------------------
 // Fast & Universal Media Stream URL Resolver
@@ -4043,28 +4179,32 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           {/* Primary Subtitle (e.g., German / Original) */}
                           {(currentCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal || showSwipeSamplePreview) && !currentCue)) && (() => {
                             const text = currentCue ? currentCue.text : "this is test";
-                            const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
-                              <div
-                                dir={dir}
-                                style={getSubtitleTrackComputedStyle(primarySubStyle, isImmersiveMode, text)}
-                              >
-                                <span>{text}</span>
-                              </div>
+                              <SubtitleCueBox
+                                text={text}
+                                config={primarySubStyle}
+                                isImmersive={isImmersiveMode}
+                                currentTime={currentTime}
+                                cueStartTime={currentCue?.startTime}
+                                cueEndTime={currentCue?.endTime}
+                                previewProgress={!currentCue ? 0.45 : undefined}
+                              />
                             );
                           })()}
 
                           {/* Secondary Subtitle (e.g., Arabic / Translated with Gemini) */}
                           {showDualSubtitles && (currentSecondaryCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal || showSwipeSamplePreview) && !currentSecondaryCue)) && (() => {
                             const text = currentSecondaryCue ? currentSecondaryCue.text : "هذه تجربة كلام هنا";
-                            const dir = secondarySubStyle.direction === "rtl" ? "rtl" : secondarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
-                              <div
-                                dir={dir}
-                                style={getSubtitleTrackComputedStyle(secondarySubStyle, isImmersiveMode, text)}
-                              >
-                                <span>{text}</span>
-                              </div>
+                              <SubtitleCueBox
+                                text={text}
+                                config={secondarySubStyle}
+                                isImmersive={isImmersiveMode}
+                                currentTime={currentTime}
+                                cueStartTime={currentSecondaryCue?.startTime}
+                                cueEndTime={currentSecondaryCue?.endTime}
+                                previewProgress={!currentSecondaryCue ? 0.45 : undefined}
+                              />
                             );
                           })()}
                         </div>
@@ -4073,18 +4213,20 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           {/* Primary Subtitle in its dedicated position */}
                           {(currentCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal || showSwipeSamplePreview) && !currentCue)) && (() => {
                             const text = currentCue ? currentCue.text : "this is test";
-                            const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
                               <div
                                 className="absolute inset-x-0 flex flex-col items-center justify-center px-4 pointer-events-none z-20 transition-all duration-300 ease-out"
                                 style={getSubtitlePositionStyle(primarySubStyle.position, primarySubStyle.offsetY)}
                               >
-                                <div
-                                  dir={dir}
-                                  style={getSubtitleTrackComputedStyle(primarySubStyle, isImmersiveMode, text)}
-                                >
-                                  <span>{text}</span>
-                                </div>
+                                <SubtitleCueBox
+                                  text={text}
+                                  config={primarySubStyle}
+                                  isImmersive={isImmersiveMode}
+                                  currentTime={currentTime}
+                                  cueStartTime={currentCue?.startTime}
+                                  cueEndTime={currentCue?.endTime}
+                                  previewProgress={!currentCue ? 0.45 : undefined}
+                                />
                               </div>
                             );
                           })()}
@@ -4092,18 +4234,20 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           {/* Secondary Subtitle in its dedicated position */}
                           {showDualSubtitles && (currentSecondaryCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal || showSwipeSamplePreview) && !currentSecondaryCue)) && (() => {
                             const text = currentSecondaryCue ? currentSecondaryCue.text : "هذه تجربة كلام هنا";
-                            const dir = secondarySubStyle.direction === "rtl" ? "rtl" : secondarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
                               <div
                                 className="absolute inset-x-0 flex flex-col items-center justify-center px-4 pointer-events-none z-20 transition-all duration-300 ease-out"
                                 style={getSubtitlePositionStyle(secondarySubStyle.position, secondarySubStyle.offsetY)}
                               >
-                                <div
-                                  dir={dir}
-                                  style={getSubtitleTrackComputedStyle(secondarySubStyle, isImmersiveMode, text)}
-                                >
-                                  <span>{text}</span>
-                                </div>
+                                <SubtitleCueBox
+                                  text={text}
+                                  config={secondarySubStyle}
+                                  isImmersive={isImmersiveMode}
+                                  currentTime={currentTime}
+                                  cueStartTime={currentSecondaryCue?.startTime}
+                                  cueEndTime={currentSecondaryCue?.endTime}
+                                  previewProgress={!currentSecondaryCue ? 0.45 : undefined}
+                                />
                               </div>
                             );
                           })()}
@@ -4188,13 +4332,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       {/* 6. Live YouTube-Grade Hover Frame Bubble Preview (Fixed Dimensions & Zero Shaking) */}
                       {hoverPosition !== null && hoverTime !== null && (
                         <div
-                          style={{ left: `${Math.max(12, Math.min(88, hoverPosition))}%` }}
-                          className="absolute bottom-full mb-3 -translate-x-1/2 flex flex-col items-center pointer-events-none z-40"
+                          style={{ left: `${Math.max(14, Math.min(86, hoverPosition))}%` }}
+                          className="absolute bottom-full mb-3 -translate-x-1/2 flex flex-col items-center pointer-events-none z-40 transition-none"
                         >
-                          <div className="w-48 bg-slate-950/95 border border-white/10 rounded-xl p-1.5 shadow-2xl flex flex-col items-center gap-1.5 backdrop-blur-md">
-                            {/* Video Live Frame Thumbnail */}
+                          <div className="w-52 min-w-[208px] max-w-[208px] bg-slate-950/95 border border-white/10 rounded-xl p-1.5 shadow-2xl flex flex-col items-center gap-1.5 backdrop-blur-md box-border overflow-hidden">
+                            {/* Video Live Frame Thumbnail (Fixed size) */}
                             {currentFile.type === "video" && (
-                              <div className="w-full h-28 bg-black rounded-lg overflow-hidden relative border border-white/10 shrink-0">
+                              <div className="w-full h-28 min-h-[112px] max-h-[112px] bg-black rounded-lg overflow-hidden relative border border-white/10 shrink-0">
                                 <video
                                   ref={previewVideoRef}
                                   src={resolveMediaStreamUrl(currentFile)}
@@ -4211,24 +4355,24 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
                             {/* Timestamp for Audio */}
                             {currentFile.type === "audio" && (
-                              <div className="w-full py-1 bg-indigo-950/80 border border-indigo-500/30 rounded-lg text-center shrink-0">
+                              <div className="w-full py-1 min-h-[28px] max-h-[28px] bg-indigo-950/80 border border-indigo-500/30 rounded-lg text-center shrink-0 flex items-center justify-center">
                                 <span className="font-mono text-xs font-bold text-indigo-300">
                                   {formatSecondsToTime(hoverTime)}
                                 </span>
                               </div>
                             )}
 
-                            {/* Subtitle cue text preview (Locked size container to prevent any jitter/flicker) */}
+                            {/* Subtitle cue text preview (Locked size & height container to prevent any jitter/flicker) */}
                             {activeCues.length > 0 && (
-                              <div className="w-full h-8 px-2 bg-slate-900/90 rounded-lg border border-white/10 flex items-center justify-center text-center overflow-hidden shrink-0">
-                                <p className="text-[11px] text-slate-200 font-sans font-medium line-clamp-1 leading-tight select-none">
+                              <div className="w-full h-9 min-h-[36px] max-h-[36px] px-2 bg-slate-900/90 rounded-lg border border-white/10 flex items-center justify-center text-center overflow-hidden shrink-0">
+                                <p className="text-[11px] text-slate-200 font-sans font-medium line-clamp-2 leading-tight select-none break-words text-center">
                                   {hoverCueText || <span className="text-slate-500 text-[10px]">بدون نص</span>}
                                 </p>
                               </div>
                             )}
                           </div>
                           {/* Triangle Arrow */}
-                          <div className="w-2.5 h-2.5 bg-slate-950 rotate-45 border-r border-b border-white/10 -mt-1.5" />
+                          <div className="w-2.5 h-2.5 bg-slate-950 rotate-45 border-r border-b border-white/10 -mt-1.5 shrink-0" />
                         </div>
                       )}
                     </div>

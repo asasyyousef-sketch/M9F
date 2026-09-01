@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   X,
   Palette,
@@ -27,7 +27,8 @@ import {
   Space,
   ChevronDown,
   ChevronUp,
-  Maximize2
+  Maximize2,
+  Timer
 } from "lucide-react";
 import {
   SubtitleTrackStyleConfig,
@@ -35,7 +36,8 @@ import {
   DEFAULT_SECONDARY_STYLE,
   hexToRgba,
   computeSubtitleCSS,
-  detectTextDirection
+  detectTextDirection,
+  SubtitleCueBox
 } from "./MediaPlayerWorkspace";
 
 export interface SubtitleStylePanelProps {
@@ -76,6 +78,17 @@ const BG_COLOR_PRESETS = [
   { label: "أخضر غامق", hex: "#064e3b" },
   { label: "بنفسجي داكن", hex: "#3b0764" },
   { label: "أزرق كحلي", hex: "#1e1b4b" }
+];
+
+const PROGRESS_COLOR_PRESETS = [
+  { label: "أبيض ناصع", hex: "#ffffff" },
+  { label: "أصفر ذهبي", hex: "#fde047" },
+  { label: "سماوي نيون", hex: "#38bdf8" },
+  { label: "أخضر زمردي", hex: "#6ee7b7" },
+  { label: "برتقالي مشرق", hex: "#fb923c" },
+  { label: "وردي ناعم", hex: "#f472b6" },
+  { label: "بنفسجي فاتح", hex: "#c084fc" },
+  { label: "أحمر مرجاني", hex: "#f87171" }
 ];
 
 const STYLE_TEMPLATES: {
@@ -259,9 +272,26 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
   returnModalName
 }) => {
   const [selectedTab, setSelectedTab] = useState<"primary" | "secondary" | "both">("primary");
-  const [activeSection, setActiveSection] = useState<"presets" | "font" | "background" | "position">("presets");
+  const [activeSection, setActiveSection] = useState<"presets" | "font" | "background" | "progress" | "position">("presets");
   const [showPreviewStage, setShowPreviewStage] = useState<boolean>(true);
   const [justSaved, setJustSaved] = useState<boolean>(false);
+  const [previewProgress, setPreviewProgress] = useState<number>(0.35);
+
+  // Smooth live animation loop for previewing the reading progress highlight in real time
+  useEffect(() => {
+    let animationFrameId: number;
+    const startTimestamp = performance.now();
+    const cycleDuration = 3600; // 3.6s smooth cycle
+
+    const updateAnimation = (now: number) => {
+      const elapsed = (now - startTimestamp) % cycleDuration;
+      setPreviewProgress(elapsed / cycleDuration);
+      animationFrameId = requestAnimationFrame(updateAnimation);
+    };
+
+    animationFrameId = requestAnimationFrame(updateAnimation);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, []);
 
   const currentConfig = selectedTab === "secondary" ? secondaryStyle : primaryStyle;
 
@@ -332,30 +362,28 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
         {showPreviewStage && (() => {
           const pText = samplePrimaryText || "Guten Morgen! Willkommen zu unserem Deutschkurs.";
           const sText = sampleSecondaryText || "صباح الخير! أهلاً بكم في دورة اللغة الألمانية.";
-          const pDir = primaryStyle.direction === "rtl" ? "rtl" : primaryStyle.direction === "ltr" ? "ltr" : detectTextDirection(pText);
-          const sDir = secondaryStyle.direction === "rtl" ? "rtl" : secondaryStyle.direction === "ltr" ? "ltr" : detectTextDirection(sText);
           return (
             <div className="relative w-full min-h-[72px] sm:min-h-[90px] max-h-[140px] bg-gradient-to-b from-slate-900 via-slate-950 to-black rounded-lg border border-slate-800 flex flex-col items-center justify-center p-2 overflow-hidden shadow-inner gap-1.5 animate-fadeIn">
               {/* Background Grid Accent */}
               <div className="absolute inset-0 bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:14px_14px] opacity-20 pointer-events-none" />
 
               {/* Primary Subtitle Sample */}
-              <div
-                dir={pDir}
-                style={computeSubtitleCSS(primaryStyle, false, 1, pText)}
-                className="transition-all duration-150 shadow-md max-w-[96%] truncate text-center"
-              >
-                <span>{pText}</span>
-              </div>
+              <SubtitleCueBox
+                text={pText}
+                config={primaryStyle}
+                isImmersive={false}
+                previewProgress={primaryStyle.enableTimingProgress ? previewProgress : undefined}
+                className="transition-all duration-150 shadow-md max-w-[96%]"
+              />
 
               {/* Secondary Subtitle Sample (Arabic Dual) */}
-              <div
-                dir={sDir}
-                style={computeSubtitleCSS(secondaryStyle, false, 1, sText)}
-                className="transition-all duration-150 shadow-md max-w-[96%] truncate text-center"
-              >
-                <span>{sText}</span>
-              </div>
+              <SubtitleCueBox
+                text={sText}
+                config={secondaryStyle}
+                isImmersive={false}
+                previewProgress={secondaryStyle.enableTimingProgress ? previewProgress : undefined}
+                className="transition-all duration-150 shadow-md max-w-[96%]"
+              />
             </div>
           );
         })()}
@@ -416,54 +444,66 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
           </button>
         </div>
 
-        {/* Sections Navigation Tabs (Responsive & Elegant) */}
-        <div className="grid grid-cols-4 gap-1 pt-0.5 text-xs font-bold">
+        {/* Sections Navigation Tabs (5 Clean Columns) */}
+        <div className="grid grid-cols-5 gap-1 pt-0.5 text-xs font-bold">
           <button
             onClick={() => setActiveSection("presets")}
-            className={`py-2 px-1 rounded-lg text-center transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1 border ${
+            className={`py-2 px-0.5 rounded-lg text-center transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1 border ${
               activeSection === "presets"
                 ? "bg-slate-800 text-amber-300 border-amber-500/50 shadow-xs font-black"
                 : "bg-slate-950/60 text-slate-400 border-slate-800/80 hover:text-slate-200 hover:bg-slate-900"
             }`}
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span className="text-[11px] sm:text-xs">قوالب</span>
+            <span className="text-[10px] sm:text-xs">قوالب</span>
           </button>
 
           <button
             onClick={() => setActiveSection("font")}
-            className={`py-2 px-1 rounded-lg text-center transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1 border ${
+            className={`py-2 px-0.5 rounded-lg text-center transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1 border ${
               activeSection === "font"
                 ? "bg-slate-800 text-indigo-300 border-indigo-500/50 shadow-xs font-black"
                 : "bg-slate-950/60 text-slate-400 border-slate-800/80 hover:text-slate-200 hover:bg-slate-900"
             }`}
           >
             <Type className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-            <span className="text-[11px] sm:text-xs">الخط</span>
+            <span className="text-[10px] sm:text-xs">الخط</span>
           </button>
 
           <button
             onClick={() => setActiveSection("background")}
-            className={`py-2 px-1 rounded-lg text-center transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1 border ${
+            className={`py-2 px-0.5 rounded-lg text-center transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1 border ${
               activeSection === "background"
                 ? "bg-slate-800 text-teal-300 border-teal-500/50 shadow-xs font-black"
                 : "bg-slate-950/60 text-slate-400 border-slate-800/80 hover:text-slate-200 hover:bg-slate-900"
             }`}
           >
             <Box className="w-3.5 h-3.5 text-teal-400 shrink-0" />
-            <span className="text-[11px] sm:text-xs">الخلفية</span>
+            <span className="text-[10px] sm:text-xs">الخلفية</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSection("progress")}
+            className={`py-2 px-0.5 rounded-lg text-center transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1 border ${
+              activeSection === "progress"
+                ? "bg-slate-800 text-cyan-300 border-cyan-500/50 shadow-xs font-black"
+                : "bg-slate-950/60 text-slate-400 border-slate-800/80 hover:text-slate-200 hover:bg-slate-900"
+            }`}
+          >
+            <Timer className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span className="text-[10px] sm:text-xs">التقدم ⏱️</span>
           </button>
 
           <button
             onClick={() => setActiveSection("position")}
-            className={`py-2 px-1 rounded-lg text-center transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1 border ${
+            className={`py-2 px-0.5 rounded-lg text-center transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1 border ${
               activeSection === "position"
                 ? "bg-slate-800 text-blue-300 border-blue-500/50 shadow-xs font-black"
                 : "bg-slate-950/60 text-slate-400 border-slate-800/80 hover:text-slate-200 hover:bg-slate-900"
             }`}
           >
             <ArrowUpDown className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-            <span className="text-[11px] sm:text-xs">الموضع</span>
+            <span className="text-[10px] sm:text-xs">الموضع</span>
           </button>
         </div>
       </div>
@@ -1078,7 +1118,198 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
         )}
 
         {/* ==================================================== */}
-        {/* SECTION 4: POSITION ON SCREEN */}
+        {/* SECTION 4: READING PROGRESS INDICATOR (مؤشر تقدم قراءة الجملة) */}
+        {/* ==================================================== */}
+        {activeSection === "progress" && (
+          <div className="space-y-3 animate-fadeIn">
+            {/* Master Toggle Switch */}
+            <div className="bg-slate-950/80 p-3 rounded-xl border border-cyan-500/30 space-y-2 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 flex items-center justify-center font-bold">
+                    <Timer className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span>مؤشر تقدم القراءة (Loading Highlight)</span>
+                      {currentConfig.enableTimingProgress && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-500/40 font-mono">
+                          مُفعّل ✓
+                        </span>
+                      )}
+                    </h4>
+                    <p className="text-[10.5px] text-slate-400">إضاءة وتعبئة تدريجية على خلفية الجملة توضح موقع النطق الحالي</p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => handleUpdate({ enableTimingProgress: !currentConfig.enableTimingProgress })}
+                  className={`w-12 h-6.5 rounded-full p-0.5 transition-colors cursor-pointer shrink-0 ${
+                    currentConfig.enableTimingProgress ? "bg-cyan-600 shadow-md shadow-cyan-500/30" : "bg-slate-800"
+                  }`}
+                >
+                  <div
+                    className={`w-5.5 h-5.5 rounded-full bg-white transition-transform ${
+                      currentConfig.enableTimingProgress ? "-translate-x-5.5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <p className="text-[10.5px] text-slate-300 leading-relaxed bg-slate-900/90 p-2 rounded-lg border border-slate-800/80">
+                💡 <strong className="text-cyan-300">الفائدة:</strong> في الجمل الطويلة، تفتح وتضيء الخلفية تدريجياً وتتحرك مع تقدم توقيت الجملة الصوتي حتى يعرف القارئ الكلمة الحالية ومقدار المتبقي من الجملة دون أي تشتت.
+              </p>
+            </div>
+
+            {currentConfig.enableTimingProgress ? (
+              <>
+                {/* Style of Progress Indicator */}
+                <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-2">
+                  <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                    <span>شكل وأسلوب حركة المؤشر:</span>
+                    <span className="text-[10.5px] text-cyan-400 font-mono">
+                      {currentConfig.timingProgressStyle === "glow_sweep"
+                        ? "شعاع توهج متحرك"
+                        : currentConfig.timingProgressStyle === "bottom_bar"
+                        ? "شريط سفلي مضيء"
+                        : currentConfig.timingProgressStyle === "top_bar"
+                        ? "شريط علوي مضيء"
+                        : "تعبئة خلفية تدريجية (افتراضي)"}
+                    </span>
+                  </label>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      {
+                        id: "background_sweep",
+                        name: "تعبئة الخلفية (Fill Sweep)",
+                        desc: "إضاءة ناعمة تملأ خلفية الجملة تدريجياً",
+                        icon: "🌊"
+                      },
+                      {
+                        id: "glow_sweep",
+                        name: "شعاع متوهج (Glow Beam)",
+                        desc: "بقعة نيون ضوئية تسير على طول الجملة",
+                        icon: "✨"
+                      },
+                      {
+                        id: "bottom_bar",
+                        name: "شريط سفلي (Bottom Bar)",
+                        desc: "خط تقدم أنيق ومضيء أسفل الصندوق",
+                        icon: "➖"
+                      },
+                      {
+                        id: "top_bar",
+                        name: "شريط علوي (Top Bar)",
+                        desc: "خط تقدم أنيق ومضيء أعلى الصندوق",
+                        icon: "▔"
+                      }
+                    ].map((styleOption) => (
+                      <button
+                        key={styleOption.id}
+                        onClick={() => handleUpdate({ timingProgressStyle: styleOption.id as any })}
+                        className={`p-2.5 rounded-xl border text-right transition-all cursor-pointer flex flex-col justify-between gap-1 ${
+                          (currentConfig.timingProgressStyle || "background_sweep") === styleOption.id
+                            ? "bg-cyan-950/40 border-cyan-500 text-cyan-200 ring-1 ring-cyan-500/50 shadow-xs"
+                            : "bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-base">{styleOption.icon}</span>
+                          {(currentConfig.timingProgressStyle || "background_sweep") === styleOption.id && (
+                            <Check className="w-3.5 h-3.5 text-cyan-400" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-bold text-white">{styleOption.name}</p>
+                          <p className="text-[9.5px] text-slate-400 line-clamp-1">{styleOption.desc}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Progress Highlight Color */}
+                <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-2">
+                  <label className="text-xs font-bold text-slate-300">لون الإضاءة والمؤشر (Highlight Color):</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={currentConfig.timingProgressColor || "#ffffff"}
+                      onChange={(e) => handleUpdate({ timingProgressColor: e.target.value })}
+                      className="w-8 h-8 rounded-md border border-slate-700 bg-transparent cursor-pointer shrink-0"
+                    />
+                    <div className="flex flex-wrap items-center gap-1.5 flex-1">
+                      {PROGRESS_COLOR_PRESETS.map((col) => (
+                        <button
+                          key={col.hex}
+                          onClick={() => handleUpdate({ timingProgressColor: col.hex })}
+                          style={{ backgroundColor: col.hex }}
+                          className={`w-6 h-6 rounded-full border-2 transition-transform cursor-pointer ${
+                            (currentConfig.timingProgressColor || "#ffffff").toLowerCase() === col.hex.toLowerCase()
+                              ? "border-white scale-110 shadow-md ring-2 ring-cyan-500/50"
+                              : "border-slate-800 hover:scale-105"
+                          }`}
+                          title={col.label}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Highlight Opacity / Intensity Slider */}
+                <div className="bg-slate-950/60 p-2.5 sm:p-3 rounded-lg border border-slate-800/90 space-y-1.5">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-300">
+                    <span>قوة ووضوح الإضاءة (Highlight Opacity):</span>
+                    <span className="font-mono text-cyan-400 font-bold">{currentConfig.timingProgressOpacity ?? 35}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="10"
+                    max="100"
+                    step="5"
+                    value={currentConfig.timingProgressOpacity ?? 35}
+                    onChange={(e) => handleUpdate({ timingProgressOpacity: parseInt(e.target.value) })}
+                    className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                  />
+                  <div className="grid grid-cols-4 gap-1 text-[9.5px] text-slate-400 font-mono">
+                    {[
+                      { val: 20, label: "20% هادئ" },
+                      { val: 35, label: "35% متوازن" },
+                      { val: 55, label: "55% بارز" },
+                      { val: 80, label: "80% ساطع" }
+                    ].map((op) => (
+                      <button
+                        key={op.val}
+                        onClick={() => handleUpdate({ timingProgressOpacity: op.val })}
+                        className={`py-1 rounded-md transition-colors cursor-pointer text-center ${
+                          (currentConfig.timingProgressOpacity ?? 35) === op.val
+                            ? "bg-cyan-600 text-white font-bold"
+                            : "hover:text-white bg-slate-900 border border-slate-800"
+                        }`}
+                      >
+                        {op.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="p-4 bg-slate-950/40 rounded-xl border border-slate-800/60 text-center space-y-2">
+                <p className="text-xs text-slate-400">مؤشر التقدم معطل حالياً لهذا المسار. فعّله من المفتاح بالأعلى لتجربته ومعاينته مباشرة.</p>
+                <button
+                  onClick={() => handleUpdate({ enableTimingProgress: true })}
+                  className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-bold transition-all cursor-pointer"
+                >
+                  تفعيل المؤشر الآن ⏱️
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ==================================================== */}
+        {/* SECTION 5: POSITION ON SCREEN */}
         {/* ==================================================== */}
         {activeSection === "position" && (
           <div className="space-y-2.5 animate-fadeIn">
