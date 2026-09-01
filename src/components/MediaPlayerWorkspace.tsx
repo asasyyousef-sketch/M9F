@@ -901,7 +901,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   // Active screen mode: File Manager (default) vs Active Player
   const [isPlayerOpen, setIsPlayerOpen] = useState<boolean>(false);
 
-  // Folders State
+  // Folders State (Synchronized with Server)
   const [folders, setFolders] = useState<MediaFolder[]>(() => {
     try {
       const saved = localStorage.getItem("media_player_folders");
@@ -913,7 +913,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
 
-  // File to Folder mapping (fileId -> folderId)
+  // File to Folder mapping (fileId -> folderId) (Synchronized with Server)
   const [fileFolderMap, setFileFolderMap] = useState<Record<string, string>>(() => {
     try {
       const saved = localStorage.getItem("media_file_folder_map");
@@ -923,7 +923,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   });
 
-  // Save folders & map whenever they change
+  // Save folders & map to localStorage as fast client fallback
   useEffect(() => {
     try {
       localStorage.setItem("media_player_folders", JSON.stringify(folders));
@@ -976,6 +976,24 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
   const activeCueRef = useRef<HTMLDivElement | null>(null);
 
+  // Fetch folders and mapping from server
+  const fetchMediaFolders = async () => {
+    try {
+      const res = await fetch("/api/media/folders");
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.folders)) {
+          setFolders(data.folders);
+        }
+        if (data.fileFolderMap && typeof data.fileFolderMap === "object") {
+          setFileFolderMap(data.fileFolderMap);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load folders from server:", err);
+    }
+  };
+
   // Fetch files from server
   const fetchMediaFiles = async () => {
     setLoading(true);
@@ -1003,6 +1021,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   useEffect(() => {
     fetchMediaFiles();
+    fetchMediaFolders();
   }, []);
 
   // Save currently selected file and open player view in direct cinematic mode
@@ -1087,7 +1106,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     setShowFolderModal(true);
   };
 
-  const handleSaveFolder = () => {
+  const handleSaveFolder = async () => {
     if (!folderNameInput.trim()) return;
     const cleanName = folderNameInput.trim();
 
@@ -1101,11 +1120,31 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       };
       setFolders((prev) => [...prev, newFolder]);
       setSuccessMsg(`تم إنشاء مجلد "${cleanName}" بنجاح 📁`);
+
+      try {
+        await fetch("/api/media/folders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newFolder)
+        });
+      } catch (err) {
+        console.error("Failed to save folder to server:", err);
+      }
     } else if (editingFolderId) {
       setFolders((prev) =>
         prev.map((f) => (f.id === editingFolderId ? { ...f, name: cleanName } : f))
       );
       setSuccessMsg(`تم تعديل اسم المجلد إلى "${cleanName}" 📁`);
+
+      try {
+        await fetch(`/api/media/folders/${editingFolderId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: cleanName })
+        });
+      } catch (err) {
+        console.error("Failed to update folder on server:", err);
+      }
     }
 
     setShowFolderModal(false);
@@ -1113,7 +1152,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     setEditingFolderId(null);
   };
 
-  const handleDeleteFolder = (folderId: string, folderName: string, e?: React.MouseEvent) => {
+  const handleDeleteFolder = async (folderId: string, folderName: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (!window.confirm(`هل أنت متأكد من حذف مجلد "${folderName}"؟ (لن يتم حذف الملفات، ستعود للمجلد الرئيسي)`)) {
       return;
@@ -1143,9 +1182,17 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       setActiveFolderId(target?.parentId || null);
     }
     setSuccessMsg(`تم حذف مجلد "${folderName}"`);
+
+    try {
+      await fetch(`/api/media/folders/${folderId}`, {
+        method: "DELETE"
+      });
+    } catch (err) {
+      console.error("Failed to delete folder on server:", err);
+    }
   };
 
-  const handleMoveFileToFolder = (fileId: string, targetFolderId: string | null) => {
+  const handleMoveFileToFolder = async (fileId: string, targetFolderId: string | null) => {
     setFileFolderMap((prev) => {
       const next = { ...prev };
       if (!targetFolderId) {
@@ -1157,9 +1204,19 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     });
     setMovingFile(null);
     setSuccessMsg("تم نقل الملف بنجاح 📁");
+
+    try {
+      await fetch("/api/media/folders/move-files", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds: [fileId], targetFolderId })
+      });
+    } catch (err) {
+      console.error("Failed to move file on server:", err);
+    }
   };
 
-  const handleBulkMoveFiles = (fileIds: string[], targetFolderId: string | null) => {
+  const handleBulkMoveFiles = async (fileIds: string[], targetFolderId: string | null) => {
     if (fileIds.length === 0) return;
     setFileFolderMap((prev) => {
       const next = { ...prev };
@@ -1173,6 +1230,16 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       return next;
     });
     setSuccessMsg(`تم نقل ${fileIds.length} ملف بنجاح 📁`);
+
+    try {
+      await fetch("/api/media/folders/move-files", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds, targetFolderId })
+      });
+    } catch (err) {
+      console.error("Failed to move files on server:", err);
+    }
   };
 
   const handleBulkDeleteFiles = async (fileIds: string[], folderIds: string[] = []) => {
@@ -1184,7 +1251,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
 
     try {
-      // Delete folders from local state
+      // Delete folders from local state & server
       if (folderIds.length > 0) {
         setFolders((prev) => prev.filter((f) => !folderIds.includes(f.id)));
         setFileFolderMap((prev) => {
@@ -1196,6 +1263,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           });
           return next;
         });
+
+        for (const fId of folderIds) {
+          await fetch(`/api/media/folders/${fId}`, { method: "DELETE" }).catch(() => {});
+        }
       }
 
       // Delete files from server & local state
@@ -1547,6 +1618,11 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           createdAt: new Date().toISOString()
         };
         setFolders((prev) => [...prev, newFolder]);
+        fetch("/api/media/folders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newFolder)
+        }).catch((err) => console.error("Error creating folder on server:", err));
         targetFolderId = newFolder.id;
       }
     }
@@ -1615,6 +1691,14 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                 });
                 return next;
               });
+
+              // Persist mapping to server
+              const fileIds = res.files.map((f: any) => f.id);
+              fetch("/api/media/folders/move-files", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ fileIds, targetFolderId: folderToUse })
+              }).catch((err) => console.error("Error moving files to folder on server:", err));
             }
             setCurrentFile(res.files[0]);
             setIsPlaying(true);
@@ -3256,130 +3340,61 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         {/* Header Actions */}
         <div className="flex items-center gap-2">
           {isPlayerOpen && currentFile ? (
-            /* Actions in Player Mode */
+            /* Actions in Player Mode: Clean and focused on active media */
             <>
+              {/* Side Panel (Transcript / Subtitles) Toggle */}
               <button
                 onClick={() => {
-                  if (showTranscriptPanel && sidePanelView === "subtitles") {
-                    setSidePanelView("transcript");
-                  } else {
-                    setShowTranscriptPanel(true);
-                    setSidePanelView("subtitles");
-                  }
+                  setShowTranscriptPanel(!showTranscriptPanel);
+                  if (!showTranscriptPanel) setSidePanelView("transcript");
                 }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-colors cursor-pointer ${
-                  showTranscriptPanel && sidePanelView === "subtitles"
-                    ? "bg-indigo-600 text-white shadow-xs"
-                    : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-medium text-xs transition-colors cursor-pointer border ${
+                  showTranscriptPanel
+                    ? "bg-blue-50 text-blue-700 border-blue-300 shadow-2xs"
+                    : "bg-white hover:bg-slate-100 text-slate-700 border-slate-200"
                 }`}
-                title="خيارات وإعدادات الترجمة في اللوحة الجانبية"
+                title={showTranscriptPanel ? "إخفاء لوحة الجمل والترجمة" : "إظهار لوحة الجمل والترجمة"}
               >
-                <Languages className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">خيارات الترجمة</span>
-              </button>
-
-              <button
-                onClick={() => setShowSubtitleUploadModal(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/80 rounded-xl font-bold text-xs transition-colors cursor-pointer"
-                title="إضافة أو رفع ترجمة للمقطع الحالي"
-              >
-                <Subtitles className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">رفع ترجمة (SRT/VTT)</span>
+                <FileText className="w-3.5 h-3.5 text-blue-600" />
+                <span>لوحة الجمل</span>
               </button>
             </>
           ) : (
-            /* Actions in File Manager Mode */
-            <>
+            /* Actions in File Manager Mode: Clean stats summary (Actions live in Explorer Command Bar) */
+            <div className="flex items-center gap-2">
               {/* Stats pill */}
-              <div className="hidden lg:flex items-center gap-2.5 px-3 py-1 bg-slate-100/80 rounded-xl text-[11px] font-semibold text-slate-600 border border-slate-200/60">
+              <div className="flex items-center gap-2.5 px-3 py-1.5 bg-slate-100/90 rounded-xl text-[11px] font-semibold text-slate-600 border border-slate-200/80">
                 <div className="flex items-center gap-1">
-                  <Film className="w-3 h-3 text-blue-600" />
+                  <Film className="w-3.5 h-3.5 text-blue-600" />
                   <span>{totalVideos} فيديو</span>
                 </div>
                 <span className="text-slate-300">|</span>
                 <div className="flex items-center gap-1">
-                  <Music className="w-3 h-3 text-violet-600" />
+                  <Music className="w-3.5 h-3.5 text-violet-600" />
                   <span>{totalAudios} صوتيات</span>
                 </div>
-                <span className="text-slate-300">|</span>
-                <div className="flex items-center gap-1">
-                  <Folder className="w-3 h-3 text-amber-500" />
+                <span className="text-slate-300 hidden sm:inline">|</span>
+                <div className="hidden sm:flex items-center gap-1">
+                  <Folder className="w-3.5 h-3.5 text-amber-500" />
                   <span>{folders.length} مجلد</span>
                 </div>
-                <span className="text-slate-300">|</span>
-                <div className="flex items-center gap-1">
-                  <HardDrive className="w-3 h-3 text-slate-500" />
+                <span className="text-slate-300 hidden md:inline">|</span>
+                <div className="hidden md:flex items-center gap-1">
+                  <HardDrive className="w-3.5 h-3.5 text-slate-500" />
                   <span>{formatFileSize(totalSize)}</span>
                 </div>
               </div>
 
-              {/* Create Folder Button */}
+              {/* Quick Refresh */}
               <button
-                onClick={handleOpenCreateFolderModal}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 rounded-xl font-bold text-xs transition-colors cursor-pointer"
-                title="إنشاء مجلد جديد لتنظيم الملفات"
+                onClick={fetchMediaFiles}
+                className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                title="تحديث قائمة الملفات"
               >
-                <FolderPlus className="w-3.5 h-3.5 text-amber-600" />
-                <span>+ مجلد جديد</span>
+                <RefreshCw className="w-4 h-4" />
               </button>
-
-              {/* YouTube Download & Transcribe Button */}
-              <button
-                onClick={() => {
-                  setGradioInitialMode("youtube");
-                  setShowGradioModal(true);
-                }}
-                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer"
-                title="تنزيل وتفريغ أي فيديو من يوتيوب بالدقة المحددة"
-              >
-                <Tv className="w-3.5 h-3.5" />
-                <span>تنزيل من يوتيوب 🎥⚡</span>
-              </button>
-
-              {/* Gradio STT Button */}
-              <button
-                onClick={() => {
-                  setGradioInitialMode("current");
-                  setShowGradioModal(true);
-                }}
-                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer"
-                title="تفريغ أي ملف صوتي أو فيديو بسيرفر Gradio الألماني المحلي"
-              >
-                <Mic className="w-3.5 h-3.5" />
-                <span>تفريغ Gradio 🇩🇪</span>
-              </button>
-            </>
+            </div>
           )}
-
-          {/* Upload Folder Button */}
-          <button
-            onClick={() => folderInputRef.current?.click()}
-            disabled={uploading}
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl font-bold text-xs shadow-2xs transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            title="رفع مجلد كامل من جهازك يحتوي على مقاطع فيديو أو صوت"
-          >
-            <FolderInput className="w-3.5 h-3.5 text-blue-600" />
-            <span>+ 📁 رفع مجلد</span>
-          </button>
-
-          {/* Upload Button */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#0056f6] hover:bg-[#0047d1] text-white rounded-xl font-bold text-xs shadow-xs transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {uploading ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>رفع ({uploadProgress}%)...</span>
-              </>
-            ) : (
-              <>
-                <Upload className="w-3.5 h-3.5" />
-                <span>رفع وسائط 📤</span>
-              </>
-            )}
-          </button>
         </div>
       </header>
 
@@ -4921,6 +4936,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
               onUploadFolderClick={() => folderInputRef.current?.click()}
               onOpenYouTubeDownload={() => {
                 setGradioInitialMode("youtube");
+                setShowGradioModal(true);
+              }}
+              onOpenGradioModal={() => {
+                setGradioInitialMode("current");
                 setShowGradioModal(true);
               }}
               onOpenGradioModalForFile={(file) => {

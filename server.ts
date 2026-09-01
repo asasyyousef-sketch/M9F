@@ -251,6 +251,7 @@ async function startServer() {
   // ==========================================
   const MEDIA_DIR = path.join(process.cwd(), "uploads", "media");
   const MEDIA_META_PATH = path.join(process.cwd(), "media_files.json");
+  const MEDIA_FOLDERS_PATH = path.join(process.cwd(), "media_folders.json");
 
   if (!fs.existsSync(MEDIA_DIR)) {
     fs.mkdirSync(MEDIA_DIR, { recursive: true });
@@ -272,6 +273,49 @@ async function startServer() {
     uploadedAt?: string;
   }
 
+  interface ServerMediaFolder {
+    id: string;
+    name: string;
+    color?: string;
+    createdAt: string;
+    parentId?: string | null;
+  }
+
+  interface ServerMediaFoldersData {
+    folders: ServerMediaFolder[];
+    fileFolderMap: Record<string, string>;
+  }
+
+  function loadMediaFoldersData(): ServerMediaFoldersData {
+    try {
+      if (fs.existsSync(MEDIA_FOLDERS_PATH)) {
+        const raw = fs.readFileSync(MEDIA_FOLDERS_PATH, "utf-8").trim();
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            return { folders: parsed, fileFolderMap: {} };
+          } else if (parsed && typeof parsed === "object") {
+            return {
+              folders: Array.isArray(parsed.folders) ? parsed.folders : [],
+              fileFolderMap: parsed.fileFolderMap && typeof parsed.fileFolderMap === "object" ? parsed.fileFolderMap : {}
+            };
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error reading media_folders.json:", e);
+    }
+    return { folders: [], fileFolderMap: {} };
+  }
+
+  function saveMediaFoldersData(data: ServerMediaFoldersData) {
+    try {
+      fs.writeFileSync(MEDIA_FOLDERS_PATH, JSON.stringify(data, null, 2), "utf-8");
+    } catch (e) {
+      console.error("Error saving media_folders.json:", e);
+    }
+  }
+
   interface ServerMediaFile {
     id: string;
     filename: string;
@@ -290,6 +334,7 @@ async function startServer() {
     primaryTrackId?: string;
     secondaryTrackId?: string;
     showDualSubtitles?: boolean;
+    folderId?: string;
   }
 
   function loadMediaMeta(): ServerMediaFile[] {
@@ -445,6 +490,19 @@ async function startServer() {
       }
 
       saveMediaMeta(list);
+
+      // Clean up file from media_folders mapping
+      try {
+        const foldersData = loadMediaFoldersData();
+        if (foldersData.fileFolderMap && (foldersData.fileFolderMap[removed.id] || foldersData.fileFolderMap[id])) {
+          delete foldersData.fileFolderMap[removed.id];
+          delete foldersData.fileFolderMap[id];
+          saveMediaFoldersData(foldersData);
+        }
+      } catch (e) {
+        console.error("Error cleaning folder map on file delete:", e);
+      }
+
       res.json({ success: true, message: "تم حذف الملف بنجاح", id });
     } catch (e: any) {
       res.status(500).json({ error: e.message || "فشل حذف الملف" });
@@ -471,6 +529,170 @@ async function startServer() {
       res.json({ success: true, file: item });
     } catch (e: any) {
       res.status(500).json({ error: e.message || "فشل تعديل الاسم" });
+    }
+  });
+
+  // ==========================================
+  // 📂 MEDIA FOLDERS MANAGEMENT (Server-Side Persistent)
+  // ==========================================
+  // 1. Get all folders and file-to-folder mapping
+  app.get("/api/media/folders", (req, res) => {
+    try {
+      const data = loadMediaFoldersData();
+      res.json({
+        success: true,
+        folders: data.folders,
+        fileFolderMap: data.fileFolderMap
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "فشل في جلب قائمة المجلدات" });
+    }
+  });
+
+  // 2. Create a new folder
+  app.post("/api/media/folders", (req, res) => {
+    try {
+      const { id, name, parentId, color } = req.body;
+      if (!name || typeof name !== "string") {
+        return res.status(400).json({ error: "اسم المجلد مطلوب" });
+      }
+
+      const cleanName = name.trim();
+      const data = loadMediaFoldersData();
+      const folderId = id || `folder-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+      const newFolder: ServerMediaFolder = {
+        id: folderId,
+        name: cleanName,
+        parentId: parentId || null,
+        color: color || "#3b82f6",
+        createdAt: new Date().toISOString()
+      };
+
+      data.folders.push(newFolder);
+      saveMediaFoldersData(data);
+
+      res.json({
+        success: true,
+        message: `تم إنشاء مجلد "${cleanName}" بنجاح`,
+        folder: newFolder,
+        folders: data.folders,
+        fileFolderMap: data.fileFolderMap
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "فشل إنشاء المجلد" });
+    }
+  });
+
+  // 3. Update / Rename folder
+  app.patch("/api/media/folders/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const { name, color, parentId } = req.body;
+      const data = loadMediaFoldersData();
+
+      const folder = data.folders.find((f) => f.id === id);
+      if (!folder) {
+        return res.status(404).json({ error: "المجلد غير موجود" });
+      }
+
+      if (name && typeof name === "string") folder.name = name.trim();
+      if (color && typeof color === "string") folder.color = color;
+      if (parentId !== undefined) folder.parentId = parentId;
+
+      saveMediaFoldersData(data);
+      res.json({
+        success: true,
+        folder,
+        folders: data.folders,
+        fileFolderMap: data.fileFolderMap
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "فشل تعديل المجلد" });
+    }
+  });
+
+  // 4. Delete folder (and all its subfolders recursively)
+  app.delete("/api/media/folders/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const data = loadMediaFoldersData();
+
+      // Recursive descendant helper
+      const getDescendants = (targetId: string, all: ServerMediaFolder[]): string[] => {
+        const children = all.filter((f) => f.parentId === targetId);
+        return [targetId, ...children.flatMap((c) => getDescendants(c.id, all))];
+      };
+
+      const idsToDelete = new Set(getDescendants(id, data.folders));
+      data.folders = data.folders.filter((f) => !idsToDelete.has(f.id));
+
+      // Unassign files in deleted folders
+      Object.keys(data.fileFolderMap).forEach((fileId) => {
+        if (idsToDelete.has(data.fileFolderMap[fileId])) {
+          delete data.fileFolderMap[fileId];
+        }
+      });
+
+      saveMediaFoldersData(data);
+      res.json({
+        success: true,
+        message: "تم حذف المجلد وتفريغ الملفات للمجلد الرئيسي",
+        deletedFolderIds: Array.from(idsToDelete),
+        folders: data.folders,
+        fileFolderMap: data.fileFolderMap
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "فشل حذف المجلد" });
+    }
+  });
+
+  // 5. Move files to target folder
+  app.post("/api/media/folders/move-files", (req, res) => {
+    try {
+      const { fileIds, targetFolderId } = req.body;
+      if (!Array.isArray(fileIds) || fileIds.length === 0) {
+        return res.status(400).json({ error: "قائمة الملفات مطلوبة" });
+      }
+
+      const data = loadMediaFoldersData();
+      for (const fileId of fileIds) {
+        if (!targetFolderId || targetFolderId === "uncategorized") {
+          delete data.fileFolderMap[fileId];
+        } else {
+          data.fileFolderMap[fileId] = targetFolderId;
+        }
+      }
+
+      saveMediaFoldersData(data);
+      res.json({
+        success: true,
+        message: `تم نقل ${fileIds.length} ملف بنجاح`,
+        fileFolderMap: data.fileFolderMap,
+        folders: data.folders
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "فشل نقل الملفات" });
+    }
+  });
+
+  // 6. Full sync for folders and file-to-folder mapping
+  app.post("/api/media/folders/sync", (req, res) => {
+    try {
+      const { folders, fileFolderMap } = req.body;
+      const data: ServerMediaFoldersData = {
+        folders: Array.isArray(folders) ? folders : [],
+        fileFolderMap: fileFolderMap && typeof fileFolderMap === "object" ? fileFolderMap : {}
+      };
+      saveMediaFoldersData(data);
+      res.json({
+        success: true,
+        message: "تمت مزامنة المجلدات على السيرفر بنجاح",
+        folders: data.folders,
+        fileFolderMap: data.fileFolderMap
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "فشل مزامنة المجلدات" });
     }
   });
 

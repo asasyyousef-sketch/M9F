@@ -39,6 +39,7 @@ import {
   Volume2,
   Clock,
   Tv,
+  Mic,
   AlertTriangle,
   FileText,
   MoreVertical
@@ -75,6 +76,7 @@ export interface MediaExplorerViewProps {
   onUploadClick: () => void;
   onUploadFolderClick?: () => void;
   onOpenYouTubeDownload?: () => void;
+  onOpenGradioModal?: () => void;
   onOpenGradioModalForFile: (file: MediaFile) => void;
   onOpenSubtitleOptionsForFile: (file: MediaFile) => void;
   onRefreshFiles: () => void;
@@ -126,6 +128,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
   onUploadClick,
   onUploadFolderClick,
   onOpenYouTubeDownload,
+  onOpenGradioModal,
   onOpenGradioModalForFile,
   onOpenSubtitleOptionsForFile,
   onRefreshFiles,
@@ -942,165 +945,169 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
       </div>
 
       {/* ======================================================== */}
-      {/* 2. REFINED COMMAND BAR                                   */}
+      {/* 2. REFINED STANDARD COMMAND BAR                          */}
       {/* ======================================================== */}
       <div className="bg-slate-50/90 border-b border-slate-200 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 shrink-0">
-        {/* Left Side: Creation & Contextual Operations */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          {/* Primary Upload Button */}
-          <button
-            onClick={onUploadClick}
-            disabled={uploading}
-            className="px-3 py-1.5 bg-[#0056f6] hover:bg-[#0047d1] text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-75"
-            title="رفع مقاطع فيديو أو صوتية جديدة"
-          >
-            {uploading ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>رفع ({uploadProgress}%)...</span>
-              </>
-            ) : (
-              <>
-                <Film className="w-3.5 h-3.5" />
-                <span>+ رفع وسائط</span>
-              </>
-            )}
-          </button>
-
-          {/* Upload Entire Folder Button (رفع مجلد كامل) */}
-          {onUploadFolderClick && (
+        {/* Left Side: Creation, Import & Management Operations */}
+        <div className="flex flex-wrap items-center gap-1">
+          {/* Group 1: Creation & Import (Standard Clean Buttons) */}
+          <div className="flex items-center gap-1">
+            {/* Primary Upload Button */}
             <button
-              onClick={onUploadFolderClick}
+              onClick={onUploadClick}
               disabled={uploading}
-              className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200/80 rounded-lg text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-75"
-              title="رفع مجلد كامل من جهازك بجميع ملفات الفيديو والصوت"
+              className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-75"
+              title="رفع ملفات وسائط (فيديو / صوت)"
             >
-              <FolderInput className="w-3.5 h-3.5 text-blue-600" />
-              <span className="hidden sm:inline">+ 📁 رفع مجلد</span>
-              <span className="sm:hidden">+ مجلد</span>
-            </button>
-          )}
-
-          {/* YouTube Download & Transcribe Button */}
-          {onOpenYouTubeDownload && (
-            <button
-              onClick={onOpenYouTubeDownload}
-              className="px-3 py-1.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
-              title="تنزيل وتفريغ مقطع من يوتيوب بالدقة المحددة"
-            >
-              <Tv className="w-3.5 h-3.5" />
-              <span>تنزيل من يوتيوب 🎥⚡</span>
-            </button>
-          )}
-
-          {/* New Folder Button */}
-          <button
-            onClick={onOpenCreateFolder}
-            className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200/90 rounded-lg text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
-            title="إنشاء مجلد تصنيف جديد"
-          >
-            <FolderPlus className="w-3.5 h-3.5 text-amber-500" />
-            <span>+ مجلد جديد</span>
-          </button>
-
-          <div className="h-4 w-px bg-slate-200 mx-0.5 hidden sm:block" />
-
-          {/* Selection Mode Toggle Button (زر وضع التحديد) */}
-          <button
-            onClick={handleToggleSelectionMode}
-            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
-              isSelectionMode
-                ? "bg-blue-600 text-white border-blue-600 shadow-xs"
-                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
-            }`}
-            title={isSelectionMode ? "إيقاف وضع التحديد وإلغاء الاختيارات" : "تفعيل وضع التحديد المتعدد"}
-          >
-            <CheckSquare className="w-3.5 h-3.5" />
-            <span>{isSelectionMode ? "وضع التحديد: مفعّل" : "وضع التحديد"}</span>
-          </button>
-
-          {/* Contextual Actions & Select All (Shown ONLY when Selection Mode is active) */}
-          {isSelectionMode && (
-            <div className="flex flex-wrap items-center gap-1.5 animate-fadeIn">
-              {/* Select All Toggle */}
-              <button
-                onClick={handleSelectAll}
-                className={`px-2 py-1.5 rounded-lg text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
-                  (selectedFileIds.size > 0 || selectedFolderIds.size > 0)
-                    ? "bg-blue-50 text-blue-700 border-blue-200"
-                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-                }`}
-                title="تحديد كافة العناصر المعروضة"
-              >
-                {selectedFileIds.size === filteredFiles.length && selectedFolderIds.size === displayedFolders.length && (filteredFiles.length > 0 || displayedFolders.length > 0) ? (
-                  <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
-                ) : (
-                  <Square className="w-3.5 h-3.5 text-slate-400" />
-                )}
-                <span>تحديد الكل</span>
-              </button>
-
-              {(selectedFileIds.size > 0 || selectedFolderIds.size > 0) && (
-                <div className="flex items-center gap-1.5 bg-blue-50/90 border border-blue-200 px-2 py-0.5 rounded-lg text-xs animate-fadeIn">
-                  <span className="font-black text-blue-800 text-[11px]">
-                    محدد: {selectedFileIds.size + selectedFolderIds.size}
-                  </span>
-
-                  <div className="h-3 w-px bg-blue-300 mx-0.5" />
-
-                  {/* Bulk Move */}
-                  {selectedFileIds.size > 0 && (
-                    <button
-                      onClick={() => setShowBulkMoveModal(true)}
-                      className="px-2 py-1 bg-white hover:bg-amber-50 text-amber-700 border border-amber-200 rounded-md text-[11px] font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
-                      title="نقل الملفات المحددة إلى مجلد"
-                    >
-                      <FolderInput className="w-3 h-3 text-amber-600" />
-                      <span>نقل</span>
-                    </button>
-                  )}
-
-                  {/* Bulk Subtitle Exporter */}
-                  {selectedFileIds.size > 0 && (
-                    <button
-                      onClick={() => setShowBatchSubtitleModal(true)}
-                      className="px-2 py-1 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md text-[11px] font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
-                      title="تصدير ترجمات الملفات المحددة"
-                    >
-                      <DownloadCloud className="w-3 h-3 text-indigo-600" />
-                      <span>تصدير</span>
-                    </button>
-                  )}
-
-                  {/* Bulk Delete */}
-                  <button
-                    onClick={triggerBulkDelete}
-                    className="px-2 py-1 bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 rounded-md text-[11px] font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
-                    title="حذف العناصر المحددة"
-                  >
-                    <Trash2 className="w-3 h-3 text-rose-600" />
-                    <span>حذف</span>
-                  </button>
-
-                  {/* Clear Selection */}
-                  <button
-                    onClick={() => {
-                      setSelectedFileIds(new Set());
-                      setSelectedFolderIds(new Set());
-                    }}
-                    className="p-1 hover:bg-blue-100 text-blue-600 rounded-md transition-colors cursor-pointer"
-                    title="إلغاء التحديد"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
+              {uploading ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span className="text-[11px] font-medium">{uploadProgress}%</span>
+                </>
+              ) : (
+                <>
+                  <Film className="w-3.5 h-3.5" />
+                  <span>رفع وسائط</span>
+                </>
               )}
-            </div>
-          )}
+            </button>
+
+            {/* Upload Entire Folder */}
+            {onUploadFolderClick && (
+              <button
+                onClick={onUploadFolderClick}
+                disabled={uploading}
+                className="p-1.5 sm:px-2 sm:py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-75"
+                title="رفع مجلد كامل"
+              >
+                <FolderInput className="w-3.5 h-3.5 text-blue-600" />
+                <span className="hidden md:inline">رفع مجلد</span>
+              </button>
+            )}
+
+            {/* YouTube Download */}
+            {onOpenYouTubeDownload && (
+              <button
+                onClick={onOpenYouTubeDownload}
+                className="p-1.5 sm:px-2 sm:py-1.5 bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 rounded-lg text-xs font-medium transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                title="تنزيل وتفريغ من يوتيوب"
+              >
+                <Tv className="w-3.5 h-3.5 text-rose-600" />
+                <span className="hidden md:inline">يوتيوب</span>
+              </button>
+            )}
+
+            {/* New Folder Button */}
+            <button
+              onClick={onOpenCreateFolder}
+              className="p-1.5 sm:px-2 sm:py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
+              title="إنشاء مجلد جديد"
+            >
+              <FolderPlus className="w-3.5 h-3.5 text-amber-600" />
+              <span className="hidden md:inline">مجلد جديد</span>
+            </button>
+          </div>
+
+          <div className="h-4 w-px bg-slate-200 mx-0.5" />
+
+          {/* Group 2: Selection Mode & Batch Actions */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleToggleSelectionMode}
+              className={`p-1.5 sm:px-2 sm:py-1.5 rounded-lg text-xs font-medium transition-all border flex items-center gap-1.5 cursor-pointer ${
+                isSelectionMode
+                  ? "bg-blue-50 text-blue-700 border-blue-300 shadow-2xs"
+                  : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+              }`}
+              title={isSelectionMode ? "إلغاء وضع التحديد" : "تفعيل وضع التحديد المتعدد"}
+            >
+              <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
+              <span className="hidden sm:inline">{isSelectionMode ? "إلغاء التحديد" : "تحديد"}</span>
+            </button>
+
+            {/* Contextual Actions & Select All (Shown ONLY when Selection Mode is active) */}
+            {isSelectionMode && (
+              <div className="flex items-center gap-1 animate-fadeIn">
+                {/* Select All Toggle */}
+                <button
+                  onClick={handleSelectAll}
+                  className={`p-1.5 sm:px-2 sm:py-1.5 rounded-lg text-xs font-medium transition-all border flex items-center gap-1.5 cursor-pointer ${
+                    (selectedFileIds.size > 0 || selectedFolderIds.size > 0)
+                      ? "bg-blue-50 text-blue-700 border-blue-200"
+                      : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                  }`}
+                  title="تحديد كافة العناصر"
+                >
+                  {selectedFileIds.size === filteredFiles.length && selectedFolderIds.size === displayedFolders.length && (filteredFiles.length > 0 || displayedFolders.length > 0) ? (
+                    <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
+                  ) : (
+                    <Square className="w-3.5 h-3.5 text-slate-400" />
+                  )}
+                  <span className="hidden sm:inline">الكل</span>
+                </button>
+
+                {(selectedFileIds.size > 0 || selectedFolderIds.size > 0) && (
+                  <div className="flex items-center gap-1 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-lg text-xs animate-fadeIn">
+                    <span className="font-bold text-blue-800 text-[11px] px-1">
+                      {selectedFileIds.size + selectedFolderIds.size}
+                    </span>
+
+                    <div className="h-3 w-px bg-blue-200 mx-0.5" />
+
+                    {/* Bulk Move */}
+                    {selectedFileIds.size > 0 && (
+                      <button
+                        onClick={() => setShowBulkMoveModal(true)}
+                        className="p-1 sm:px-1.5 sm:py-0.5 bg-white hover:bg-amber-50 text-amber-700 border border-amber-200 rounded text-[11px] font-medium transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
+                        title="نقل العناصر المحددة"
+                      >
+                        <FolderInput className="w-3 h-3 text-amber-600" />
+                        <span className="hidden md:inline">نقل</span>
+                      </button>
+                    )}
+
+                    {/* Bulk Subtitle Exporter */}
+                    {selectedFileIds.size > 0 && (
+                      <button
+                        onClick={() => setShowBatchSubtitleModal(true)}
+                        className="p-1 sm:px-1.5 sm:py-0.5 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded text-[11px] font-medium transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
+                        title="تصدير ترجمات العناصر المحددة"
+                      >
+                        <DownloadCloud className="w-3 h-3 text-indigo-600" />
+                        <span className="hidden md:inline">تصدير</span>
+                      </button>
+                    )}
+
+                    {/* Bulk Delete */}
+                    <button
+                      onClick={triggerBulkDelete}
+                      className="p-1 sm:px-1.5 sm:py-0.5 bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 rounded text-[11px] font-medium transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
+                      title="حذف العناصر المحددة"
+                    >
+                      <Trash2 className="w-3 h-3 text-rose-600" />
+                      <span className="hidden md:inline">حذف</span>
+                    </button>
+
+                    {/* Clear Selection */}
+                    <button
+                      onClick={() => {
+                        setSelectedFileIds(new Set());
+                        setSelectedFolderIds(new Set());
+                      }}
+                      className="p-1 hover:bg-blue-100 text-blue-600 rounded transition-colors cursor-pointer"
+                      title="إلغاء التحديد"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Right Side: Clean Dropdowns for Filter, Sort, View Mode & Inspector */}
-        <div className="flex items-center gap-1.5">
+        {/* Right Side: Standard Filter, Sort, View Modes & Inspector */}
+        <div className="flex items-center gap-1">
           {/* 1. Filter Dropdown */}
           <div className="relative">
             <button
@@ -1110,22 +1117,23 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                 setShowSortDropdown(false);
                 setShowViewDropdown(false);
               }}
-              className={`px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              className={`p-1.5 sm:px-2 sm:py-1.5 rounded-lg border text-xs font-medium transition-all flex items-center gap-1 cursor-pointer ${
                 filterType !== "all"
                   ? "bg-blue-50 text-blue-700 border-blue-300"
                   : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
               }`}
+              title="تصفية حسب النوع"
             >
-              <Film className="w-3.5 h-3.5 text-slate-500" />
-              <span>
+              <SlidersHorizontal className="w-3.5 h-3.5 text-slate-500" />
+              <span className="hidden sm:inline">
                 {filterType === "all"
-                  ? "تصفية: الكل"
+                  ? "الكل"
                   : filterType === "video"
-                  ? "فيديو فقط"
+                  ? "فيديو"
                   : filterType === "audio"
-                  ? "صوت فقط"
+                  ? "صوت"
                   : filterType === "with_sub"
-                  ? "مترجمة فقط"
+                  ? "مترجم"
                   : "بدون ترجمة"}
               </span>
               <ChevronDown className="w-3 h-3 text-slate-400" />
@@ -1438,36 +1446,36 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                 <button
                   onClick={onUploadClick}
                   disabled={uploading}
-                  className="px-4 py-2 bg-[#0056f6] hover:bg-[#0047d1] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-75"
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-75"
                 >
-                  <Film className="w-3.5 h-3.5" />
-                  <span>+ رفع مقطع جديد</span>
+                  <Film className="w-4 h-4" />
+                  <span>رفع وسائط</span>
                 </button>
                 {onUploadFolderClick && (
                   <button
                     onClick={onUploadFolderClick}
                     disabled={uploading}
-                    className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-75"
+                    className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-75"
                   >
-                    <FolderInput className="w-3.5 h-3.5 text-blue-600" />
-                    <span>+ 📁 رفع مجلد كامل</span>
+                    <FolderInput className="w-4 h-4 text-blue-600" />
+                    <span>رفع مجلد</span>
                   </button>
                 )}
                 {onOpenYouTubeDownload && (
                   <button
                     onClick={onOpenYouTubeDownload}
-                    className="px-4 py-2 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                    className="px-3.5 py-2 bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 rounded-lg text-xs font-medium transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
                   >
-                    <Tv className="w-3.5 h-3.5" />
-                    <span>تنزيل وتفريغ من يوتيوب 🎥⚡</span>
+                    <Tv className="w-4 h-4 text-rose-600" />
+                    <span>يوتيوب</span>
                   </button>
                 )}
                 <button
                   onClick={onOpenCreateFolder}
-                  className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                  className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
                 >
-                  <FolderPlus className="w-3.5 h-3.5 text-amber-500" />
-                  <span>+ إنشاء مجلد</span>
+                  <FolderPlus className="w-4 h-4 text-amber-600" />
+                  <span>مجلد جديد</span>
                 </button>
               </div>
             </div>
@@ -1736,7 +1744,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                           <div className="flex items-center gap-2.5 min-w-0">
                             {/* Real Thumbnail / Video Frame snapshot */}
                             <div
-                              className={`w-12 h-8 rounded-lg flex items-center justify-center shrink-0 text-white shadow-2xs overflow-hidden relative border border-slate-200/60 ${
+                              className={`w-12 h-8 rounded-md flex items-center justify-center shrink-0 text-white shadow-2xs overflow-hidden relative border border-slate-200/60 ${
                                 file.type === "video" ? "bg-slate-900" : "bg-purple-600"
                               }`}
                             >
@@ -1910,7 +1918,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                       e.preventDefault();
                       setContextMenu({ x: e.clientX, y: e.clientY, folder });
                     }}
-                    className={`p-3 rounded-2xl border transition-all flex flex-col justify-between cursor-pointer group relative overflow-hidden select-none ${
+                    className={`p-3 rounded-xl border transition-all flex flex-col justify-between cursor-pointer group relative overflow-hidden select-none ${
                       isDragOver
                         ? "bg-amber-100/90 border-amber-500 ring-2 ring-amber-400 scale-[1.02]"
                         : isSelected
@@ -1950,7 +1958,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
 
                     {/* Big Folder Icon Banner */}
                     <div
-                      className="w-full h-28 rounded-xl flex flex-col items-center justify-center mb-2.5 transition-all group-hover:scale-[1.02]"
+                      className="w-full h-28 rounded-lg flex flex-col items-center justify-center mb-2.5 transition-all group-hover:scale-[1.02]"
                       style={{ backgroundColor: `${folder.color || "#f59e0b"}15`, color: folder.color || "#b45309" }}
                     >
                       <Folder className="w-14 h-14 fill-current drop-shadow-xs" />
@@ -1990,7 +1998,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                       e.preventDefault();
                       setContextMenu({ x: e.clientX, y: e.clientY, file });
                     }}
-                    className={`p-3 rounded-2xl border transition-all flex flex-col justify-between cursor-pointer group relative overflow-hidden select-none ${
+                    className={`p-3 rounded-xl border transition-all flex flex-col justify-between cursor-pointer group relative overflow-hidden select-none ${
                       isSelected
                         ? "bg-blue-50/70 border-blue-400 shadow-md ring-2 ring-blue-500/30"
                         : isInspected
@@ -2032,7 +2040,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                     </div>
 
                     {/* Media Card Thumbnail Banner with Video Snapshot or Waveform */}
-                    <div className="w-full h-28 bg-slate-900 rounded-xl flex items-center justify-center mb-2.5 relative overflow-hidden group-hover:opacity-95 transition-all border border-slate-200/60">
+                    <div className="w-full h-28 bg-slate-900 rounded-lg flex items-center justify-center mb-2.5 relative overflow-hidden group-hover:opacity-95 transition-all border border-slate-200/60">
                       {file.type === "video" && videoThumb ? (
                         <img
                           src={videoThumb}
@@ -2282,7 +2290,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
 
                 {/* Folder Banner */}
                 <div
-                  className="w-full h-36 rounded-2xl flex flex-col items-center justify-center border shadow-xs transition-all"
+                  className="w-full h-36 rounded-xl flex flex-col items-center justify-center border shadow-xs transition-all"
                   style={{
                     backgroundColor: `${previewTargetFolder.color || "#f59e0b"}15`,
                     borderColor: `${previewTargetFolder.color || "#f59e0b"}35`,
@@ -2371,7 +2379,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                 </div>
 
                 {/* Mini Preview Player with Real-Time Subtitle Synchronization */}
-                <div className="w-full bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 shadow-md relative group">
+                <div className="w-full bg-slate-950 rounded-xl overflow-hidden border border-slate-800 shadow-md relative group">
                   {previewTargetFile.type === "video" ? (
                     <div className="relative w-full h-44 bg-black flex items-center justify-center">
                       <video
