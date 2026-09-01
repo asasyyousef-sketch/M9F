@@ -106,6 +106,7 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
   const [temperature, setTemperature] = useState<number>(0.0);
   const [conditionOnPreviousText, setConditionOnPreviousText] = useState<boolean>(true);
   const [vadFilter, setVadFilter] = useState<boolean>(true);
+  const [wordTimestamps, setWordTimestamps] = useState<boolean>(true);
   const [minSilenceDurationMs, setMinSilenceDurationMs] = useState<number>(2000);
   const [noSpeechThreshold, setNoSpeechThreshold] = useState<number>(0.6);
   const [compressionRatioThreshold, setCompressionRatioThreshold] = useState<number>(2.4);
@@ -390,6 +391,7 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
         temperature,
         conditionOnPreviousText,
         vadFilter,
+        wordTimestamps,
         minSilenceDurationMs,
         noSpeechThreshold,
         compressionRatioThreshold,
@@ -897,7 +899,7 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
                 </div>
 
                 {/* Toggles */}
-                <div className="flex items-center gap-6 pt-2">
+                <div className="flex flex-wrap items-center gap-6 pt-2">
                   <label className="flex items-center gap-2 cursor-pointer text-slate-300">
                     <input
                       type="checkbox"
@@ -906,6 +908,16 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
                       className="rounded accent-indigo-500 w-4 h-4"
                     />
                     <span>فلتر كشف الصوت والصمت (VAD Filter)</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={wordTimestamps}
+                      onChange={(e) => setWordTimestamps(e.target.checked)}
+                      className="rounded accent-indigo-500 w-4 h-4"
+                    />
+                    <span>توقيتات دقيقة للكلمات (Word Timestamps)</span>
                   </label>
 
                   <label className="flex items-center gap-2 cursor-pointer text-slate-300">

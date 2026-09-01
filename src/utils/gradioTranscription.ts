@@ -10,6 +10,7 @@ export interface GradioTranscribeOptions {
   temperature?: number;
   conditionOnPreviousText?: boolean;
   vadFilter?: boolean;
+  wordTimestamps?: boolean;
   minSilenceDurationMs?: number;
   noSpeechThreshold?: number;
   compressionRatioThreshold?: number;
@@ -218,6 +219,7 @@ export async function transcribeFileWithGradio(
     temperature = 0.0,
     conditionOnPreviousText = true,
     vadFilter = true,
+    wordTimestamps = true,
     minSilenceDurationMs = 2000,
     noSpeechThreshold = 0.6,
     compressionRatioThreshold = 2.4,
@@ -259,10 +261,24 @@ export async function transcribeFileWithGradio(
 
   onStatusUpdate?.("1/3 اكتمل رفع الملف بنجاح (100%)", "uploading", 100);
 
-  // 2) Step 2: Call Transcribe Endpoint
+  // 2) Step 2: Call Transcribe Endpoint (11 values matching Gradio's exact signature: File, 3 Sliders, 3 Checkboxes, 4 Sliders)
   onStatusUpdate?.("2/3 تم رفع الملف، جاري تهيئة طلب المعالجة والتفريغ...", "calling", 35);
 
-  const payloadData = [
+  const payload11 = [
+    { path: uploadedPath, meta: { _type: "gradio.FileData" } }, // 0: File
+    beamSize,                                                   // 1: Slider (beam_size)
+    bestOf,                                                     // 2: Slider (best_of)
+    temperature,                                                // 3: Slider (temperature)
+    conditionOnPreviousText,                                    // 4: Checkbox (condition_on_previous_text)
+    vadFilter,                                                  // 5: Checkbox (vad_filter)
+    wordTimestamps,                                             // 6: Checkbox (word_timestamps / timestamp token)
+    minSilenceDurationMs,                                       // 7: Slider (min_silence_duration_ms)
+    noSpeechThreshold,                                          // 8: Slider (no_speech_threshold)
+    compressionRatioThreshold,                                  // 9: Slider (compression_ratio_threshold)
+    logProbThreshold                                            // 10: Slider (log_prob_threshold)
+  ];
+
+  const payload10 = [
     { path: uploadedPath, meta: { _type: "gradio.FileData" } },
     beamSize,
     bestOf,
@@ -280,9 +296,22 @@ export async function transcribeFileWithGradio(
     callRes = await fetch(`${baseUrl}/gradio_api/call/transcribe`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: payloadData }),
+      body: JSON.stringify({ data: payload11 }),
       signal
     });
+
+    // Fallback: If server responded with error indicating different input count
+    if (!callRes.ok && (callRes.status === 422 || callRes.status === 500)) {
+      const errText = await callRes.clone().text().catch(() => "");
+      if (errText.includes("needed: 10") || errText.includes("got: 11")) {
+        callRes = await fetch(`${baseUrl}/gradio_api/call/transcribe`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ data: payload10 }),
+          signal
+        });
+      }
+    }
   } catch (err: any) {
     throw new Error(`فشل استدعاء دالة transcribe على السيرفر: ${err.message}`);
   }
