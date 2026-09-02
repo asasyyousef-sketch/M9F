@@ -639,35 +639,47 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [showFullscreenControls, setShowFullscreenControls] = useState<boolean>(false);
   const [forceLandscapeInPortrait, setForceLandscapeInPortrait] = useState<boolean>(true);
-  const [viewportDimensions, setViewportDimensions] = useState<{ width: number; height: number }>(() => ({
-    width: typeof window !== "undefined" ? window.innerWidth : 1280,
-    height: typeof window !== "undefined" ? window.innerHeight : 720
-  }));
+  const [landscapeRotationAngle, setLandscapeRotationAngle] = useState<number>(90);
+  const [viewportDimensions, setViewportDimensions] = useState<{ width: number; height: number }>(() => {
+    if (typeof window !== "undefined") {
+      const w = window.visualViewport?.width || window.innerWidth || 1280;
+      const h = window.visualViewport?.height || window.innerHeight || 720;
+      return { width: Math.round(w), height: Math.round(h) };
+    }
+    return { width: 1280, height: 720 };
+  });
   const playerSectionRef = useRef<HTMLElement>(null);
   const fullscreenControlsTimeoutRef = useRef<number | null>(null);
 
-  // Track viewport dimensions and orientation for automatic YouTube-like landscape
-  useEffect(() => {
-    const handleResize = () => {
+  // Track viewport dimensions and orientation continuously for mandatory landscape
+  const updateViewportDimensions = useCallback(() => {
+    if (typeof window !== "undefined") {
+      const w = window.visualViewport?.width || window.innerWidth || (playerSectionRef.current ? playerSectionRef.current.clientWidth : 1280);
+      const h = window.visualViewport?.height || window.innerHeight || (playerSectionRef.current ? playerSectionRef.current.clientHeight : 720);
       setViewportDimensions({
-        width: window.innerWidth,
-        height: window.innerHeight
+        width: Math.round(w),
+        height: Math.round(h)
       });
-    };
-    window.addEventListener("resize", handleResize);
-    window.addEventListener("orientationchange", handleResize);
-    return () => {
-      window.removeEventListener("resize", handleResize);
-      window.removeEventListener("orientationchange", handleResize);
-    };
+    }
   }, []);
 
+  useEffect(() => {
+    updateViewportDimensions();
+    window.addEventListener("resize", updateViewportDimensions);
+    window.addEventListener("orientationchange", updateViewportDimensions);
+    document.addEventListener("fullscreenchange", updateViewportDimensions);
+    return () => {
+      window.removeEventListener("resize", updateViewportDimensions);
+      window.removeEventListener("orientationchange", updateViewportDimensions);
+      document.removeEventListener("fullscreenchange", updateViewportDimensions);
+    };
+  }, [updateViewportDimensions]);
+
+  // Is viewport taller than it is wide (vertical portrait)?
   const isPortraitViewport = viewportDimensions.width < viewportDimensions.height;
-  const isTouchOrMobileDevice =
-    typeof window !== "undefined" &&
-    ("ontouchstart" in window || navigator.maxTouchPoints > 0 || window.innerWidth <= 1024);
+  // Mandatory horizontal mode whenever in fullscreen on portrait viewport (unless user manually cycles to 0deg vertical)
   const shouldRotateLandscape =
-    isFullscreen && isPortraitViewport && isTouchOrMobileDevice && forceLandscapeInPortrait;
+    isFullscreen && isPortraitViewport && forceLandscapeInPortrait && landscapeRotationAngle !== 0;
 
   // Immersive Theater Mode (Video huge, minimal bottom controls, side drawer for scrolling cues with toggle)
   const [isImmersiveMode, setIsImmersiveMode] = useState<boolean>(false);
@@ -957,6 +969,23 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       setHudToast(null);
     }, 950);
   }, []);
+
+  const handleCycleOrientation = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (landscapeRotationAngle === 90) {
+      setLandscapeRotationAngle(270);
+      setForceLandscapeInPortrait(true);
+      triggerHud("أفقي معكوس 180° 🔄", "اتجاه الفيديو");
+    } else if (landscapeRotationAngle === 270) {
+      setLandscapeRotationAngle(0);
+      setForceLandscapeInPortrait(false);
+      triggerHud("الوضع الرأسي 📱", "اتجاه الفيديو");
+    } else {
+      setLandscapeRotationAngle(90);
+      setForceLandscapeInPortrait(true);
+      triggerHud("الوضع الأفقي الإجباري 🖥️", "اتجاه الفيديو");
+    }
+  }, [landscapeRotationAngle, triggerHud]);
 
   // Real-time Gesture Subtitle Preview State & Trigger
   const [showSwipeSubtitlePreview, setShowSwipeSubtitlePreview] = useState<boolean>(false);
@@ -2735,7 +2764,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     } else {
       setIsFullscreen(true);
       setForceLandscapeInPortrait(true);
-      triggerHud("ملء الشاشة أفقي 🔄", "Fullscreen");
+      setLandscapeRotationAngle(90);
+      updateViewportDimensions();
+      triggerHud("ملء الشاشة أفقي إجباري 🖥️", "Fullscreen");
 
       const reqFs =
         target.requestFullscreen ||
@@ -2747,30 +2778,14 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         reqFs.call(target)
           .then(() => {
             lockScreenOrientationLandscape();
+            updateViewportDimensions();
           })
           .catch((err: any) => {
-            console.error("Fullscreen error, fallback to video element:", err);
-            const vid = videoRef.current;
-            if (vid) {
-              const vidReqFs =
-                vid.requestFullscreen ||
-                (vid as any).webkitRequestFullscreen ||
-                (vid as any).webkitEnterFullscreen ||
-                (vid as any).mozRequestFullScreen ||
-                (vid as any).msRequestFullscreen;
-              if (vidReqFs) {
-                vidReqFs.call(vid)
-                  .then(() => {
-                    lockScreenOrientationLandscape();
-                  })
-                  .catch((e2: any) => {
-                    console.error(e2);
-                  });
-              }
-            }
+            console.warn("Native fullscreen not available or blocked in frame, using full-window mode:", err);
+            updateViewportDimensions();
           });
       }
-      // Also lock orientation immediately during user click event
+      // Also request orientation lock immediately during user touch/click gesture
       lockScreenOrientationLandscape();
     }
   };
@@ -3749,13 +3764,19 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     let tapXRatio = (endX - rect.left) / rect.width;
     let tapYRatio = (endY - rect.top) / rect.height;
 
-    // When forced into landscape rotated 90 degrees clockwise in portrait orientation:
-    if (shouldRotateLandscape) {
+    // When forced into landscape rotated in portrait orientation:
+    if (shouldRotateLandscape && landscapeRotationAngle === 90) {
       deltaX = endY - start.y;
       deltaY = endX - start.x;
       startXRatio = (start.y - rect.top) / rect.height;
       tapXRatio = (endY - rect.top) / rect.height;
       tapYRatio = (rect.right - endX) / rect.width;
+    } else if (shouldRotateLandscape && landscapeRotationAngle === 270) {
+      deltaX = start.y - endY;
+      deltaY = start.x - endX;
+      startXRatio = (rect.bottom - start.y) / rect.height;
+      tapXRatio = (rect.bottom - endY) / rect.height;
+      tapYRatio = (endX - rect.left) / rect.width;
     }
 
     const absDeltaX = Math.abs(deltaX);
@@ -4150,27 +4171,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         {isPlayerOpen && currentFile ? (
           <section
             ref={playerSectionRef}
-            style={
-              shouldRotateLandscape
-                ? {
-                    position: "fixed",
-                    top: "50%",
-                    left: "50%",
-                    width: `${viewportDimensions.height}px`,
-                    height: `${viewportDimensions.width}px`,
-                    transform: "translate(-50%, -50%) rotate(90deg)",
-                    transformOrigin: "center center",
-                    zIndex: 99999,
-                    maxWidth: "none",
-                    maxHeight: "none",
-                  }
-                : undefined
-            }
             className={
               isFullscreen
-                ? shouldRotateLandscape
-                  ? "bg-black flex flex-col p-0 m-0 overflow-hidden text-white select-none"
-                  : "fixed inset-0 z-50 bg-black flex flex-col h-screen w-screen p-0 m-0 overflow-hidden text-white select-none"
+                ? "fixed inset-0 z-[9999] bg-black flex flex-col h-screen w-screen p-0 m-0 overflow-hidden text-white select-none"
                 : isImmersiveMode
                 ? "fixed inset-0 z-50 bg-slate-950 flex flex-col h-screen w-screen p-2 sm:p-3 overflow-hidden text-white"
                 : "bg-slate-900 rounded-xl p-2 sm:p-2.5 text-white shadow-2xl border border-slate-800 overflow-hidden"
@@ -4178,9 +4181,27 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           >
             {/* Split Grid / Flex: Player View + Transcript Panel (Zero excessive gap) */}
             <div
+              style={
+                shouldRotateLandscape
+                  ? {
+                      position: "absolute",
+                      top: "50%",
+                      left: "50%",
+                      width: `${viewportDimensions.height}px`,
+                      height: `${viewportDimensions.width}px`,
+                      transform: `translate(-50%, -50%) rotate(${landscapeRotationAngle}deg)`,
+                      transformOrigin: "center center",
+                      maxWidth: "none",
+                      maxHeight: "none",
+                      overflow: "hidden",
+                    }
+                  : undefined
+              }
               className={
                 isFullscreen
-                  ? "flex-1 w-full h-full relative overflow-hidden"
+                  ? shouldRotateLandscape
+                    ? "flex flex-col relative w-full h-full"
+                    : "flex-1 w-full h-full relative overflow-hidden flex flex-col"
                   : isImmersiveMode
                   ? "flex-1 flex flex-col md:flex-row landscape:flex-row overflow-hidden gap-2 min-h-0 relative"
                   : "grid grid-cols-1 lg:grid-cols-12 gap-2"
@@ -4300,21 +4321,32 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                         {isFullscreen && currentFile.type === "video" && (
                           <button
                             type="button"
-                            onClick={() => {
-                              setForceLandscapeInPortrait((prev) => {
-                                const next = !prev;
-                                triggerHud(next ? "الوضع الأفقي 🔄" : "الوضع العمودي 📱", "اتجاه الشاشة");
-                                return next;
-                              });
-                            }}
-                            className={`w-7 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center border-0 outline-none ${
+                            onClick={handleCycleOrientation}
+                            className={`px-2 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 border-0 outline-none ${
                               shouldRotateLandscape
-                                ? "bg-amber-500/30 text-amber-300"
-                                : "bg-transparent text-white/90 hover:text-white hover:bg-white/10"
+                                ? "bg-amber-500/30 text-amber-300 ring-1 ring-amber-400/50"
+                                : "bg-black/50 text-slate-300 hover:text-white hover:bg-black/75 backdrop-blur-md"
                             }`}
-                            title={forceLandscapeInPortrait ? "التحويل للوضع العمودي" : "التحويل للوضع الأفقي"}
+                            title={
+                              landscapeRotationAngle === 90
+                                ? "أفقي إجباري (90°) - اضغط لعكس الاتجاه أو التحويل للرأسي"
+                                : landscapeRotationAngle === 270
+                                ? "أفقي معكوس (270°) - اضغط للتحويل للرأسي"
+                                : "رأسي - اضغط للتحويل للأفقي الإجباري"
+                            }
                           >
-                            <RotateCw className={`w-3.5 h-3.5 transition-transform duration-300 ${shouldRotateLandscape ? "rotate-90 text-amber-300" : ""}`} />
+                            <RotateCw
+                              className={`w-3.5 h-3.5 transition-transform duration-300 ${
+                                landscapeRotationAngle === 90
+                                  ? "rotate-90 text-amber-300"
+                                  : landscapeRotationAngle === 270
+                                  ? "rotate-270 text-amber-300"
+                                  : "text-slate-300"
+                              }`}
+                            />
+                            <span className="text-[10px] font-mono">
+                              {landscapeRotationAngle === 90 ? "أفقي" : landscapeRotationAngle === 270 ? "أفقي 180°" : "رأسي"}
+                            </span>
                           </button>
                         )}
 
@@ -5182,21 +5214,32 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       {isFullscreen && (
                         <button
                           type="button"
-                          onClick={() => {
-                            setForceLandscapeInPortrait((prev) => {
-                              const next = !prev;
-                              triggerHud(next ? "الوضع الأفقي 🔄" : "الوضع العمودي 📱", "اتجاه الشاشة");
-                              return next;
-                            });
-                          }}
-                          className={`h-7 w-7 sm:h-8 sm:w-8 rounded-lg flex items-center justify-center border transition-colors cursor-pointer ${
+                          onClick={handleCycleOrientation}
+                          className={`h-7 px-2 sm:h-8 sm:px-2.5 rounded-lg flex items-center gap-1 border transition-colors cursor-pointer text-xs font-mono font-bold ${
                             shouldRotateLandscape
-                              ? "bg-amber-500/20 text-amber-300 border-amber-500/50"
+                              ? "bg-amber-500/25 text-amber-300 border-amber-500/60 shadow-xs"
                               : "bg-slate-800/90 hover:bg-slate-700/90 text-slate-300 border-slate-700/60 active:bg-slate-700"
                           }`}
-                          title={forceLandscapeInPortrait ? "التحويل للوضع العمودي" : "التحويل للوضع الأفقي"}
+                          title={
+                            landscapeRotationAngle === 90
+                              ? "أفقي إجباري (90°) - اضغط لعكس الاتجاه أو التحويل للرأسي"
+                              : landscapeRotationAngle === 270
+                              ? "أفقي معكوس (270°) - اضغط للتحويل للرأسي"
+                              : "رأسي - اضغط للتحويل للأفقي الإجباري"
+                          }
                         >
-                          <RotateCw className={`w-3.5 h-3.5 transition-transform duration-300 ${shouldRotateLandscape ? "rotate-90 text-amber-300" : ""}`} />
+                          <RotateCw
+                            className={`w-3.5 h-3.5 transition-transform duration-300 ${
+                              landscapeRotationAngle === 90
+                                ? "rotate-90 text-amber-300"
+                                : landscapeRotationAngle === 270
+                                ? "rotate-270 text-amber-300"
+                                : "text-slate-400"
+                            }`}
+                          />
+                          <span className="text-[10px] hidden sm:inline">
+                            {landscapeRotationAngle === 90 ? "أفقي" : landscapeRotationAngle === 270 ? "180°" : "رأسي"}
+                          </span>
                         </button>
                       )}
                     </div>
