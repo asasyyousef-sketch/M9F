@@ -330,8 +330,8 @@ export const SubtitleStylePanel: React.FC<SubtitleStylePanelProps> = ({
 
         {/* Video Canvas Mockup */}
         {showPreviewStage && (() => {
-          const pText = samplePrimaryText || "Guten Morgen! Willkommen zu unserem Deutschkurs.";
-          const sText = sampleSecondaryText || "صباح الخير! أهلاً بكم في دورة اللغة الألمانية.";
+          const pText = samplePrimaryText || "Das ist ein Text hier";
+          const sText = sampleSecondaryText || "هذا النص التجريبي هنا";
           const pDir = primaryStyle.direction === "rtl" ? "rtl" : primaryStyle.direction === "ltr" ? "ltr" : detectTextDirection(pText);
           const sDir = secondaryStyle.direction === "rtl" ? "rtl" : secondaryStyle.direction === "ltr" ? "ltr" : detectTextDirection(sText);
           return (
@@ -1205,10 +1205,10 @@ export const SubtitleStyleModal: React.FC<SubtitleStyleModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-fadeIn"
+      className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-fadeIn"
       dir="rtl"
     >
-      <div className="bg-slate-900 border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden flex flex-col w-full max-w-lg h-[94vh] max-h-[720px] animate-scaleUp">
+      <div className="bg-slate-900 border border-slate-700/90 rounded-3xl shadow-2xl overflow-hidden flex flex-col w-full max-w-lg h-[92vh] max-h-[700px] animate-scaleUp">
         {/* Modal Header */}
         <div className="p-3 sm:p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">

@@ -359,6 +359,8 @@ interface ActiveGestureOverlay {
     | "minimize"
     | "seek_backward_5s"
     | "seek_forward_5s"
+    | "seek_backward_swipe"
+    | "seek_forward_swipe"
     | "prev_sentence"
     | "next_sentence"
     | "volume_up"
@@ -657,9 +659,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     if (source === "gradio") setShowGradioModal(false);
     if (source === "upload") setShowSubtitleUploadModal(false);
     if (source === "options") setShowSubtitleOptionsModal(false);
-    setShowSubtitleStyleModal(false);
-    setShowTranscriptPanel(true);
-    setSidePanelView("style");
+    setShowSubtitleStyleModal(true);
   };
 
   const openSubtitlesInSidebar = (source: "gradio" | "upload" | "style" | null = null) => {
@@ -911,7 +911,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     isPotentialSwipe: boolean;
   } | null>(null);
 
-  const triggerVisualFeedback = useCallback((gesture: Omit<ActiveGestureOverlay, "id">) => {
+  const triggerVisualFeedback = useCallback((gesture: Omit<ActiveGestureOverlay, "id">, durationMs: number = 380) => {
     if (gestureTimerRef.current) {
       window.clearTimeout(gestureTimerRef.current);
     }
@@ -919,7 +919,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     setActiveGesture({ ...gesture, id });
     gestureTimerRef.current = window.setTimeout(() => {
       setActiveGesture(null);
-    }, 340);
+    }, durationMs);
   }, []);
 
   // Active screen mode: File Manager (default) vs Active Player
@@ -1386,16 +1386,17 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       const savedPrefs = getSavedSubtitlePreferences(currentFile.id);
 
       // Determine Primary Track:
-      // 1. Check server-saved primaryTrackId on currentFile
-      // 2. Check local saved preference
-      // 3. Fallback: Prefer German/original or source!=ai or first track
+      // 1. If activeTrackId is already set and exists in current file's tracks, KEEP IT!
+      // 2. Check server-saved primaryTrackId on currentFile
+      // 3. Check local saved preference
+      // 4. Fallback: Prefer German/original or source!=ai or first track
       let chosenPrimaryId: string | null = null;
-      if (currentFile.primaryTrackId && currentFile.subtitles.some((t) => t.id === currentFile.primaryTrackId)) {
+      if (activeTrackIdRef.current && currentFile.subtitles.some((t) => t.id === activeTrackIdRef.current)) {
+        chosenPrimaryId = activeTrackIdRef.current;
+      } else if (currentFile.primaryTrackId && currentFile.subtitles.some((t) => t.id === currentFile.primaryTrackId)) {
         chosenPrimaryId = currentFile.primaryTrackId;
       } else if (savedPrefs.primaryId && currentFile.subtitles.some((t) => t.id === savedPrefs.primaryId)) {
         chosenPrimaryId = savedPrefs.primaryId;
-      } else if (activeTrackIdRef.current && currentFile.subtitles.some((t) => t.id === activeTrackIdRef.current)) {
-        chosenPrimaryId = activeTrackIdRef.current;
       } else {
         // Find German or uploaded track first
         const germanOrOriginal = currentFile.subtitles.find(
@@ -1407,11 +1408,18 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       setActiveTrackId(chosenPrimaryId);
 
       // Determine Secondary Track:
-      // 1. Check server-saved secondaryTrackId on currentFile
-      // 2. Check local saved preference
-      // 3. Fallback: Prefer translated/Arabic track (different from primary)
+      // 1. If secondaryTrackId is already set, valid, and not primary, KEEP IT!
+      // 2. Check server-saved secondaryTrackId on currentFile
+      // 3. Check local saved preference
+      // 4. Fallback: Prefer translated/Arabic track (different from primary)
       let chosenSecondaryId: string | null = null;
       if (
+        secondaryTrackIdRef.current &&
+        secondaryTrackIdRef.current !== chosenPrimaryId &&
+        currentFile.subtitles.some((t) => t.id === secondaryTrackIdRef.current)
+      ) {
+        chosenSecondaryId = secondaryTrackIdRef.current;
+      } else if (
         currentFile.secondaryTrackId &&
         currentFile.secondaryTrackId !== chosenPrimaryId &&
         currentFile.subtitles.some((t) => t.id === currentFile.secondaryTrackId)
@@ -1486,33 +1494,17 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   // Sample Text Generators for Instant Visual Confirmation during Swipes / Previews
   const getSamplePrimarySubtitleText = useCallback(() => {
-    if (activeTrack?.language === "de") {
-      return "Dies ist ein Beispiel für den Untertitel (نص تجريبي للترجمة الأولى)";
-    }
-    if (activeTrack?.language === "en") {
-      return "This is a sample subtitle text (نص تجريبي للترجمة الأولى)";
-    }
     if (activeTrack?.language === "ar") {
-      return "هذا نص تجريبي لمعاينة الترجمة الأولى (الأساسية) 🎬";
+      return "هذا النص التجريبي هنا";
     }
-    return activeTrack?.label
-      ? `معاينة: ${activeTrack.label} (نص تجريبي)`
-      : "نص تجريبي لمعاينة مظهر الترجمة الأولى 🎬";
+    return "Das ist ein Text hier";
   }, [activeTrack]);
 
   const getSampleSecondarySubtitleText = useCallback(() => {
-    if (secondaryTrack?.language === "ar" || secondaryTrack?.source === "ai" || secondaryTrack?.label.includes("عربي") || secondaryTrack?.label.includes("🇸🇦")) {
-      return "هذا نص تجريبي لمعاينة الترجمة العربية المزدوجة 🇸🇦⚡";
+    if (secondaryTrack?.language === "de" || secondaryTrack?.language === "en") {
+      return "Das ist ein Text hier";
     }
-    if (secondaryTrack?.language === "de") {
-      return "Dies ist ein Beispiel für den zweiten Untertitel (الترجمة الثانية)";
-    }
-    if (secondaryTrack?.language === "en") {
-      return "Sample text for secondary dual subtitle (الترجمة الثانية)";
-    }
-    return secondaryTrack?.label
-      ? `معاينة: ${secondaryTrack.label} (الترجمة المزدوجة)`
-      : "هذا نص تجريبي لمعاينة الترجمة المزدوجة الثانية 💬";
+    return "هذا النص التجريبي هنا";
   }, [secondaryTrack]);
 
   // Robust, Non-repeating 1-to-1 Mapping between Primary Cues and Secondary (e.g. Arabic) Cues
@@ -1990,8 +1982,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       text: (c.text || "").trim()
     })).filter((c) => c.text.length > 0);
 
-    if (currentFile && currentFile.id === mediaId) {
-      const existingSubs = currentFile.subtitles ? [...currentFile.subtitles] : [];
+    setCurrentFile((prev) => {
+      if (!prev || prev.id !== mediaId) return prev;
+      const existingSubs = prev.subtitles ? [...prev.subtitles] : [];
       let updatedSubs: MediaSubtitleTrack[];
 
       if (trackId && existingSubs.some((t) => t.id === trackId)) {
@@ -2001,7 +1994,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       } else {
         const fallbackLabel = formatSubtitleTrackProtocol(source || "uploaded", "de");
         const dummyTrack: MediaSubtitleTrack = {
-          id: trackId || `sub-${Date.now()}`,
+          id: trackId || `sub-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
           label: label || fallbackLabel,
           cues: cleanCues,
           source,
@@ -2010,10 +2003,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         updatedSubs = [dummyTrack, ...existingSubs];
       }
 
-      const updatedFile = { ...currentFile, subtitles: updatedSubs };
-      setCurrentFile(updatedFile);
-      setFiles((prev) => prev.map((f) => (f.id === mediaId ? updatedFile : f)));
-    }
+      const updatedFile = { ...prev, subtitles: updatedSubs };
+      setFiles((fList) => fList.map((f) => (f.id === mediaId ? updatedFile : f)));
+      return updatedFile;
+    });
 
     try {
       const res = await fetch(`/api/media/${mediaId}/subtitles`, {
@@ -2027,11 +2020,27 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
       setSuccessMsg(`تم حفظ وتحديث الترجمة بنجاح! (${cleanCues.length} مقطع)`);
       if (data.file) {
-        setCurrentFile(data.file);
-        setFiles((prev) => prev.map((f) => (f.id === data.file.id ? data.file : f)));
+        setCurrentFile((prev) => {
+          if (!prev || prev.id !== data.file.id) return prev;
+          return {
+            ...data.file,
+            primaryTrackId: prev.primaryTrackId || data.file.primaryTrackId || activeTrackId || undefined,
+            secondaryTrackId: prev.secondaryTrackId || data.file.secondaryTrackId || secondaryTrackId || undefined,
+            showDualSubtitles: prev.showDualSubtitles !== undefined ? prev.showDualSubtitles : data.file.showDualSubtitles
+          };
+        });
+        setFiles((prev) => prev.map((f) => (f.id === data.file.id ? { ...f, subtitles: data.file.subtitles } : f)));
       }
-      if (data.track) {
-        setActiveTrackId(data.track.id);
+      // ONLY set active/secondary track if this was a brand new track and no track was active
+      if (data.track && !trackId) {
+        if (!activeTrackIdRef.current) {
+          activeTrackIdRef.current = data.track.id;
+          setActiveTrackId(data.track.id);
+        } else if (!secondaryTrackIdRef.current && data.track.id !== activeTrackIdRef.current) {
+          secondaryTrackIdRef.current = data.track.id;
+          setSecondaryTrackId(data.track.id);
+          setShowDualSubtitles(true);
+        }
       }
     } catch (err: any) {
       console.error(err);
@@ -2129,34 +2138,52 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         text: cleanCue.text
       };
 
-      // Match best candidate in secondary track (highest time overlap, or closest start time)
-      let bestMatchIdx = -1;
-      let maxOverlap = 0;
+      // 1. First check secondaryCueMap for exact matching pair
+      let matchingSecCue: SubtitleCue | undefined = secondaryCueMap.get(cleanCue.id);
 
-      secondaryTrack.cues.forEach((sc, idx) => {
-        const overlapStart = Math.max(sc.startTime, origTimes.startTime);
-        const overlapEnd = Math.min(sc.endTime, origTimes.endTime);
-        const overlap = Math.max(0, overlapEnd - overlapStart);
-        if (overlap > maxOverlap) {
-          maxOverlap = overlap;
-          bestMatchIdx = idx;
+      // 2. Direct ID match
+      if (!matchingSecCue) {
+        matchingSecCue = secondaryTrack.cues.find((sc) => sc.id === cleanCue.id);
+      }
+
+      // 3. Match by highest time overlap with original times
+      if (!matchingSecCue) {
+        let bestMatchIdx = -1;
+        let maxOverlap = 0;
+        secondaryTrack.cues.forEach((sc, idx) => {
+          const overlapStart = Math.max(sc.startTime, origTimes.startTime);
+          const overlapEnd = Math.min(sc.endTime, origTimes.endTime);
+          const overlap = Math.max(0, overlapEnd - overlapStart);
+          if (overlap > maxOverlap) {
+            maxOverlap = overlap;
+            bestMatchIdx = idx;
+          }
+        });
+        if (bestMatchIdx !== -1 && maxOverlap > 0.1) {
+          matchingSecCue = secondaryTrack.cues[bestMatchIdx];
         }
-      });
+      }
 
-      if (bestMatchIdx === -1) {
+      // 4. Match by closest start time
+      if (!matchingSecCue) {
+        let bestMatchIdx = -1;
         let minDiff = Infinity;
         secondaryTrack.cues.forEach((sc, idx) => {
           const diff = Math.abs(sc.startTime - origTimes.startTime);
-          if (diff < minDiff) {
+          if (diff < minDiff && diff < 3.0) {
             minDiff = diff;
             bestMatchIdx = idx;
           }
         });
+        if (bestMatchIdx !== -1) {
+          matchingSecCue = secondaryTrack.cues[bestMatchIdx];
+        }
       }
 
-      if (bestMatchIdx !== -1) {
-        const updatedSecCues = secondaryTrack.cues.map((sc, idx) => {
-          if (idx === bestMatchIdx) {
+      if (matchingSecCue) {
+        const targetSecId = matchingSecCue.id;
+        const updatedSecCues = secondaryTrack.cues.map((sc) => {
+          if (sc.id === targetSecId) {
             return {
               ...sc,
               startTime: cleanStartTime,
@@ -3318,11 +3345,57 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   const handleStageTap = useCallback(
     (xRatio: number) => {
+      const now = Date.now();
+      const currentTracker = tapTrackerRef.current;
+
+      // -------------------------------------------------------------
+      // 1. FULLSCREEN MODE: Double click anywhere on screen = Play / Pause
+      // -------------------------------------------------------------
+      if (isFullscreen) {
+        if (currentTracker && now - currentTracker.lastTime < 350) {
+          if (currentTracker.timer) {
+            window.clearTimeout(currentTracker.timer);
+          }
+          tapTrackerRef.current = null;
+
+          const el = getMediaElement();
+          const willPlay = el ? el.paused : !isPlaying;
+          togglePlay();
+          triggerVisualFeedback({
+            type: willPlay ? "play" : "pause",
+            side: "center",
+            label: willPlay ? "تشغيل" : "إيقاف مؤقت"
+          });
+          triggerHud(willPlay ? "تشغيل الفيديو" : "إيقاف مؤقت", willPlay ? "▶️" : "⏸️");
+          return;
+        }
+
+        // First tap in fullscreen: wait to see if second tap follows
+        if (currentTracker?.timer) {
+          window.clearTimeout(currentTracker.timer);
+        }
+
+        const timer = window.setTimeout(() => {
+          tapTrackerRef.current = null;
+          // In Fullscreen: Single tap ONLY toggles the scrubber timeline & controls bar!
+          setShowFullscreenControls((prev) => !prev);
+        }, 240);
+
+        tapTrackerRef.current = {
+          count: 1,
+          side: "center",
+          timer,
+          lastTime: now
+        };
+        return;
+      }
+
+      // -------------------------------------------------------------
+      // 2. WINDOWED / THEATER MODE:
+      // -------------------------------------------------------------
       // 60% Center Zone (0.20 to 0.80), 20% Left (< 0.20), 20% Right (> 0.80)
       const side: "left" | "right" | "center" =
         xRatio < 0.20 ? "left" : xRatio > 0.80 ? "right" : "center";
-      const now = Date.now();
-      const currentTracker = tapTrackerRef.current;
 
       // Check if double tap/click within 300ms on the same zone
       if (currentTracker && now - currentTracker.lastTime < 300 && currentTracker.side === side) {
@@ -3343,7 +3416,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
               subLabel: "الوضع السينمائي: تكبير ملء الشاشة"
             });
           } else {
-            // In Fullscreen Mode & Standard Mode: Double click in center = Play / Pause
+            // In Standard Mode: Double click in center = Play / Pause
             const el = getMediaElement();
             const willPlay = el ? el.paused : !isPlaying;
             togglePlay();
@@ -3375,7 +3448,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         return;
       }
 
-      // FIRST TAP
+      // FIRST TAP in Windowed Mode
       if (currentTracker?.timer) {
         window.clearTimeout(currentTracker.timer);
       }
@@ -3383,21 +3456,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       const timer = window.setTimeout(() => {
         // SINGLE TAP ACTION
         tapTrackerRef.current = null;
-        if (isFullscreen) {
-          // In Fullscreen: Single tap ONLY toggles the scrubber timeline & controls bar!
-          setShowFullscreenControls((prev) => !prev);
-        } else {
-          // In Windowed Mode: Single tap in center toggles play/pause
-          if (side === "center") {
-            const el = getMediaElement();
-            const willPlay = el ? el.paused : !isPlaying;
-            togglePlay();
-            triggerVisualFeedback({
-              type: willPlay ? "play" : "pause",
-              side: "center",
-              label: willPlay ? "تشغيل" : "إيقاف مؤقت"
-            });
-          }
+        if (side === "center") {
+          const el = getMediaElement();
+          const willPlay = el ? el.paused : !isPlaying;
+          togglePlay();
+          triggerVisualFeedback({
+            type: willPlay ? "play" : "pause",
+            side: "center",
+            label: willPlay ? "تشغيل" : "إيقاف مؤقت"
+          });
         }
       }, 230);
 
@@ -3416,7 +3483,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       isPlaying,
       togglePlay,
       skipSeconds,
-      triggerVisualFeedback
+      triggerVisualFeedback,
+      triggerHud
     ]
   );
 
@@ -3465,11 +3533,56 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const deltaY = start.y - endY; // Positive = Dragged UP, Negative = Dragged DOWN
     const absDeltaX = Math.abs(deltaX);
     const absDeltaY = Math.abs(deltaY);
-    const duration = Date.now() - start.time;
+    const swipeDuration = Date.now() - start.time;
     const startXRatio = (start.x - rect.left) / rect.width;
 
-    // Vertical Swipe Detection: Drag >= 25px, predominantly vertical, under 1000ms
-    if (absDeltaY >= 25 && absDeltaY > absDeltaX * 0.7 && duration < 1000) {
+    // -------------------------------------------------------------
+    // A. HORIZONTAL SWIPE GESTURE (السحب لليمين أو لليسار للتقديم والتأخير التناسبي)
+    // The longer the swipe distance, the greater the seek amount!
+    // -------------------------------------------------------------
+    if (absDeltaX >= 25 && absDeltaX > absDeltaY * 0.7 && swipeDuration < 1500) {
+      if (tapTrackerRef.current?.timer) {
+        window.clearTimeout(tapTrackerRef.current.timer);
+        tapTrackerRef.current = null;
+      }
+
+      // Proportional seek scale:
+      // dragRatio is the fraction of total stage width traversed (0.05 to 1.0)
+      const dragRatio = Math.min(1, absDeltaX / Math.max(120, rect.width));
+      // Base scale: full screen width = 90 to 180 seconds (adapts dynamically to duration)
+      const totalSeekScale = duration > 0 ? Math.min(180, Math.max(45, duration * 0.25)) : 90;
+      // Seek seconds scales with swipe distance (short swipe ~3-6s, medium ~15-30s, long ~60-90s+)
+      const seekSeconds = Math.max(3, Math.round(dragRatio * totalSeekScale));
+
+      if (deltaX > 0) {
+        // Swiped RIGHT -> Seek Forward (تقديم للأمام)
+        skipSeconds(seekSeconds);
+        triggerVisualFeedback({
+          type: "seek_forward_swipe",
+          side: "right",
+          label: `+${seekSeconds} ثانية`,
+          subLabel: `سحب لليمين: تقديم ${seekSeconds} ثانية`
+        }, 550);
+        triggerHud(`تقديم +${seekSeconds} ثانية ⏩`, "سحب ➡️");
+      } else {
+        // Swiped LEFT -> Seek Backward (رجوع للخلف)
+        skipSeconds(-seekSeconds);
+        triggerVisualFeedback({
+          type: "seek_backward_swipe",
+          side: "left",
+          label: `-${seekSeconds} ثانية`,
+          subLabel: `سحب لليسار: رجوع ${seekSeconds} ثانية`
+        }, 550);
+        triggerHud(`رجوع -${seekSeconds} ثانية ⏪`, "سحب ⬅️");
+      }
+      return;
+    }
+
+    // -------------------------------------------------------------
+    // B. VERTICAL SWIPE DETECTION (سحب عمودي للأعلى أو للأسفل)
+    // Drag >= 25px, predominantly vertical, under 1000ms
+    // -------------------------------------------------------------
+    if (absDeltaY >= 25 && absDeltaY > absDeltaX * 0.7 && swipeDuration < 1000) {
       if (tapTrackerRef.current?.timer) {
         window.clearTimeout(tapTrackerRef.current.timer);
         tapTrackerRef.current = null;
@@ -3500,7 +3613,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       return;
     }
 
-    // Tap Detection: Minimal movement (< 20px)
+    // -------------------------------------------------------------
+    // C. TAP / CLICK DETECTION (Minimal movement < 20px)
+    // -------------------------------------------------------------
     if (absDeltaX < 20 && absDeltaY < 20) {
       const xRatio = (endX - rect.left) / rect.width;
       handleStageTap(xRatio);
@@ -3984,19 +4099,18 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                                 )}
                               </button>
 
-                              {/* 3. Subtitle Design / التصميم */}
+                              {/* 3. Subtitle Design / تخصيص الستايل */}
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setShowTranscriptPanel(true);
-                                  setSidePanelView("style");
+                                  setShowSubtitleStyleModal(true);
                                   setShowTopOptionsMenu(false);
                                 }}
                                 className="w-full px-3 py-2 hover:bg-slate-800 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0"
                               >
                                 <Palette className="w-4 h-4 text-amber-400" />
-                                <span>التصميم</span>
+                                <span>تخصيص الستايل</span>
                               </button>
 
                               <div className="my-1 border-t border-slate-800/80" />
@@ -4078,17 +4192,21 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     </div>
                   )}
 
-                  {/* 3. Left Zone: Previous / Next Sentence (Swipe) or Double-Tap -5s */}
+                  {/* 3. Left Zone: Previous / Next Sentence (Swipe) or Double-Tap -5s or Horizontal Swipe Rewind */}
                   {activeGesture && activeGesture.side === "left" && (
                     <div className="absolute left-0 inset-y-0 w-1/3 flex items-center justify-start pl-6 sm:pl-10 pointer-events-none z-35 animate-yt-side">
                       <div className="bg-black/80 backdrop-blur-md border border-white/20 rounded-2xl px-4 sm:px-5 py-3.5 sm:py-4 flex flex-col items-center gap-1.5 shadow-2xl text-white">
-                        {activeGesture.type === "seek_backward_5s" ? (
+                        {activeGesture.type === "seek_backward_5s" || activeGesture.type === "seek_backward_swipe" ? (
                           <>
                             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/20 flex items-center justify-center">
                               <RotateCcw className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
                             </div>
-                            <span className="text-xs sm:text-sm font-black font-mono text-white tracking-wide">-5 ثواني</span>
-                            <span className="text-[10px] text-slate-300 font-bold bg-white/10 px-2 py-0.5 rounded-full">نقرتان</span>
+                            <span className="text-xs sm:text-sm font-black font-mono text-white tracking-wide">
+                              {activeGesture.label || "-5 ثواني"}
+                            </span>
+                            <span className="text-[10px] text-slate-300 font-bold bg-white/10 px-2 py-0.5 rounded-full">
+                              {activeGesture.type === "seek_backward_swipe" ? "سحب ⬅️" : "نقرتان"}
+                            </span>
                           </>
                         ) : activeGesture.type === "next_sentence" ? (
                           <>
@@ -4111,17 +4229,21 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     </div>
                   )}
 
-                  {/* 4. Right Zone: Volume Up/Down (Swipe) or Double-Tap +5s */}
+                  {/* 4. Right Zone: Volume Up/Down (Swipe) or Double-Tap +5s or Horizontal Swipe Forward */}
                   {activeGesture && activeGesture.side === "right" && (
                     <div className="absolute right-0 inset-y-0 w-1/3 flex items-center justify-end pr-6 sm:pr-10 pointer-events-none z-35 animate-yt-side">
                       <div className="bg-black/80 backdrop-blur-md border border-white/20 rounded-2xl px-4 sm:px-5 py-3.5 sm:py-4 flex flex-col items-center gap-1.5 shadow-2xl text-white">
-                        {activeGesture.type === "seek_forward_5s" ? (
+                        {activeGesture.type === "seek_forward_5s" || activeGesture.type === "seek_forward_swipe" ? (
                           <>
                             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/20 flex items-center justify-center">
                               <RotateCw className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
                             </div>
-                            <span className="text-xs sm:text-sm font-black font-mono text-white tracking-wide">+5 ثواني</span>
-                            <span className="text-[10px] text-slate-300 font-bold bg-white/10 px-2 py-0.5 rounded-full">نقرتان</span>
+                            <span className="text-xs sm:text-sm font-black font-mono text-white tracking-wide">
+                              {activeGesture.label || "+5 ثواني"}
+                            </span>
+                            <span className="text-[10px] text-slate-300 font-bold bg-white/10 px-2 py-0.5 rounded-full">
+                              {activeGesture.type === "seek_forward_swipe" ? "سحب ➡️" : "نقرتان"}
+                            </span>
                           </>
                         ) : activeGesture.type === "volume_up" ? (
                           <>
@@ -4873,6 +4995,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                             title={showCueTimestamps ? "إخفاء أرقام الدقائق والتوقيت (توفير مساحة أكبر للنص)" : "إظهار أرقام الدقائق والتوقيت"}
                           >
                             <Clock className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Quick Style Customization Modal Button */}
+                          <button
+                            onClick={() => setShowSubtitleStyleModal(true)}
+                            className="p-1.5 rounded-lg transition-all cursor-pointer text-slate-400 hover:text-amber-300 hover:bg-slate-700/70"
+                            title="تخصيص ستايل الترجمة (الخطوط، الألوان، الموضع والقوالب)"
+                          >
+                            <Palette className="w-3.5 h-3.5" />
                           </button>
                         </>
                       ) : (
@@ -5918,6 +6049,23 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           }}
         />
       )}
+
+      {/* ======================================================== */}
+      {/* MODAL: SUBTITLE STYLE CUSTOMIZATION MODAL (Clean, Focused & Non-Distracting) */}
+      {/* ======================================================== */}
+      <SubtitleStyleModal
+        isOpen={showSubtitleStyleModal}
+        onClose={() => setShowSubtitleStyleModal(false)}
+        primaryStyle={primarySubStyle}
+        secondaryStyle={secondarySubStyle}
+        onUpdatePrimaryStyle={updatePrimarySubStyle}
+        onUpdateSecondaryStyle={updateSecondarySubStyle}
+        onUpdateBothStyles={updateBothSubStyles}
+        activeTrackLabel={activeTrack?.label}
+        secondaryTrackLabel={secondaryTrack?.label}
+        samplePrimaryText={currentCue?.text || getSamplePrimarySubtitleText()}
+        sampleSecondaryText={currentSecondaryCue?.text || (currentCue ? secondaryCueMap.get(currentCue.id)?.text : null) || getSampleSecondarySubtitleText()}
+      />
     </div>
   );
 };
