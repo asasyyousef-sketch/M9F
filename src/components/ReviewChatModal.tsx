@@ -374,7 +374,7 @@ const parseInlineChatContent = (
       parts.push(
         <code
           key={match.index}
-          className="px-1 py-0.5 rounded text-indigo-300 font-mono text-xs mx-0.5 inline-block"
+          className="px-1.5 py-0.5 rounded text-indigo-300 font-mono text-xs sm:text-sm mx-0.5 inline-block"
           dir="ltr"
         >
           {parseInlineChatContent(inner, onSpeak, onCopy, onCreateCard)}
@@ -1246,7 +1246,7 @@ const FormattedChatMessage: React.FC<{
   const blocks = parseMarkdownBlocks(rawLines);
 
   return (
-    <div dir="auto" className={`space-y-1.5 text-slate-100 leading-relaxed text-start select-text ${className}`}>
+    <div dir="auto" className={`space-y-1.5 text-slate-100 text-base leading-relaxed text-start select-text ${className}`}>
       {blocks.map((block, bIdx) => {
         // Render Embedded Images Gallery Block
         if (block.type === "image") {
@@ -1268,7 +1268,7 @@ const FormattedChatMessage: React.FC<{
               dir="rtl"
               className="w-full my-3 overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900/90 shadow-sm max-w-full table-scrollbar-thin pb-0.5 touch-pan-x"
             >
-              <table dir="rtl" className="w-max min-w-full text-xs sm:text-sm text-right border-collapse">
+              <table dir="rtl" className="w-max min-w-full text-sm sm:text-base text-right border-collapse">
                 <thead className="bg-slate-800/95 text-indigo-300 border-b border-slate-700 font-bold">
                   <tr>
                     {block.headers.map((h, hIdx) => {
@@ -1345,7 +1345,7 @@ const FormattedChatMessage: React.FC<{
               <h1
                 key={bIdx}
                 dir="auto"
-                className="font-black text-white text-base sm:text-lg mt-3 mb-1.5 border-r-3 border-blue-500 pr-2.5 text-start"
+                className="font-black text-white text-lg sm:text-xl mt-3 mb-1.5 border-r-3 border-blue-500 pr-2.5 text-start"
               >
                 {parseInlineChatContent(title, onSpeak, onCopy, onCreateCard)}
               </h1>
@@ -1356,7 +1356,7 @@ const FormattedChatMessage: React.FC<{
               <h2
                 key={bIdx}
                 dir="auto"
-                className="font-extrabold text-white text-sm sm:text-base mt-2.5 mb-1.5 border-r-3 border-blue-500 pr-2.5 text-start"
+                className="font-extrabold text-white text-base sm:text-lg mt-2.5 mb-1.5 border-r-3 border-blue-500 pr-2.5 text-start"
               >
                 {parseInlineChatContent(title, onSpeak, onCopy, onCreateCard)}
               </h2>
@@ -1366,7 +1366,7 @@ const FormattedChatMessage: React.FC<{
             <h3
               key={bIdx}
               dir="auto"
-              className="font-bold text-blue-300 text-xs sm:text-sm mt-2 mb-1 border-r-3 border-blue-500/80 pr-2.5 text-start"
+              className="font-bold text-blue-300 text-sm sm:text-base mt-2 mb-1 border-r-3 border-blue-500/80 pr-2.5 text-start"
             >
               {parseInlineChatContent(title, onSpeak, onCopy, onCreateCard)}
             </h3>
@@ -1386,10 +1386,10 @@ const FormattedChatMessage: React.FC<{
                 isSub ? "mr-4 sm:mr-6 text-slate-300" : "pr-1 text-slate-200"
               }`}
             >
-              <span className={`shrink-0 mt-0.5 font-bold ${isSub ? "text-blue-300 text-xs" : "text-blue-400"}`}>
+              <span className={`shrink-0 mt-0.5 font-bold ${isSub ? "text-blue-300 text-sm" : "text-blue-400 text-base"}`}>
                 {isSub ? "◦" : "•"}
               </span>
-              <div className="flex-1 leading-relaxed">
+              <div className="flex-1 leading-relaxed text-base">
                 {parseInlineChatContent(bulletMatch[3], onSpeak, onCopy, onCreateCard)}
               </div>
             </div>
@@ -1409,10 +1409,10 @@ const FormattedChatMessage: React.FC<{
                 isSub ? "mr-4 sm:mr-6 text-slate-300" : "pr-1 text-slate-200"
               }`}
             >
-              <span className="text-blue-300 font-extrabold shrink-0 text-xs mt-0.5 bg-blue-950/80 px-1.5 py-0.5 rounded border border-blue-800/80 font-mono">
+              <span className="text-blue-300 font-extrabold shrink-0 text-xs sm:text-sm mt-0.5 bg-blue-950/80 px-1.5 py-0.5 rounded border border-blue-800/80 font-mono">
                 {numMatch[2]}
               </span>
-              <div className="flex-1 leading-relaxed">
+              <div className="flex-1 leading-relaxed text-base">
                 {parseInlineChatContent(numMatch[3], onSpeak, onCopy, onCreateCard)}
               </div>
             </div>
@@ -1426,7 +1426,7 @@ const FormattedChatMessage: React.FC<{
 
         // 6. Regular text line
         return (
-          <div key={bIdx} dir="auto" className="min-h-[1.25em] text-start text-slate-200 leading-relaxed">
+          <div key={bIdx} dir="auto" className="min-h-[1.25em] text-start text-slate-200 leading-relaxed text-base">
             {parseInlineChatContent(line, onSpeak, onCopy, onCreateCard)}
           </div>
         );
@@ -2408,17 +2408,11 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
 
         {/* COMPACT SENTENCE REFERENCE (Simple text box, zero clutter, minimal vertical height) */}
         {card.frontText && (
-          <div className="px-3.5 py-1 bg-slate-950/70 border-b border-slate-800/60 flex items-center gap-2 text-xs shrink-0 select-text">
-            <span className="text-slate-400 text-[11px] font-medium shrink-0">الجملة:</span>
-            <div className="text-slate-200 text-xs font-normal truncate dir-ltr min-w-0 flex-1 flex items-center gap-1.5" title={card.frontText}>
-              <span className="font-medium text-slate-100 truncate">
+          <div className="px-3.5 py-1.5 sm:py-1 bg-slate-950/70 border-b border-slate-800/60 flex items-center gap-2 text-sm sm:text-xs shrink-0 select-text">
+            <div className="text-slate-100 text-sm sm:text-xs font-semibold truncate dir-ltr min-w-0 flex-1" title={card.frontText}>
+              <span className="truncate">
                 {card.correctArticle ? `${card.correctArticle} ` : ''}{card.frontText}
               </span>
-              {card.backText ? (
-                <span className="text-slate-400 text-[11px] font-normal truncate shrink-0 max-w-[200px] border-r border-slate-800 pr-2 mr-1">
-                  ({card.backText})
-                </span>
-              ) : null}
             </div>
           </div>
         )}
@@ -2592,7 +2586,7 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
                   className={`flex flex-col ${msg.role === "user" ? "items-start" : "items-end"}`}
                 >
                   <div
-                    className={`max-w-[92%] sm:max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-md ${
+                    className={`max-w-[95%] sm:max-w-[85%] rounded-2xl px-4 py-3 text-base leading-relaxed shadow-md ${
                       msg.role === "user"
                         ? "bg-indigo-600 text-white rounded-br-xs font-medium"
                         : "bg-slate-800/90 border border-slate-700/70 text-slate-100 rounded-bl-xs"
@@ -2600,11 +2594,11 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
                   >
                     {/* Render message with clean layout */}
                     {msg.role === "user" ? (
-                      <div className="whitespace-pre-wrap font-sans text-xs sm:text-sm leading-relaxed">
+                      <div className="whitespace-pre-wrap font-sans text-base leading-relaxed">
                         {msg.content}
                       </div>
                     ) : (
-                      <div className="pt-1">
+                      <div className="pt-0.5">
                         <FormattedChatMessage
                           text={msg.content}
                           onSpeak={(txt) => {
@@ -2628,7 +2622,7 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
 
                         {/* Model name indicator matching message background */}
                         <div className="mt-2 pt-1 flex items-center justify-between select-none bg-transparent">
-                          <span className="text-[8.5px] text-slate-400/70 font-normal tracking-wide">
+                          <span className="text-[9.5px] sm:text-[8.5px] text-slate-400/70 font-normal tracking-wide">
                             {AVAILABLE_MODELS.find((m) => m.id === (msg.modelUsed || selectedModel))?.name || msg.modelUsed || selectedModel}
                           </span>
                         </div>
@@ -2639,9 +2633,9 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
               ))}
 
               {isLoading && (
-                <div className="flex items-center gap-2 text-indigo-400 bg-slate-800/60 border border-slate-700/50 px-4 py-2 rounded-2xl w-fit animate-pulse">
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span className="text-xs font-semibold">جارٍ صياغة الرد...</span>
+                <div className="flex items-center gap-2 text-indigo-400 bg-slate-800/60 border border-slate-700/50 px-4 py-2.5 rounded-2xl w-fit animate-pulse">
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span className="text-sm font-semibold">جارٍ صياغة الرد...</span>
                 </div>
               )}
               <div ref={messagesEndRef} />
