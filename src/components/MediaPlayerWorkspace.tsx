@@ -472,6 +472,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const [cueToDelete, setCueToDelete] = useState<SubtitleCue | null>(null);
 
   // Transient In-Memory AI Sentence Chat State (Cleared when exiting or switching video/audio)
+  const fullscreenExitCooldownRef = useRef<number>(0);
   const [sentenceChatHistories, setSentenceChatHistories] = useState<Record<string, ReviewChatMessage[]>>({});
   const [isSentenceChatOpen, setIsSentenceChatOpen] = useState<boolean>(false);
   const [chatTargetCue, setChatTargetCue] = useState<(SubtitleCue & { secondaryText?: string }) | null>(null);
@@ -480,6 +481,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   // Open Sentence AI Chat with full 20-previous & 20-next surrounding context
   const handleOpenSentenceChat = (targetCue: SubtitleCue) => {
+    // If fullscreen was exited recently, strictly block sentence chat from opening
+    if (Date.now() - fullscreenExitCooldownRef.current < 800) {
+      return;
+    }
     const targetIdx = activeCues.findIndex((c) => c.id === targetCue.id);
     const getSecText = (c: SubtitleCue) => {
       if (!secondaryCues || secondaryCues.length === 0) return undefined;
@@ -2624,9 +2629,16 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const handleToggleFullscreen = () => {
     const target = playerSectionRef.current || videoRef.current;
     if (!target) return;
-    if (document.fullscreenElement) {
+    if (document.fullscreenElement || isFullscreen) {
+      fullscreenExitCooldownRef.current = Date.now();
+      setIsSentenceChatOpen(false);
+      setChatTargetCue(null);
+      cueTapTrackerRef.current = { id: "", time: 0, timer: null };
       setIsFullscreen(false);
-      document.exitFullscreen().catch(console.error);
+      setIsImmersiveMode(true);
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(console.error);
+      }
       setShowTranscriptPanel(true);
       setSidePanelView("transcript");
       requestAnimationFrame(() => {
@@ -2676,11 +2688,16 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         fullscreenControlsTimeoutRef.current = null;
       }
       if (!isFs) {
+        fullscreenExitCooldownRef.current = Date.now();
+        setIsSentenceChatOpen(false);
+        setChatTargetCue(null);
+        cueTapTrackerRef.current = { id: "", time: 0, timer: null };
+        setIsImmersiveMode(true);
         setShowTranscriptPanel(true);
         setSidePanelView("transcript");
-        setTimeout(() => {
+        requestAnimationFrame(() => {
           scrollToActiveCue(true);
-        }, 80);
+        });
       }
     };
     document.addEventListener("fullscreenchange", handleFsChange);
@@ -2794,6 +2811,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const cueTapTrackerRef = useRef<{ id: string; time: number; timer: number | null }>({ id: "", time: 0, timer: null });
 
   const handleCueClick = useCallback((cue: SubtitleCue) => {
+    // If fullscreen was exited recently, ignore clicks/taps on cues to prevent accidental sentence chat activation
+    if (Date.now() - fullscreenExitCooldownRef.current < 800) {
+      return;
+    }
     const now = Date.now();
     const tracker = cueTapTrackerRef.current;
     if (tracker.id === cue.id && now - tracker.time < 350) {
@@ -3403,66 +3424,28 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
       // -------------------------------------------------------------
       // 1. FULLSCREEN MODE:
-      // Top-Left Box (20% width x 25% height): Double-tap = Exit Fullscreen
-      // Everywhere else: Double-tap = Instant Play / Pause
-      // Single-tap: Toggle timeline scrubber & controls bar
+      // Top Corner Zone (Top-Right: xRatio >= 0.75, Top-Left: xRatio <= 0.25, in top 25% height):
+      // Cleanly switches from Fullscreen to Cinema mode immediately without conflicts
+      // Everywhere else: Double-tap = Instant Play / Pause, Single-tap = Toggle timeline scrubber & controls bar
       // -------------------------------------------------------------
       if (isFullscreen) {
-        const isTopLeftExitZone = xRatio <= 0.20 && yRatio <= 0.25;
+        const isCornerExitZone = (xRatio <= 0.25 || xRatio >= 0.75) && yRatio <= 0.25;
 
-        if (isTopLeftExitZone) {
-          // Double-tap in top-left 20% x 25% zone -> Exit Fullscreen!
-          if (currentTracker && now - currentTracker.lastTime < 350 && currentTracker.side === "top-left-exit") {
-            if (currentTracker.timer) {
-              window.clearTimeout(currentTracker.timer);
-            }
-            tapTrackerRef.current = null;
-
-            setIsFullscreen(false);
-            if (document.fullscreenElement) {
-              document.exitFullscreen().catch(console.error);
-            }
-            setShowTranscriptPanel(true);
-            setSidePanelView("transcript");
-            triggerVisualFeedback({
-              type: "minimize",
-              side: "center",
-              label: "تصغير الشاشة",
-              subLabel: "أعلى اليسار: الخروج من ملء الشاشة"
-            }, 250);
-            triggerHud("تصغير الشاشة 🗗", "أعلى اليسار");
-            requestAnimationFrame(() => {
-              scrollToActiveCue(true);
-            });
-            return;
-          }
-
-          // First tap in top-left zone:
+        if (isCornerExitZone) {
           if (currentTracker?.timer) {
             window.clearTimeout(currentTracker.timer);
           }
-
-          const timer = window.setTimeout(() => {
-            tapTrackerRef.current = null;
-            setShowFullscreenControls((prev) => !prev);
-          }, 220);
-
-          tapTrackerRef.current = {
-            count: 1,
-            side: "top-left-exit",
-            timer,
-            lastTime: now
-          };
+          tapTrackerRef.current = null;
+          handleToggleFullscreen();
           return;
         }
 
-        // Standard Double Click outside top-left box: Instant Play / Pause
-        if (currentTracker && now - currentTracker.lastTime < 300 && currentTracker.side !== "top-left-exit") {
+        // Standard Double Click outside top corners: Instant Play / Pause
+        if (currentTracker && now - currentTracker.lastTime < 300) {
           if (currentTracker.timer) {
             window.clearTimeout(currentTracker.timer);
           }
           tapTrackerRef.current = null;
-
           const el = getMediaElement();
           const willPlay = el ? el.paused : !isPlaying;
           togglePlay();
@@ -3479,13 +3462,11 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         if (currentTracker?.timer) {
           window.clearTimeout(currentTracker.timer);
         }
-
         const timer = window.setTimeout(() => {
           tapTrackerRef.current = null;
           // In Fullscreen: Single tap ONLY toggles the scrubber timeline & controls bar!
           setShowFullscreenControls((prev) => !prev);
         }, 220);
-
         tapTrackerRef.current = {
           count: 1,
           side: "center",
@@ -4275,22 +4256,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                             </div>
                           )}
                         </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Fullscreen Top-Left 20% width x 25% height Exit Zone (Subtle guidance indicator when controls are visible) */}
-                  {isFullscreen && (
-                    <div
-                      className={`absolute top-0 left-0 w-[20%] h-[25%] z-30 pointer-events-none transition-all duration-300 ${
-                        showFullscreenControls ? "opacity-100" : "opacity-0"
-                      }`}
-                    >
-                      <div className="w-full h-full border-r border-b border-dashed border-white/20 rounded-br-2xl bg-white/[0.02] p-2 flex items-end justify-start">
-                        <span className="text-[9px] sm:text-[10px] text-slate-300/80 bg-black/60 backdrop-blur-sm px-1.5 py-0.5 rounded border border-white/10 select-none flex items-center gap-1 font-sans">
-                          <Minimize2 className="w-2.5 h-2.5 text-blue-300" />
-                          <span>2x نقر للتصغير</span>
-                        </span>
                       </div>
                     </div>
                   )}
@@ -5289,6 +5254,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                                 onClick={() => handleCueClick(cue)}
                                 onDoubleClick={(e) => {
                                   e.stopPropagation();
+                                  if (Date.now() - fullscreenExitCooldownRef.current < 800) {
+                                    return;
+                                  }
                                   handleOpenSentenceChat(cue);
                                 }}
                                 className={`px-2.5 py-2 rounded-lg border transition-colors duration-150 flex items-center justify-between gap-2 cursor-pointer group ${
