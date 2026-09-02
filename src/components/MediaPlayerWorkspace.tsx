@@ -62,7 +62,6 @@ import {
   MoreVertical,
   ArrowUp,
   ArrowDown,
-  ArrowLeftRight,
   Folder,
   FolderPlus,
   FolderOpen,
@@ -922,31 +921,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       setActiveGesture(null);
     }, durationMs);
   }, []);
-
-  // Gesture seek direction state ("standard" = Right +5s / Left -5s; "inverted" = Right -5s / Left +5s)
-  const [gestureDirection, setGestureDirection] = useState<"standard" | "inverted">(() => {
-    try {
-      const saved = localStorage.getItem("media_player_gesture_direction");
-      return saved === "inverted" ? "inverted" : "standard";
-    } catch {
-      return "standard";
-    }
-  });
-
-  const toggleGestureDirection = useCallback(() => {
-    setGestureDirection((prev) => {
-      const next = prev === "standard" ? "inverted" : "standard";
-      try {
-        localStorage.setItem("media_player_gesture_direction", next);
-      } catch (err) {}
-      if (next === "inverted") {
-        triggerHud("الوضع العربي: اليمين تراجع ⏪ / اليسار تقديم ⏩", "↔️ إيماءات");
-      } else {
-        triggerHud("الوضع القياسي: اليمين تقديم ⏩ / اليسار تراجع ⏪", "↔️ إيماءات");
-      }
-      return next;
-    });
-  }, [triggerHud]);
 
   // Active screen mode: File Manager (default) vs Active Player
   const [isPlayerOpen, setIsPlayerOpen] = useState<boolean>(false);
@@ -3369,26 +3343,26 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     triggerHud
   ]);
 
-  // Left Swipe UP / DOWN (Sentence navigation: UP = Previous Sentence, DOWN = Next Sentence)
+  // Left Swipe UP / DOWN (Sentence navigation)
   const handleLeftSwipeUp = useCallback(() => {
-    jumpToPreviousSentence(true);
-    triggerVisualFeedback({
-      type: "prev_sentence",
-      side: "left",
-      label: "الجملة السابقة",
-      subLabel: "سحب للأعلى: تراجع جملة"
-    }, 350);
-  }, [jumpToPreviousSentence, triggerVisualFeedback]);
-
-  const handleLeftSwipeDown = useCallback(() => {
     jumpToNextSentence(true);
     triggerVisualFeedback({
       type: "next_sentence",
       side: "left",
       label: "الجملة التالية",
-      subLabel: "سحب للأسفل: تقديم جملة"
-    }, 350);
+      subLabel: "سحب للأعلى: تقديم جملة"
+    });
   }, [jumpToNextSentence, triggerVisualFeedback]);
+
+  const handleLeftSwipeDown = useCallback(() => {
+    jumpToPreviousSentence(true);
+    triggerVisualFeedback({
+      type: "prev_sentence",
+      side: "left",
+      label: "الجملة السابقة",
+      subLabel: "سحب للأسفل: تراجع جملة"
+    });
+  }, [jumpToPreviousSentence, triggerVisualFeedback]);
 
   // Right Swipe UP / DOWN (Volume Control)
   const handleRightSwipeUp = useCallback(() => {
@@ -3400,7 +3374,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       side: "right",
       label: `مستوى الصوت: ${Math.round(nextVol * 100)}%`,
       subLabel: nextVol > 1.0 ? "⚡ تعزيز الصوت الفائق" : "سحب للأعلى: رفع الصوت"
-    }, 350);
+    });
   }, [volume, handleVolumeChange, triggerVisualFeedback, triggerSamsungVolumeBar]);
 
   const handleRightSwipeDown = useCallback(() => {
@@ -3412,7 +3386,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       side: "right",
       label: `مستوى الصوت: ${Math.round(nextVol * 100)}%`,
       subLabel: nextVol === 0 ? "كتم الصوت" : "سحب للأسفل: خفض الصوت"
-    }, 350);
+    });
   }, [volume, handleVolumeChange, triggerVisualFeedback, triggerSamsungVolumeBar]);
 
   const handleStageTap = useCallback(
@@ -3421,45 +3395,92 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       const currentTracker = tapTrackerRef.current;
 
       // -------------------------------------------------------------
-      // 1. FULLSCREEN TOP-LEFT EXIT ZONE (Top-left corner only)
+      // 1. FULLSCREEN MODE:
+      // Top-Left Box (20% width x 25% height): Double-tap = Exit Fullscreen
+      // Everywhere else: Double-tap = Instant Play / Pause
+      // Single-tap: Toggle timeline scrubber & controls bar
       // -------------------------------------------------------------
-      if (isFullscreen && xRatio <= 0.18 && yRatio <= 0.20) {
-        if (currentTracker && now - currentTracker.lastTime < 320 && currentTracker.side === "top-left-exit") {
+      if (isFullscreen) {
+        const isTopLeftExitZone = xRatio <= 0.20 && yRatio <= 0.25;
+
+        if (isTopLeftExitZone) {
+          // Double-tap in top-left 20% x 25% zone -> Exit Fullscreen!
+          if (currentTracker && now - currentTracker.lastTime < 320 && currentTracker.side === "top-left-exit") {
+            if (currentTracker.timer) {
+              window.clearTimeout(currentTracker.timer);
+            }
+            tapTrackerRef.current = null;
+
+            if (document.fullscreenElement) {
+              document.exitFullscreen().catch(console.error);
+            }
+            setShowTranscriptPanel(true);
+            setSidePanelView("transcript");
+            triggerVisualFeedback({
+              type: "minimize",
+              side: "center",
+              label: "تصغير الشاشة",
+              subLabel: "أعلى اليسار: الخروج من ملء الشاشة"
+            }, 450);
+            triggerHud("تصغير الشاشة 🗗", "أعلى اليسار");
+            setTimeout(() => {
+              scrollToActiveCue(true);
+            }, 80);
+            return;
+          }
+
+          // First tap in top-left zone:
+          if (currentTracker?.timer) {
+            window.clearTimeout(currentTracker.timer);
+          }
+
+          const timer = window.setTimeout(() => {
+            tapTrackerRef.current = null;
+            setShowFullscreenControls((prev) => !prev);
+          }, 220);
+
+          tapTrackerRef.current = {
+            count: 1,
+            side: "top-left-exit",
+            timer,
+            lastTime: now
+          };
+          return;
+        }
+
+        // Standard Double Click outside top-left box: Instant Play / Pause
+        if (currentTracker && now - currentTracker.lastTime < 300 && currentTracker.side !== "top-left-exit") {
           if (currentTracker.timer) {
             window.clearTimeout(currentTracker.timer);
           }
           tapTrackerRef.current = null;
 
-          if (document.fullscreenElement) {
-            document.exitFullscreen().catch(console.error);
-          }
-          setShowTranscriptPanel(true);
-          setSidePanelView("transcript");
+          const el = getMediaElement();
+          const willPlay = el ? el.paused : !isPlaying;
+          togglePlay();
           triggerVisualFeedback({
-            type: "minimize",
+            type: willPlay ? "play" : "pause",
             side: "center",
-            label: "تصغير الشاشة",
-            subLabel: "أعلى اليسار: الخروج من ملء الشاشة"
-          }, 350);
-          triggerHud("تصغير الشاشة 🗗", "أعلى اليسار");
-          setTimeout(() => {
-            scrollToActiveCue(true);
-          }, 60);
+            label: willPlay ? "تشغيل" : "إيقاف مؤقت"
+          });
+          triggerHud(willPlay ? "تشغيل الفيديو" : "إيقاف مؤقت", willPlay ? "▶️" : "⏸️");
           return;
         }
 
+        // First tap anywhere else in fullscreen:
         if (currentTracker?.timer) {
           window.clearTimeout(currentTracker.timer);
         }
 
         const timer = window.setTimeout(() => {
           tapTrackerRef.current = null;
+          // In Fullscreen: Single tap ONLY toggles the scrubber timeline & controls bar!
           setShowFullscreenControls((prev) => !prev);
-        }, 110);
+        }, 220);
 
         tapTrackerRef.current = {
           count: 1,
-          side: "top-left-exit",
+          side: "center",
           timer,
           lastTime: now
         };
@@ -3467,13 +3488,11 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       }
 
       // -------------------------------------------------------------
-      // 2. UNIFIED 25% ZONE SYSTEM (Both Fullscreen and Windowed Modes)
-      // Left 25%: xRatio < 0.25
-      // Right 25%: xRatio > 0.75
-      // Center 50%: 0.25 <= xRatio <= 0.75
+      // 2. WINDOWED / THEATER MODE:
       // -------------------------------------------------------------
+      // 60% Center Zone (0.20 to 0.80), 20% Left (< 0.20), 20% Right (> 0.80)
       const side: "left" | "right" | "center" =
-        xRatio < 0.25 ? "left" : xRatio > 0.75 ? "right" : "center";
+        xRatio < 0.20 ? "left" : xRatio > 0.80 ? "right" : "center";
 
       // Check if double tap/click within 300ms on the same zone
       if (currentTracker && now - currentTracker.lastTime < 300 && currentTracker.side === side) {
@@ -3482,19 +3501,19 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         }
         tapTrackerRef.current = null;
 
-        // DOUBLE TAP ACTION
+        // DOUBLE TAP / CLICK ACTION
         if (side === "center") {
           if (isImmersiveMode && !isFullscreen) {
-            // In Cinema mode: Double click in center opens Fullscreen
+            // In Cinema mode (and not fullscreen): Double click in center opens Fullscreen!
             handleToggleFullscreen();
             triggerVisualFeedback({
               type: "fullscreen",
               side: "center",
               label: "تكبير شامل للشاشة",
               subLabel: "الوضع السينمائي: تكبير ملء الشاشة"
-            }, 350);
+            });
           } else {
-            // Standard / Fullscreen Center Double Click: Play / Pause
+            // In Standard Mode: Double click in center = Play / Pause
             const el = getMediaElement();
             const willPlay = el ? el.paused : !isPlaying;
             togglePlay();
@@ -3502,63 +3521,49 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
               type: willPlay ? "play" : "pause",
               side: "center",
               label: willPlay ? "تشغيل" : "إيقاف مؤقت"
-            }, 350);
-            triggerHud(willPlay ? "تشغيل الفيديو" : "إيقاف مؤقت", willPlay ? "▶️" : "⏸️");
+            });
           }
         } else if (side === "right") {
-          // Right 25% Zone Double Tap:
-          // Standard: +5s (Forward); Inverted: -5s (Rewind)
-          const isForward = gestureDirection === "standard";
-          const seconds = isForward ? 5 : -5;
-          skipSeconds(seconds);
+          // Right 20% Double Tap: Skip Forward 5s (+5s)
+          skipSeconds(5);
           triggerVisualFeedback({
-            type: isForward ? "seek_forward_5s" : "seek_backward_5s",
+            type: "seek_forward_5s",
             side: "right",
-            label: isForward ? "+5 ثواني" : "-5 ثواني",
-            subLabel: isForward ? "تقديم 5 ثواني (اليمين 25%)" : "تراجع 5 ثواني (اليمين 25%)"
-          }, 350);
-          triggerHud(isForward ? "تقديم +5 ثواني ⏩" : "تراجع -5 ثواني ⏪", isForward ? "يمين ➡️" : "يمين ⬅️");
+            label: "+5 ثواني",
+            subLabel: "تقديم 5 ثواني"
+          });
         } else if (side === "left") {
-          // Left 25% Zone Double Tap:
-          // Standard: -5s (Rewind); Inverted: +5s (Forward)
-          const isForward = gestureDirection === "inverted";
-          const seconds = isForward ? 5 : -5;
-          skipSeconds(seconds);
+          // Left 20% Double Tap: Rewind 5s (-5s)
+          skipSeconds(-5);
           triggerVisualFeedback({
-            type: isForward ? "seek_forward_5s" : "seek_backward_5s",
+            type: "seek_backward_5s",
             side: "left",
-            label: isForward ? "+5 ثواني" : "-5 ثواني",
-            subLabel: isForward ? "تقديم 5 ثواني (اليسار 25%)" : "تراجع 5 ثواني (اليسار 25%)"
-          }, 350);
-          triggerHud(isForward ? "تقديم +5 ثواني ⏩" : "تراجع -5 ثواني ⏪", isForward ? "يسار ➡️" : "يسار ⬅️");
+            label: "-5 ثواني",
+            subLabel: "تراجع 5 ثواني"
+          });
         }
         return;
       }
 
-      // FIRST TAP: Fast 110ms delay for ultra-snappy appearance
+      // FIRST TAP in Windowed Mode
       if (currentTracker?.timer) {
         window.clearTimeout(currentTracker.timer);
       }
 
       const timer = window.setTimeout(() => {
+        // SINGLE TAP ACTION
         tapTrackerRef.current = null;
-        if (isFullscreen) {
-          // In Fullscreen: Single tap immediately toggles controls
-          setShowFullscreenControls((prev) => !prev);
-        } else {
-          // In Windowed: Center single tap toggles Play / Pause
-          if (side === "center") {
-            const el = getMediaElement();
-            const willPlay = el ? el.paused : !isPlaying;
-            togglePlay();
-            triggerVisualFeedback({
-              type: willPlay ? "play" : "pause",
-              side: "center",
-              label: willPlay ? "تشغيل" : "إيقاف مؤقت"
-            }, 350);
-          }
+        if (side === "center") {
+          const el = getMediaElement();
+          const willPlay = el ? el.paused : !isPlaying;
+          togglePlay();
+          triggerVisualFeedback({
+            type: willPlay ? "play" : "pause",
+            side: "center",
+            label: willPlay ? "تشغيل" : "إيقاف مؤقت"
+          });
         }
-      }, 110);
+      }, 230);
 
       tapTrackerRef.current = {
         count: 1,
@@ -3577,8 +3582,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       skipSeconds,
       triggerVisualFeedback,
       triggerHud,
-      scrollToActiveCue,
-      gestureDirection
+      scrollToActiveCue
     ]
   );
 
@@ -3631,7 +3635,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const startXRatio = (start.x - rect.left) / rect.width;
 
     // -------------------------------------------------------------
-    // A. HORIZONTAL SWIPE GESTURE (السحب الأفقي للتقديم والتأخير التناسبي)
+    // A. HORIZONTAL SWIPE GESTURE (السحب لليمين أو لليسار للتقديم والتأخير التناسبي)
+    // The longer the swipe distance, the greater the seek amount!
     // -------------------------------------------------------------
     if (absDeltaX >= 25 && absDeltaX > absDeltaY * 0.7 && swipeDuration < 1500) {
       if (tapTrackerRef.current?.timer) {
@@ -3639,38 +3644,57 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         tapTrackerRef.current = null;
       }
 
+      // Fine-tuned, progressive swipe seeking (especially smooth and controlled on mobile):
+      // - Gentle/short swipe (~25px - 55px): 2 to 4 seconds (very precise, no sudden 13-second jump)
+      // - Medium swipe (~55px - 120px): 5 to 10 seconds
+      // - Long swipe (~120px - 220px): 11 to 24 seconds
+      // - Broad full-width swipe (> 220px): 25 to 50 seconds (capped at 60s)
       const effectiveDist = Math.max(0, absDeltaX - 22);
       let seekSeconds = 2;
 
       if (effectiveDist <= 35) {
+        // Simple flick / short swipe: 2 to 4 seconds
         seekSeconds = 2 + Math.round((effectiveDist / 35) * 2);
       } else if (effectiveDist <= 100) {
+        // Moderate swipe: 5 to 10 seconds
         seekSeconds = 5 + Math.round(((effectiveDist - 35) / 65) * 5);
       } else if (effectiveDist <= 200) {
+        // Deliberate swipe: 11 to 24 seconds
         seekSeconds = 11 + Math.round(((effectiveDist - 100) / 100) * 13);
       } else {
+        // Broad / full swipe: 25 to 50 seconds
         const fullRatio = Math.min(1, (effectiveDist - 200) / Math.max(100, rect.width - 220));
         seekSeconds = 25 + Math.round(fullRatio * 25);
       }
       seekSeconds = Math.max(2, Math.min(60, seekSeconds));
 
-      const isDraggingRight = deltaX > 0;
-      const isForward = gestureDirection === "standard" ? isDraggingRight : !isDraggingRight;
-      const signedSeconds = isForward ? seekSeconds : -seekSeconds;
-
-      skipSeconds(signedSeconds);
-      triggerVisualFeedback({
-        type: isForward ? "seek_forward_swipe" : "seek_backward_swipe",
-        side: isDraggingRight ? "right" : "left",
-        label: `${isForward ? "+" : "-"}${seekSeconds} ثانية`,
-        subLabel: `سحب ${isDraggingRight ? "لليمين" : "لليسار"}: ${isForward ? "تقديم" : "رجوع"} ${seekSeconds} ثانية`
-      }, 350);
-      triggerHud(`${isForward ? "تقديم +" : "رجوع -"}${seekSeconds} ثانية ${isForward ? "⏩" : "⏪"}`, isDraggingRight ? "سحب ➡️" : "سحب ⬅️");
+      if (deltaX > 0) {
+        // Swiped RIGHT -> Seek Forward (تقديم للأمام)
+        skipSeconds(seekSeconds);
+        triggerVisualFeedback({
+          type: "seek_forward_swipe",
+          side: "right",
+          label: `+${seekSeconds} ثانية`,
+          subLabel: `سحب لليمين: تقديم ${seekSeconds} ثانية`
+        }, 550);
+        triggerHud(`تقديم +${seekSeconds} ثانية ⏩`, "سحب ➡️");
+      } else {
+        // Swiped LEFT -> Seek Backward (رجوع للخلف)
+        skipSeconds(-seekSeconds);
+        triggerVisualFeedback({
+          type: "seek_backward_swipe",
+          side: "left",
+          label: `-${seekSeconds} ثانية`,
+          subLabel: `سحب لليسار: رجوع ${seekSeconds} ثانية`
+        }, 550);
+        triggerHud(`رجوع -${seekSeconds} ثانية ⏪`, "سحب ⬅️");
+      }
       return;
     }
 
     // -------------------------------------------------------------
-    // B. VERTICAL SWIPE DETECTION (Exact 25% Left / 25% Right / 50% Center)
+    // B. VERTICAL SWIPE DETECTION (سحب عمودي للأعلى أو للأسفل)
+    // Drag >= 25px, predominantly vertical, under 1000ms
     // -------------------------------------------------------------
     if (absDeltaY >= 25 && absDeltaY > absDeltaX * 0.7 && swipeDuration < 1000) {
       if (tapTrackerRef.current?.timer) {
@@ -3678,22 +3702,22 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         tapTrackerRef.current = null;
       }
 
-      if (startXRatio < 0.25) {
-        // LEFT 25% ZONE: Sentence Navigation (UP = Previous, DOWN = Next)
+      if (startXRatio < 0.15) {
+        // LEFT ZONE SWIPE (Sentence Navigation - Left 15% edge)
         if (deltaY > 0) {
-          handleLeftSwipeUp(); // Previous sentence (الأعلى = السابقة)
+          handleLeftSwipeUp(); // Next sentence
         } else {
-          handleLeftSwipeDown(); // Next sentence (الأسفل = التالية)
+          handleLeftSwipeDown(); // Prev sentence
         }
-      } else if (startXRatio > 0.75) {
-        // RIGHT 25% ZONE: Volume Control (UP = Volume Up, DOWN = Volume Down)
+      } else if (startXRatio > 0.85) {
+        // RIGHT ZONE SWIPE (Volume Control - Right 15% edge)
         if (deltaY > 0) {
           handleRightSwipeUp(); // Volume Up
         } else {
           handleRightSwipeDown(); // Volume Down
         }
       } else {
-        // CENTER 50% ZONE: Subtitles Control (Wide Center Area)
+        // CENTER ZONE SWIPE (Subtitles - Wide 70% Center Area)
         if (deltaY > 0) {
           handleCenterSwipeUp();
         } else {
@@ -4050,7 +4074,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   {/* Sleek Floating Top Header (Fullscreen & Immersive Mode) */}
                   {(isImmersiveMode || isFullscreen) && (
                     <div
-                      className={`absolute top-0 inset-x-0 z-40 bg-gradient-to-b from-black/85 via-slate-950/60 to-transparent p-2.5 sm:p-3.5 flex items-center justify-between text-white transition-all duration-100 ease-out pointer-events-auto select-none ${
+                      className={`absolute top-0 inset-x-0 z-40 bg-gradient-to-b from-black/85 via-slate-950/60 to-transparent p-2.5 sm:p-3.5 flex items-center justify-between text-white transition-all duration-300 pointer-events-auto select-none ${
                         isFullscreen
                           ? showFullscreenControls
                             ? "opacity-100 translate-y-0"
@@ -4085,30 +4109,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
                       {/* Right: Clean Action Controls */}
                       <div className="flex items-center gap-1.5 shrink-0">
-                        {/* Gesture Direction Quick Switcher */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleGestureDirection();
-                          }}
-                          className={`h-7 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border-0 outline-none ${
-                            gestureDirection === "inverted"
-                              ? "bg-amber-600/85 text-white shadow-xs"
-                              : "bg-black/50 text-slate-300 hover:text-white hover:bg-black/75 backdrop-blur-md"
-                          }`}
-                          title={
-                            gestureDirection === "inverted"
-                              ? "إيماءات عربية: اليمين تراجع (-5s) / اليسار تقديم (+5s)"
-                              : "إيماءات قياسية: اليمين تقديم (+5s) / اليسار تراجع (-5s)"
-                          }
-                        >
-                          <ArrowLeftRight className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">
-                            {gestureDirection === "inverted" ? "يمين تراجع" : "يمين تقديم"}
-                          </span>
-                        </button>
-
                         {/* Sentences / Transcript Toggle Button (Hidden in fullscreen mode per user requirement) */}
                         {!isFullscreen && (
                           <button
@@ -4230,25 +4230,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                                 <span>تخصيص الستايل</span>
                               </button>
 
-                              {/* 4. Toggle Gesture Direction / تبديل اتجاه الإيماءات */}
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleGestureDirection();
-                                  setShowTopOptionsMenu(false);
-                                }}
-                                className="w-full px-3 py-2 hover:bg-slate-800 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition-colors flex items-center justify-between cursor-pointer border-0"
-                              >
-                                <div className="flex items-center gap-2">
-                                  <ArrowLeftRight className="w-4 h-4 text-cyan-400" />
-                                  <span>اتجاه الإيماءات</span>
-                                </div>
-                                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-slate-800 text-slate-300">
-                                  {gestureDirection === "inverted" ? "عربي (تراجع يمين)" : "قياسي (تقديم يمين)"}
-                                </span>
-                              </button>
-
                               <div className="my-1 border-t border-slate-800/80" />
 
                               {/* 4. Upload Subtitle / رفع ترجمة */}
@@ -4290,7 +4271,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   {/* Fullscreen Top-Left 20% width x 25% height Exit Zone (Subtle guidance indicator when controls are visible) */}
                   {isFullscreen && (
                     <div
-                      className={`absolute top-0 left-0 w-[18%] h-[20%] z-30 pointer-events-none transition-all duration-100 ease-out ${
+                      className={`absolute top-0 left-0 w-[20%] h-[25%] z-30 pointer-events-none transition-all duration-300 ${
                         showFullscreenControls ? "opacity-100" : "opacity-0"
                       }`}
                     >
@@ -4345,40 +4326,36 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     </div>
                   )}
 
-                  {/* 3. Left Zone: 25% Width - Sentence Navigation / Seek / Double-Tap */}
+                  {/* 3. Left Zone: Previous / Next Sentence (Swipe) or Double-Tap -5s or Horizontal Swipe Rewind */}
                   {activeGesture && activeGesture.side === "left" && (
-                    <div className="absolute left-0 inset-y-0 w-1/4 flex items-center justify-start pl-3 sm:pl-6 pointer-events-none z-35 animate-yt-side">
-                      <div className="bg-black/80 backdrop-blur-md border border-white/20 rounded-2xl px-3.5 sm:px-5 py-3 sm:py-4 flex flex-col items-center gap-1.5 shadow-2xl text-white">
-                        {activeGesture.type.startsWith("seek_") ? (
+                    <div className="absolute left-0 inset-y-0 w-1/3 flex items-center justify-start pl-6 sm:pl-10 pointer-events-none z-35 animate-yt-side">
+                      <div className="bg-black/80 backdrop-blur-md border border-white/20 rounded-2xl px-4 sm:px-5 py-3.5 sm:py-4 flex flex-col items-center gap-1.5 shadow-2xl text-white">
+                        {activeGesture.type === "seek_backward_5s" || activeGesture.type === "seek_backward_swipe" ? (
                           <>
                             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/20 flex items-center justify-center">
-                              {activeGesture.type.includes("forward") ? (
-                                <RotateCw className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
-                              ) : (
-                                <RotateCcw className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
-                              )}
+                              <RotateCcw className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
                             </div>
                             <span className="text-xs sm:text-sm font-black font-mono text-white tracking-wide">
-                              {activeGesture.label || (activeGesture.type.includes("forward") ? "+5 ثواني" : "-5 ثواني")}
+                              {activeGesture.label || "-5 ثواني"}
                             </span>
                             <span className="text-[10px] text-slate-300 font-bold bg-white/10 px-2 py-0.5 rounded-full">
-                              {activeGesture.type.includes("swipe") ? "سحب أفقي" : "نقرتان (اليسار 25%)"}
+                              {activeGesture.type === "seek_backward_swipe" ? "سحب ⬅️" : "نقرتان"}
                             </span>
                           </>
-                        ) : activeGesture.type === "prev_sentence" ? (
-                          <>
-                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-blue-600/50 border border-blue-400/50 flex items-center justify-center">
-                              <SkipBack className="w-6 h-6 sm:w-7 sm:h-7 text-blue-200" />
-                            </div>
-                            <span className="text-xs sm:text-sm font-bold text-slate-100">الجملة السابقة</span>
-                            <span className="text-[10px] text-blue-300 font-bold bg-blue-500/20 px-2 py-0.5 rounded-full">سحب ⬆️</span>
-                          </>
-                        ) : (
+                        ) : activeGesture.type === "next_sentence" ? (
                           <>
                             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-blue-600/50 border border-blue-400/50 flex items-center justify-center">
                               <SkipForward className="w-6 h-6 sm:w-7 sm:h-7 text-blue-200" />
                             </div>
                             <span className="text-xs sm:text-sm font-bold text-slate-100">الجملة التالية</span>
+                            <span className="text-[10px] text-blue-300 font-bold bg-blue-500/20 px-2 py-0.5 rounded-full">سحب ⬆️</span>
+                          </>
+                        ) : (
+                          <>
+                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-blue-600/50 border border-blue-400/50 flex items-center justify-center">
+                              <SkipBack className="w-6 h-6 sm:w-7 sm:h-7 text-blue-200" />
+                            </div>
+                            <span className="text-xs sm:text-sm font-bold text-slate-100">الجملة السابقة</span>
                             <span className="text-[10px] text-blue-300 font-bold bg-blue-500/20 px-2 py-0.5 rounded-full">سحب ⬇️</span>
                           </>
                         )}
@@ -4386,24 +4363,20 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     </div>
                   )}
 
-                  {/* 4. Right Zone: 25% Width - Volume Up/Down / Seek / Double-Tap */}
+                  {/* 4. Right Zone: Volume Up/Down (Swipe) or Double-Tap +5s or Horizontal Swipe Forward */}
                   {activeGesture && activeGesture.side === "right" && (
-                    <div className="absolute right-0 inset-y-0 w-1/4 flex items-center justify-end pr-3 sm:pr-6 pointer-events-none z-35 animate-yt-side">
-                      <div className="bg-black/80 backdrop-blur-md border border-white/20 rounded-2xl px-3.5 sm:px-5 py-3 sm:py-4 flex flex-col items-center gap-1.5 shadow-2xl text-white">
-                        {activeGesture.type.startsWith("seek_") ? (
+                    <div className="absolute right-0 inset-y-0 w-1/3 flex items-center justify-end pr-6 sm:pr-10 pointer-events-none z-35 animate-yt-side">
+                      <div className="bg-black/80 backdrop-blur-md border border-white/20 rounded-2xl px-4 sm:px-5 py-3.5 sm:py-4 flex flex-col items-center gap-1.5 shadow-2xl text-white">
+                        {activeGesture.type === "seek_forward_5s" || activeGesture.type === "seek_forward_swipe" ? (
                           <>
                             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/20 flex items-center justify-center">
-                              {activeGesture.type.includes("forward") ? (
-                                <RotateCw className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
-                              ) : (
-                                <RotateCcw className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
-                              )}
+                              <RotateCw className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
                             </div>
                             <span className="text-xs sm:text-sm font-black font-mono text-white tracking-wide">
-                              {activeGesture.label || (activeGesture.type.includes("forward") ? "+5 ثواني" : "-5 ثواني")}
+                              {activeGesture.label || "+5 ثواني"}
                             </span>
                             <span className="text-[10px] text-slate-300 font-bold bg-white/10 px-2 py-0.5 rounded-full">
-                              {activeGesture.type.includes("swipe") ? "سحب أفقي" : "نقرتان (اليمين 25%)"}
+                              {activeGesture.type === "seek_forward_swipe" ? "سحب ➡️" : "نقرتان"}
                             </span>
                           </>
                         ) : activeGesture.type === "volume_up" ? (
@@ -4767,7 +4740,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   }}
                   className={
                     isFullscreen
-                      ? `absolute bottom-3 inset-x-3 sm:bottom-6 sm:inset-x-8 md:inset-x-16 lg:inset-x-24 z-40 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl shadow-2xl p-2.5 sm:p-3 space-y-2 transition-all duration-100 ease-out ${
+                      ? `absolute bottom-3 inset-x-3 sm:bottom-6 sm:inset-x-8 md:inset-x-16 lg:inset-x-24 z-40 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl shadow-2xl p-2.5 sm:p-3 space-y-2 transition-all duration-300 ease-out ${
                           showFullscreenControls
                             ? "opacity-100 translate-y-0 pointer-events-auto"
                             : "opacity-0 translate-y-8 pointer-events-none"
