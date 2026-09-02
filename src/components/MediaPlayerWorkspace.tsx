@@ -584,6 +584,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [showFullscreenControls, setShowFullscreenControls] = useState<boolean>(false);
   const playerSectionRef = useRef<HTMLElement>(null);
+  const fullscreenControlsTimeoutRef = useRef<number | null>(null);
 
   // Immersive Theater Mode (Video huge, minimal bottom controls, side drawer for scrolling cues with toggle)
   const [isImmersiveMode, setIsImmersiveMode] = useState<boolean>(false);
@@ -983,8 +984,36 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const subtitleFileInputRef = useRef<HTMLInputElement | null>(null);
   const progressBarRef = useRef<HTMLDivElement | null>(null);
+  const controlsBarRef = useRef<HTMLDivElement | null>(null);
   const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
   const activeCueRef = useRef<HTMLDivElement | null>(null);
+
+  // Dynamic measurement of controls bar height in fullscreen/immersive modes
+  const [controlsBarHeight, setControlsBarHeight] = useState<number>(108);
+
+  useEffect(() => {
+    const el = controlsBarRef.current;
+    if (!el) return;
+
+    const measure = () => {
+      if (controlsBarRef.current) {
+        const rect = controlsBarRef.current.getBoundingClientRect();
+        if (rect.height > 0) {
+          setControlsBarHeight(rect.height);
+        }
+      }
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    window.addEventListener("resize", measure);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [isFullscreen, showFullscreenControls]);
 
   // Synchronized state refs to prevent stale closure race conditions during swipe gestures
   const showSubtitlesOverlayRef = useRef(showSubtitlesOverlay);
@@ -2557,12 +2586,31 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   };
 
+  // Reset / start the 5-second fullscreen controls auto-hide timer
+  const resetFullscreenControlsTimer = useCallback(() => {
+    if (fullscreenControlsTimeoutRef.current) {
+      window.clearTimeout(fullscreenControlsTimeoutRef.current);
+      fullscreenControlsTimeoutRef.current = null;
+    }
+    if (!isFullscreen || !showFullscreenControls || isScrubbing) {
+      return;
+    }
+    fullscreenControlsTimeoutRef.current = window.setTimeout(() => {
+      setShowFullscreenControls(false);
+      fullscreenControlsTimeoutRef.current = null;
+    }, 5000);
+  }, [isFullscreen, showFullscreenControls, isScrubbing]);
+
   // Sync fullscreen state
   useEffect(() => {
     const handleFsChange = () => {
       const isFs = !!document.fullscreenElement;
       setIsFullscreen(isFs);
       setShowFullscreenControls(false);
+      if (fullscreenControlsTimeoutRef.current) {
+        window.clearTimeout(fullscreenControlsTimeoutRef.current);
+        fullscreenControlsTimeoutRef.current = null;
+      }
     };
     document.addEventListener("fullscreenchange", handleFsChange);
     document.addEventListener("webkitfullscreenchange", handleFsChange);
@@ -2571,6 +2619,24 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       document.removeEventListener("webkitfullscreenchange", handleFsChange);
     };
   }, []);
+
+  // 5-second inactivity auto-hide timer for timeline & controls bar in fullscreen mode
+  useEffect(() => {
+    if (isFullscreen && showFullscreenControls && !isScrubbing) {
+      resetFullscreenControlsTimer();
+    } else {
+      if (fullscreenControlsTimeoutRef.current) {
+        window.clearTimeout(fullscreenControlsTimeoutRef.current);
+        fullscreenControlsTimeoutRef.current = null;
+      }
+    }
+    return () => {
+      if (fullscreenControlsTimeoutRef.current) {
+        window.clearTimeout(fullscreenControlsTimeoutRef.current);
+        fullscreenControlsTimeoutRef.current = null;
+      }
+    };
+  }, [isFullscreen, showFullscreenControls, isScrubbing, resetFullscreenControlsTimer]);
 
   // Close Speed menu when clicking outside
   useEffect(() => {
@@ -3430,7 +3496,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   const getSubtitlePositionStyle = useCallback((position: "bottom" | "top" | "center", offsetY: number): React.CSSProperties => {
     if (position === "top") {
-      const extraTop = isFullscreen && showFullscreenControls ? 60 : 0;
+      const extraTop = isFullscreen && showFullscreenControls ? 56 : 0;
       return {
         top: `${offsetY + extraTop}px`,
         bottom: "auto",
@@ -3447,15 +3513,22 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       };
     }
     // Consistent bottom positioning across standard, immersive, and fullscreen modes
-    // When in fullscreen and floating controls are revealed, raise the subtitle smoothly (+90px) to prevent overlap
-    const extraBottom = isFullscreen && showFullscreenControls ? 90 : 0;
+    // In Fullscreen mode: when controls bar (scrubber & playback controls) is visible,
+    // dynamically offset the subtitle by the exact total height and bottom margin of the controls box.
+    // This guarantees that if offsetY is 0px, the subtitle sits exactly 0px directly above the controls box (never hidden behind it).
+    const isSmallScreen = typeof window !== "undefined" ? window.innerWidth < 640 : false;
+    const controlsBottomMargin = isSmallScreen ? 12 : 24; // matches bottom-3 (12px) vs sm:bottom-6 (24px)
+    const measuredHeight = controlsBarHeight > 0 ? controlsBarHeight : 108;
+    const fullscreenControlsClearance = measuredHeight + controlsBottomMargin + 2;
+
+    const extraBottom = isFullscreen && showFullscreenControls ? fullscreenControlsClearance : 0;
     return {
       bottom: `${offsetY + extraBottom}px`,
       top: "auto",
       transform: "none",
       transition: "bottom 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s ease"
     };
-  }, [isFullscreen, showFullscreenControls]);
+  }, [isFullscreen, showFullscreenControls, controlsBarHeight]);
 
   return (
     <div
@@ -3721,9 +3794,18 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
               >
                 {/* VIDEO OR AUDIO STAGE */}
                 <div
-                  onPointerDown={handleStagePointerDown}
+                  onPointerDown={(e) => {
+                    if (isFullscreen && showFullscreenControls) resetFullscreenControlsTimer();
+                    handleStagePointerDown(e);
+                  }}
                   onPointerUp={handleStagePointerUp}
                   onPointerCancel={handleStagePointerCancel}
+                  onMouseMove={() => {
+                    if (isFullscreen && showFullscreenControls) resetFullscreenControlsTimer();
+                  }}
+                  onTouchStart={() => {
+                    if (isFullscreen && showFullscreenControls) resetFullscreenControlsTimer();
+                  }}
                   className={
                     isFullscreen
                       ? "flex-1 relative bg-black overflow-hidden flex items-center justify-center min-h-0 w-full h-full cursor-pointer select-none touch-none"
@@ -3742,7 +3824,16 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                             : "opacity-0 -translate-y-6 pointer-events-none"
                           : "opacity-100 translate-y-0"
                       }`}
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isFullscreen && showFullscreenControls) resetFullscreenControlsTimer();
+                      }}
+                      onMouseMove={() => {
+                        if (isFullscreen && showFullscreenControls) resetFullscreenControlsTimer();
+                      }}
+                      onTouchStart={() => {
+                        if (isFullscreen && showFullscreenControls) resetFullscreenControlsTimer();
+                      }}
                     >
                       {/* Left: Back to files + Media Title */}
                       <div className="flex items-center gap-2 min-w-0">
@@ -4345,8 +4436,21 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
                 {/* Player Timeline & Controls Bar (Unified in LTR layout for consistent button/scrubber directions) */}
                 <div
+                  ref={controlsBarRef}
                   dir="ltr"
-                  onClick={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isFullscreen && showFullscreenControls) resetFullscreenControlsTimer();
+                  }}
+                  onPointerDown={() => {
+                    if (isFullscreen && showFullscreenControls) resetFullscreenControlsTimer();
+                  }}
+                  onMouseMove={() => {
+                    if (isFullscreen && showFullscreenControls) resetFullscreenControlsTimer();
+                  }}
+                  onTouchStart={() => {
+                    if (isFullscreen && showFullscreenControls) resetFullscreenControlsTimer();
+                  }}
                   className={
                     isFullscreen
                       ? `absolute bottom-3 inset-x-3 sm:bottom-6 sm:inset-x-8 md:inset-x-16 lg:inset-x-24 z-40 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl shadow-2xl p-2.5 sm:p-3 space-y-2 transition-all duration-300 ease-out ${
