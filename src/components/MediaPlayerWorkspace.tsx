@@ -380,6 +380,51 @@ interface MediaPlayerWorkspaceProps {
   onBackToLibrary?: () => void;
 }
 
+// Helper to request screen orientation lock to landscape (like YouTube mobile)
+const lockScreenOrientationLandscape = async () => {
+  try {
+    const screenObj = typeof window !== "undefined" ? window.screen : null;
+    const orientation =
+      screenObj?.orientation ||
+      (screenObj as any)?.mozOrientation ||
+      (screenObj as any)?.msOrientation;
+    if (orientation && typeof orientation.lock === "function") {
+      await orientation.lock("landscape");
+    } else if ((screenObj as any)?.lockOrientation) {
+      (screenObj as any).lockOrientation("landscape");
+    } else if ((screenObj as any)?.mozLockOrientation) {
+      (screenObj as any).mozLockOrientation("landscape");
+    } else if ((screenObj as any)?.msLockOrientation) {
+      (screenObj as any).msLockOrientation("landscape");
+    }
+  } catch (err) {
+    // Orientation lock might fail on desktop, iOS Safari, or restricted permissions
+    console.debug("Screen orientation lock to landscape failed or not supported:", err);
+  }
+};
+
+// Helper to unlock screen orientation when leaving fullscreen
+const unlockScreenOrientation = () => {
+  try {
+    const screenObj = typeof window !== "undefined" ? window.screen : null;
+    const orientation =
+      screenObj?.orientation ||
+      (screenObj as any)?.mozOrientation ||
+      (screenObj as any)?.msOrientation;
+    if (orientation && typeof orientation.unlock === "function") {
+      orientation.unlock();
+    } else if ((screenObj as any)?.unlockOrientation) {
+      (screenObj as any).unlockOrientation();
+    } else if ((screenObj as any)?.mozUnlockOrientation) {
+      (screenObj as any).mozUnlockOrientation();
+    } else if ((screenObj as any)?.msUnlockOrientation) {
+      (screenObj as any).msUnlockOrientation();
+    }
+  } catch (err) {
+    console.debug("Screen orientation unlock failed:", err);
+  }
+};
+
 export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   onToggleSidebar,
   onBackToLibrary
@@ -593,8 +638,36 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   // Fullscreen state and section ref
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [showFullscreenControls, setShowFullscreenControls] = useState<boolean>(false);
+  const [forceLandscapeInPortrait, setForceLandscapeInPortrait] = useState<boolean>(true);
+  const [viewportDimensions, setViewportDimensions] = useState<{ width: number; height: number }>(() => ({
+    width: typeof window !== "undefined" ? window.innerWidth : 1280,
+    height: typeof window !== "undefined" ? window.innerHeight : 720
+  }));
   const playerSectionRef = useRef<HTMLElement>(null);
   const fullscreenControlsTimeoutRef = useRef<number | null>(null);
+
+  // Track viewport dimensions and orientation for automatic YouTube-like landscape
+  useEffect(() => {
+    const handleResize = () => {
+      setViewportDimensions({
+        width: window.innerWidth,
+        height: window.innerHeight
+      });
+    };
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("orientationchange", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("orientationchange", handleResize);
+    };
+  }, []);
+
+  const isPortraitViewport = viewportDimensions.width < viewportDimensions.height;
+  const isTouchOrMobileDevice =
+    typeof window !== "undefined" &&
+    ("ontouchstart" in window || navigator.maxTouchPoints > 0 || window.innerWidth <= 1024);
+  const shouldRotateLandscape =
+    isFullscreen && isPortraitViewport && isTouchOrMobileDevice && forceLandscapeInPortrait;
 
   // Immersive Theater Mode (Video huge, minimal bottom controls, side drawer for scrolling cues with toggle)
   const [isImmersiveMode, setIsImmersiveMode] = useState<boolean>(false);
@@ -2629,15 +2702,30 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const handleToggleFullscreen = () => {
     const target = playerSectionRef.current || videoRef.current;
     if (!target) return;
-    if (document.fullscreenElement || isFullscreen) {
+    const isCurrentlyFs = !!(
+      document.fullscreenElement ||
+      (document as any).webkitFullscreenElement ||
+      (document as any).mozFullScreenElement ||
+      (document as any).msFullscreenElement ||
+      isFullscreen
+    );
+
+    if (isCurrentlyFs) {
       fullscreenExitCooldownRef.current = Date.now();
       setIsSentenceChatOpen(false);
       setChatTargetCue(null);
       cueTapTrackerRef.current = { id: "", time: 0, timer: null };
       setIsFullscreen(false);
       setIsImmersiveMode(true);
+      unlockScreenOrientation();
       if (document.fullscreenElement) {
         document.exitFullscreen().catch(console.error);
+      } else if ((document as any).webkitExitFullscreen) {
+        (document as any).webkitExitFullscreen().catch(console.error);
+      } else if ((document as any).mozCancelFullScreen) {
+        (document as any).mozCancelFullScreen().catch(console.error);
+      } else if ((document as any).msExitFullscreen) {
+        (document as any).msExitFullscreen().catch(console.error);
       }
       setShowTranscriptPanel(true);
       setSidePanelView("transcript");
@@ -2646,19 +2734,44 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       });
     } else {
       setIsFullscreen(true);
-      if (target.requestFullscreen) {
-        target.requestFullscreen().catch((err) => {
-          console.error("Fullscreen error, fallback to video element:", err);
-          if (videoRef.current?.requestFullscreen) {
-            videoRef.current.requestFullscreen().catch((e2) => {
-              console.error(e2);
-              setIsFullscreen(false);
-            });
-          } else {
-            setIsFullscreen(false);
-          }
-        });
+      setForceLandscapeInPortrait(true);
+      triggerHud("ملء الشاشة أفقي 🔄", "Fullscreen");
+
+      const reqFs =
+        target.requestFullscreen ||
+        (target as any).webkitRequestFullscreen ||
+        (target as any).mozRequestFullScreen ||
+        (target as any).msRequestFullscreen;
+
+      if (reqFs) {
+        reqFs.call(target)
+          .then(() => {
+            lockScreenOrientationLandscape();
+          })
+          .catch((err: any) => {
+            console.error("Fullscreen error, fallback to video element:", err);
+            const vid = videoRef.current;
+            if (vid) {
+              const vidReqFs =
+                vid.requestFullscreen ||
+                (vid as any).webkitRequestFullscreen ||
+                (vid as any).webkitEnterFullscreen ||
+                (vid as any).mozRequestFullScreen ||
+                (vid as any).msRequestFullscreen;
+              if (vidReqFs) {
+                vidReqFs.call(vid)
+                  .then(() => {
+                    lockScreenOrientationLandscape();
+                  })
+                  .catch((e2: any) => {
+                    console.error(e2);
+                  });
+              }
+            }
+          });
       }
+      // Also lock orientation immediately during user click event
+      lockScreenOrientationLandscape();
     }
   };
 
@@ -2677,17 +2790,26 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }, 5000);
   }, [isFullscreen, showFullscreenControls, isScrubbing]);
 
-  // Sync fullscreen state
+  // Sync fullscreen state & screen orientation (like YouTube mobile)
   useEffect(() => {
     const handleFsChange = () => {
-      const isFs = !!document.fullscreenElement;
+      const isFs = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      );
       setIsFullscreen(isFs);
       setShowFullscreenControls(false);
       if (fullscreenControlsTimeoutRef.current) {
         window.clearTimeout(fullscreenControlsTimeoutRef.current);
         fullscreenControlsTimeoutRef.current = null;
       }
-      if (!isFs) {
+      if (isFs) {
+        setForceLandscapeInPortrait(true);
+        lockScreenOrientationLandscape();
+      } else {
+        unlockScreenOrientation();
         fullscreenExitCooldownRef.current = Date.now();
         setIsSentenceChatOpen(false);
         setChatTargetCue(null);
@@ -2702,9 +2824,14 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     };
     document.addEventListener("fullscreenchange", handleFsChange);
     document.addEventListener("webkitfullscreenchange", handleFsChange);
+    document.addEventListener("mozfullscreenchange", handleFsChange);
+    document.addEventListener("MSFullscreenChange", handleFsChange);
     return () => {
       document.removeEventListener("fullscreenchange", handleFsChange);
       document.removeEventListener("webkitfullscreenchange", handleFsChange);
+      document.removeEventListener("mozfullscreenchange", handleFsChange);
+      document.removeEventListener("MSFullscreenChange", handleFsChange);
+      unlockScreenOrientation();
     };
   }, [scrollToActiveCue]);
 
@@ -3616,12 +3743,24 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
     const endX = e.clientX;
     const endY = e.clientY;
-    const deltaX = endX - start.x;
-    const deltaY = start.y - endY; // Positive = Dragged UP, Negative = Dragged DOWN
+    let deltaX = endX - start.x;
+    let deltaY = start.y - endY; // Positive = Dragged UP, Negative = Dragged DOWN
+    let startXRatio = (start.x - rect.left) / rect.width;
+    let tapXRatio = (endX - rect.left) / rect.width;
+    let tapYRatio = (endY - rect.top) / rect.height;
+
+    // When forced into landscape rotated 90 degrees clockwise in portrait orientation:
+    if (shouldRotateLandscape) {
+      deltaX = endY - start.y;
+      deltaY = endX - start.x;
+      startXRatio = (start.y - rect.top) / rect.height;
+      tapXRatio = (endY - rect.top) / rect.height;
+      tapYRatio = (rect.right - endX) / rect.width;
+    }
+
     const absDeltaX = Math.abs(deltaX);
     const absDeltaY = Math.abs(deltaY);
     const swipeDuration = Date.now() - start.time;
-    const startXRatio = (start.x - rect.left) / rect.width;
 
     // -------------------------------------------------------------
     // A. HORIZONTAL SWIPE GESTURE (السحب لليمين أو لليسار للتقديم والتأخير التناسبي)
@@ -3723,9 +3862,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     // C. TAP / CLICK DETECTION (Minimal movement < 20px)
     // -------------------------------------------------------------
     if (absDeltaX < 20 && absDeltaY < 20) {
-      const xRatio = (endX - rect.left) / rect.width;
-      const yRatio = (endY - rect.top) / rect.height;
-      handleStageTap(xRatio, yRatio);
+      handleStageTap(tapXRatio, tapYRatio);
     }
   };
 
@@ -4013,9 +4150,27 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         {isPlayerOpen && currentFile ? (
           <section
             ref={playerSectionRef}
+            style={
+              shouldRotateLandscape
+                ? {
+                    position: "fixed",
+                    top: "50%",
+                    left: "50%",
+                    width: `${viewportDimensions.height}px`,
+                    height: `${viewportDimensions.width}px`,
+                    transform: "translate(-50%, -50%) rotate(90deg)",
+                    transformOrigin: "center center",
+                    zIndex: 99999,
+                    maxWidth: "none",
+                    maxHeight: "none",
+                  }
+                : undefined
+            }
             className={
               isFullscreen
-                ? "fixed inset-0 z-50 bg-black flex flex-col h-screen w-screen p-0 m-0 overflow-hidden text-white select-none"
+                ? shouldRotateLandscape
+                  ? "bg-black flex flex-col p-0 m-0 overflow-hidden text-white select-none"
+                  : "fixed inset-0 z-50 bg-black flex flex-col h-screen w-screen p-0 m-0 overflow-hidden text-white select-none"
                 : isImmersiveMode
                 ? "fixed inset-0 z-50 bg-slate-950 flex flex-col h-screen w-screen p-2 sm:p-3 overflow-hidden text-white"
                 : "bg-slate-900 rounded-xl p-2 sm:p-2.5 text-white shadow-2xl border border-slate-800 overflow-hidden"
@@ -4138,6 +4293,28 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                             ) : (
                               <Maximize2 className="w-3.5 h-3.5" />
                             )}
+                          </button>
+                        )}
+
+                        {/* Orientation Toggle Button in Fullscreen Mode (Switch Horizontal / Vertical like YouTube) */}
+                        {isFullscreen && currentFile.type === "video" && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setForceLandscapeInPortrait((prev) => {
+                                const next = !prev;
+                                triggerHud(next ? "الوضع الأفقي 🔄" : "الوضع العمودي 📱", "اتجاه الشاشة");
+                                return next;
+                              });
+                            }}
+                            className={`w-7 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center border-0 outline-none ${
+                              shouldRotateLandscape
+                                ? "bg-amber-500/30 text-amber-300"
+                                : "bg-transparent text-white/90 hover:text-white hover:bg-white/10"
+                            }`}
+                            title={forceLandscapeInPortrait ? "التحويل للوضع العمودي" : "التحويل للوضع الأفقي"}
+                          >
+                            <RotateCw className={`w-3.5 h-3.5 transition-transform duration-300 ${shouldRotateLandscape ? "rotate-90 text-amber-300" : ""}`} />
                           </button>
                         )}
 
@@ -5000,6 +5177,28 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           <Volume2 className="w-3.5 h-3.5 text-slate-300" />
                         )}
                       </button>
+
+                      {/* Orientation Toggle Button in Fullscreen Mode (Switch Horizontal / Vertical) */}
+                      {isFullscreen && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setForceLandscapeInPortrait((prev) => {
+                              const next = !prev;
+                              triggerHud(next ? "الوضع الأفقي 🔄" : "الوضع العمودي 📱", "اتجاه الشاشة");
+                              return next;
+                            });
+                          }}
+                          className={`h-7 w-7 sm:h-8 sm:w-8 rounded-lg flex items-center justify-center border transition-colors cursor-pointer ${
+                            shouldRotateLandscape
+                              ? "bg-amber-500/20 text-amber-300 border-amber-500/50"
+                              : "bg-slate-800/90 hover:bg-slate-700/90 text-slate-300 border-slate-700/60 active:bg-slate-700"
+                          }`}
+                          title={forceLandscapeInPortrait ? "التحويل للوضع العمودي" : "التحويل للوضع الأفقي"}
+                        >
+                          <RotateCw className={`w-3.5 h-3.5 transition-transform duration-300 ${shouldRotateLandscape ? "rotate-90 text-amber-300" : ""}`} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
