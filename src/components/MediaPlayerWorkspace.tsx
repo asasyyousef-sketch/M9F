@@ -2625,18 +2625,25 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const target = playerSectionRef.current || videoRef.current;
     if (!target) return;
     if (document.fullscreenElement) {
+      setIsFullscreen(false);
       document.exitFullscreen().catch(console.error);
       setShowTranscriptPanel(true);
       setSidePanelView("transcript");
-      setTimeout(() => {
+      requestAnimationFrame(() => {
         scrollToActiveCue(true);
-      }, 80);
+      });
     } else {
+      setIsFullscreen(true);
       if (target.requestFullscreen) {
         target.requestFullscreen().catch((err) => {
           console.error("Fullscreen error, fallback to video element:", err);
           if (videoRef.current?.requestFullscreen) {
-            videoRef.current.requestFullscreen().catch(console.error);
+            videoRef.current.requestFullscreen().catch((e2) => {
+              console.error(e2);
+              setIsFullscreen(false);
+            });
+          } else {
+            setIsFullscreen(false);
           }
         });
       }
@@ -3405,12 +3412,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
         if (isTopLeftExitZone) {
           // Double-tap in top-left 20% x 25% zone -> Exit Fullscreen!
-          if (currentTracker && now - currentTracker.lastTime < 320 && currentTracker.side === "top-left-exit") {
+          if (currentTracker && now - currentTracker.lastTime < 350 && currentTracker.side === "top-left-exit") {
             if (currentTracker.timer) {
               window.clearTimeout(currentTracker.timer);
             }
             tapTrackerRef.current = null;
 
+            setIsFullscreen(false);
             if (document.fullscreenElement) {
               document.exitFullscreen().catch(console.error);
             }
@@ -3421,11 +3429,11 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
               side: "center",
               label: "تصغير الشاشة",
               subLabel: "أعلى اليسار: الخروج من ملء الشاشة"
-            }, 450);
+            }, 250);
             triggerHud("تصغير الشاشة 🗗", "أعلى اليسار");
-            setTimeout(() => {
+            requestAnimationFrame(() => {
               scrollToActiveCue(true);
-            }, 80);
+            });
             return;
           }
 
@@ -3702,22 +3710,25 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         tapTrackerRef.current = null;
       }
 
-      if (startXRatio < 0.15) {
-        // LEFT ZONE SWIPE (Sentence Navigation - Left 15% edge)
+      // Vertical edge swipe threshold: 25% (0.25 / 0.75) exclusively in fullscreen, 15% (0.15 / 0.85) otherwise
+      const edgeThreshold = isFullscreen ? 0.25 : 0.15;
+
+      if (startXRatio < edgeThreshold) {
+        // LEFT ZONE SWIPE (Sentence Navigation - Left edge: 25% in Fullscreen, 15% otherwise)
         if (deltaY > 0) {
           handleLeftSwipeUp(); // Next sentence
         } else {
           handleLeftSwipeDown(); // Prev sentence
         }
-      } else if (startXRatio > 0.85) {
-        // RIGHT ZONE SWIPE (Volume Control - Right 15% edge)
+      } else if (startXRatio > (1 - edgeThreshold)) {
+        // RIGHT ZONE SWIPE (Volume Control - Right edge: 25% in Fullscreen, 15% otherwise)
         if (deltaY > 0) {
           handleRightSwipeUp(); // Volume Up
         } else {
           handleRightSwipeDown(); // Volume Down
         }
       } else {
-        // CENTER ZONE SWIPE (Subtitles - Wide 70% Center Area)
+        // CENTER ZONE SWIPE (Subtitles - Wide Center Area)
         if (deltaY > 0) {
           handleCenterSwipeUp();
         } else {
@@ -4025,7 +4036,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
               isFullscreen
                 ? "fixed inset-0 z-50 bg-black flex flex-col h-screen w-screen p-0 m-0 overflow-hidden text-white select-none"
                 : isImmersiveMode
-                ? "fixed inset-0 z-50 bg-slate-950 flex flex-col h-screen w-screen p-2 sm:p-3 overflow-hidden text-white animate-fadeIn"
+                ? "fixed inset-0 z-50 bg-slate-950 flex flex-col h-screen w-screen p-2 sm:p-3 overflow-hidden text-white"
                 : "bg-slate-900 rounded-xl p-2 sm:p-2.5 text-white shadow-2xl border border-slate-800 overflow-hidden"
             }
           >
@@ -5037,7 +5048,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                 <div
                   className={
                     isImmersiveMode
-                      ? "w-full h-[40vh] sm:h-[44vh] md:h-full landscape:h-full md:w-80 lg:w-96 landscape:w-80 lg:landscape:w-96 flex-shrink-0 bg-slate-800/90 border border-slate-700/90 rounded-lg flex flex-col overflow-hidden shadow-lg animate-fadeIn"
+                      ? "w-full h-[40vh] sm:h-[44vh] md:h-full landscape:h-full md:w-80 lg:w-96 landscape:w-80 lg:landscape:w-96 flex-shrink-0 bg-slate-800/90 border border-slate-700/90 rounded-lg flex flex-col overflow-hidden shadow-lg"
                       : "lg:col-span-5 xl:col-span-4 bg-slate-800/90 border border-slate-700/90 rounded-lg flex flex-col h-[420px] sm:h-[480px] lg:h-full lg:min-h-[460px] overflow-hidden shadow-lg animate-fadeIn"
                   }
                 >
