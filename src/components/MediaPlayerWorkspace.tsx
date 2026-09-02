@@ -747,6 +747,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     setActiveTrackId(trackId);
     if (trackId) {
       setShowSubtitlesOverlay(true);
+      triggerSubtitlePreview(3200);
       try {
         localStorage.setItem("media_player_show_subtitles_overlay", JSON.stringify(true));
       } catch (e) {}
@@ -764,6 +765,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const shouldShowDual = Boolean(trackId);
     if (trackId) {
       setShowDualSubtitles(true);
+      triggerSubtitlePreview(3200);
       try {
         localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(true));
       } catch (e) {
@@ -781,6 +783,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const handleToggleDualSubtitles = () => {
     setShowDualSubtitles((prev) => {
       const next = !prev;
+      if (next) {
+        triggerSubtitlePreview(3200);
+      }
       try {
         localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(next));
       } catch (e) {
@@ -800,6 +805,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const newSecondary = activeTrackId;
     setActiveTrackId(newPrimary);
     setSecondaryTrackId(newSecondary);
+    triggerSubtitlePreview(3200);
     if (currentFile) {
       saveSubtitlePreferences(currentFile.id, newPrimary, newSecondary);
       saveSubtitlePreferencesToServer(currentFile.id, newPrimary, newSecondary, showDualSubtitles);
@@ -812,6 +818,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const handleToggleSubtitlesOverlay = () => {
     setShowSubtitlesOverlay((prev) => {
       const next = !prev;
+      if (next) {
+        triggerSubtitlePreview(3200);
+      }
       try {
         localStorage.setItem("media_player_show_subtitles_overlay", JSON.stringify(next));
       } catch (e) {
@@ -855,6 +864,21 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     hudTimerRef.current = window.setTimeout(() => {
       setHudToast(null);
     }, 950);
+  }, []);
+
+  // Real-time Gesture Subtitle Preview State & Trigger
+  const [showSwipeSubtitlePreview, setShowSwipeSubtitlePreview] = useState<boolean>(false);
+  const swipeSubtitlePreviewTimerRef = useRef<number | null>(null);
+
+  const triggerSubtitlePreview = useCallback((durationMs: number = 3200) => {
+    if (swipeSubtitlePreviewTimerRef.current) {
+      window.clearTimeout(swipeSubtitlePreviewTimerRef.current);
+    }
+    setShowSwipeSubtitlePreview(true);
+    swipeSubtitlePreviewTimerRef.current = window.setTimeout(() => {
+      setShowSwipeSubtitlePreview(false);
+      swipeSubtitlePreviewTimerRef.current = null;
+    }, durationMs);
   }, []);
 
   // YouTube-style Gesture Overlay, Multi-Tap & Swipe Engine States
@@ -961,6 +985,33 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const progressBarRef = useRef<HTMLDivElement | null>(null);
   const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
   const activeCueRef = useRef<HTMLDivElement | null>(null);
+
+  // Synchronized state refs to prevent stale closure race conditions during swipe gestures
+  const showSubtitlesOverlayRef = useRef(showSubtitlesOverlay);
+  const showDualSubtitlesRef = useRef(showDualSubtitles);
+  const activeTrackIdRef = useRef(activeTrackId);
+  const secondaryTrackIdRef = useRef(secondaryTrackId);
+  const currentFileRef = useRef(currentFile);
+
+  useEffect(() => {
+    showSubtitlesOverlayRef.current = showSubtitlesOverlay;
+  }, [showSubtitlesOverlay]);
+
+  useEffect(() => {
+    showDualSubtitlesRef.current = showDualSubtitles;
+  }, [showDualSubtitles]);
+
+  useEffect(() => {
+    activeTrackIdRef.current = activeTrackId;
+  }, [activeTrackId]);
+
+  useEffect(() => {
+    secondaryTrackIdRef.current = secondaryTrackId;
+  }, [secondaryTrackId]);
+
+  useEffect(() => {
+    currentFileRef.current = currentFile;
+  }, [currentFile]);
 
   // Fetch folders and mapping from server
   const fetchMediaFolders = async () => {
@@ -1285,6 +1336,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   );
 
   // Set active and secondary subtitle tracks when currentFile changes (restoring saved preferences)
+  const currentFileId = currentFile?.id || null;
+  const currentFileSubtitlesCount = currentFile?.subtitles?.length || 0;
+
   useEffect(() => {
     if (currentFile?.subtitles && currentFile.subtitles.length > 0) {
       const savedPrefs = getSavedSubtitlePreferences(currentFile.id);
@@ -1298,8 +1352,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         chosenPrimaryId = currentFile.primaryTrackId;
       } else if (savedPrefs.primaryId && currentFile.subtitles.some((t) => t.id === savedPrefs.primaryId)) {
         chosenPrimaryId = savedPrefs.primaryId;
-      } else if (activeTrackId && currentFile.subtitles.some((t) => t.id === activeTrackId)) {
-        chosenPrimaryId = activeTrackId;
+      } else if (activeTrackIdRef.current && currentFile.subtitles.some((t) => t.id === activeTrackIdRef.current)) {
+        chosenPrimaryId = activeTrackIdRef.current;
       } else {
         // Find German or uploaded track first
         const germanOrOriginal = currentFile.subtitles.find(
@@ -1307,6 +1361,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         );
         chosenPrimaryId = germanOrOriginal ? germanOrOriginal.id : currentFile.subtitles[0].id;
       }
+      activeTrackIdRef.current = chosenPrimaryId;
       setActiveTrackId(chosenPrimaryId);
 
       // Determine Secondary Track:
@@ -1333,18 +1388,23 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         const otherTrack = arabicOrTranslated || currentFile.subtitles.find((t) => t.id !== chosenPrimaryId);
         chosenSecondaryId = otherTrack ? otherTrack.id : null;
       }
+      secondaryTrackIdRef.current = chosenSecondaryId;
       setSecondaryTrackId(chosenSecondaryId);
 
       if (currentFile.showDualSubtitles !== undefined) {
+        showDualSubtitlesRef.current = currentFile.showDualSubtitles;
         setShowDualSubtitles(currentFile.showDualSubtitles);
       } else if (chosenSecondaryId) {
+        showDualSubtitlesRef.current = true;
         setShowDualSubtitles(true);
       }
     } else {
+      activeTrackIdRef.current = null;
+      secondaryTrackIdRef.current = null;
       setActiveTrackId(null);
       setSecondaryTrackId(null);
     }
-  }, [currentFile]);
+  }, [currentFileId, currentFileSubtitlesCount]);
 
   // Active Subtitle Track (Primary) and Cues
   const activeTrack = useMemo(() => {
@@ -1381,6 +1441,37 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       (cue) => currentTime >= cue.startTime && currentTime <= cue.endTime
     ) || null;
   }, [secondaryCues, currentTime]);
+
+  // Sample Text Generators for Instant Visual Confirmation during Swipes / Previews
+  const getSamplePrimarySubtitleText = useCallback(() => {
+    if (activeTrack?.language === "de") {
+      return "Dies ist ein Beispiel für den Untertitel (نص تجريبي للترجمة الأولى)";
+    }
+    if (activeTrack?.language === "en") {
+      return "This is a sample subtitle text (نص تجريبي للترجمة الأولى)";
+    }
+    if (activeTrack?.language === "ar") {
+      return "هذا نص تجريبي لمعاينة الترجمة الأولى (الأساسية) 🎬";
+    }
+    return activeTrack?.label
+      ? `معاينة: ${activeTrack.label} (نص تجريبي)`
+      : "نص تجريبي لمعاينة مظهر الترجمة الأولى 🎬";
+  }, [activeTrack]);
+
+  const getSampleSecondarySubtitleText = useCallback(() => {
+    if (secondaryTrack?.language === "ar" || secondaryTrack?.source === "ai" || secondaryTrack?.label.includes("عربي") || secondaryTrack?.label.includes("🇸🇦")) {
+      return "هذا نص تجريبي لمعاينة الترجمة العربية المزدوجة 🇸🇦⚡";
+    }
+    if (secondaryTrack?.language === "de") {
+      return "Dies ist ein Beispiel für den zweiten Untertitel (الترجمة الثانية)";
+    }
+    if (secondaryTrack?.language === "en") {
+      return "Sample text for secondary dual subtitle (الترجمة الثانية)";
+    }
+    return secondaryTrack?.label
+      ? `معاينة: ${secondaryTrack.label} (الترجمة المزدوجة)`
+      : "هذا نص تجريبي لمعاينة الترجمة المزدوجة الثانية 💬";
+  }, [secondaryTrack]);
 
   // Robust, Non-repeating 1-to-1 Mapping between Primary Cues and Secondary (e.g. Arabic) Cues
   const secondaryCueMap = useMemo(() => {
@@ -2857,10 +2948,27 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   // Center Swipe UP / DOWN (Subtitles)
   const handleCenterSwipeUp = useCallback(() => {
-    const availableSubtitles = currentFile?.subtitles || [];
+    const file = currentFileRef.current;
+    const availableSubtitles = file?.subtitles || [];
+
+    const currentOverlay = showSubtitlesOverlayRef.current;
+    const currentDual = showDualSubtitlesRef.current;
+    const currentActiveId = activeTrackIdRef.current;
+    const currentSecId = secondaryTrackIdRef.current;
+
+    // Trigger instant visual sample preview so user immediately sees subtitle position and design
+    triggerSubtitlePreview(3200);
 
     if (availableSubtitles.length === 0) {
-      triggerHud("لا توجد مسارات ترجمة لهذا الملف", "⚠️");
+      showSubtitlesOverlayRef.current = true;
+      setShowSubtitlesOverlay(true);
+      triggerVisualFeedback({
+        type: "swipe_up_sub1",
+        side: "center",
+        label: "معاينة نص تجريبي",
+        subLabel: "سحب للأعلى: عرض نموذج تجريبي للترجمة"
+      });
+      triggerHud("عرض نص تجريبي للترجمة 🎬", "سحب ⬆️");
       return;
     }
 
@@ -2869,14 +2977,14 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     // State 1: Primary Subtitle 1 Visible (showSubtitlesOverlay === true && showDualSubtitles === false)
     // State 2: Both Subtitles 1 & 2 Visible (showSubtitlesOverlay === true && showDualSubtitles === true)
 
-    if (!showSubtitlesOverlay) {
+    if (!currentOverlay) {
       // 1st Swipe UP -> Reveal Primary Subtitle 1 ONLY
-      let targetPrimaryId = activeTrackId;
+      let targetPrimaryId = currentActiveId;
       const hasValidPrimary = Boolean(targetPrimaryId && availableSubtitles.some((t) => t.id === targetPrimaryId));
       if (!hasValidPrimary) {
-        const savedPrefs = currentFile ? getSavedSubtitlePreferences(currentFile.id) : { primaryId: null, secondaryId: null };
-        if (currentFile?.primaryTrackId && availableSubtitles.some((t) => t.id === currentFile.primaryTrackId)) {
-          targetPrimaryId = currentFile.primaryTrackId;
+        const savedPrefs = file ? getSavedSubtitlePreferences(file.id) : { primaryId: null, secondaryId: null };
+        if (file?.primaryTrackId && availableSubtitles.some((t) => t.id === file.primaryTrackId)) {
+          targetPrimaryId = file.primaryTrackId;
         } else if (savedPrefs.primaryId && availableSubtitles.some((t) => t.id === savedPrefs.primaryId)) {
           targetPrimaryId = savedPrefs.primaryId;
         } else {
@@ -2886,6 +2994,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           targetPrimaryId = germanOrOriginal ? germanOrOriginal.id : availableSubtitles[0].id;
         }
       }
+
+      showSubtitlesOverlayRef.current = true;
+      showDualSubtitlesRef.current = false;
+      activeTrackIdRef.current = targetPrimaryId;
 
       setActiveTrackId(targetPrimaryId);
       setShowSubtitlesOverlay(true);
@@ -2898,139 +3010,182 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         console.error(e);
       }
 
-      if (currentFile && targetPrimaryId) {
-        saveSubtitlePreferences(currentFile.id, targetPrimaryId, secondaryTrackId);
-        saveSubtitlePreferencesToServer(currentFile.id, targetPrimaryId, secondaryTrackId, false);
+      if (file && targetPrimaryId) {
+        saveSubtitlePreferences(file.id, targetPrimaryId, currentSecId);
+        saveSubtitlePreferencesToServer(file.id, targetPrimaryId, currentSecId, false);
         setCurrentFile((prev) => prev ? { ...prev, primaryTrackId: targetPrimaryId, showDualSubtitles: false } : null);
-        setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, primaryTrackId: targetPrimaryId, showDualSubtitles: false } : f));
+        setFiles((prev) => prev.map((f) => f.id === file.id ? { ...f, primaryTrackId: targetPrimaryId, showDualSubtitles: false } : f));
       }
+
+      const primTrack = availableSubtitles.find((t) => t.id === targetPrimaryId);
+      const primLabel = primTrack?.label || "الترجمة الأولى";
 
       triggerVisualFeedback({
         type: "swipe_up_sub1",
         side: "center",
         label: "إظهار الترجمة الأولى",
-        subLabel: "سحب للأعلى: تفعيل الترجمة الأولى"
+        subLabel: `سحب للأعلى: تفعيل (${primLabel})`
       });
-      triggerHud("إظهار الترجمة الأولى", "سحب ⬆️");
-    } else if (!showDualSubtitles) {
+      triggerHud(`إظهار الترجمة الأولى (${primLabel})`, "سحب ⬆️");
+    } else if (!currentDual) {
       // 2nd Swipe UP -> Reveal Secondary / Dual Subtitle 2
       if (availableSubtitles.length <= 1) {
         triggerHud("يوجد مسار ترجمة واحد فقط متاح", "ℹ️");
         return;
       }
 
-      let targetSecId = secondaryTrackId;
-      const isSecValid = Boolean(targetSecId && targetSecId !== activeTrackId && availableSubtitles.some((t) => t.id === targetSecId));
+      let targetSecId = currentSecId;
+      const isSecValid = Boolean(targetSecId && targetSecId !== currentActiveId && availableSubtitles.some((t) => t.id === targetSecId));
       if (!isSecValid) {
-        const savedPrefs = currentFile ? getSavedSubtitlePreferences(currentFile.id) : { primaryId: null, secondaryId: null };
-        if (currentFile?.secondaryTrackId && currentFile.secondaryTrackId !== activeTrackId && availableSubtitles.some((t) => t.id === currentFile.secondaryTrackId)) {
-          targetSecId = currentFile.secondaryTrackId;
-        } else if (savedPrefs.secondaryId && savedPrefs.secondaryId !== activeTrackId && availableSubtitles.some((t) => t.id === savedPrefs.secondaryId)) {
+        const savedPrefs = file ? getSavedSubtitlePreferences(file.id) : { primaryId: null, secondaryId: null };
+        if (file?.secondaryTrackId && file.secondaryTrackId !== currentActiveId && availableSubtitles.some((t) => t.id === file.secondaryTrackId)) {
+          targetSecId = file.secondaryTrackId;
+        } else if (savedPrefs.secondaryId && savedPrefs.secondaryId !== currentActiveId && availableSubtitles.some((t) => t.id === savedPrefs.secondaryId)) {
           targetSecId = savedPrefs.secondaryId;
         } else {
           const arabicOrOther = availableSubtitles.find(
-            (t) => t.id !== activeTrackId && (t.language === "ar" || t.source === "ai" || t.label.includes("عربي") || t.label.includes("🇸🇦"))
-          ) || availableSubtitles.find((t) => t.id !== activeTrackId);
+            (t) => t.id !== currentActiveId && (t.language === "ar" || t.source === "ai" || t.label.includes("عربي") || t.label.includes("🇸🇦"))
+          ) || availableSubtitles.find((t) => t.id !== currentActiveId);
           targetSecId = arabicOrOther ? arabicOrOther.id : null;
         }
       }
 
+      showSubtitlesOverlayRef.current = true;
+      showDualSubtitlesRef.current = true;
       if (targetSecId) {
+        secondaryTrackIdRef.current = targetSecId;
         setSecondaryTrackId(targetSecId);
       }
       setShowDualSubtitles(true);
 
       try {
+        localStorage.setItem("media_player_show_subtitles_overlay", JSON.stringify(true));
         localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(true));
       } catch (e) {
         console.error(e);
       }
 
-      if (currentFile) {
-        saveSubtitlePreferences(currentFile.id, activeTrackId, targetSecId);
-        saveSubtitlePreferencesToServer(currentFile.id, activeTrackId, targetSecId, true);
+      if (file) {
+        saveSubtitlePreferences(file.id, currentActiveId, targetSecId);
+        saveSubtitlePreferencesToServer(file.id, currentActiveId, targetSecId, true);
         setCurrentFile((prev) => prev ? { ...prev, secondaryTrackId: targetSecId || undefined, showDualSubtitles: true } : null);
-        setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, secondaryTrackId: targetSecId || undefined, showDualSubtitles: true } : f));
+        setFiles((prev) => prev.map((f) => f.id === file.id ? { ...f, secondaryTrackId: targetSecId || undefined, showDualSubtitles: true } : f));
       }
+
+      const secTrack = availableSubtitles.find((t) => t.id === targetSecId);
+      const secLabel = secTrack?.label || "الترجمة الثانية";
 
       triggerVisualFeedback({
         type: "swipe_up_sub2",
         side: "center",
-        label: "إظهار الترجمة الثانية (المزدوجة)",
-        subLabel: "سحب للأعلى: تفعيل الترجمة المزدوجة"
+        label: "إظهار الترجمة المزدوجة",
+        subLabel: `سحب للأعلى: تفعيل (+ ${secLabel})`
       });
-      triggerHud("إظهار الترجمة الثانية (المزدوجة)", "سحب ⬆️");
+      triggerHud(`إظهار الترجمة المزدوجة (+ ${secLabel})`, "سحب ⬆️");
     } else {
       triggerHud("كلا الترجمتين مفعّلتان بالفعل", "💬💬");
     }
   }, [
-    showSubtitlesOverlay,
-    showDualSubtitles,
-    activeTrackId,
-    secondaryTrackId,
-    currentFile,
+    triggerSubtitlePreview,
     triggerVisualFeedback,
     triggerHud
   ]);
 
   const handleCenterSwipeDown = useCallback(() => {
-    const availableSubtitles = currentFile?.subtitles || [];
+    const file = currentFileRef.current;
+    const availableSubtitles = file?.subtitles || [];
+
+    const currentOverlay = showSubtitlesOverlayRef.current;
+    const currentDual = showDualSubtitlesRef.current;
+    const currentActiveId = activeTrackIdRef.current;
+    const currentSecId = secondaryTrackIdRef.current;
+
+    if (availableSubtitles.length === 0 && currentOverlay) {
+      showSubtitlesOverlayRef.current = false;
+      showDualSubtitlesRef.current = false;
+      setShowSubtitlesOverlay(false);
+      setShowDualSubtitles(false);
+      if (swipeSubtitlePreviewTimerRef.current) {
+        window.clearTimeout(swipeSubtitlePreviewTimerRef.current);
+      }
+      setShowSwipeSubtitlePreview(false);
+      triggerVisualFeedback({
+        type: "swipe_down_all",
+        side: "center",
+        label: "إخفاء النص التجريبي",
+        subLabel: "سحب للأسفل: إخفاء المعاينة"
+      });
+      triggerHud("إخفاء النص التجريبي", "سحب ⬇️");
+      return;
+    }
+
     if (availableSubtitles.length === 0) {
       triggerHud("لا توجد مسارات ترجمة", "⚠️");
       return;
     }
 
-    if (showSubtitlesOverlay && showDualSubtitles) {
+    if (currentOverlay && currentDual) {
       // 1st Swipe DOWN -> Hide Subtitle 2, keep Subtitle 1 active
+      showDualSubtitlesRef.current = false;
       setShowDualSubtitles(false);
+      triggerSubtitlePreview(3200);
+
       try {
         localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(false));
       } catch (e) {
         console.error(e);
       }
-      if (currentFile) {
-        saveSubtitlePreferencesToServer(currentFile.id, activeTrackId, secondaryTrackId, false);
+
+      if (file) {
+        saveSubtitlePreferencesToServer(file.id, currentActiveId, currentSecId, false);
         setCurrentFile((cf) => cf ? { ...cf, showDualSubtitles: false } : null);
-        setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, showDualSubtitles: false } : f));
+        setFiles((prev) => prev.map((f) => f.id === file.id ? { ...f, showDualSubtitles: false } : f));
       }
+
       triggerVisualFeedback({
         type: "swipe_down_sub2",
         side: "center",
         label: "إخفاء الترجمة الثانية",
         subLabel: "سحب للأسفل: الإبقاء على الترجمة الأولى فقط"
       });
-      triggerHud("إخفاء الترجمة الثانية", "سحب ⬇️");
-    } else if (showSubtitlesOverlay) {
+      triggerHud("إخفاء الترجمة الثانية (الاحتفاظ بالأولى)", "سحب ⬇️");
+    } else if (currentOverlay) {
       // 2nd Swipe DOWN -> Hide Subtitle 1 (All subtitles hidden)
+      showSubtitlesOverlayRef.current = false;
+      showDualSubtitlesRef.current = false;
       setShowSubtitlesOverlay(false);
       setShowDualSubtitles(false);
+
+      if (swipeSubtitlePreviewTimerRef.current) {
+        window.clearTimeout(swipeSubtitlePreviewTimerRef.current);
+      }
+      setShowSwipeSubtitlePreview(false);
+
       try {
         localStorage.setItem("media_player_show_subtitles_overlay", JSON.stringify(false));
         localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(false));
       } catch (e) {
         console.error(e);
       }
-      if (currentFile) {
-        saveSubtitlePreferencesToServer(currentFile.id, activeTrackId, secondaryTrackId, false);
+
+      if (file) {
+        saveSubtitlePreferencesToServer(file.id, currentActiveId, currentSecId, false);
         setCurrentFile((cf) => cf ? { ...cf, showDualSubtitles: false } : null);
-        setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, showDualSubtitles: false } : f));
+        setFiles((prev) => prev.map((f) => f.id === file.id ? { ...f, showDualSubtitles: false } : f));
       }
+
       triggerVisualFeedback({
         type: "swipe_down_all",
         side: "center",
         label: "إخفاء الترجمة بالكامل",
         subLabel: "سحب للأسفل: إخفاء جميع الترجمات"
       });
-      triggerHud("إخفاء الترجمة بالكامل", "سحب ⬇️");
+      triggerHud("إخفاء جميع الترجمات", "سحب ⬇️");
     } else {
       triggerHud("الترجمة مخفية بالفعل", "🚫");
     }
   }, [
-    showSubtitlesOverlay,
-    showDualSubtitles,
-    currentFile,
-    activeTrackId,
-    secondaryTrackId,
+    triggerSubtitlePreview,
     triggerVisualFeedback,
     triggerHud
   ]);
@@ -4108,7 +4263,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   )}
 
                   {/* FLOATING SUBTITLES OVERLAY (Identical floating behavior & styling for BOTH Video & Audio) */}
-                  {showSubtitlesOverlay && (currentCue || (showDualSubtitles && currentSecondaryCue) || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && (
+                  {showSubtitlesOverlay && (currentCue || (showDualSubtitles && currentSecondaryCue) || showSwipeSubtitlePreview || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && (
                     <>
                       {primarySubStyle.position === secondarySubStyle.position ? (
                         <div
@@ -4116,8 +4271,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           style={getSubtitlePositionStyle(primarySubStyle.position, primarySubStyle.offsetY)}
                         >
                           {/* Primary Subtitle (e.g., German / Original) */}
-                          {(currentCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && !currentCue)) && (() => {
-                            const text = currentCue ? currentCue.text : "this is test";
+                          {(currentCue || (((showSwipeSubtitlePreview || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal)) && !currentCue)) && (() => {
+                            const text = currentCue ? currentCue.text : getSamplePrimarySubtitleText();
                             const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
                               <div
@@ -4130,8 +4285,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           })()}
 
                           {/* Secondary Subtitle (e.g., Arabic / Translated with Gemini) */}
-                          {showDualSubtitles && (currentSecondaryCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && !currentSecondaryCue)) && (() => {
-                            const text = currentSecondaryCue ? currentSecondaryCue.text : "هذه تجربة كلام هنا";
+                          {showDualSubtitles && (currentSecondaryCue || (((showSwipeSubtitlePreview || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal)) && !currentSecondaryCue)) && (() => {
+                            const text = currentSecondaryCue ? currentSecondaryCue.text : getSampleSecondarySubtitleText();
                             const dir = secondarySubStyle.direction === "rtl" ? "rtl" : secondarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
                               <div
@@ -4146,8 +4301,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       ) : (
                         <>
                           {/* Primary Subtitle in its dedicated position */}
-                          {(currentCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && !currentCue)) && (() => {
-                            const text = currentCue ? currentCue.text : "this is test";
+                          {(currentCue || (((showSwipeSubtitlePreview || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal)) && !currentCue)) && (() => {
+                            const text = currentCue ? currentCue.text : getSamplePrimarySubtitleText();
                             const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
                               <div
@@ -4165,8 +4320,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           })()}
 
                           {/* Secondary Subtitle in its dedicated position */}
-                          {showDualSubtitles && (currentSecondaryCue || (((showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && !currentSecondaryCue)) && (() => {
-                            const text = currentSecondaryCue ? currentSecondaryCue.text : "هذه تجربة كلام هنا";
+                          {showDualSubtitles && (currentSecondaryCue || (((showSwipeSubtitlePreview || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal)) && !currentSecondaryCue)) && (() => {
+                            const text = currentSecondaryCue ? currentSecondaryCue.text : getSampleSecondarySubtitleText();
                             const dir = secondarySubStyle.direction === "rtl" ? "rtl" : secondarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
                               <div
