@@ -900,7 +900,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const gestureTimerRef = useRef<number | null>(null);
   const tapTrackerRef = useRef<{
     count: number;
-    side: "left" | "right" | "center";
+    side: "left" | "right" | "center" | "top-left-exit";
     timer: number | null;
     lastTime: number;
   } | null>(null);
@@ -1473,6 +1473,17 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       (cue) => currentTime >= cue.startTime && currentTime <= cue.endTime
     ) || null;
   }, [activeCues, currentTime]);
+
+  // Current active or latest past Cue (guarantees the active/last sentence stood upon is identified even during pauses)
+  const lastActiveOrPastCue = useMemo(() => {
+    if (!activeCues || activeCues.length === 0) return null;
+    if (currentCue) return currentCue;
+    const pastCues = activeCues.filter((c) => c.startTime <= currentTime);
+    if (pastCues.length > 0) {
+      return pastCues[pastCues.length - 1];
+    }
+    return activeCues[0] || null;
+  }, [activeCues, currentCue, currentTime]);
 
   // Secondary Subtitle Track (For Dual Subtitles / الترجمة المزدوجة)
   const secondaryTrack = useMemo(() => {
@@ -2615,6 +2626,11 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     if (!target) return;
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(console.error);
+      setShowTranscriptPanel(true);
+      setSidePanelView("transcript");
+      setTimeout(() => {
+        scrollToActiveCue(true);
+      }, 80);
     } else {
       if (target.requestFullscreen) {
         target.requestFullscreen().catch((err) => {
@@ -2652,6 +2668,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         window.clearTimeout(fullscreenControlsTimeoutRef.current);
         fullscreenControlsTimeoutRef.current = null;
       }
+      if (!isFs) {
+        setShowTranscriptPanel(true);
+        setSidePanelView("transcript");
+        setTimeout(() => {
+          scrollToActiveCue(true);
+        }, 80);
+      }
     };
     document.addEventListener("fullscreenchange", handleFsChange);
     document.addEventListener("webkitfullscreenchange", handleFsChange);
@@ -2659,7 +2682,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       document.removeEventListener("fullscreenchange", handleFsChange);
       document.removeEventListener("webkitfullscreenchange", handleFsChange);
     };
-  }, []);
+  }, [scrollToActiveCue]);
 
   // 5-second inactivity auto-hide timer for timeline & controls bar in fullscreen mode
   useEffect(() => {
@@ -2759,6 +2782,29 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const totalVideos = useMemo(() => files.filter((f) => f.type === "video").length, [files]);
   const totalAudios = useMemo(() => files.filter((f) => f.type === "audio").length, [files]);
   const totalSize = useMemo(() => files.reduce((acc, f) => acc + (f.size || 0), 0), [files]);
+
+  // Sentence Tap & Double-Tap Tracker (Single tap seeks, Double tap opens AI sentence chat)
+  const cueTapTrackerRef = useRef<{ id: string; time: number; timer: number | null }>({ id: "", time: 0, timer: null });
+
+  const handleCueClick = useCallback((cue: SubtitleCue) => {
+    const now = Date.now();
+    const tracker = cueTapTrackerRef.current;
+    if (tracker.id === cue.id && now - tracker.time < 350) {
+      if (tracker.timer) window.clearTimeout(tracker.timer);
+      cueTapTrackerRef.current = { id: "", time: 0, timer: null };
+      handleOpenSentenceChat(cue);
+      return;
+    }
+    if (tracker.timer) window.clearTimeout(tracker.timer);
+    handleSeek(cue.startTime);
+    cueTapTrackerRef.current = {
+      id: cue.id,
+      time: now,
+      timer: window.setTimeout(() => {
+        cueTapTrackerRef.current = { id: "", time: 0, timer: null };
+      }, 360)
+    };
+  }, [handleSeek, handleOpenSentenceChat]);
 
   // Pro Navigation Shortcuts & Sentence Handlers
   // Replay current sentence only (R)
@@ -3344,15 +3390,66 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   }, [volume, handleVolumeChange, triggerVisualFeedback, triggerSamsungVolumeBar]);
 
   const handleStageTap = useCallback(
-    (xRatio: number) => {
+    (xRatio: number, yRatio: number = 0.5) => {
       const now = Date.now();
       const currentTracker = tapTrackerRef.current;
 
       // -------------------------------------------------------------
-      // 1. FULLSCREEN MODE: Double click anywhere on screen = Play / Pause
+      // 1. FULLSCREEN MODE:
+      // Top-Left Box (20% width x 25% height): Double-tap = Exit Fullscreen
+      // Everywhere else: Double-tap = Instant Play / Pause
+      // Single-tap: Toggle timeline scrubber & controls bar
       // -------------------------------------------------------------
       if (isFullscreen) {
-        if (currentTracker && now - currentTracker.lastTime < 350) {
+        const isTopLeftExitZone = xRatio <= 0.20 && yRatio <= 0.25;
+
+        if (isTopLeftExitZone) {
+          // Double-tap in top-left 20% x 25% zone -> Exit Fullscreen!
+          if (currentTracker && now - currentTracker.lastTime < 320 && currentTracker.side === "top-left-exit") {
+            if (currentTracker.timer) {
+              window.clearTimeout(currentTracker.timer);
+            }
+            tapTrackerRef.current = null;
+
+            if (document.fullscreenElement) {
+              document.exitFullscreen().catch(console.error);
+            }
+            setShowTranscriptPanel(true);
+            setSidePanelView("transcript");
+            triggerVisualFeedback({
+              type: "minimize",
+              side: "center",
+              label: "تصغير الشاشة",
+              subLabel: "أعلى اليسار: الخروج من ملء الشاشة"
+            }, 450);
+            triggerHud("تصغير الشاشة 🗗", "أعلى اليسار");
+            setTimeout(() => {
+              scrollToActiveCue(true);
+            }, 80);
+            return;
+          }
+
+          // First tap in top-left zone:
+          if (currentTracker?.timer) {
+            window.clearTimeout(currentTracker.timer);
+          }
+
+          const timer = window.setTimeout(() => {
+            tapTrackerRef.current = null;
+            setShowFullscreenControls((prev) => !prev);
+          }, 220);
+
+          tapTrackerRef.current = {
+            count: 1,
+            side: "top-left-exit",
+            timer,
+            lastTime: now
+          };
+          return;
+        }
+
+        // Standard Double Click outside top-left box: Instant Play / Pause
+        if (currentTracker && now - currentTracker.lastTime < 300 && currentTracker.side !== "top-left-exit") {
           if (currentTracker.timer) {
             window.clearTimeout(currentTracker.timer);
           }
@@ -3370,7 +3467,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           return;
         }
 
-        // First tap in fullscreen: wait to see if second tap follows
+        // First tap anywhere else in fullscreen:
         if (currentTracker?.timer) {
           window.clearTimeout(currentTracker.timer);
         }
@@ -3379,7 +3476,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           tapTrackerRef.current = null;
           // In Fullscreen: Single tap ONLY toggles the scrubber timeline & controls bar!
           setShowFullscreenControls((prev) => !prev);
-        }, 240);
+        }, 220);
 
         tapTrackerRef.current = {
           count: 1,
@@ -3484,7 +3581,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       togglePlay,
       skipSeconds,
       triggerVisualFeedback,
-      triggerHud
+      triggerHud,
+      scrollToActiveCue
     ]
   );
 
@@ -3546,13 +3644,29 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         tapTrackerRef.current = null;
       }
 
-      // Proportional seek scale:
-      // dragRatio is the fraction of total stage width traversed (0.05 to 1.0)
-      const dragRatio = Math.min(1, absDeltaX / Math.max(120, rect.width));
-      // Base scale: full screen width = 90 to 180 seconds (adapts dynamically to duration)
-      const totalSeekScale = duration > 0 ? Math.min(180, Math.max(45, duration * 0.25)) : 90;
-      // Seek seconds scales with swipe distance (short swipe ~3-6s, medium ~15-30s, long ~60-90s+)
-      const seekSeconds = Math.max(3, Math.round(dragRatio * totalSeekScale));
+      // Fine-tuned, progressive swipe seeking (especially smooth and controlled on mobile):
+      // - Gentle/short swipe (~25px - 55px): 2 to 4 seconds (very precise, no sudden 13-second jump)
+      // - Medium swipe (~55px - 120px): 5 to 10 seconds
+      // - Long swipe (~120px - 220px): 11 to 24 seconds
+      // - Broad full-width swipe (> 220px): 25 to 50 seconds (capped at 60s)
+      const effectiveDist = Math.max(0, absDeltaX - 22);
+      let seekSeconds = 2;
+
+      if (effectiveDist <= 35) {
+        // Simple flick / short swipe: 2 to 4 seconds
+        seekSeconds = 2 + Math.round((effectiveDist / 35) * 2);
+      } else if (effectiveDist <= 100) {
+        // Moderate swipe: 5 to 10 seconds
+        seekSeconds = 5 + Math.round(((effectiveDist - 35) / 65) * 5);
+      } else if (effectiveDist <= 200) {
+        // Deliberate swipe: 11 to 24 seconds
+        seekSeconds = 11 + Math.round(((effectiveDist - 100) / 100) * 13);
+      } else {
+        // Broad / full swipe: 25 to 50 seconds
+        const fullRatio = Math.min(1, (effectiveDist - 200) / Math.max(100, rect.width - 220));
+        seekSeconds = 25 + Math.round(fullRatio * 25);
+      }
+      seekSeconds = Math.max(2, Math.min(60, seekSeconds));
 
       if (deltaX > 0) {
         // Swiped RIGHT -> Seek Forward (تقديم للأمام)
@@ -3618,7 +3732,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     // -------------------------------------------------------------
     if (absDeltaX < 20 && absDeltaY < 20) {
       const xRatio = (endX - rect.left) / rect.width;
-      handleStageTap(xRatio);
+      const yRatio = (endY - rect.top) / rect.height;
+      handleStageTap(xRatio, yRatio);
     }
   };
 
@@ -3994,38 +4109,40 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
                       {/* Right: Clean Action Controls */}
                       <div className="flex items-center gap-1.5 shrink-0">
-                        {/* Sentences / Transcript Toggle Button */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowTranscriptPanel(!showTranscriptPanel);
-                            if (!showTranscriptPanel) setSidePanelView("transcript");
-                          }}
-                          className={`h-7 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border-0 outline-none ${
-                            showTranscriptPanel && sidePanelView === "transcript"
-                              ? "bg-blue-600 text-white shadow-xs"
-                              : "bg-black/50 text-slate-300 hover:text-white hover:bg-black/75 backdrop-blur-md"
-                          }`}
-                          title={showTranscriptPanel ? "إخفاء لوحة الجمل" : "إظهار لوحة الجمل"}
-                        >
-                          <FileText className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">الجمل</span>
-                        </button>
+                        {/* Sentences / Transcript Toggle Button (Hidden in fullscreen mode per user requirement) */}
+                        {!isFullscreen && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowTranscriptPanel(!showTranscriptPanel);
+                              if (!showTranscriptPanel) setSidePanelView("transcript");
+                            }}
+                            className={`h-7 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border-0 outline-none ${
+                              showTranscriptPanel && sidePanelView === "transcript"
+                                ? "bg-blue-600 text-white shadow-xs"
+                                : "bg-black/50 text-slate-300 hover:text-white hover:bg-black/75 backdrop-blur-md"
+                            }`}
+                            title={showTranscriptPanel ? "إخفاء لوحة الجمل" : "إظهار لوحة الجمل"}
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">الجمل</span>
+                          </button>
+                        )}
 
-                        {/* Fullscreen Toggle (Video only) */}
+                        {/* Fullscreen Toggle (Video only) - in fullscreen, turns into a colorless minimize button */}
                         {currentFile.type === "video" && (
                           <button
                             type="button"
                             onClick={handleToggleFullscreen}
                             className={`w-7 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center border-0 outline-none ${
                               isFullscreen
-                                ? "bg-indigo-600 text-white shadow-xs"
+                                ? "bg-transparent text-white/90 hover:text-white hover:bg-white/10"
                                 : "bg-black/50 text-slate-300 hover:text-white hover:bg-black/75 backdrop-blur-md"
                             }`}
-                            title={isFullscreen ? "الخروج من ملء الشاشة (F / Esc)" : "ملء الشاشة بالكامل (F)"}
+                            title={isFullscreen ? "تصغير الشاشة (Esc / F)" : "ملء الشاشة بالكامل (F)"}
                           >
                             {isFullscreen ? (
-                              <Minimize2 className="w-3.5 h-3.5" />
+                              <Minimize2 className="w-4 h-4" />
                             ) : (
                               <Maximize2 className="w-3.5 h-3.5" />
                             )}
@@ -4150,6 +4267,23 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       </div>
                     </div>
                   )}
+
+                  {/* Fullscreen Top-Left 20% width x 25% height Exit Zone (Subtle guidance indicator when controls are visible) */}
+                  {isFullscreen && (
+                    <div
+                      className={`absolute top-0 left-0 w-[20%] h-[25%] z-30 pointer-events-none transition-all duration-300 ${
+                        showFullscreenControls ? "opacity-100" : "opacity-0"
+                      }`}
+                    >
+                      <div className="w-full h-full border-r border-b border-dashed border-white/20 rounded-br-2xl bg-white/[0.02] p-2 flex items-end justify-start">
+                        <span className="text-[9px] sm:text-[10px] text-slate-300/80 bg-black/60 backdrop-blur-sm px-1.5 py-0.5 rounded border border-white/10 select-none flex items-center gap-1 font-sans">
+                          <Minimize2 className="w-2.5 h-2.5 text-blue-300" />
+                          <span>2x نقر للتصغير</span>
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   {/* YouTube-Style Dynamic Gesture Visual Overlays */}
                   {/* 1. Center Tap: Play / Pause or Fullscreen / Minimize */}
                   {activeGesture && activeGesture.side === "center" && (activeGesture.type === "play" || activeGesture.type === "pause" || activeGesture.type === "fullscreen" || activeGesture.type === "minimize") && (
@@ -5132,7 +5266,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           </div>
                         ) : (
                           filteredCues.map((cue) => {
-                            const isCurrent = currentCue?.id === cue.id;
+                            const isCurrent = currentCue ? currentCue.id === cue.id : lastActiveOrPastCue?.id === cue.id;
                             // Clean 1-to-1 matching secondary cue (prevents duplicate and mismatched sentences)
                             const matchingSec = secondaryCueMap.get(cue.id);
 
@@ -5141,12 +5275,17 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                                 key={cue.id}
                                 ref={isCurrent ? activeCueRef : null}
                                 data-active-cue={isCurrent ? "true" : undefined}
-                                onClick={() => handleSeek(cue.startTime)}
+                                onClick={() => handleCueClick(cue)}
+                                onDoubleClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenSentenceChat(cue);
+                                }}
                                 className={`px-2.5 py-2 rounded-lg border transition-colors duration-150 flex items-center justify-between gap-2 cursor-pointer group ${
                                   isCurrent
                                     ? "bg-blue-600/25 border-blue-500/80 text-white shadow-xs"
                                     : "border-transparent hover:bg-slate-800/80 text-slate-300 hover:text-white"
                                 }`}
+                                title="نقرة للانتقال • نقرتان لمحادثة الذكاء الاصطناعي مع الجملة"
                               >
                                 {/* Left/Start: Optional Timestamp Badge (Click to jump) */}
                                 {showCueTimestamps && (

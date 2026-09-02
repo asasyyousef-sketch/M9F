@@ -2303,16 +2303,6 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
               <h3 className="font-bold text-xs sm:text-sm text-white shrink-0">
                 {mediaContext ? "مساعد المشهد والسكربت" : "المساعد اللغوي"}
               </h3>
-              <span className="text-slate-600 shrink-0">•</span>
-              {mediaContext && mediaContext.cueStartTime !== undefined && mediaContext.cueEndTime !== undefined && (
-                <span className="bg-blue-950/80 border border-blue-600/40 text-blue-300 font-mono text-[10px] sm:text-xs px-2 py-0.5 rounded-full shrink-0 flex items-center gap-1 dir-ltr">
-                  <Clock className="w-2.5 h-2.5" />
-                  {formatSeconds(mediaContext.cueStartTime)} - {formatSeconds(mediaContext.cueEndTime)}
-                </span>
-              )}
-              <span className="text-xs font-bold text-indigo-300 font-sans dir-ltr truncate max-w-[140px] sm:max-w-[240px]" title={card.frontText}>
-                {card.correctArticle ? `${card.correctArticle} ` : ''}{card.frontText}
-              </span>
             </div>
           </div>
 
@@ -2397,6 +2387,23 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* COMPACT SENTENCE REFERENCE (Simple text box, zero clutter, minimal vertical height) */}
+        {card.frontText && (
+          <div className="px-3.5 py-1 bg-slate-950/70 border-b border-slate-800/60 flex items-center gap-2 text-xs shrink-0 select-text">
+            <span className="text-slate-400 text-[11px] font-medium shrink-0">الجملة:</span>
+            <div className="text-slate-200 text-xs font-normal truncate dir-ltr min-w-0 flex-1 flex items-center gap-1.5" title={card.frontText}>
+              <span className="font-medium text-slate-100 truncate">
+                {card.correctArticle ? `${card.correctArticle} ` : ''}{card.frontText}
+              </span>
+              {card.backText ? (
+                <span className="text-slate-400 text-[11px] font-normal truncate shrink-0 max-w-[200px] border-r border-slate-800 pr-2 mr-1">
+                  ({card.backText})
+                </span>
+              ) : null}
+            </div>
+          </div>
+        )}
 
         {/* CONTEXT INSPECTOR DRAWER */}
         <AnimatePresence>
