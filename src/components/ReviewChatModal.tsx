@@ -1472,6 +1472,24 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
     const saved = localStorage.getItem("settings_review_chat_structured_template");
     return saved !== null ? saved === "true" : true; // Default is true (enabled like now)
   });
+  const [enableChatAnimations, setEnableChatAnimations] = useState<boolean>(() => {
+    const saved = localStorage.getItem("settings_ai_chat_animations");
+    return saved !== null ? saved === "true" : true;
+  });
+
+  useEffect(() => {
+    const handleSyncAnimations = () => {
+      const saved = localStorage.getItem("settings_ai_chat_animations");
+      setEnableChatAnimations(saved !== null ? saved === "true" : true);
+    };
+    window.addEventListener("app_settings_changed", handleSyncAnimations);
+    window.addEventListener("storage", handleSyncAnimations);
+    return () => {
+      window.removeEventListener("app_settings_changed", handleSyncAnimations);
+      window.removeEventListener("storage", handleSyncAnimations);
+    };
+  }, []);
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPromptsMenuOpen, setIsPromptsMenuOpen] = useState(false);
   const [isImageMenuOpen, setIsImageMenuOpen] = useState(false);
@@ -2173,7 +2191,7 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[99999] flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-950/85 backdrop-blur-md select-none animate-fadeIn"
+      className={`fixed inset-0 z-[99999] flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-950/85 backdrop-blur-md select-none ${enableChatAnimations ? "animate-fadeIn" : ""}`}
       dir="rtl"
       onClick={(e) => e.stopPropagation()}
     >
@@ -2281,10 +2299,10 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
       </AnimatePresence>
 
       <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+        initial={enableChatAnimations ? { opacity: 0, scale: 0.95, y: 15 } : false}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 15 }}
-        transition={{ duration: 0.22, ease: "easeOut" }}
+        exit={enableChatAnimations ? { opacity: 0, scale: 0.95, y: 15 } : undefined}
+        transition={enableChatAnimations ? { duration: 0.22, ease: "easeOut" } : { duration: 0 }}
         className="w-full max-w-3xl h-[92vh] max-h-[850px] bg-slate-900 border border-slate-800 text-slate-100 rounded-2xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden relative"
         onClick={(e) => e.stopPropagation()}
       >
@@ -2824,11 +2842,12 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
         {/* SETTINGS POPUP MODAL (نافذة منبثقة بدل نافذة منسدلة) */}
         <AnimatePresence>
           {isSettingsOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm animate-fade-in">
+            <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm ${enableChatAnimations ? "animate-fade-in" : ""}`}>
               <motion.div
-                initial={{ scale: 0.95, opacity: 0, y: 10 }}
+                initial={enableChatAnimations ? { scale: 0.95, opacity: 0, y: 10 } : false}
                 animate={{ scale: 1, opacity: 1, y: 0 }}
-                exit={{ scale: 0.95, opacity: 0, y: 10 }}
+                exit={enableChatAnimations ? { scale: 0.95, opacity: 0, y: 10 } : undefined}
+                transition={enableChatAnimations ? undefined : { duration: 0 }}
                 className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
               >
                 {/* Modal Header */}
@@ -3002,6 +3021,42 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
                         <span
                           className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
                             useStructuredTemplate ? "right-1" : "right-6"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 5. AI Chat Open Animation Toggle (أنيميشن فتح ورفع المحادثة) */}
+                  <div className="pt-2 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-950 border border-slate-800/80">
+                      <div className="flex-1 text-right">
+                        <span className="text-xs font-bold text-slate-200 block flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                          <span>أنيميشن فتح ورفع المحادثة</span>
+                        </span>
+                        <p className="text-[10.5px] text-slate-400 mt-0.5 leading-relaxed">
+                          {enableChatAnimations
+                            ? "مفعل: فتح النافذة بحركة صعود وتكبير تدريجية ناعمة."
+                            : "معطل: فتح فوري بحركة صفرية (0s) دون أي تأخير أو انزلاق بصري."}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = !enableChatAnimations;
+                          setEnableChatAnimations(next);
+                          localStorage.setItem("settings_ai_chat_animations", String(next));
+                          window.dispatchEvent(new Event("app_settings_changed"));
+                        }}
+                        className={`w-11 h-6 shrink-0 rounded-full transition-colors relative cursor-pointer ${
+                          enableChatAnimations ? "bg-indigo-600" : "bg-slate-700"
+                        }`}
+                        title={enableChatAnimations ? "تعطيل أنيميشن الفتح (حركة صفرية)" : "تفعيل أنيميشن الفتح"}
+                      >
+                        <span
+                          className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                            enableChatAnimations ? "right-1" : "right-6"
                           }`}
                         />
                       </button>

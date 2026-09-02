@@ -4540,7 +4540,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   const [isCalculatingCache, setIsCalculatingCache] = useState(false);
 
   // Active Settings Tab
-  const [activeTab, setActiveTab] = useState<"audio" | "ai" | "images" | "storage" | "diagnostics">("audio");
+  const [activeTab, setActiveTab] = useState<"audio" | "ai" | "images" | "storage" | "animations" | "diagnostics">("audio");
+
+  // Animation settings states
+  const [enableChatAnimations, setEnableChatAnimations] = useState<boolean>(
+    () => localStorage.getItem("settings_ai_chat_animations") !== "false"
+  );
+  const [enableGeneralAnimations, setEnableGeneralAnimations] = useState<boolean>(
+    () => localStorage.getItem("settings_general_animations") !== "false"
+  );
+
+  const handleToggleChatAnimations = (val: boolean) => {
+    setEnableChatAnimations(val);
+    localStorage.setItem("settings_ai_chat_animations", String(val));
+    window.dispatchEvent(new Event("app_settings_changed"));
+  };
+
+  const handleToggleGeneralAnimations = (val: boolean) => {
+    setEnableGeneralAnimations(val);
+    localStorage.setItem("settings_general_animations", String(val));
+    window.dispatchEvent(new Event("app_settings_changed"));
+  };
 
   // Diagnostic system states
   const [speechError, setSpeechError] = useState<{
@@ -6257,6 +6277,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
             >
               <HardDrive className="w-4 h-4" />
               <span>المظهر والتخزين المؤقت</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("animations")}
+              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                activeTab === "animations"
+                  ? "bg-primary text-on-primary shadow-sm"
+                  : "text-on-surface-variant hover:text-on-surface hover:bg-surface-container"
+              }`}
+            >
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>الحركات والأنيميشن</span>
             </button>
 
             <button
@@ -8727,6 +8760,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 </div>
               </div>
 
+              {/* Animations Quick Shortcut Card */}
+              <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/5 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 text-right">
+                  <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500 shrink-0">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-xs text-on-surface">إعدادات الحركات والأنيميشن والفتح الفوري</h4>
+                    <p className="text-[11px] text-on-surface-variant">
+                      التحكم في أنيميشن رفع محادثات الذكاء وجعله صفرياً (0 ثانية) أو تدريجياً.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("animations")}
+                  className="px-3 py-1.5 bg-amber-500 text-white hover:bg-amber-600 font-bold text-xs rounded-lg transition-all shrink-0 cursor-pointer shadow-xs"
+                >
+                  فتح قسم الأنيميشن
+                </button>
+              </div>
+
               {/* Performance & Network / Audio Preload Quick Toggle Card */}
               <div className="p-5 rounded-2xl border border-outline-variant/40 bg-surface-container-low/50 space-y-3">
                 <div className="flex items-center justify-between">
@@ -8823,6 +8878,160 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                       <span>مسح ذاكرة الصوتيات</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: ANIMATIONS & MOTION */}
+          {activeTab === "animations" && (
+            <div className="space-y-6 animate-fade-in">
+              {/* Header Banner */}
+              <div className="p-5 rounded-2xl border border-amber-500/25 bg-amber-500/5 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-outline-variant/30">
+                  <div>
+                    <h3 className="font-bold text-base text-primary flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-amber-500" />
+                      <span>قسم الحركات والأنيميشن وسرعة النوافذ (Animations & Motion)</span>
+                    </h3>
+                    <p className="text-xs text-on-surface-variant mt-1 leading-relaxed">
+                      التحكم في سلاسة وسرعة المؤثرات البصرية وسلوك رفع وفتح النوافذ التفاعلية في الموقع.
+                    </p>
+                  </div>
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold self-start sm:self-auto border ${
+                    enableChatAnimations
+                      ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30"
+                      : "bg-indigo-500/10 text-indigo-600 border-indigo-500/30"
+                  }`}>
+                    {enableChatAnimations ? "✨ أنيميشن تدريجي مفعّل" : "⚡ فتح فوري صفري (0 ثانية)"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Setting 1: AI Chat Open & Raise Animation */}
+              <div className="p-5 rounded-2xl border border-outline-variant/40 bg-surface-container-low/50 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1 text-right flex-1">
+                    <div className="flex items-center gap-2 font-bold text-sm text-on-surface">
+                      <Zap className="w-4 h-4 text-amber-500" />
+                      <span>أنيميشن فتح ورفع محادثات الذكاء الاصطناعي</span>
+                    </div>
+                    <p className="text-xs text-on-surface-variant leading-relaxed">
+                      {enableChatAnimations
+                        ? "مفعّل حالياً: تفتح نافذة محادثة الذكاء الاصطناعي بحركة صعود وتكبير تدريجية ناعمة (Scale & Slide-up)."
+                        : "معطل حالياً (صفرية): تم إلغاء حركة الصعود والانزلاق تماماً (مدة صفرية 0 ثانية)، فتظهر نافذة المحادثة فورياً وبلمح البصر دون أي تأخير بصري."}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-xs font-bold text-on-surface-variant">
+                      {enableChatAnimations ? "مفعل" : "معطل (حركة صفرية 0s)"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleChatAnimations(!enableChatAnimations)}
+                      className={`w-12 h-7 rounded-full transition-colors relative cursor-pointer border ${
+                        enableChatAnimations
+                          ? "bg-primary border-primary/80"
+                          : "bg-surface-container-highest border-outline-variant"
+                      }`}
+                      title={enableChatAnimations ? "إلغاء أنيميشن فتح المحادثات (جعله صفرياً فورياً)" : "تفعيل أنيميشن فتح المحادثات"}
+                    >
+                      <span
+                        className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-md transition-transform ${
+                          enableChatAnimations ? "right-1" : "right-6"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Explanation Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                  <div
+                    onClick={() => handleToggleChatAnimations(false)}
+                    className={`p-4 rounded-xl border transition-all cursor-pointer text-right space-y-2 ${
+                      !enableChatAnimations
+                        ? "bg-primary/10 border-primary shadow-xs ring-1 ring-primary/30"
+                        : "bg-surface-container-high/40 border-outline-variant/30 hover:border-outline-variant"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-xs text-on-surface flex items-center gap-1.5">
+                        <Zap className="w-3.5 h-3.5 text-amber-500" />
+                        <span>فتح فوري صفري (Zero Animation - 0s)</span>
+                      </span>
+                      {!enableChatAnimations && (
+                        <span className="text-[10px] bg-primary text-on-primary px-2 py-0.5 rounded-md font-bold">
+                          المحدد حالياً
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                      تلغى جميع تأثيرات الصعود أو التأخير (0 ثانية)، فتظهر واجهة المحادثة بشكل مباشر ولحظي لتوفير أقصى سرعة استجابة واستخدام فوري.
+                    </p>
+                  </div>
+
+                  <div
+                    onClick={() => handleToggleChatAnimations(true)}
+                    className={`p-4 rounded-xl border transition-all cursor-pointer text-right space-y-2 ${
+                      enableChatAnimations
+                        ? "bg-primary/10 border-primary shadow-xs ring-1 ring-primary/30"
+                        : "bg-surface-container-high/40 border-outline-variant/30 hover:border-outline-variant"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-xs text-on-surface flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>أنيميشن تدريجي ناعم (Smooth Transition)</span>
+                      </span>
+                      {enableChatAnimations && (
+                        <span className="text-[10px] bg-primary text-on-primary px-2 py-0.5 rounded-md font-bold">
+                          المحدد حالياً
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                      ظهور سلس بحركة ارتقاء وتكبير بمعدل 0.22 ثانية تعطي مظهراً جمالياً عند فتح واستدعاء شاشات المحادثة.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Setting 2: General System Animations */}
+              <div className="p-5 rounded-2xl border border-outline-variant/40 bg-surface-container-low/50 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1 text-right flex-1">
+                    <div className="flex items-center gap-2 font-bold text-sm text-on-surface">
+                      <Activity className="w-4 h-4 text-primary" />
+                      <span>تقليل الحركات العامة بالموقع (Reduce Motion)</span>
+                    </div>
+                    <p className="text-xs text-on-surface-variant leading-relaxed">
+                      تقليل تأثيرات التنقل التلقائي ووميض العناصر في بطاقات المراجعة والقوائم للأجهزة ذات الأداء المنخفض أو لتوفير البطارية.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-xs font-bold text-on-surface-variant">
+                      {enableGeneralAnimations ? "حركات كاملة" : "حركات مخففة"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleGeneralAnimations(!enableGeneralAnimations)}
+                      className={`w-12 h-7 rounded-full transition-colors relative cursor-pointer border ${
+                        enableGeneralAnimations
+                          ? "bg-primary border-primary/80"
+                          : "bg-surface-container-highest border-outline-variant"
+                      }`}
+                      title={enableGeneralAnimations ? "تخفيف الحركات العامة" : "تفعيل الحركات الكاملة"}
+                    >
+                      <span
+                        className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-md transition-transform ${
+                          enableGeneralAnimations ? "right-1" : "right-6"
+                        }`}
+                      />
                     </button>
                   </div>
                 </div>
