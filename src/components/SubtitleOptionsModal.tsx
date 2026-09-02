@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   X,
   Languages,
@@ -18,7 +18,9 @@ import {
   Settings2,
   Layers,
   ArrowRightLeft,
-  ArrowRight
+  ArrowRight,
+  MoreVertical,
+  Star
 } from "lucide-react";
 import { MediaFile } from "../types";
 
@@ -76,6 +78,49 @@ export const SubtitleOptionsPanel: React.FC<SubtitleOptionsPanelProps> = ({
   isEmbedded = false
 }) => {
   const [activeTab, setActiveTab] = useState<"tracks" | "ai" | "tools">("tracks");
+  const [trackMenuAnchor, setTrackMenuAnchor] = useState<{
+    trackId: string;
+    x: number;
+    y: number;
+    openAbove: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setTrackMenuAnchor(null);
+    };
+    if (trackMenuAnchor) {
+      window.addEventListener("click", handleClickOutside);
+      window.addEventListener("resize", handleClickOutside);
+      window.addEventListener("scroll", handleClickOutside, true);
+    }
+    return () => {
+      window.removeEventListener("click", handleClickOutside);
+      window.removeEventListener("resize", handleClickOutside);
+      window.removeEventListener("scroll", handleClickOutside, true);
+    };
+  }, [trackMenuAnchor]);
+
+  const handleToggleTrackMenu = (trackId: string, e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    if (trackMenuAnchor?.trackId === trackId) {
+      setTrackMenuAnchor(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const openAbove = rect.bottom + 190 > window.innerHeight;
+    const menuWidth = 175;
+    let posX = rect.left - (menuWidth - rect.width);
+    if (posX < 10) posX = 10;
+    if (posX + menuWidth > window.innerWidth - 10) posX = window.innerWidth - menuWidth - 10;
+
+    setTrackMenuAnchor({
+      trackId,
+      x: posX,
+      y: openAbove ? rect.top - 6 : rect.bottom + 6,
+      openAbove,
+    });
+  };
 
   if (!currentFile) {
     return (
@@ -89,6 +134,7 @@ export const SubtitleOptionsPanel: React.FC<SubtitleOptionsPanelProps> = ({
   const subtitles = currentFile.subtitles || [];
   const activeTrack = subtitles.find((t) => t.id === activeTrackId) || null;
   const secondaryTrack = subtitles.find((t) => t.id === secondaryTrackId) || null;
+  const targetMenuTrack = trackMenuAnchor ? subtitles.find((t) => t.id === trackMenuAnchor.trackId) || null : null;
 
   return (
     <div className="flex flex-col h-full bg-slate-900 text-slate-100 select-none overflow-hidden" dir="rtl">
@@ -138,66 +184,12 @@ export const SubtitleOptionsPanel: React.FC<SubtitleOptionsPanelProps> = ({
       <div className="p-2.5 sm:p-3 overflow-y-auto flex-1 space-y-3 custom-scrollbar text-xs">
         
         {/* ==================================================== */}
-        {/* TAB 1: TRACKS & DUAL SUBTITLES */}
+        {/* TAB 1: TRACKS */}
         {/* ==================================================== */}
         {activeTab === "tracks" && (
           <div className="space-y-3 animate-fadeIn">
-            {/* Master Floating Subtitles Display Switch */}
-            <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-2.5 sm:p-3 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <div className={`w-6 h-6 rounded-md flex items-center justify-center font-bold text-xs border shrink-0 ${
-                  showSubtitlesOverlay
-                    ? "bg-blue-600/20 text-blue-400 border-blue-500/30"
-                    : "bg-slate-800 text-slate-500 border-slate-700"
-                }`}>
-                  <Subtitles className="w-3.5 h-3.5" />
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold text-slate-200">
-                    عرض الترجمة العائمة على الشاشة
-                  </h3>
-                  <p className="text-[10px] text-slate-400">
-                    {showSubtitlesOverlay ? "الترجمة معروضة حالياً على الفيديو" : "الترجمة مخفية من العرض (معطلة)"}
-                  </p>
-                </div>
-              </div>
-
-              <button
-                onClick={onToggleSubtitlesOverlay}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
-                  showSubtitlesOverlay
-                    ? "bg-blue-600 text-white border-blue-500 shadow-xs"
-                    : "bg-slate-800 text-slate-400 border-slate-700 hover:text-white"
-                }`}
-              >
-                {showSubtitlesOverlay ? "معروضة ✓" : "مخفية (معطلة)"}
-              </button>
-            </div>
-
-            {/* Primary Track Selection Card */}
-            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-2.5 sm:p-3 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-md bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xs border border-indigo-500/30 shrink-0">
-                    1
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-bold text-slate-200">
-                      المسار الأساسي (الترجمة الأولى)
-                    </h3>
-                    <p className="text-[10px] text-slate-400">
-                      المسار الرئيسي المعروض ومصدر قائمة الجمل
-                    </p>
-                  </div>
-                </div>
-
-                {activeTrack && (
-                  <span className="text-[9.5px] bg-indigo-950 text-indigo-300 font-bold px-1.5 py-0.5 rounded-full border border-indigo-500/30 shrink-0">
-                    {activeTrack.cues.length} مقطع
-                  </span>
-                )}
-              </div>
-
+            {/* Clean Subtitle Tracks List */}
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-2.5 sm:p-3 space-y-2">
               {subtitles.length === 0 ? (
                 <div className="py-4 text-center text-slate-400 space-y-2">
                   <Subtitles className="w-6 h-6 text-slate-600 mx-auto" />
@@ -214,9 +206,10 @@ export const SubtitleOptionsPanel: React.FC<SubtitleOptionsPanelProps> = ({
                   </button>
                 </div>
               ) : (
-                <div className="space-y-1.5 pt-0.5">
+                <div className="space-y-1.5">
                   {subtitles.map((track) => {
                     const isPrimary = activeTrackId === track.id;
+                    const isSecondary = secondaryTrackId === track.id && showDualSubtitles;
                     return (
                       <div
                         key={track.id}
@@ -224,29 +217,44 @@ export const SubtitleOptionsPanel: React.FC<SubtitleOptionsPanelProps> = ({
                         className={`p-2 sm:p-2.5 rounded-lg border transition-all cursor-pointer flex items-center justify-between gap-2 ${
                           isPrimary
                             ? "bg-indigo-600/20 border-indigo-500/80 text-white shadow-xs"
+                            : isSecondary
+                            ? "bg-emerald-600/15 border-emerald-500/60 text-slate-100"
                             : "bg-slate-900/80 border-slate-800/80 text-slate-300 hover:bg-slate-800"
                         }`}
                       >
                         <div className="flex items-center gap-2 min-w-0">
                           <div
-                            className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${
+                            className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
                               isPrimary
                                 ? "border-indigo-400 bg-indigo-500 text-white"
+                                : isSecondary
+                                ? "border-emerald-400 bg-emerald-500 text-white"
                                 : "border-slate-600"
                             }`}
                           >
                             {isPrimary && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                            {isSecondary && !isPrimary && <span className="text-[9px] font-black leading-none">2</span>}
                           </div>
                           <div className="min-w-0">
-                            <p className="text-xs font-bold truncate flex items-center gap-1.5">
-                              <span>{track.label}</span>
+                            <p className="text-xs font-bold truncate flex items-center gap-1.5 flex-wrap">
+                              <span className="truncate">{track.label}</span>
                               {track.source === "ai" && (
                                 <span className="text-[8.5px] bg-emerald-950 text-emerald-300 px-1 py-0.2 rounded border border-emerald-500/30">
                                   AI
                                 </span>
                               )}
+                              {isPrimary && (
+                                <span className="text-[9px] bg-indigo-500/25 text-indigo-300 font-bold px-1.5 py-0.2 rounded border border-indigo-500/30">
+                                  أساسي
+                                </span>
+                              )}
+                              {isSecondary && (
+                                <span className="text-[9px] bg-emerald-500/25 text-emerald-300 font-bold px-1.5 py-0.2 rounded border border-emerald-500/30">
+                                  ثانوي
+                                </span>
+                              )}
                             </p>
-                            <p className="text-[10px] text-slate-400 truncate">
+                            <p className="text-[10.5px] text-slate-400 truncate mt-0.5">
                               {track.cues.length} جملة • {track.language || "تلقائي"}
                             </p>
                           </div>
@@ -254,11 +262,16 @@ export const SubtitleOptionsPanel: React.FC<SubtitleOptionsPanelProps> = ({
 
                         <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                           <button
-                            onClick={() => onDeleteTrack(track.id)}
-                            className="p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-md transition-colors cursor-pointer"
-                            title="حذف هذا المسار"
+                            type="button"
+                            onClick={(e) => handleToggleTrackMenu(track.id, e)}
+                            className={`p-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center border-0 outline-none ${
+                              trackMenuAnchor?.trackId === track.id
+                                ? "bg-indigo-600 text-white shadow-xs"
+                                : "text-slate-400 hover:text-white hover:bg-slate-800"
+                            }`}
+                            title="خيارات المسار"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <MoreVertical className="w-4 h-4" />
                           </button>
                         </div>
                       </div>
@@ -266,115 +279,18 @@ export const SubtitleOptionsPanel: React.FC<SubtitleOptionsPanelProps> = ({
                   })}
 
                   <button
-                    onClick={() => onSelectPrimaryTrack(null)}
-                    className={`w-full py-1.5 rounded-lg text-xs font-bold transition-all border text-center cursor-pointer ${
-                      activeTrackId === null
-                        ? "bg-slate-800 text-slate-200 border-slate-600"
-                        : "bg-transparent text-slate-500 hover:text-slate-400 border-dashed border-slate-800 hover:border-slate-700"
-                    }`}
+                    onClick={() => {
+                      if (onClose) onClose();
+                      onOpenUploadModal();
+                    }}
+                    className="w-full mt-1.5 py-1.5 bg-slate-900/60 hover:bg-slate-800 text-indigo-300 hover:text-white border border-dashed border-slate-800 hover:border-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer inline-flex items-center justify-center gap-1.5"
                   >
-                    إيقاف المسار الأساسي (Off)
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>إضافة مسار ترجمة جديد</span>
                   </button>
                 </div>
               )}
             </div>
-
-            {/* Quick Swap Button */}
-            {subtitles.length > 1 && onSwapTracks && (
-              <div className="flex items-center justify-center -my-1">
-                <button
-                  onClick={onSwapTracks}
-                  className="px-3 py-1 bg-slate-950 hover:bg-slate-800 text-indigo-300 hover:text-indigo-200 border border-slate-800 rounded-full text-[11px] font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
-                  title="تبديل الترجمة الأولى لتصبح الثانية والعكس"
-                >
-                  <ArrowRightLeft className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>تبديل ترتيب الترجمتين (1 ⇄ 2)</span>
-                </button>
-              </div>
-            )}
-
-            {/* Secondary Track Selection Card (Dual Subtitles) */}
-            {subtitles.length > 1 && (
-              <div className="bg-slate-950/60 border border-emerald-500/30 rounded-xl p-2.5 sm:p-3 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-md bg-emerald-600/20 text-emerald-400 flex items-center justify-center font-bold text-xs border border-emerald-500/30 shrink-0">
-                      2
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-bold text-emerald-300 flex items-center gap-1">
-                        <span>الترجمة الثانوية (المزدوجة)</span>
-                        <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1 py-0.2 rounded-sm font-mono">
-                          Dual
-                        </span>
-                      </h3>
-                      <p className="text-[10px] text-slate-400">
-                        لعرض لغتين معاً (ألماني + عربي)
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={onToggleDualSubtitles}
-                    className={`px-2 py-0.5 rounded-lg text-[10.5px] font-bold transition-all cursor-pointer border ${
-                      showDualSubtitles
-                        ? "bg-emerald-600 text-white border-emerald-500 shadow-xs"
-                        : "bg-slate-900 text-slate-400 border-slate-800"
-                    }`}
-                  >
-                    {showDualSubtitles ? "مفعل ✓" : "معطل"}
-                  </button>
-                </div>
-
-                <div className="space-y-1.5 pt-0.5">
-                  {subtitles
-                    .filter((t) => t.id !== activeTrackId)
-                    .map((track) => {
-                      const isSecondary = secondaryTrackId === track.id;
-                      return (
-                        <div
-                          key={track.id}
-                          onClick={() => onSelectSecondaryTrack(track.id)}
-                          className={`p-2 sm:p-2.5 rounded-lg border transition-all cursor-pointer flex items-center justify-between gap-2 ${
-                            isSecondary && showDualSubtitles
-                              ? "bg-emerald-600/20 border-emerald-500/80 text-white shadow-xs"
-                              : "bg-slate-900/80 border-slate-800/80 text-slate-300 hover:bg-slate-800"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div
-                              className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${
-                                isSecondary && showDualSubtitles
-                                  ? "border-emerald-400 bg-emerald-500 text-white"
-                                  : "border-slate-600"
-                              }`}
-                            >
-                              {isSecondary && showDualSubtitles && <Check className="w-2.5 h-2.5 stroke-[3]" />}
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-xs font-bold truncate">{track.label}</p>
-                              <p className="text-[10px] text-slate-400">
-                                {track.cues.length} جملة متزامنة
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                  <button
-                    onClick={() => onSelectSecondaryTrack(null)}
-                    className={`w-full py-1.5 rounded-lg text-xs font-bold transition-all border text-center cursor-pointer ${
-                      secondaryTrackId === null || !showDualSubtitles
-                        ? "bg-slate-800 text-slate-200 border-slate-600"
-                        : "bg-transparent text-slate-500 hover:text-slate-400 border-dashed border-slate-800"
-                    }`}
-                  >
-                    بدون مسار ثانوي (ترجمة مفردة)
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         )}
 
@@ -568,6 +484,90 @@ export const SubtitleOptionsPanel: React.FC<SubtitleOptionsPanelProps> = ({
           >
             <span>العودة لقائمة الجمل والتفريغ</span>
             <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Floating Track Options Context Menu */}
+      {trackMenuAnchor && targetMenuTrack && (
+        <div
+          className={`fixed z-[100] min-w-[175px] bg-slate-900/98 backdrop-blur-md rounded-2xl p-1.5 shadow-2xl text-right border-0 shadow-black/80 ring-1 ring-white/10 ${
+            trackMenuAnchor.openAbove ? "origin-bottom animate-scaleUp" : "origin-top animate-scaleUp"
+          }`}
+          style={{
+            top: trackMenuAnchor.openAbove ? undefined : `${trackMenuAnchor.y}px`,
+            bottom: trackMenuAnchor.openAbove ? `${window.innerHeight - trackMenuAnchor.y}px` : undefined,
+            left: `${trackMenuAnchor.x}px`,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* 1. تحديد كـ أساسي */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectPrimaryTrack(targetMenuTrack.id);
+              setTrackMenuAnchor(null);
+            }}
+            className={`w-full px-2.5 py-2 hover:bg-slate-800 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0 ${
+              targetMenuTrack.id === activeTrackId ? "text-indigo-400 bg-indigo-500/10" : "text-slate-200 hover:text-white"
+            }`}
+          >
+            <Check className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+            <span>تحديد كـ أساسي</span>
+          </button>
+
+          {/* 2. تحديد كـ ثانوي (ان كان هناك اساسي بالاصل يظهر هذا الخيار) */}
+          {activeTrackId !== null && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectSecondaryTrack(targetMenuTrack.id);
+                if (!showDualSubtitles) {
+                  onToggleDualSubtitles();
+                }
+                setTrackMenuAnchor(null);
+              }}
+              className={`w-full px-2.5 py-2 hover:bg-slate-800 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0 ${
+                targetMenuTrack.id === secondaryTrackId && showDualSubtitles
+                  ? "text-emerald-400 bg-emerald-500/10"
+                  : "text-slate-200 hover:text-white"
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>تحديد كـ ثانوي</span>
+            </button>
+          )}
+
+          {/* 3. تبديل (ان كان هناك اساسي وثانوي محددين وتريد التبديل بينهما) */}
+          {activeTrackId && secondaryTrackId && activeTrackId !== secondaryTrackId && onSwapTracks && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSwapTracks();
+                setTrackMenuAnchor(null);
+              }}
+              className="w-full px-2.5 py-2 hover:bg-slate-800 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+              <span>تبديل الأساسي والثانوي</span>
+            </button>
+          )}
+
+          {/* 4. زر الحذف */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDeleteTrack(targetMenuTrack.id);
+              setTrackMenuAnchor(null);
+            }}
+            className="w-full px-2.5 py-2 hover:bg-rose-500/20 text-rose-300 hover:text-rose-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            <span>حذف المسار</span>
           </button>
         </div>
       )}

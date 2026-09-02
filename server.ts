@@ -9,6 +9,7 @@ import { fileURLToPath } from "url";
 import multer from "multer";
 import { initialFolders, initialCards } from "./src/data/seed";
 import { getSupabase, SUPABASE_SQL_SCHEMA } from "./src/supabaseClient";
+import { formatSubtitleTrackProtocol } from "./src/utils/subtitleNaming";
 import { GoogleGenAI, Type } from "@google/genai";
 
 function extractRateLimitHeaders(headers: Headers): Record<string, string> {
@@ -746,7 +747,7 @@ async function startServer() {
 
       const subTrack: ServerSubtitleTrack = {
         id: "sub-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
-        label: "🇩🇪 تفريغ يوتيوب (Gradio)",
+        label: formatSubtitleTrackProtocol("TRN", "de"),
         language: "de",
         cues: cleanCues,
         source: "ai",
@@ -1057,8 +1058,8 @@ async function startServer() {
 
       const newTrack: ServerSubtitleTrack = {
         id: "sub-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
-        label: label?.trim() || "الترجمة",
-        language: language || "ar",
+        label: label?.trim() || formatSubtitleTrackProtocol(source || "UPL", language || "de"),
+        language: language || "de",
         cues: cleanCues,
         source: source || "uploaded",
         uploadedAt: new Date().toISOString()
@@ -1307,7 +1308,7 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
 
       const newTrack: ServerSubtitleTrack = {
         id: "sub-ai-" + Date.now(),
-        label: `ترجمة ذكية (${language.toUpperCase()}) ⚡`,
+        label: formatSubtitleTrackProtocol("GEM", language || "de"),
         language,
         cues: parsedCues.map((c, idx) => ({
           id: `cue-${idx + 1}`,
@@ -1455,7 +1456,7 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
 
       const translatedTrack: ServerSubtitleTrack = {
         id: "sub-trans-" + Date.now(),
-        label: `🇸🇦 ${targetLangName} (${usedModel})`,
+        label: formatSubtitleTrackProtocol("GEM", targetLanguage || "ar"),
         language: targetLanguage,
         cues: translatedCues.map((c, idx) => ({
           id: c.id || `cue-trans-${idx + 1}`,

@@ -43,6 +43,7 @@ import {
   YouTubeVideoFormat
 } from "../utils/gradioTranscription";
 import { parseSubtitleContent } from "../utils/subtitleParser";
+import { formatSubtitleTrackProtocol } from "../utils/subtitleNaming";
 
 interface GradioTranscriberModalProps {
   isOpen: boolean;
@@ -431,7 +432,7 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
         const cues = parseSubtitleContent(res.srtText);
         setParsedCuesCount(cues.length);
         if (cues.length > 0) {
-          const trackLabel = `🇩🇪 ألماني (سيرفر Gradio)`;
+          const trackLabel = formatSubtitleTrackProtocol("TRN", "de");
           await onSubtitlesGenerated(trackLabel, cues, res.srtText);
         }
       }

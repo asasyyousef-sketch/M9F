@@ -88,6 +88,7 @@ import { SubtitleOptionsModal, SubtitleOptionsPanel } from "./SubtitleOptionsMod
 import { CleanCueEditorModal } from "./CleanCueEditorModal";
 import { ALL_AVAILABLE_MODELS, AIModelOption } from "./AICorrectorWorkspace";
 import { MediaExplorerView } from "./MediaExplorerView";
+import { formatSubtitleTrackProtocol } from "../utils/subtitleNaming";
 import { ReviewChatModal, ReviewChatMessage } from "./ReviewChatModal";
 import { speakClient } from "./Modals";
 
@@ -1879,7 +1880,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         return;
       }
 
-      const defaultLabel = file.name.replace(/\.[^/.]+$/, "") || "ترجمة مرفوعة";
+      const defaultLabel = formatSubtitleTrackProtocol("UPL", "de");
       await saveSubtitleTrackToServer(currentFile.id, defaultLabel, parsedCues, "uploaded");
       setShowSubtitleUploadModal(false);
       setPastedSubtitleText("");
@@ -1903,7 +1904,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       return;
     }
 
-    const label = subtitleTrackLabel.trim() || `ترجمة يدوية (${parsedCues.length} جملة)`;
+    const label = subtitleTrackLabel.trim() || formatSubtitleTrackProtocol("UPL", "de");
     await saveSubtitleTrackToServer(currentFile.id, label, parsedCues, "manual");
     setShowSubtitleUploadModal(false);
     setPastedSubtitleText("");
@@ -1986,9 +1987,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           t.id === trackId ? { ...t, cues: cleanCues, label: label || t.label } : t
         );
       } else {
+        const fallbackLabel = formatSubtitleTrackProtocol(source || "uploaded", "de");
         const dummyTrack: MediaSubtitleTrack = {
           id: trackId || `sub-${Date.now()}`,
-          label: label || "الترجمة",
+          label: label || fallbackLabel,
           cues: cleanCues,
           source,
           uploadedAt: new Date().toISOString()
@@ -5532,7 +5534,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   </label>
                   <input
                     type="text"
-                    placeholder="مثال: العربية (مترجم) أو English"
+                    placeholder={`تلقائي بالبروتوكول: ${formatSubtitleTrackProtocol("UPL", "de")}`}
                     value={subtitleTrackLabel}
                     onChange={(e) => setSubtitleTrackLabel(e.target.value)}
                     className="w-full text-xs p-2.5 border border-slate-200 rounded-xl focus:border-indigo-500 focus:outline-hidden"
