@@ -935,6 +935,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   };
   const [bufferedPercent, setBufferedPercent] = useState<number>(0);
   const [isScrubbing, setIsScrubbing] = useState<boolean>(false);
+  const isScrubbingRef = useRef<boolean>(false);
+  const scrubRafRef = useRef<number | null>(null);
+  const pendingScrubTimeRef = useRef<number | null>(null);
   const [hoverPosition, setHoverPosition] = useState<number | null>(null);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [hoverCueText, setHoverCueText] = useState<string | null>(null);
@@ -2539,29 +2542,69 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     setCurrentTime(boundedTime);
   }, [duration, currentFile]);
 
-  // Calculate precise time from pointer event relative to timeline LTR width
-  const calculateTimeFromEvent = (e: MouseEvent | TouchEvent | React.MouseEvent | React.PointerEvent | PointerEvent) => {
-    if (!progressBarRef.current) return 0;
-    const rect = progressBarRef.current.getBoundingClientRect();
-    if (rect.width <= 0) return 0;
+  // Calculate exact 0..1 timeline fraction, taking into account screen/container rotation
+  const getFractionFromPointerEvent = useCallback(
+    (e: MouseEvent | TouchEvent | React.MouseEvent | React.PointerEvent | PointerEvent) => {
+      if (!progressBarRef.current) return 0;
+      const rect = progressBarRef.current.getBoundingClientRect();
 
-    let clientX = 0;
-    if ("clientX" in e && typeof e.clientX === "number") {
-      clientX = e.clientX;
-    } else if ("touches" in e && (e as TouchEvent).touches.length > 0) {
-      clientX = (e as TouchEvent).touches[0].clientX;
-    }
+      let clientX = 0;
+      let clientY = 0;
+      if ("clientX" in e && typeof e.clientX === "number") {
+        clientX = e.clientX;
+        clientY = e.clientY;
+      } else if ("touches" in e && (e as TouchEvent).touches && (e as TouchEvent).touches.length > 0) {
+        clientX = (e as TouchEvent).touches[0].clientX;
+        clientY = (e as TouchEvent).touches[0].clientY;
+      } else if ("changedTouches" in e && (e as TouchEvent).changedTouches && (e as TouchEvent).changedTouches.length > 0) {
+        clientX = (e as TouchEvent).changedTouches[0].clientX;
+        clientY = (e as TouchEvent).changedTouches[0].clientY;
+      }
 
-    // Force strictly LTR calculation: 0 = Left edge, 1 = Right edge
-    const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const totalDuration = duration || getMediaElement()?.duration || 0;
-    return fraction * totalDuration;
-  };
+      let fraction = 0;
+      if (shouldRotateLandscape && landscapeRotationAngle === 90) {
+        // Rotated 90deg clockwise: timeline runs vertically along the screen from top (start) to bottom (end)
+        if (rect.height > 0) {
+          fraction = (clientY - rect.top) / rect.height;
+        }
+      } else if (shouldRotateLandscape && landscapeRotationAngle === 270) {
+        // Rotated 270deg clockwise: timeline runs vertically along the screen from bottom (start) to top (end)
+        if (rect.height > 0) {
+          fraction = (rect.bottom - clientY) / rect.height;
+        }
+      } else {
+        // Standard unrotated horizontal layout: runs from left (start) to right (end)
+        if (rect.width > 0) {
+          fraction = (clientX - rect.left) / rect.width;
+        }
+      }
+
+      return Math.max(0, Math.min(1, fraction));
+    },
+    [shouldRotateLandscape, landscapeRotationAngle]
+  );
+
+  // Calculate precise time from pointer event relative to timeline width/orientation
+  const calculateTimeFromEvent = useCallback(
+    (e: MouseEvent | TouchEvent | React.MouseEvent | React.PointerEvent | PointerEvent) => {
+      const fraction = getFractionFromPointerEvent(e);
+      const totalDuration = duration || getMediaElement()?.duration || 0;
+      return fraction * totalDuration;
+    },
+    [getFractionFromPointerEvent, duration]
+  );
 
   // Smooth YouTube-like Drag & Scrub pointer handler
   const handlePointerDownTimeline = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
+    e.stopPropagation();
     if (!progressBarRef.current) return;
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // safe fallback if capture unsupported
+    }
 
     const el = getMediaElement();
     const isCurrentlyPlaying = el ? !el.paused : isPlaying;
@@ -2573,26 +2616,61 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       setIsPlaying(false);
     }
 
+    isScrubbingRef.current = true;
     setIsScrubbing(true);
 
     const targetTime = calculateTimeFromEvent(e);
-    if (el) {
-      el.currentTime = targetTime;
-    }
     setCurrentTime(targetTime);
+    pendingScrubTimeRef.current = targetTime;
+
+    if (el) {
+      try {
+        if ("fastSeek" in el && typeof (el as any).fastSeek === "function") {
+          (el as any).fastSeek(targetTime);
+        } else {
+          el.currentTime = targetTime;
+        }
+      } catch {
+        el.currentTime = targetTime;
+      }
+    }
 
     const onPointerMove = (ev: PointerEvent) => {
       ev.preventDefault();
+      ev.stopPropagation();
       const newTime = calculateTimeFromEvent(ev);
-      if (el) {
-        el.currentTime = newTime;
-      }
       setCurrentTime(newTime);
+      pendingScrubTimeRef.current = newTime;
+
+      // Throttle seeking the actual media element via requestAnimationFrame
+      // to keep UI thumb movement at full 60/120fps without video decoder hitching
+      if (!scrubRafRef.current) {
+        scrubRafRef.current = requestAnimationFrame(() => {
+          scrubRafRef.current = null;
+          if (el && pendingScrubTimeRef.current !== null) {
+            try {
+              if ("fastSeek" in el && typeof (el as any).fastSeek === "function") {
+                (el as any).fastSeek(pendingScrubTimeRef.current);
+              } else {
+                el.currentTime = pendingScrubTimeRef.current;
+              }
+            } catch {
+              el.currentTime = pendingScrubTimeRef.current;
+            }
+          }
+        });
+      }
     };
 
     const onPointerUp = (ev: PointerEvent) => {
       ev.preventDefault();
-      setIsScrubbing(false);
+      ev.stopPropagation();
+
+      if (scrubRafRef.current) {
+        cancelAnimationFrame(scrubRafRef.current);
+        scrubRafRef.current = null;
+      }
+
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("pointercancel", onPointerUp);
@@ -2602,6 +2680,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         el.currentTime = finalTime;
       }
       setCurrentTime(finalTime);
+
+      isScrubbingRef.current = false;
+      setIsScrubbing(false);
 
       // Only resume playing when the user releases the mouse if it was previously playing
       if (wasPlayingBeforeScrubRef.current && el) {
@@ -2619,9 +2700,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   const handleTimelinePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!progressBarRef.current) return;
-    const rect = progressBarRef.current.getBoundingClientRect();
-    if (rect.width <= 0) return;
-    const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const fraction = getFractionFromPointerEvent(e);
     const totalDuration = duration || getMediaElement()?.duration || 0;
     const calculatedTime = fraction * totalDuration;
 
@@ -2650,7 +2729,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   };
 
   const handleTimelinePointerLeave = () => {
-    if (!isScrubbing) {
+    if (!isScrubbingRef.current) {
       setHoverPosition(null);
       setHoverTime(null);
       setHoverCueText(null);
@@ -3092,6 +3171,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
     const onTimeUpdate = () => {
+      if (isScrubbingRef.current) return;
       const cur = el.currentTime;
       setCurrentTime(cur);
       // Auto-stop when single-sentence playback limit is reached
@@ -4914,13 +4994,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     e.stopPropagation();
                     if (isFullscreen && showFullscreenControls) resetFullscreenControlsTimer();
                   }}
-                  onPointerDown={() => {
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
                     if (isFullscreen && showFullscreenControls) resetFullscreenControlsTimer();
                   }}
                   onMouseMove={() => {
                     if (isFullscreen && showFullscreenControls) resetFullscreenControlsTimer();
                   }}
-                  onTouchStart={() => {
+                  onTouchStart={(e) => {
+                    e.stopPropagation();
                     if (isFullscreen && showFullscreenControls) resetFullscreenControlsTimer();
                   }}
                   className={
