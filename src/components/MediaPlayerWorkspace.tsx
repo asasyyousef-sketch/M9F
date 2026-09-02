@@ -355,6 +355,8 @@ interface ActiveGestureOverlay {
   type:
     | "play"
     | "pause"
+    | "fullscreen"
+    | "minimize"
     | "seek_backward_5s"
     | "seek_forward_5s"
     | "prev_sentence"
@@ -747,6 +749,11 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   // Helper setters that also persist to both localStorage and Server
   const handleSelectPrimaryTrack = (trackId: string | null) => {
     setActiveTrackId(trackId);
+    let nextSecondary = secondaryTrackId;
+    if (trackId && trackId === secondaryTrackId) {
+      nextSecondary = null;
+      setSecondaryTrackId(null);
+    }
     if (trackId) {
       setShowSubtitlesOverlay(true);
       triggerSubtitlePreview(3200);
@@ -755,15 +762,20 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       } catch (e) {}
     }
     if (currentFile) {
-      saveSubtitlePreferences(currentFile.id, trackId, secondaryTrackId);
-      saveSubtitlePreferencesToServer(currentFile.id, trackId, secondaryTrackId, showDualSubtitles);
-      setCurrentFile((prev) => prev ? { ...prev, primaryTrackId: trackId || undefined } : null);
-      setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, primaryTrackId: trackId || undefined } : f));
+      saveSubtitlePreferences(currentFile.id, trackId, nextSecondary);
+      saveSubtitlePreferencesToServer(currentFile.id, trackId, nextSecondary, showDualSubtitles);
+      setCurrentFile((prev) => prev ? { ...prev, primaryTrackId: trackId || undefined, secondaryTrackId: nextSecondary || undefined } : null);
+      setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, primaryTrackId: trackId || undefined, secondaryTrackId: nextSecondary || undefined } : f));
     }
   };
 
   const handleSelectSecondaryTrack = (trackId: string | null) => {
     setSecondaryTrackId(trackId);
+    let nextPrimary = activeTrackId;
+    if (trackId && trackId === activeTrackId) {
+      nextPrimary = null;
+      setActiveTrackId(null);
+    }
     const shouldShowDual = Boolean(trackId);
     if (trackId) {
       setShowDualSubtitles(true);
@@ -775,10 +787,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       }
     }
     if (currentFile) {
-      saveSubtitlePreferences(currentFile.id, activeTrackId, trackId);
-      saveSubtitlePreferencesToServer(currentFile.id, activeTrackId, trackId, shouldShowDual);
-      setCurrentFile((prev) => prev ? { ...prev, secondaryTrackId: trackId || undefined, showDualSubtitles: shouldShowDual } : null);
-      setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, secondaryTrackId: trackId || undefined, showDualSubtitles: shouldShowDual } : f));
+      saveSubtitlePreferences(currentFile.id, nextPrimary, trackId);
+      saveSubtitlePreferencesToServer(currentFile.id, nextPrimary, trackId, shouldShowDual);
+      setCurrentFile((prev) => prev ? { ...prev, primaryTrackId: nextPrimary || undefined, secondaryTrackId: trackId || undefined, showDualSubtitles: shouldShowDual } : null);
+      setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, primaryTrackId: nextPrimary || undefined, secondaryTrackId: trackId || undefined, showDualSubtitles: shouldShowDual } : f));
     }
   };
 
@@ -3312,24 +3324,35 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       const now = Date.now();
       const currentTracker = tapTrackerRef.current;
 
-      // Check if double tap within 280ms on the same zone
-      if (currentTracker && now - currentTracker.lastTime < 280 && currentTracker.side === side) {
+      // Check if double tap/click within 300ms on the same zone
+      if (currentTracker && now - currentTracker.lastTime < 300 && currentTracker.side === side) {
         if (currentTracker.timer) {
           window.clearTimeout(currentTracker.timer);
         }
         tapTrackerRef.current = null;
 
-        // DOUBLE TAP ACTION
+        // DOUBLE TAP / CLICK ACTION
         if (side === "center") {
-          // Center 60% Double Tap: Play / Pause
-          const el = getMediaElement();
-          const willPlay = el ? el.paused : !isPlaying;
-          togglePlay();
-          triggerVisualFeedback({
-            type: willPlay ? "play" : "pause",
-            side: "center",
-            label: willPlay ? "تشغيل" : "إيقاف مؤقت"
-          });
+          if (isImmersiveMode && !isFullscreen) {
+            // In Cinema mode (and not fullscreen): Double click in center opens Fullscreen!
+            handleToggleFullscreen();
+            triggerVisualFeedback({
+              type: "fullscreen",
+              side: "center",
+              label: "تكبير شامل للشاشة",
+              subLabel: "الوضع السينمائي: تكبير ملء الشاشة"
+            });
+          } else {
+            // In Fullscreen Mode & Standard Mode: Double click in center = Play / Pause
+            const el = getMediaElement();
+            const willPlay = el ? el.paused : !isPlaying;
+            togglePlay();
+            triggerVisualFeedback({
+              type: willPlay ? "play" : "pause",
+              side: "center",
+              label: willPlay ? "تشغيل" : "إيقاف مؤقت"
+            });
+          }
         } else if (side === "right") {
           // Right 20% Double Tap: Skip Forward 5s (+5s)
           skipSeconds(5);
@@ -3387,6 +3410,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     },
     [
       isFullscreen,
+      isImmersiveMode,
+      handleToggleFullscreen,
       getMediaElement,
       isPlaying,
       togglePlay,
@@ -4012,14 +4037,18 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     </div>
                   )}
                   {/* YouTube-Style Dynamic Gesture Visual Overlays */}
-                  {/* 1. Center Tap: Play / Pause */}
-                  {activeGesture && activeGesture.side === "center" && (activeGesture.type === "play" || activeGesture.type === "pause") && (
+                  {/* 1. Center Tap: Play / Pause or Fullscreen / Minimize */}
+                  {activeGesture && activeGesture.side === "center" && (activeGesture.type === "play" || activeGesture.type === "pause" || activeGesture.type === "fullscreen" || activeGesture.type === "minimize") && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-35 animate-yt-pop">
                       <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-black/75 backdrop-blur-md border border-white/20 flex flex-col items-center justify-center text-white shadow-2xl gap-1">
                         {activeGesture.type === "play" ? (
                           <Play className="w-10 h-10 sm:w-12 sm:h-12 fill-white text-white translate-x-1" />
-                        ) : (
+                        ) : activeGesture.type === "pause" ? (
                           <Pause className="w-10 h-10 sm:w-12 sm:h-12 fill-white text-white" />
+                        ) : activeGesture.type === "fullscreen" ? (
+                          <Expand className="w-10 h-10 sm:w-12 sm:h-12 text-white" />
+                        ) : (
+                          <Shrink className="w-10 h-10 sm:w-12 sm:h-12 text-white" />
                         )}
                         <span className="text-[10px] sm:text-xs font-bold text-slate-200">
                           {activeGesture.label}

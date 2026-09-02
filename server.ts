@@ -7,10 +7,45 @@ import { spawn } from "child_process";
 import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from "url";
 import multer from "multer";
+import { pipeline } from "stream";
 import { initialFolders, initialCards } from "./src/data/seed";
 import { getSupabase, SUPABASE_SQL_SCHEMA } from "./src/supabaseClient";
 import { formatSubtitleTrackProtocol } from "./src/utils/subtitleNaming";
 import { GoogleGenAI, Type } from "@google/genai";
+
+// ─── Crash & Unhandled Rejection Immunity ───────────────────────────────────────
+// Prevents server crashes from remote sockets (e.g. Gradio / Python / Whisper server disconnecting mid-stream)
+process.on("uncaughtException", (err: any) => {
+  const code = err?.code || "";
+  const msg = err?.message || String(err);
+  if (
+    code === "UND_ERR_SOCKET" ||
+    code === "ECONNRESET" ||
+    code === "EPIPE" ||
+    code === "ETIMEDOUT" ||
+    msg.includes("terminated") ||
+    msg.includes("other side closed") ||
+    msg.includes("aborted")
+  ) {
+    console.warn("[Network Stream Warning (Non-Fatal)] Remote socket closed or aborted:", msg);
+    return;
+  }
+  console.error("[Uncaught Exception]", err);
+});
+
+process.on("unhandledRejection", (reason: any) => {
+  const msg = reason?.message || String(reason);
+  if (
+    msg.includes("terminated") ||
+    msg.includes("other side closed") ||
+    msg.includes("UND_ERR_SOCKET") ||
+    msg.includes("aborted")
+  ) {
+    console.warn("[Unhandled Rejection Warning (Non-Fatal)] Connection dropped by remote server:", msg);
+    return;
+  }
+  console.error("[Unhandled Rejection]", reason);
+});
 
 function extractRateLimitHeaders(headers: Headers): Record<string, string> {
   const result: Record<string, string> = {};
@@ -853,11 +888,18 @@ async function startServer() {
                 res.setHeader(key, value);
               }
             });
-            if (remoteRes.body) {
-              const { Readable } = await import("stream");
-              Readable.fromWeb(remoteRes.body as any).pipe(res);
-              return;
-            }
+        if (remoteRes.body) {
+          const { Readable } = await import("stream");
+          const streamReadable = Readable.fromWeb(remoteRes.body as any);
+          streamReadable.on("error", (sErr: any) => {
+            console.warn("[Media Stream Proxy Notice] Upstream socket ended or closed:", sErr?.message);
+          });
+          res.on("close", () => {
+            streamReadable.destroy();
+          });
+          streamReadable.pipe(res);
+          return;
+        }
           } catch (proxyErr) {
             console.warn("Proxy stream fallback to redirect:", proxyErr);
           }
@@ -977,7 +1019,14 @@ async function startServer() {
 
       if (remoteRes.body) {
         const { Readable } = await import("stream");
-        Readable.fromWeb(remoteRes.body as any).pipe(res);
+        const streamReadable = Readable.fromWeb(remoteRes.body as any);
+        streamReadable.on("error", (sErr: any) => {
+          console.warn("[Media Stream Proxy Notice] Upstream target closed or aborted:", sErr?.message);
+        });
+        res.on("close", () => {
+          streamReadable.destroy();
+        });
+        streamReadable.pipe(res);
       } else {
         res.end();
       }

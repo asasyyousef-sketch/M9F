@@ -20,7 +20,8 @@ import {
   ArrowRightLeft,
   ArrowRight,
   MoreVertical,
-  Star
+  Star,
+  MinusCircle
 } from "lucide-react";
 import { MediaFile } from "../types";
 
@@ -501,24 +502,50 @@ export const SubtitleOptionsPanel: React.FC<SubtitleOptionsPanelProps> = ({
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* 1. تحديد كـ أساسي */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelectPrimaryTrack(targetMenuTrack.id);
-              setTrackMenuAnchor(null);
-            }}
-            className={`w-full px-2.5 py-2 hover:bg-slate-800 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0 ${
-              targetMenuTrack.id === activeTrackId ? "text-indigo-400 bg-indigo-500/10" : "text-slate-200 hover:text-white"
-            }`}
-          >
-            <Check className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-            <span>تحديد كـ أساسي</span>
-          </button>
+          {/* 1. خيار الأساسي: تحديد كـ أساسي أو إزالة من الأساسي */}
+          {targetMenuTrack.id === activeTrackId ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectPrimaryTrack(null);
+                setTrackMenuAnchor(null);
+              }}
+              className="w-full px-2.5 py-2 hover:bg-slate-800 text-amber-300 hover:text-amber-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0"
+            >
+              <MinusCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>إزالة من الأساسي</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectPrimaryTrack(targetMenuTrack.id);
+                setTrackMenuAnchor(null);
+              }}
+              className="w-full px-2.5 py-2 hover:bg-slate-800 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0 text-slate-200 hover:text-white"
+            >
+              <Check className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+              <span>تحديد كـ أساسي</span>
+            </button>
+          )}
 
-          {/* 2. تحديد كـ ثانوي (ان كان هناك اساسي بالاصل يظهر هذا الخيار) */}
-          {activeTrackId !== null && (
+          {/* 2. خيار الثانوي: تحديد كـ ثانوي أو إزالة من الثانوي */}
+          {targetMenuTrack.id === secondaryTrackId && showDualSubtitles ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectSecondaryTrack(null);
+                setTrackMenuAnchor(null);
+              }}
+              className="w-full px-2.5 py-2 hover:bg-slate-800 text-amber-300 hover:text-amber-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0"
+            >
+              <MinusCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>إزالة من الثانوي</span>
+            </button>
+          ) : (
             <button
               type="button"
               onClick={(e) => {
@@ -529,11 +556,7 @@ export const SubtitleOptionsPanel: React.FC<SubtitleOptionsPanelProps> = ({
                 }
                 setTrackMenuAnchor(null);
               }}
-              className={`w-full px-2.5 py-2 hover:bg-slate-800 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0 ${
-                targetMenuTrack.id === secondaryTrackId && showDualSubtitles
-                  ? "text-emerald-400 bg-emerald-500/10"
-                  : "text-slate-200 hover:text-white"
-              }`}
+              className="w-full px-2.5 py-2 hover:bg-slate-800 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0 text-slate-200 hover:text-white"
             >
               <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
               <span>تحديد كـ ثانوي</span>
@@ -552,7 +575,7 @@ export const SubtitleOptionsPanel: React.FC<SubtitleOptionsPanelProps> = ({
               className="w-full px-2.5 py-2 hover:bg-slate-800 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0"
             >
               <ArrowRightLeft className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-              <span>تبديل الأساسي والثانوي</span>
+              <span>تبديل</span>
             </button>
           )}
 
