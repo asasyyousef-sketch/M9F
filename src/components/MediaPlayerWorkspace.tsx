@@ -2626,11 +2626,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     if (!target) return;
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(console.error);
-      setShowTranscriptPanel(true);
-      setSidePanelView("transcript");
-      setTimeout(() => {
-        scrollToActiveCue(true);
-      }, 80);
     } else {
       if (target.requestFullscreen) {
         target.requestFullscreen().catch((err) => {
@@ -2671,9 +2666,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       if (!isFs) {
         setShowTranscriptPanel(true);
         setSidePanelView("transcript");
-        setTimeout(() => {
+        requestAnimationFrame(() => {
           scrollToActiveCue(true);
-        }, 80);
+        });
       }
     };
     document.addEventListener("fullscreenchange", handleFsChange);
@@ -3390,173 +3385,38 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   }, [volume, handleVolumeChange, triggerVisualFeedback, triggerSamsungVolumeBar]);
 
   const handleStageTap = useCallback(
-    (xRatio: number, yRatio: number = 0.5) => {
-      const now = Date.now();
-      const currentTracker = tapTrackerRef.current;
-
-      // -------------------------------------------------------------
-      // 1. FULLSCREEN MODE:
-      // Top-Left Box (20% width x 25% height): Double-tap = Exit Fullscreen
-      // Everywhere else: Double-tap = Instant Play / Pause
-      // Single-tap: Toggle timeline scrubber & controls bar
-      // -------------------------------------------------------------
-      if (isFullscreen) {
-        const isTopLeftExitZone = xRatio <= 0.20 && yRatio <= 0.25;
-
-        if (isTopLeftExitZone) {
-          // Double-tap in top-left 20% x 25% zone -> Exit Fullscreen!
-          if (currentTracker && now - currentTracker.lastTime < 320 && currentTracker.side === "top-left-exit") {
-            if (currentTracker.timer) {
-              window.clearTimeout(currentTracker.timer);
-            }
-            tapTrackerRef.current = null;
-
-            if (document.fullscreenElement) {
-              document.exitFullscreen().catch(console.error);
-            }
-            setShowTranscriptPanel(true);
-            setSidePanelView("transcript");
-            triggerVisualFeedback({
-              type: "minimize",
-              side: "center",
-              label: "تصغير الشاشة",
-              subLabel: "أعلى اليسار: الخروج من ملء الشاشة"
-            }, 450);
-            triggerHud("تصغير الشاشة 🗗", "أعلى اليسار");
-            setTimeout(() => {
-              scrollToActiveCue(true);
-            }, 80);
-            return;
-          }
-
-          // First tap in top-left zone:
-          if (currentTracker?.timer) {
-            window.clearTimeout(currentTracker.timer);
-          }
-
-          const timer = window.setTimeout(() => {
-            tapTrackerRef.current = null;
-            setShowFullscreenControls((prev) => !prev);
-          }, 220);
-
-          tapTrackerRef.current = {
-            count: 1,
-            side: "top-left-exit",
-            timer,
-            lastTime: now
-          };
-          return;
-        }
-
-        // Standard Double Click outside top-left box: Instant Play / Pause
-        if (currentTracker && now - currentTracker.lastTime < 300 && currentTracker.side !== "top-left-exit") {
-          if (currentTracker.timer) {
-            window.clearTimeout(currentTracker.timer);
-          }
-          tapTrackerRef.current = null;
-
-          const el = getMediaElement();
-          const willPlay = el ? el.paused : !isPlaying;
-          togglePlay();
-          triggerVisualFeedback({
-            type: willPlay ? "play" : "pause",
-            side: "center",
-            label: willPlay ? "تشغيل" : "إيقاف مؤقت"
-          });
-          triggerHud(willPlay ? "تشغيل الفيديو" : "إيقاف مؤقت", willPlay ? "▶️" : "⏸️");
-          return;
-        }
-
-        // First tap anywhere else in fullscreen:
-        if (currentTracker?.timer) {
-          window.clearTimeout(currentTracker.timer);
-        }
-
-        const timer = window.setTimeout(() => {
-          tapTrackerRef.current = null;
-          // In Fullscreen: Single tap ONLY toggles the scrubber timeline & controls bar!
-          setShowFullscreenControls((prev) => !prev);
-        }, 220);
-
-        tapTrackerRef.current = {
-          count: 1,
-          side: "center",
-          timer,
-          lastTime: now
-        };
-        return;
-      }
-
-      // -------------------------------------------------------------
-      // 2. WINDOWED / THEATER MODE:
-      // -------------------------------------------------------------
-      // Check if double tap/click within 300ms anywhere on video
-      if (currentTracker && now - currentTracker.lastTime < 300) {
-        if (currentTracker.timer) {
-          window.clearTimeout(currentTracker.timer);
-        }
+    (_xRatio: number, _yRatio: number = 0.5) => {
+      // Clear any previous tracker or timer
+      if (tapTrackerRef.current?.timer) {
+        window.clearTimeout(tapTrackerRef.current.timer);
         tapTrackerRef.current = null;
-
-        // DOUBLE TAP / CLICK ACTION
-        if (isImmersiveMode && !isFullscreen) {
-          // In Cinema mode (and not fullscreen): Double click opens Fullscreen!
-          handleToggleFullscreen();
-          triggerVisualFeedback({
-            type: "fullscreen",
-            side: "center",
-            label: "تكبير شامل للشاشة",
-            subLabel: "الوضع السينمائي: تكبير ملء الشاشة"
-          });
-        } else {
-          // In Standard Mode: Double click = Play / Pause
-          const el = getMediaElement();
-          const willPlay = el ? el.paused : !isPlaying;
-          togglePlay();
-          triggerVisualFeedback({
-            type: willPlay ? "play" : "pause",
-            side: "center",
-            label: willPlay ? "تشغيل" : "إيقاف مؤقت"
-          });
-        }
-        return;
       }
 
-      // FIRST TAP in Windowed Mode
-      if (currentTracker?.timer) {
-        window.clearTimeout(currentTracker.timer);
-      }
-
-      const timer = window.setTimeout(() => {
-        // SINGLE TAP ACTION: Play / Pause
-        tapTrackerRef.current = null;
-        const el = getMediaElement();
-        const willPlay = el ? el.paused : !isPlaying;
-        togglePlay();
-        triggerVisualFeedback({
-          type: willPlay ? "play" : "pause",
-          side: "center",
-          label: willPlay ? "تشغيل" : "إيقاف مؤقت"
-        });
-      }, 230);
-
-      tapTrackerRef.current = {
-        count: 1,
+      // INSTANT TAP ANYWHERE: PLAY / PAUSE (0ms latency)
+      const el = getMediaElement();
+      const willPlay = el ? el.paused : !isPlaying;
+      togglePlay();
+      triggerVisualFeedback({
+        type: willPlay ? "play" : "pause",
         side: "center",
-        timer,
-        lastTime: now
-      };
+        label: willPlay ? "تشغيل" : "إيقاف مؤقت"
+      });
+      triggerHud(willPlay ? "تشغيل الفيديو" : "إيقاف مؤقت", willPlay ? "▶️" : "⏸️");
+
+      // In fullscreen, wake up controls bar so the user can see current progress
+      if (isFullscreen) {
+        setShowFullscreenControls(true);
+        resetFullscreenControlsTimer();
+      }
     },
     [
       isFullscreen,
-      isImmersiveMode,
-      handleToggleFullscreen,
       getMediaElement,
       isPlaying,
       togglePlay,
-      skipSeconds,
       triggerVisualFeedback,
       triggerHud,
-      scrollToActiveCue
+      resetFullscreenControlsTimer
     ]
   );
 
@@ -3999,7 +3859,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
               isFullscreen
                 ? "fixed inset-0 z-50 bg-black flex flex-col h-screen w-screen p-0 m-0 overflow-hidden text-white select-none"
                 : isImmersiveMode
-                ? "fixed inset-0 z-50 bg-slate-950 flex flex-col h-screen w-screen p-2 sm:p-3 overflow-hidden text-white animate-fadeIn"
+                ? "fixed inset-0 z-50 bg-slate-950 flex flex-col h-screen w-screen p-2 sm:p-3 overflow-hidden text-white"
                 : "bg-slate-900 rounded-xl p-2 sm:p-2.5 text-white shadow-2xl border border-slate-800 overflow-hidden"
             }
           >
@@ -5005,16 +4865,17 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
               {/* ======================================================== */}
               {/* SIDE PANEL: TRANSCRIPT (SENTENCES) & SUBTITLE STYLE STUDIO */}
-              {/* Only shown when not in fullscreen mode as requested */}
+              {/* Kept mounted in DOM and toggled with hidden/flex for instant 0ms fullscreen switching */}
               {/* ======================================================== */}
-              {!isFullscreen && showTranscriptPanel && (
-                <div
-                  className={
-                    isImmersiveMode
-                      ? "w-full h-[40vh] sm:h-[44vh] md:h-full landscape:h-full md:w-80 lg:w-96 landscape:w-80 lg:landscape:w-96 flex-shrink-0 bg-slate-800/90 border border-slate-700/90 rounded-lg flex flex-col overflow-hidden shadow-lg animate-fadeIn"
-                      : "lg:col-span-5 xl:col-span-4 bg-slate-800/90 border border-slate-700/90 rounded-lg flex flex-col h-[420px] sm:h-[480px] lg:h-full lg:min-h-[460px] overflow-hidden shadow-lg animate-fadeIn"
-                  }
-                >
+              <div
+                className={`${
+                  isFullscreen || !showTranscriptPanel ? "hidden" : "flex"
+                } ${
+                  isImmersiveMode
+                    ? "w-full h-[40vh] sm:h-[44vh] md:h-full landscape:h-full md:w-80 lg:w-96 landscape:w-80 lg:landscape:w-96 flex-shrink-0 bg-slate-800/90 border border-slate-700/90 rounded-lg flex-col overflow-hidden shadow-lg"
+                    : "lg:col-span-5 xl:col-span-4 bg-slate-800/90 border border-slate-700/90 rounded-lg flex-col h-[420px] sm:h-[480px] lg:h-full lg:min-h-[460px] overflow-hidden shadow-lg"
+                }`}
+              >
                   {/* Panel Header */}
                   <div className="px-3 py-2 border-b border-slate-700/80 bg-slate-800 flex items-center justify-between gap-2 shrink-0">
                     {/* Media Icon + Name */}
@@ -5337,8 +5198,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     </>
                   )}
                 </div>
-              )}
-            </div>
+              </div>
 
             {/* Smart Fixed Floating Options Menu (Borderless, Boundary-Aware, Never Clipped) */}
             {cueOptionsMenuId && cueMenuAnchor && (
