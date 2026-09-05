@@ -1067,10 +1067,18 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
               >
                 {/* Target German Sentence Card */}
                 <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl relative">
-                  <span className="text-[10px] font-bold text-slate-400 block mb-1">
-                    الجملة الألمانية المستهدفة:
-                  </span>
-                  <div className="text-xl sm:text-2xl font-black text-purple-700 dark:text-purple-300 select-text">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                      الجملة الألمانية المستهدفة:
+                    </span>
+                    <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-950 text-purple-600 dark:text-purple-300">
+                      DE (LTR)
+                    </span>
+                  </div>
+                  <div
+                    dir="ltr"
+                    className="text-xl sm:text-2xl font-black text-purple-700 dark:text-purple-300 select-text text-left font-sans tracking-wide leading-relaxed py-1"
+                  >
                     {currentChallenge.target_german}
                   </div>
 
@@ -1107,9 +1115,12 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
                 {userSpokenText && (
                   <div className="p-3 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs">
                     <span className="text-slate-500 dark:text-slate-400 block mb-1 font-semibold">
-                      ما تم التقاطه من صوتك:
+                      ما تم التقاطه من صوتك (بالألمانية):
                     </span>
-                    <p className="font-bold text-slate-800 dark:text-slate-100 text-sm">
+                    <p
+                      dir="ltr"
+                      className="font-bold text-slate-800 dark:text-slate-100 text-sm text-left font-sans py-0.5"
+                    >
                       "{userSpokenText}"
                     </p>
                     {matchScore !== null && (
