@@ -275,53 +275,59 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
         }
       }
 
-      const resObj: GradioTranscribeResult = {
-        plainText,
-        srtText,
-        vttText: vttContent,
-        audioFileUrl: completedJob.videoUrl
-      };
-      setResult(resObj);
-      setCurrentStep("completed");
-      setLiveStage("done");
-      setLiveStageLabel("اكتمل");
-      setProgressPercent(100);
-
       // Parse Subtitle cues
       const cues = parseSubtitleContent(srtText);
       setParsedCuesCount(cues.length);
 
-      // 3. Save as MediaFile to Express backend library
-      try {
-        const saveRes = await fetch("/api/media/from-youtube", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: completedJob.title || youtubeInfo?.title || "فيديو يوتيوب مفرغ",
-            videoId: completedJob.videoId || youtubeInfo?.videoId,
-            videoUrl: completedJob.videoUrl || liveVideoUrl,
-            srtText,
-            cues,
-            duration: completedJob.duration || youtubeInfo?.duration,
-            thumbnailUrl: completedJob.thumbnailUrl || youtubeInfo?.thumbnailUrl,
-            formatId: selectedFormatId,
-            author: completedJob.author || youtubeInfo?.author,
-            description: youtubeInfo?.description
-          })
-        });
+      // 3. Download & Save video file locally onto our server disk
+      setStatusMessage("جاري تنزيل ملف الفيديو وتخزينه محلياً على سيرفر الموقع ليعمل بدون الحاجة لأي اتصال خارجي...");
+      setLiveStageLabel("تنزيل الفيديو محلياً...");
+      setProgressPercent(95);
 
-        if (saveRes.ok) {
-          const savedData = await saveRes.json();
-          if (savedData.file) {
-            setDownloadedMediaFile(savedData.file);
-            // Notify parent workspace to auto-load newly created media file
-            if (onVideoDownloaded) {
-              await onVideoDownloaded(savedData.file, srtText, cues);
-            }
-          }
-        }
-      } catch (saveErr) {
-        console.warn("Could not auto-save media to backend:", saveErr);
+      const saveRes = await fetch("/api/media/from-youtube", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: completedJob.title || youtubeInfo?.title || "فيديو يوتيوب مفرغ",
+          videoId: completedJob.videoId || youtubeInfo?.videoId,
+          videoUrl: completedJob.videoUrl || liveVideoUrl,
+          srtText,
+          cues,
+          duration: completedJob.duration || youtubeInfo?.duration,
+          thumbnailUrl: completedJob.thumbnailUrl || youtubeInfo?.thumbnailUrl,
+          formatId: selectedFormatId,
+          author: completedJob.author || youtubeInfo?.author,
+          description: youtubeInfo?.description
+        })
+      });
+
+      if (!saveRes.ok) {
+        const errJson = await saveRes.json().catch(() => ({}));
+        throw new Error(errJson.error || "فشل تنزيل وحفظ ملف الفيديو على السيرفر المحلي");
+      }
+
+      const savedData = await saveRes.json();
+      const localFile = savedData.file;
+
+      const resObj: GradioTranscribeResult = {
+        plainText,
+        srtText,
+        vttText: vttContent,
+        audioFileUrl: localFile?.url || completedJob.videoUrl
+      };
+      setResult(resObj);
+      if (localFile) {
+        setDownloadedMediaFile(localFile);
+      }
+      setCurrentStep("completed");
+      setLiveStage("done");
+      setLiveStageLabel("اكتمل وحُفظ محلياً");
+      setProgressPercent(100);
+      setStatusMessage("تم تنزيل وحفظ ملف الفيديو محلياً والتفريغ بنجاح في مكتبة الوسائط!");
+
+      // Notify parent workspace to auto-load newly created media file
+      if (localFile && onVideoDownloaded) {
+        await onVideoDownloaded(localFile, srtText, cues);
       }
     } catch (err: any) {
       if (err.name === "AbortError") {

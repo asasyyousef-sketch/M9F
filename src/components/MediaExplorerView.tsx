@@ -67,7 +67,7 @@ export interface MediaExplorerViewProps {
   onMoveFile: (fileId: string, targetFolderId: string | null) => void;
   onBulkMove: (fileIds: string[], targetFolderId: string | null) => void;
   onBulkDelete: (fileIds: string[], folderIds: string[]) => void;
-  onDeleteFile: (id: string, e?: React.MouseEvent) => void;
+  onDeleteFile: (id: string, e?: React.MouseEvent | boolean, skipConfirm?: boolean) => void;
   onStartRename: (file: MediaFile, e?: React.MouseEvent) => void;
   editingId: string | null;
   editTitleText: string;
@@ -91,11 +91,12 @@ const mediaMetadataCache: Record<string, { duration: number; width?: number; hei
 export function resolveMediaFileUrl(file: MediaFile | null | undefined): string {
   if (!file) return "";
   if (file.url && file.url.startsWith("blob:")) return file.url;
-  if (file.url && (file.url.startsWith("http://") || file.url.startsWith("https://"))) {
-    return `/api/media/stream-proxy?url=${encodeURIComponent(file.url)}`;
-  }
+  // Local server storage has absolute priority - external requests eliminated completely
   if (file.filename) {
     return `/api/media/stream/${encodeURIComponent(file.filename)}`;
+  }
+  if (file.url && file.url.startsWith("/api/media/stream/")) {
+    return file.url;
   }
   return file.url || "";
 }
@@ -711,7 +712,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
 
   const handleConfirmDelete = () => {
     if (deleteConfirmModal.type === "single_file" && deleteConfirmModal.fileId) {
-      onDeleteFile(deleteConfirmModal.fileId);
+      onDeleteFile(deleteConfirmModal.fileId, undefined, true);
     } else if (deleteConfirmModal.type === "single_folder" && deleteConfirmModal.folderId && deleteConfirmModal.folderName) {
       onDeleteFolder(deleteConfirmModal.folderId, deleteConfirmModal.folderName);
     } else if (deleteConfirmModal.type === "bulk") {

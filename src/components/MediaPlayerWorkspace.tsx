@@ -269,13 +269,12 @@ export function resolveMediaStreamUrl(file: MediaFile | null | undefined): strin
   if (file.url && file.url.startsWith("blob:")) {
     return file.url;
   }
-  if (file.url && (file.url.startsWith("http://") || file.url.startsWith("https://"))) {
-    // If it's a remote URL or local Gradio URL (e.g., http://192.168.0.159:7861/videos/...),
-    // proxy it through /api/media/stream-proxy to enable full HTTP 206 Partial Content (Range seeks) & CORS
-    return `/api/media/stream-proxy?url=${encodeURIComponent(file.url)}`;
-  }
+  // Local server storage has absolute priority - external requests eliminated completely
   if (file.filename) {
     return `/api/media/stream/${encodeURIComponent(file.filename)}`;
+  }
+  if (file.url && file.url.startsWith("/api/media/stream/")) {
+    return file.url;
   }
   return file.url || "";
 }
@@ -1458,11 +1457,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         }
       }
 
-      // Delete files from server & local state
+      // Delete files directly from server folder & local state
       if (fileIds.length > 0) {
-        for (const fid of fileIds) {
-          await fetch(`/api/media/files/${fid}`, { method: "DELETE" }).catch(() => {});
-        }
+        await fetch("/api/media/files/batch-delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileIds })
+        }).catch((err) => {
+          console.error("Batch delete files error:", err);
+        });
         setFiles((prev) => prev.filter((f) => !fileIds.includes(f.id)));
         if (currentFile && fileIds.includes(currentFile.id)) {
           setCurrentFile(null);
@@ -2396,23 +2399,24 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   };
 
-  // Delete media file
-  const handleDeleteFile = async (id: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (!window.confirm("هل أنت متأكد من حذف هذا الملف نهائياً من السيرفر؟")) {
+  // Delete media file directly from server folder and memory
+  const handleDeleteFile = async (id: string, e?: React.MouseEvent | boolean, skipConfirm = false) => {
+    if (e && typeof e !== "boolean") e.stopPropagation();
+    const shouldSkipConfirm = skipConfirm || e === true;
+    if (!shouldSkipConfirm && !window.confirm("هل أنت متأكد من حذف هذا الملف نهائياً من السيرفر والقرص؟")) {
       return;
     }
 
     try {
       const res = await fetch(`/api/media/files/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("فشل في حذف الملف");
+      if (!res.ok) throw new Error("فشل في حذف الملف من السيرفر");
 
       setFiles((prev) => prev.filter((f) => f.id !== id));
       if (currentFile?.id === id) {
         setCurrentFile(null);
         setIsPlaying(false);
       }
-      setSuccessMsg("تم حذف الملف بنجاح");
+      setSuccessMsg("تم حذف الملف نهائياً من مجلد السيرفر بنجاح 🗑️");
     } catch (err: any) {
       setErrorMsg(err.message || "حدث خطأ أثناء الحذف");
     }

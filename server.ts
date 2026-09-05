@@ -380,21 +380,27 @@ async function startServer() {
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed)) {
-            // Keep media item if it exists on local disk OR if it has a valid external/YouTube/network URL
-            return parsed.filter((item: ServerMediaFile) => {
-              if (
-                item.url &&
-                (item.url.startsWith("http://") ||
-                  item.url.startsWith("https://") ||
-                  item.url.startsWith("blob:") ||
-                  item.id?.startsWith("media-yt-") ||
-                  (item as any).isExternal)
-              ) {
-                return true;
-              }
+            let dirty = false;
+            // Every media item MUST physically exist in MEDIA_DIR on local disk
+            const valid = parsed.filter((item: ServerMediaFile) => {
+              if (!item || !item.filename) return false;
               const filePath = path.join(MEDIA_DIR, item.filename);
-              return fs.existsSync(filePath);
+              const exists = fs.existsSync(filePath);
+              if (!exists) {
+                dirty = true;
+                return false;
+              }
+              // Ensure its url points to local stream, cancelling external streaming
+              if (!item.url || item.url.startsWith("http://") || item.url.startsWith("https://")) {
+                item.url = `/api/media/stream/${encodeURIComponent(item.filename)}`;
+                dirty = true;
+              }
+              return true;
             });
+            if (dirty) {
+              saveMediaMeta(valid);
+            }
+            return valid;
           }
         }
       }
@@ -503,45 +509,149 @@ async function startServer() {
     }
   });
 
-  // 3. Delete media file
+  // 3. Delete media file (Directly unlinks physical file from server directory immediately)
   app.delete("/api/media/files/:id", (req, res) => {
     try {
       const { id } = req.params;
       const list = loadMediaMeta();
       const targetIndex = list.findIndex((m) => m.id === id || m.filename === id);
 
-      if (targetIndex === -1) {
-        return res.status(404).json({ error: "الملف غير موجود" });
+      let removedFilename = id;
+      if (targetIndex !== -1) {
+        const [removed] = list.splice(targetIndex, 1);
+        removedFilename = removed.filename;
+        saveMediaMeta(list);
       }
 
-      const [removed] = list.splice(targetIndex, 1);
-      const filePath = path.join(MEDIA_DIR, removed.filename);
+      // Directly remove physical files from MEDIA_DIR so files never pile up
+      const filesToUnlink = new Set([
+        removedFilename,
+        id,
+        path.basename(removedFilename),
+        `${removedFilename}.part`,
+        `${removedFilename}.tmp`,
+        `${id}.part`,
+        `${id}.tmp`
+      ]);
 
-      if (fs.existsSync(filePath)) {
-        try {
-          fs.unlinkSync(filePath);
-        } catch (unlinkErr) {
-          console.error("Failed to delete file from disk:", unlinkErr);
+      let unlinkedAny = false;
+      for (const fName of filesToUnlink) {
+        const filePath = path.join(MEDIA_DIR, fName);
+        if (fs.existsSync(filePath)) {
+          try {
+            fs.unlinkSync(filePath);
+            unlinkedAny = true;
+            console.log(`[Media Delete] File removed from server disk: ${filePath}`);
+          } catch (unlinkErr) {
+            console.error(`[Media Delete] Failed to delete file ${filePath} from disk:`, unlinkErr);
+          }
         }
       }
-
-      saveMediaMeta(list);
 
       // Clean up file from media_folders mapping
       try {
         const foldersData = loadMediaFoldersData();
-        if (foldersData.fileFolderMap && (foldersData.fileFolderMap[removed.id] || foldersData.fileFolderMap[id])) {
-          delete foldersData.fileFolderMap[removed.id];
-          delete foldersData.fileFolderMap[id];
-          saveMediaFoldersData(foldersData);
+        if (foldersData.fileFolderMap) {
+          let dirty = false;
+          if (foldersData.fileFolderMap[id]) {
+            delete foldersData.fileFolderMap[id];
+            dirty = true;
+          }
+          if (foldersData.fileFolderMap[removedFilename]) {
+            delete foldersData.fileFolderMap[removedFilename];
+            dirty = true;
+          }
+          if (dirty) {
+            saveMediaFoldersData(foldersData);
+          }
         }
       } catch (e) {
         console.error("Error cleaning folder map on file delete:", e);
       }
 
-      res.json({ success: true, message: "تم حذف الملف بنجاح", id });
+      res.json({ success: true, message: "تم حذف الملف نهائياً من السيرفر والمجلد بنجاح", id, unlinked: unlinkedAny });
     } catch (e: any) {
       res.status(500).json({ error: e.message || "فشل حذف الملف" });
+    }
+  });
+
+  // 3.1 Batch delete media files directly from server folder and metadata
+  app.post("/api/media/files/batch-delete", (req, res) => {
+    try {
+      const { fileIds } = req.body;
+      if (!Array.isArray(fileIds) || fileIds.length === 0) {
+        return res.status(400).json({ error: "قائمة معرفات الملفات مطلوبة" });
+      }
+
+      const list = loadMediaMeta();
+      const idsSet = new Set(fileIds);
+      const remaining: ServerMediaFile[] = [];
+      const removedFiles: ServerMediaFile[] = [];
+
+      for (const item of list) {
+        if (idsSet.has(item.id) || idsSet.has(item.filename)) {
+          removedFiles.push(item);
+        } else {
+          remaining.push(item);
+        }
+      }
+
+      saveMediaMeta(remaining);
+
+      // Direct unlinking of all files from server folder
+      let unlinkedCount = 0;
+      for (const item of removedFiles) {
+        const candidates = [
+          item.filename,
+          `${item.filename}.part`,
+          `${item.filename}.tmp`,
+          item.id
+        ];
+        for (const c of candidates) {
+          const p = path.join(MEDIA_DIR, c);
+          if (fs.existsSync(p)) {
+            try {
+              fs.unlinkSync(p);
+              unlinkedCount++;
+              console.log(`[Media Batch Delete] File removed from server disk: ${p}`);
+            } catch (e) {}
+          }
+        }
+      }
+
+      for (const fid of fileIds) {
+        const directPath = path.join(MEDIA_DIR, path.basename(fid));
+        if (fs.existsSync(directPath)) {
+          try {
+            fs.unlinkSync(directPath);
+            unlinkedCount++;
+          } catch (e) {}
+        }
+      }
+
+      try {
+        const foldersData = loadMediaFoldersData();
+        if (foldersData.fileFolderMap) {
+          let dirty = false;
+          for (const fid of fileIds) {
+            if (foldersData.fileFolderMap[fid]) {
+              delete foldersData.fileFolderMap[fid];
+              dirty = true;
+            }
+          }
+          if (dirty) {
+            saveMediaFoldersData(foldersData);
+          }
+        }
+      } catch (e) {}
+
+      res.json({
+        success: true,
+        message: `تم حذف ${removedFiles.length || fileIds.length} ملف نهائياً من السيرفر والقرص`,
+        deletedCount: removedFiles.length
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "فشل الحذف الجماعي" });
     }
   });
 
@@ -732,7 +842,7 @@ async function startServer() {
     }
   });
 
-  // 5. Add Media File directly from YouTube with Subtitles
+  // 5. Add Media File directly from YouTube / External source with Subtitles (Downloaded locally)
   app.post("/api/media/from-youtube", async (req, res) => {
     try {
       const { title, videoUrl, videoId, srtText, cues, duration, thumbnailUrl, formatId, author, description } = req.body;
@@ -743,10 +853,69 @@ async function startServer() {
       const currentList = loadMediaMeta();
       const cleanTitle = (title || `فيديو يوتيوب ${videoId || ""}`).trim();
       const isAudioOnly = formatId === "audio_only";
-      const targetFilename = `youtube_${videoId || Date.now()}.${isAudioOnly ? "mp3" : "mp4"}`;
+      const targetFilename = `youtube_${videoId || Date.now()}_${Math.random().toString(36).substring(2, 6)}.${isAudioOnly ? "mp3" : "mp4"}`;
       const targetFilePath = path.join(MEDIA_DIR, targetFilename);
 
-      // Parse cues if needed
+      if (!fs.existsSync(MEDIA_DIR)) {
+        fs.mkdirSync(MEDIA_DIR, { recursive: true });
+      }
+
+      // 1. Download video directly onto our server disk
+      let localFileSize = 0;
+      if (videoUrl && (videoUrl.startsWith("http://") || videoUrl.startsWith("https://"))) {
+        console.log(`[Media Download] Fetching remote video to local server: ${videoUrl} -> ${targetFilePath}`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15 * 60 * 1000); // 15 mins max for large video
+
+        try {
+          const dlRes = await fetch(videoUrl, {
+            signal: controller.signal,
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+          });
+          clearTimeout(timeoutId);
+
+          if (!dlRes.ok) {
+            throw new Error(`تعذر جلب ملف الفيديو من السيرفر الخارجي (رمز ${dlRes.status} ${dlRes.statusText})`);
+          }
+
+          if (dlRes.body) {
+            const fileStream = fs.createWriteStream(targetFilePath);
+            const { Readable } = await import("stream");
+            const nodeStream = Readable.fromWeb(dlRes.body as any);
+            nodeStream.pipe(fileStream);
+
+            await new Promise<void>((resolve, reject) => {
+              fileStream.on("finish", () => resolve());
+              fileStream.on("error", (err) => reject(err));
+            });
+
+            if (fs.existsSync(targetFilePath)) {
+              const stat = fs.statSync(targetFilePath);
+              localFileSize = stat.size;
+              console.log(`[Media Download] Successfully stored video on server: ${targetFilename} (${localFileSize} bytes)`);
+            }
+          }
+        } catch (dlErr: any) {
+          clearTimeout(timeoutId);
+          console.error("[Media Download] Error downloading video to local storage:", dlErr);
+          if (fs.existsSync(targetFilePath)) {
+            try { fs.unlinkSync(targetFilePath); } catch (e) {}
+          }
+          return res.status(500).json({
+            error: `فشل تنزيل ملف الفيديو إلى سيرفر الموقع: ${dlErr.message || "خطأ في الاتصال"}. تأكد من بقاء سيرفر التفريغ يعمل أثناء عملية التنزيل.`
+          });
+        }
+      } else {
+        return res.status(400).json({ error: "رابط تحميل ملف الفيديو غير متوفر لتنزيله محلياً" });
+      }
+
+      if (localFileSize === 0 || !fs.existsSync(targetFilePath)) {
+        return res.status(500).json({ error: "لم يتم حفظ ملف الفيديو على السيرفر بنجاح أو أن حجم الملف فارغ" });
+      }
+
+      // 2. Parse cues if needed
       let cleanCues: ServerSubtitleCue[] = [];
       if (Array.isArray(cues) && cues.length > 0) {
         cleanCues = cues.map((c: any, idx: number) => ({
@@ -789,19 +958,19 @@ async function startServer() {
         uploadedAt: new Date().toISOString()
       };
 
-      const finalUrl = videoUrl || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : "");
-      let localFileSize = 0;
+      // 3. Local direct stream URL only (External streaming cancelled)
+      const localStreamUrl = `/api/media/stream/${encodeURIComponent(targetFilename)}`;
 
       const newItem: ServerMediaFile = {
         id: "media-yt-" + (videoId || Date.now()) + "-" + Math.random().toString(36).substring(2, 6),
         filename: targetFilename,
         originalName: `${cleanTitle}.${isAudioOnly ? "mp3" : "mp4"}`,
         title: cleanTitle,
-        size: 0,
+        size: localFileSize,
         mimeType: isAudioOnly ? "audio/mpeg" : "video/mp4",
         type: isAudioOnly ? "audio" : "video",
         uploadedAt: new Date().toISOString(),
-        url: finalUrl,
+        url: localStreamUrl,
         duration: duration || undefined,
         thumbnailUrl: thumbnailUrl || (videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : undefined),
         author: author || undefined,
@@ -813,45 +982,9 @@ async function startServer() {
       currentList.unshift(newItem);
       saveMediaMeta(currentList);
 
-      // Asynchronously attempt to cache/download remote file locally in background if possible
-      if (videoUrl && (videoUrl.startsWith("http://") || videoUrl.startsWith("https://"))) {
-        (async () => {
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 60000);
-            const dlRes = await fetch(videoUrl, { signal: controller.signal });
-            clearTimeout(timeoutId);
-            if (dlRes.ok && dlRes.body) {
-              if (!fs.existsSync(MEDIA_DIR)) {
-                fs.mkdirSync(MEDIA_DIR, { recursive: true });
-              }
-              const fileStream = fs.createWriteStream(targetFilePath);
-              const { Readable } = await import("stream");
-              const nodeStream = Readable.fromWeb(dlRes.body as any);
-              nodeStream.pipe(fileStream);
-              await new Promise<void>((resolve, reject) => {
-                fileStream.on("finish", () => resolve());
-                fileStream.on("error", (err) => reject(err));
-              });
-              const stat = fs.statSync(targetFilePath);
-              if (stat.size > 1000) {
-                const refreshedList = loadMediaMeta();
-                const target = refreshedList.find(m => m.id === newItem.id);
-                if (target) {
-                  target.size = stat.size;
-                  saveMediaMeta(refreshedList);
-                }
-              }
-            }
-          } catch (dlErr) {
-            console.warn("Background remote media cache notice:", dlErr);
-          }
-        })();
-      }
-
       res.json({
         success: true,
-        message: "تم حفظ فيديو اليوتيوب والتفريغ في المكتبة بنجاح!",
+        message: "تم تنزيل وتخزين الفيديو محلياً على السيرفر وحفظ التفريغ بنجاح!",
         file: newItem
       });
     } catch (e: any) {
