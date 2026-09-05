@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X, Flag, Volume2, HelpCircle, RefreshCw, CheckCircle, AlertCircle, Timer, Award, Trophy, ArrowLeft, ArrowRight, Play, Pause, Eye, RotateCcw, ThumbsUp, ThumbsDown, Sparkles, ChevronRight, ChevronUp, ChevronDown, MoreHorizontal, Sliders, Shuffle, EyeOff, VolumeX, Clock, Layers, Pencil, Plus, Check, Moon, Sun, DownloadCloud, Image as ImageIcon, CheckCircle2, Loader2, Download, Minimize2, Maximize2, Repeat, Trash2, ArrowUp, ArrowDown, Music, Mic, Save, Square, Bot, MessageSquare, Activity } from "lucide-react";
-import { Flashcard, Folder, ReviewMethod, getSafeImageStyle, getCardSearchQuery } from "../types";
+import { Flashcard, Folder, ReviewMethod, getSafeImageStyle, getCardSearchQuery, SpeakingChallengeItem } from "../types";
 import { speakClient, preloadTTS, ttsCache, stopActiveAudio, fadeAndStopAudio, preloadImage, imageCache, invalidateImageCache, playPiperLocalWasm, playGradioClientAudio } from "./Modals";
 import { motion, AnimatePresence, MotionConfig } from "motion/react";
 import { ReviewChatModal } from "./ReviewChatModal";
@@ -1753,6 +1753,11 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [hasStartedStep, setHasStartedStep] = useState(false);
   const [isReviewChatOpen, setIsReviewChatOpen] = useState(false);
+  const [spokenChallengeContext, setSpokenChallengeContext] = useState<{
+    currentChallenge: SpeakingChallengeItem | null;
+    challenges: SpeakingChallengeItem[];
+    currentIndex: number;
+  } | null>(null);
 
   // Derive folder info and surrounding cards for AI Context Awareness
   const derivedFolder = React.useMemo(() => {
@@ -5109,6 +5114,11 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     cards={sessionCards}
                     folderName={derivedFolder?.name || "مجموعة البطاقات"}
                     onClose={onClose}
+                    onUpdateContext={(ctx) => setSpokenChallengeContext(ctx)}
+                    onOpenChat={(ctx) => {
+                      setSpokenChallengeContext(ctx);
+                      setIsReviewChatOpen(true);
+                    }}
                     onFinish={(score, total) => {
                       // Handled by component summary or close
                     }}
@@ -8408,29 +8418,92 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
       )}
 
       {/* Interactive AI Review Mode Chat & Corrector Modal */}
-      {isReviewChatOpen && currentCard && (
-        <ReviewChatModal
-          isOpen={isReviewChatOpen}
-          onClose={() => setIsReviewChatOpen(false)}
-          card={currentCard}
-          previousCards={surroundingPrevCards}
-          nextCards={surroundingNextCards}
-          folderInfo={{
-            name: derivedFolder?.name || "مجموعة البطاقات",
-            description: derivedFolder?.description || "",
-            targetLanguage: currentCard.frontLang || derivedFolder?.frontLang || "de",
-            sourceLanguage: currentCard.backLang || derivedFolder?.backLang || "ar"
-          }}
-          onPlayPronunciation={(text, lang, voice) => {
-            if (voice) {
-              speakClient(text, lang || currentCard.frontLang || "de", voice);
-            } else if (reviewVoiceTarget === "secondary") {
-              playSecondaryPronunciation(text, lang || currentCard.frontLang || "de");
-            } else {
-              playPrimaryPronunciation(text, lang || currentCard.frontLang || "de");
-            }
-          }}
-        />
+      {isReviewChatOpen && (
+        method === "spoken_challenge" && spokenChallengeContext?.currentChallenge ? (
+          <ReviewChatModal
+            isOpen={isReviewChatOpen}
+            onClose={() => setIsReviewChatOpen(false)}
+            card={{
+              id: String(spokenChallengeContext.currentChallenge.id || `spoken-${spokenChallengeContext.currentIndex}`),
+              frontText: spokenChallengeContext.currentChallenge.target_german,
+              backText: spokenChallengeContext.currentChallenge.arabic_prompt || "جملة التحدث المستهدفة",
+              translationHint: spokenChallengeContext.currentChallenge.grammar_focus ? `التركيز النحوي: ${spokenChallengeContext.currentChallenge.grammar_focus}` : undefined,
+              frontLang: "de",
+              backLang: "ar",
+              isSpokenChallenge: true,
+              grammarFocus: spokenChallengeContext.currentChallenge.grammar_focus,
+              cefrLevel: spokenChallengeContext.currentChallenge.cefr_level,
+              vocabularyUsed: spokenChallengeContext.currentChallenge.vocab_focus
+            }}
+            previousCards={spokenChallengeContext.challenges.slice(Math.max(0, spokenChallengeContext.currentIndex - 5), spokenChallengeContext.currentIndex).map((ch, idx) => ({
+              id: String(ch.id || `prev-spoken-${idx}`),
+              frontText: ch.target_german,
+              backText: ch.arabic_prompt,
+              translationHint: ch.grammar_focus,
+              frontLang: "de",
+              backLang: "ar",
+              isSpokenChallenge: true,
+              grammarFocus: ch.grammar_focus
+            }))}
+            nextCards={spokenChallengeContext.challenges.slice(spokenChallengeContext.currentIndex + 1, spokenChallengeContext.currentIndex + 6).map((ch, idx) => ({
+              id: String(ch.id || `next-spoken-${idx}`),
+              frontText: ch.target_german,
+              backText: ch.arabic_prompt,
+              translationHint: ch.grammar_focus,
+              frontLang: "de",
+              backLang: "ar",
+              isSpokenChallenge: true,
+              grammarFocus: ch.grammar_focus
+            }))}
+            folderInfo={{
+              name: `تحدي التحدث (${spokenChallengeContext.currentIndex + 1} من ${spokenChallengeContext.challenges.length})`,
+              description: `ممارسة نطق وتحدث الجمل الألمانية - ${derivedFolder?.name || "مجموعة البطاقات"}`,
+              targetLanguage: "de",
+              sourceLanguage: "ar"
+            }}
+            challengeContext={{
+              isChallengeMode: true,
+              scenario: spokenChallengeContext.currentChallenge.arabic_prompt,
+              grammarFocus: spokenChallengeContext.currentChallenge.grammar_focus,
+              cefrLevel: spokenChallengeContext.currentChallenge.cefr_level,
+              vocabularyUsed: spokenChallengeContext.currentChallenge.vocab_focus,
+              totalChallenges: spokenChallengeContext.challenges.length,
+              challengeIndex: spokenChallengeContext.currentIndex
+            }}
+            onPlayPronunciation={(text, lang, voice) => {
+              if (voice) {
+                speakClient(text, lang || "de", voice);
+              } else if (reviewVoiceTarget === "secondary") {
+                playSecondaryPronunciation(text, lang || "de");
+              } else {
+                playPrimaryPronunciation(text, lang || "de");
+              }
+            }}
+          />
+        ) : currentCard ? (
+          <ReviewChatModal
+            isOpen={isReviewChatOpen}
+            onClose={() => setIsReviewChatOpen(false)}
+            card={currentCard}
+            previousCards={surroundingPrevCards}
+            nextCards={surroundingNextCards}
+            folderInfo={{
+              name: derivedFolder?.name || "مجموعة البطاقات",
+              description: derivedFolder?.description || "",
+              targetLanguage: currentCard.frontLang || derivedFolder?.frontLang || "de",
+              sourceLanguage: currentCard.backLang || derivedFolder?.backLang || "ar"
+            }}
+            onPlayPronunciation={(text, lang, voice) => {
+              if (voice) {
+                speakClient(text, lang || currentCard.frontLang || "de", voice);
+              } else if (reviewVoiceTarget === "secondary") {
+                playSecondaryPronunciation(text, lang || currentCard.frontLang || "de");
+              } else {
+                playPrimaryPronunciation(text, lang || currentCard.frontLang || "de");
+              }
+            }}
+          />
+        ) : null
       )}
 
       </div>

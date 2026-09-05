@@ -27,7 +27,8 @@ import {
   Play,
   Clock,
   Film,
-  Music
+  Music,
+  Mic
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Flashcard, Folder } from "../types";
@@ -69,6 +70,16 @@ export interface ReviewChatModalMediaContext {
   onSeekMedia?: (time: number) => void;
 }
 
+export interface ReviewChatModalChallengeContext {
+  isChallengeMode?: boolean;
+  scenario?: string;
+  grammarFocus?: string;
+  cefrLevel?: string;
+  vocabularyUsed?: string[];
+  totalChallenges?: number;
+  challengeIndex?: number;
+}
+
 export interface ReviewChatModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -83,6 +94,7 @@ export interface ReviewChatModalProps {
   };
   onPlayPronunciation?: (text: string, lang?: string, voice?: string) => void;
   mediaContext?: ReviewChatModalMediaContext;
+  challengeContext?: ReviewChatModalChallengeContext;
 }
 
 const AVAILABLE_MODELS = [
@@ -1443,7 +1455,8 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
   nextCards = [],
   folderInfo,
   onPlayPronunciation,
-  mediaContext
+  mediaContext,
+  challengeContext
 }) => {
   const [messages, setMessages] = useState<ReviewChatMessage[]>(() => {
     try {
@@ -1671,6 +1684,12 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
             cueStartTime: mediaContext.cueStartTime,
             cueEndTime: mediaContext.cueEndTime
           } : undefined,
+          challengeContext: challengeContext || ((card as any).isSpokenChallenge ? {
+            isChallengeMode: true,
+            grammarFocus: (card as any).grammarFocus,
+            cefrLevel: (card as any).cefrLevel,
+            vocabularyUsed: (card as any).vocabularyUsed
+          } : undefined),
           chatHistory: historyPayload,
           message: query,
           includeImages: shouldIncludeImages,
@@ -2117,7 +2136,23 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  const quickPrompts = mediaContext
+  const isChallenge = Boolean(challengeContext?.isChallengeMode || (card as any).isSpokenChallenge);
+
+  const quickPrompts = isChallenge
+    ? (responseLength === "concise" ? [
+        { icon: "💡", label: "معنى وسياق الجملة", prompt: `وضح لي باختصار شديد المعنى الدقيق لجملة التحدي "${card.frontText}" وسياق استخدامها باللغة الألمانية مع الترجمة.` },
+        { icon: "🔊", label: "نطق الجملة ونبرتها", prompt: `كيف ينطق المتحدثون الأصليون جملة "${card.frontText}" وما هي الكلمات التي يُشدد عليها في النطق الطبيعي؟` },
+        { icon: "🔍", label: "القواعد والتركيب بإيجاز", prompt: `اشرح لي باختصار القواعد النحوية وموقع الفعل وأدوات الربط في جملة التحدي "${card.frontText}".` },
+        { icon: "✍️", label: "أقرب بديل يومي", prompt: `ما هو البديل الأكثر شيوعاً وعفوية عند الناطقين الأصليين للتعبير عن "${card.frontText}"؟` },
+        { icon: "🎯", label: "اختبار صياغة مماثلة", prompt: `اطرح علي جملة مماثلة لاختبار قدرتي على صياغة جملة تتبع نفس نمط "${card.frontText}".` }
+      ] : [
+        { icon: "💡", label: "شرح الجملة والتركيز النحوي", prompt: `اشرح لي بالتفصيل جملة التحدي "${card.frontText}" ومعناها الدقيق وكيف ترتبط بالموقف العربي المطلوب والتركيز النحوي.` },
+        { icon: "✍️", label: "3 بدائل حوارية واقعية", prompt: `أعطني 3 بدائل يومية متنوعة مستخدمة من قبل الناطقين الأصليين للتعبير عن نفس معنى "${card.frontText}" مع الترجمة.` },
+        { icon: "🔍", label: "الإعراب وترتيب الكلمات", prompt: `اشرح القواعد النحوية بالتفصيل لجملة "${card.frontText}" (ترتيب الكلمات Wortstellung، تصريف الأفعال، وتراكيب الجمل).` },
+        { icon: "🔊", label: "دليل النطق والتشديد", prompt: `أعطني دليلاً لنطق جملة "${card.frontText}" وأين تقع السكتات والنبرات الصوتية الطبيعية.` },
+        { icon: "🎯", label: "تمرين تحدث بديل", prompt: `اطرح علي موقفاً وتحدي تحدث جديد يشبه جملة "${card.frontText}" لاختبار سرعة بديهتي.` }
+      ])
+    : mediaContext
     ? (responseLength === "concise" ? [
         { icon: "💡", label: "معنى وسياق سريع", prompt: `وضح لي باختصار شديد المعنى الدقيق لجملة "${card.frontText}" وسياق استخدامها في هذا المشهد مع الترجمة.` },
         { icon: "🔊", label: "نطق ونبرة الجملة", prompt: `كيف ينطق المتحدثون الأصليون جملة "${card.frontText}" وما هي نبرتها وسرعتها الطبيعية؟` },
@@ -2145,10 +2180,10 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
         { icon: "🎯", label: "اختبرني بسؤال أو تمرين", prompt: `اطرح علي سؤالاً أو تمرين إكمال فراغ لاختبار فهمي للكلمة "${card.frontText}".` }
       ]);
 
-  const imageQuickPrompts = mediaContext ? [
+  const imageQuickPrompts = (mediaContext || isChallenge) ? [
     {
       icon: "🖼️",
-      label: "شرح بصري للمشهد مع صور",
+      label: isChallenge ? "شرح بصري لجملة التحدي" : "شرح بصري للمشهد مع صور",
       prompt: `اشرح لي الجملة "${card.frontText}" بالتفصيل مع إرفاق صور توضيحية عالية الجودة للأشياء والمفاهيم المرتبطة بسياقها.`
     },
     {
@@ -2408,12 +2443,22 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
 
         {/* COMPACT SENTENCE REFERENCE (Simple text box, zero clutter, minimal vertical height) */}
         {card.frontText && (
-          <div className="px-3.5 py-1.5 sm:py-1 bg-slate-950/70 border-b border-slate-800/60 flex items-center gap-2 text-sm sm:text-xs shrink-0 select-text">
-            <div className="text-slate-100 text-sm sm:text-xs font-semibold truncate dir-ltr min-w-0 flex-1" title={card.frontText}>
-              <span className="truncate">
+          <div className="px-3.5 py-1.5 sm:py-1 bg-slate-950/70 border-b border-slate-800/60 flex items-center justify-between gap-2 text-sm sm:text-xs shrink-0 select-text">
+            <div className="text-slate-100 text-sm sm:text-xs font-semibold truncate min-w-0 flex-1 flex items-center gap-2" title={card.frontText}>
+              <span dir="ltr" className="text-left truncate font-sans text-purple-200">
                 {card.correctArticle ? `${card.correctArticle} ` : ''}{card.frontText}
               </span>
+              {card.backText && (
+                <span className="text-slate-400 text-xs font-normal truncate shrink-0">
+                  ({card.backText})
+                </span>
+              )}
             </div>
+            {isChallenge && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-950/80 text-purple-300 border border-purple-800/60 shrink-0">
+                جملة التحدث
+              </span>
+            )}
           </div>
         )}
 
@@ -2429,7 +2474,12 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-slate-400 border-b border-slate-800/80 pb-1.5">
                   <span className="font-bold text-indigo-400 flex items-center gap-1.5">
-                    {mediaContext ? (
+                    {isChallenge ? (
+                      <>
+                        <Mic className="w-3.5 h-3.5 text-purple-400" />
+                        <span>سياق جمل وتحديات التحدث (Spoken Sentences Context):</span>
+                      </>
+                    ) : mediaContext ? (
                       <>
                         <Film className="w-3.5 h-3.5 text-blue-400" />
                         <span>سياق السكربت والمشهد (Script & Scene Context):</span>
@@ -2442,27 +2492,35 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
                     )}
                   </span>
                   <span className="truncate max-w-[200px]">
-                    {mediaContext ? `🎬 ${mediaContext.mediaTitle}` : `المجلد: ${folderInfo?.name || "بدون اسم"}`}
+                    {isChallenge
+                      ? `🗣️ جملة ${(challengeContext?.challengeIndex ?? 0) + 1} من ${challengeContext?.totalChallenges ?? (nextCards.length + (previousCards?.length || 0) + 1)}`
+                      : mediaContext
+                      ? `🎬 ${mediaContext.mediaTitle}`
+                      : `المجلد: ${folderInfo?.name || "بدون اسم"}`}
                   </span>
                 </div>
 
                 {/* Previous 5 Items */}
                 <div>
                   <span className="text-[11px] font-bold text-slate-400 block mb-1">
-                    {mediaContext ? "⏮️ الجمل السابقة في السكربت:" : "⏮️ البطاقات السابقة (الـ 5 السابقة):"}
+                    {isChallenge
+                      ? "⏮️ الجمل السابقة في التحدي (السوابق):"
+                      : mediaContext
+                      ? "⏮️ الجمل السابقة في السكربت:"
+                      : "⏮️ البطاقات السابقة (الـ 5 السابقة):"}
                   </span>
                   {(previousCards && previousCards.length > 0) ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                       {previousCards.slice(-5).map((c, i) => (
                         <div key={c.id || i} className="bg-slate-900/90 border border-slate-800 px-2.5 py-1.5 rounded-lg text-[11px] flex items-center justify-between gap-2">
                           <div className="flex flex-col min-w-0">
-                            <span className="font-sans font-bold text-slate-300 truncate dir-ltr">{c.correctArticle ? `${c.correctArticle} ` : ''}{c.frontText}</span>
+                            <span dir="ltr" className="font-sans font-bold text-slate-300 truncate text-left">{c.correctArticle ? `${c.correctArticle} ` : ''}{c.frontText}</span>
                             {c.backText && <span className="text-[10px] text-slate-400 truncate">{c.backText}</span>}
                           </div>
                           <button
                             type="button"
                             onClick={() => handlePlayChatVoice(c.frontText, c.frontLang || "de")}
-                            className="p-1 text-slate-400 hover:text-white shrink-0"
+                            className="p-1 text-slate-400 hover:text-white shrink-0 cursor-pointer"
                             title="استماع"
                           >
                             <Volume2 className="w-3 h-3" />
@@ -2471,7 +2529,7 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
                       ))}
                     </div>
                   ) : (
-                    <span className="text-slate-500 text-[10px]">لا توجد عناصر سابقة</span>
+                    <span className="text-slate-500 text-[10px]">{isChallenge ? "لا توجد جمل سابقة" : "لا توجد عناصر سابقة"}</span>
                   )}
                 </div>
 
@@ -2479,7 +2537,11 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
                 <div className="p-2.5 bg-indigo-950/40 border border-indigo-600/40 rounded-xl">
                   <div className="flex items-center justify-between gap-2 mb-1">
                     <span className="text-[11px] font-bold text-indigo-300 flex items-center gap-1.5">
-                      {mediaContext ? "🎬 الجملة الحالية في المشهد:" : "🃏 البطاقة الحالية النشطة:"}
+                      {isChallenge
+                        ? "🎯 الجملة الحالية المستهدفة:"
+                        : mediaContext
+                        ? "🎬 الجملة الحالية في المشهد:"
+                        : "🃏 البطاقة الحالية النشطة:"}
                     </span>
                     {mediaContext?.onPlayMediaSegment && mediaContext.cueStartTime !== undefined && (
                       <button
@@ -2492,32 +2554,36 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
                       </button>
                     )}
                   </div>
-                  <div className="flex items-center justify-between text-white font-bold font-sans gap-2">
-                    <span className="dir-ltr text-xs sm:text-sm">{card.correctArticle ? `${card.correctArticle} ` : ''}{card.frontText} {card.pluralText ? `(جمع: ${card.pluralText})` : ''}</span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between text-white font-bold font-sans gap-1">
+                    <span dir="ltr" className="text-xs sm:text-sm text-left text-purple-200">{card.correctArticle ? `${card.correctArticle} ` : ''}{card.frontText} {card.pluralText ? `(جمع: ${card.pluralText})` : ''}</span>
                     <span className="text-indigo-200 font-normal text-xs">{card.backText}</span>
                   </div>
                   {card.translationHint && (
-                    <p className="text-[10px] text-slate-400 mt-1">تلميح/وصف: {card.translationHint}</p>
+                    <p className="text-[10px] text-slate-400 mt-1">تلميح/سياق: {card.translationHint}</p>
                   )}
                 </div>
 
                 {/* Next 5 Items */}
                 <div>
                   <span className="text-[11px] font-bold text-slate-400 block mb-1">
-                    {mediaContext ? "⏭️ الجمل التالية في السكربت:" : "⏭️ البطاقات التالية (الـ 5 التالية):"}
+                    {isChallenge
+                      ? "⏭️ الجمل القادمة في التحدي (الجايين):"
+                      : mediaContext
+                      ? "⏭️ الجمل التالية في السكربت:"
+                      : "⏭️ البطاقات التالية (الـ 5 التالية):"}
                   </span>
                   {(nextCards && nextCards.length > 0) ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                       {nextCards.slice(0, 5).map((c, i) => (
                         <div key={c.id || i} className="bg-slate-900/90 border border-slate-800 px-2.5 py-1.5 rounded-lg text-[11px] flex items-center justify-between gap-2">
                           <div className="flex flex-col min-w-0">
-                            <span className="font-sans font-bold text-slate-300 truncate dir-ltr">{c.correctArticle ? `${c.correctArticle} ` : ''}{c.frontText}</span>
+                            <span dir="ltr" className="font-sans font-bold text-slate-300 truncate text-left">{c.correctArticle ? `${c.correctArticle} ` : ''}{c.frontText}</span>
                             {c.backText && <span className="text-[10px] text-slate-400 truncate">{c.backText}</span>}
                           </div>
                           <button
                             type="button"
                             onClick={() => handlePlayChatVoice(c.frontText, c.frontLang || "de")}
-                            className="p-1 text-slate-400 hover:text-white shrink-0"
+                            className="p-1 text-slate-400 hover:text-white shrink-0 cursor-pointer"
                             title="استماع"
                           >
                             <Volume2 className="w-3 h-3" />
@@ -2526,7 +2592,7 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
                       ))}
                     </div>
                   ) : (
-                    <span className="text-slate-500 text-[10px]">لا توجد عناصر تالية</span>
+                    <span className="text-slate-500 text-[10px]">{isChallenge ? "لا توجد جمل قادمة" : "لا توجد عناصر تالية"}</span>
                   )}
                 </div>
               </div>

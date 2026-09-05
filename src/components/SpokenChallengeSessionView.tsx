@@ -35,6 +35,7 @@ import { Flashcard, SpeakingChallengeItem, DEFAULT_GRADIO_VOICES } from "../type
 import { preloadImage, speakClient, stopActiveAudio, playPiperLocalWasm, fetchGradioAudioBlob } from "./Modals";
 import { ALL_AVAILABLE_MODELS } from "./AICorrectorWorkspace";
 import { motion, AnimatePresence } from "motion/react";
+import { ReviewChatModal } from "./ReviewChatModal";
 
 export const CHALLENGE_VOICE_OPTIONS = [
   {
@@ -67,13 +68,25 @@ interface SpokenChallengeSessionViewProps {
   folderName: string;
   onClose: () => void;
   onFinish?: (score: number, total: number) => void;
+  onOpenChat?: (context: {
+    currentChallenge: SpeakingChallengeItem;
+    challenges: SpeakingChallengeItem[];
+    currentIndex: number;
+  }) => void;
+  onUpdateContext?: (context: {
+    currentChallenge: SpeakingChallengeItem | null;
+    challenges: SpeakingChallengeItem[];
+    currentIndex: number;
+  }) => void;
 }
 
 export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProps> = ({
   cards,
   folderName,
   onClose,
-  onFinish
+  onFinish,
+  onOpenChat,
+  onUpdateContext
 }) => {
   // Setup / Pre-Analysis State
   const [selectedModel, setSelectedModel] = useState<string>(() => {
@@ -215,6 +228,32 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
       }
     };
   }, [currentChallenge]);
+
+  const [isInternalChatOpen, setIsInternalChatOpen] = useState(false);
+
+  // Keep parent context updated whenever current challenge or list changes
+  useEffect(() => {
+    if (onUpdateContext) {
+      onUpdateContext({
+        currentChallenge,
+        challenges,
+        currentIndex
+      });
+    }
+  }, [currentChallenge, challenges, currentIndex, onUpdateContext]);
+
+  const handleOpenAiChat = () => {
+    if (!currentChallenge) return;
+    if (onOpenChat) {
+      onOpenChat({
+        currentChallenge,
+        challenges,
+        currentIndex
+      });
+    } else {
+      setIsInternalChatOpen(true);
+    }
+  };
 
   // Clean String for fuzzy matching
   const cleanForMatch = (str: string): string => {
@@ -938,6 +977,20 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
             <option value="1.0">1.0x</option>
             <option value="1.2">1.2x</option>
           </select>
+
+          {/* AI Chat / Spoken Challenge Discussion Button */}
+          {currentChallenge && (
+            <button
+              type="button"
+              onClick={handleOpenAiChat}
+              title="محادثة ومناقشة بالذكاء الاصطناعي حول هذه الجملة وسياق التحدي"
+              className="px-2.5 py-1 text-xs rounded-lg font-bold transition-all flex items-center gap-1.5 cursor-pointer bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 active:scale-95 shadow-2xs"
+            >
+              <Bot className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">محادثة الذكاء</span>
+            </button>
+          )}
+
           <button
             onClick={handleSafeClose}
             className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
@@ -1108,6 +1161,17 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
                       {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                       <span>{isListening ? "جاري الاستماع... (اضغط للإيقاف)" : "تحقق من نطقك (ميكروفون)"}</span>
                     </button>
+
+                    {/* AI Chat Discussion Button */}
+                    <button
+                      type="button"
+                      onClick={handleOpenAiChat}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 hover:bg-purple-100 dark:hover:bg-purple-900/60 active:scale-95"
+                      title="مناقشة واستفسار بالذكاء الاصطناعي حول هذه الجملة وسياقها"
+                    >
+                      <Bot className="w-4 h-4" />
+                      <span>مناقشة الجملة بالذكاء</span>
+                    </button>
                   </div>
                 </div>
 
@@ -1174,6 +1238,64 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
           )}
         </div>
       </div>
+
+      {/* Spoken Challenge Context-Aware AI Chat Modal */}
+      {isInternalChatOpen && currentChallenge && (
+        <ReviewChatModal
+          isOpen={isInternalChatOpen}
+          onClose={() => setIsInternalChatOpen(false)}
+          card={{
+            id: String(currentChallenge.id || `spoken-${currentIndex}`),
+            frontText: currentChallenge.target_german,
+            backText: currentChallenge.arabic_prompt || "جملة التحدث المستهدفة",
+            translationHint: currentChallenge.grammar_focus ? `التركيز النحوي: ${currentChallenge.grammar_focus}` : undefined,
+            frontLang: "de",
+            backLang: "ar",
+            isSpokenChallenge: true,
+            grammarFocus: currentChallenge.grammar_focus,
+            cefrLevel: currentChallenge.cefr_level,
+            vocabularyUsed: currentChallenge.vocab_focus
+          }}
+          previousCards={challenges.slice(Math.max(0, currentIndex - 5), currentIndex).map((ch, idx) => ({
+            id: String(ch.id || `prev-spoken-${idx}`),
+            frontText: ch.target_german,
+            backText: ch.arabic_prompt,
+            translationHint: ch.grammar_focus,
+            frontLang: "de",
+            backLang: "ar",
+            isSpokenChallenge: true,
+            grammarFocus: ch.grammar_focus
+          }))}
+          nextCards={challenges.slice(currentIndex + 1, currentIndex + 6).map((ch, idx) => ({
+            id: String(ch.id || `next-spoken-${idx}`),
+            frontText: ch.target_german,
+            backText: ch.arabic_prompt,
+            translationHint: ch.grammar_focus,
+            frontLang: "de",
+            backLang: "ar",
+            isSpokenChallenge: true,
+            grammarFocus: ch.grammar_focus
+          }))}
+          folderInfo={{
+            name: `تحدي التحدث (${currentIndex + 1} من ${challenges.length})`,
+            description: `ممارسة نطق وتحدث الجمل الألمانية - ${folderName}`,
+            targetLanguage: "de",
+            sourceLanguage: "ar"
+          }}
+          challengeContext={{
+            isChallengeMode: true,
+            scenario: currentChallenge.arabic_prompt,
+            grammarFocus: currentChallenge.grammar_focus,
+            cefrLevel: currentChallenge.cefr_level,
+            vocabularyUsed: currentChallenge.vocab_focus,
+            totalChallenges: challenges.length,
+            challengeIndex: currentIndex
+          }}
+          onPlayPronunciation={(text) => {
+            speakGerman(text);
+          }}
+        />
+      )}
     </div>
   );
 };
