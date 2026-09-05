@@ -2223,6 +2223,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
   // Prefetch extra search images for the next 10 cards ahead (including the current card)
   useEffect(() => {
+    if (method === "spoken_challenge") return;
     if (!isSwipeImageEnabled || !sessionCards || sessionCards.length === 0) return;
 
     // Get the current card and next 10 cards to trigger prefetching
@@ -3566,6 +3567,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
   // Preload TTS Audio & Images in a sliding window to ensure instant playback and display without delay
   useEffect(() => {
+    if (method === "spoken_challenge") return;
     if (!sessionCards || sessionCards.length === 0) return;
 
     const preloadCardAssets = async (card: Flashcard) => {
@@ -3650,6 +3652,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
   // Trigger sound automatically for new cards in other modes with 200ms debounce delay
   useEffect(() => {
+    if (method === "spoken_challenge") return;
     if (chainMethods && chainIndex !== undefined && !hasStartedStep) return;
     if (!currentCard || isCompleted || isAutoPlaying) return;
 

@@ -2068,6 +2068,7 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
         deck_title = "مجلد البطاقات",
         requested_count = 5,
         selectedModel = "gemini-3.6-flash",
+        custom_instructions = "",
         userApiKey,
         geminiApiKey,
         customApiKey,
@@ -2101,20 +2102,25 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
       }
 
       // Prepare simplified deck cards representation for prompt
-      const simplifiedCards = cards.slice(0, 100).map((c: any) => ({
+      const simplifiedCards = cards.slice(0, 150).map((c: any) => ({
         german: c.frontText || c.german || "",
         arabic: c.backText || c.translationHint || c.arabic || "",
         article: c.correctArticle || "",
         plural: c.pluralText || ""
       }));
 
-      const countNum = Math.min(Math.max(parseInt(String(requested_count), 10) || 5, 1), 30);
+      const countNum = Math.min(Math.max(parseInt(String(requested_count), 10) || 5, 1), 100);
+
+      const hasCustomInstructions = typeof custom_instructions === "string" && custom_instructions.trim().length > 0;
+      const customDirectivesBlock = hasCustomInstructions
+        ? `\n\n### MANDATORY USER CONDITIONS & DIRECTIVES:\nThe user has specified the following strict custom conditions for sentence generation:\n"${custom_instructions.trim()}"\nYou MUST strictly follow and adhere to these directives when creating the scenarios and German sentences while utilizing the vocabulary from the deck!`
+        : "";
 
       const systemInstruction = `You are an expert German Language Pedagogy & AI Tutor.
 Your task is to analyze a deck of language learning flashcards, evaluate the vocabulary, grammar patterns, and CEFR level (A1/A2/B1/B2), and generate an interactive "Spoken Recall & Repetition Challenge" for the user.
 
 ### GOAL:
-Generate exactly ${countNum} speaking challenges derived directly from the provided flashcard deck content. Each challenge prompts the user in Arabic to formulate or say a specific sentence in German before the timer expires.
+Generate exactly ${countNum} speaking challenges derived directly from the provided flashcard deck content. Each challenge prompts the user in Arabic to formulate or say a specific sentence in German before the timer expires.${customDirectivesBlock}
 
 ### INSTRUCTIONS & RULES:
 1. Content Analysis: Formulate sentences that naturally combine words and grammar rules present in the deck.
@@ -2141,7 +2147,7 @@ Respond ONLY with a valid JSON array of objects following this schema (No markdo
 
       const userPromptText = `Deck Title: "${deck_title}"
 Cards count: ${simplifiedCards.length}
-Requested challenges count: ${countNum}
+Requested challenges count: ${countNum}${hasCustomInstructions ? `\nUser Custom Conditions: "${custom_instructions.trim()}"` : ""}
 Flashcards:
 ${JSON.stringify(simplifiedCards, null, 2)}`;
 

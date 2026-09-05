@@ -31,10 +31,36 @@ import {
   Zap,
   Image as ImageIcon
 } from "lucide-react";
-import { Flashcard, SpeakingChallengeItem } from "../types";
-import { preloadImage, speakClient, playPiperLocalWasm, fetchGradioAudioBlob } from "./Modals";
+import { Flashcard, SpeakingChallengeItem, DEFAULT_GRADIO_VOICES } from "../types";
+import { preloadImage, speakClient, stopActiveAudio, playPiperLocalWasm, fetchGradioAudioBlob } from "./Modals";
 import { ALL_AVAILABLE_MODELS } from "./AICorrectorWorkspace";
 import { motion, AnimatePresence } from "motion/react";
+
+export const CHALLENGE_VOICE_OPTIONS = [
+  {
+    group: "🚀 أصوات سيرفر Gradio العصبية (Qwen3-TTS)",
+    options: DEFAULT_GRADIO_VOICES.map((v) => ({
+      id: `gradio:${v.id}`,
+      name: `🚀 Gradio: ${v.name} (${v.gender === "female" ? "أنثوي" : "ذكوري"})`
+    }))
+  },
+  {
+    group: "⚡ محركات النطق المباشرة",
+    options: [
+      { id: "google", name: "⚡ Google Translate TTS (نطق ألماني مباشر وسريع)" },
+      { id: "webspeech", name: "🌐 Web Speech API (محرك نطق المتصفح الداخلي)" }
+    ]
+  },
+  {
+    group: "🧠 نماذج Piper العصبية (ألمانية)",
+    options: [
+      { id: "de_DE-thorsten-medium", name: "🇩🇪 Thorsten Medium (ذكوري ألماني طبيعي - موصى به)" },
+      { id: "de_DE-thorsten_emotional-medium", name: "🇩🇪 Thorsten Emotional (تعبيري متنوع)" },
+      { id: "de_DE-ramona-medium", name: "🇩🇪 Ramona Medium (أنثوي ألماني واضح)" },
+      { id: "de_DE-karlsson-low", name: "🇩🇪 Karlsson Low (ذكوري سريع)" }
+    ]
+  }
+];
 
 interface SpokenChallengeSessionViewProps {
   cards: Flashcard[];
@@ -61,9 +87,39 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
       return "gemini-3.6-flash";
     }
   });
+
+  const [selectedVoice, setSelectedVoice] = useState<string>(() => {
+    try {
+      return (
+        localStorage.getItem("spoken_challenge_voice") ||
+        localStorage.getItem("settings_primary_piper_model_de") ||
+        "de_DE-thorsten-medium"
+      );
+    } catch {
+      return "de_DE-thorsten-medium";
+    }
+  });
+
+  const [customConditions, setCustomConditions] = useState<string>(() => {
+    try {
+      return localStorage.getItem("spoken_challenge_custom_conditions") || "";
+    } catch {
+      return "";
+    }
+  });
+
   const [challengeCount, setChallengeCount] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("spoken_challenge_count");
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      }
+    } catch {}
     return Math.min(Math.max(cards.length, 3), 10);
   });
+
+  const [isPlayingVoiceSample, setIsPlayingVoiceSample] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [generationStep, setGenerationStep] = useState<string>("");
   const [generationError, setGenerationError] = useState<string | null>(null);
@@ -80,6 +136,10 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
   const [audioSpeed, setAudioSpeed] = useState<number>(1.0);
   const [autoPlayAudio, setAutoPlayAudio] = useState<boolean>(true);
+
+  // Audio Single-Controller Refs
+  const audioTimeoutRef = useRef<any>(null);
+  const spokenChallengesSetRef = useRef<Set<string>>(new Set());
 
   // Speech Recognition (Mic Check) State
   const [isListening, setIsListening] = useState<boolean>(false);
@@ -222,6 +282,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
           deck_title: folderName || "مجلد البطاقات",
           requested_count: challengeCount,
           selectedModel,
+          custom_instructions: customConditions.trim(),
           userApiKey,
           geminiApiKey: userApiKey,
           groqApiKey
@@ -258,35 +319,80 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
     }
   };
 
-  // Pronounce German sentence using available TTS
+  // Stop active audio helper across all engines
+  const cancelAllAudio = useCallback(() => {
+    if (audioTimeoutRef.current) {
+      clearTimeout(audioTimeoutRef.current);
+      audioTimeoutRef.current = null;
+    }
+    stopActiveAudio();
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch (e) {}
+    }
+    setIsPlayingAudio(false);
+    setIsPlayingVoiceSample(false);
+  }, []);
+
+  // Pronounce German sentence with selected voice and audio collision prevention
   const speakGerman = useCallback((text: string) => {
     if (!text) return;
+    cancelAllAudio();
     setIsPlayingAudio(true);
 
     try {
-      speakClient(text, "de");
-      setTimeout(() => {
+      speakClient(text, "de", selectedVoice);
+      const estDuration = Math.max(2200, Math.min(6500, text.split(" ").length * 500));
+      audioTimeoutRef.current = setTimeout(() => {
         setIsPlayingAudio(false);
-      }, 2000);
+      }, estDuration);
     } catch (e) {
       setIsPlayingAudio(false);
     }
-  }, []);
+  }, [selectedVoice, cancelAllAudio]);
 
-  // Handle Reveal German Sentence
+  // Preview Voice Sample
+  const handleToggleVoicePreview = () => {
+    if (isPlayingVoiceSample) {
+      cancelAllAudio();
+      return;
+    }
+    cancelAllAudio();
+    setIsPlayingVoiceSample(true);
+    try {
+      speakClient("Hallo, das ist eine Sprachprobe für diese Übung.", "de", selectedVoice);
+      audioTimeoutRef.current = setTimeout(() => {
+        setIsPlayingVoiceSample(false);
+      }, 3000);
+    } catch {
+      setIsPlayingVoiceSample(false);
+    }
+  };
+
+  // Handle Reveal German Sentence (Strict single audio trigger)
   const handleReveal = useCallback(() => {
     if (isRevealed) return;
     setIsRevealed(true);
     setIsTimerRunning(false);
-    clearInterval(timerRef.current);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
 
     if (currentChallenge && autoPlayAudio) {
-      // Small pause before auto-playing German audio
-      setTimeout(() => {
-        speakGerman(currentChallenge.target_german);
-      }, 250);
+      const challengeKey = `${currentChallenge.id || currentIndex}_${currentChallenge.target_german}`;
+      if (!spokenChallengesSetRef.current.has(challengeKey)) {
+        spokenChallengesSetRef.current.add(challengeKey);
+        if (audioTimeoutRef.current) {
+          clearTimeout(audioTimeoutRef.current);
+        }
+        audioTimeoutRef.current = setTimeout(() => {
+          speakGerman(currentChallenge.target_german);
+        }, 300);
+      }
     }
-  }, [isRevealed, currentChallenge, autoPlayAudio, speakGerman]);
+  }, [isRevealed, currentChallenge, currentIndex, autoPlayAudio, speakGerman]);
 
   // Countdown timer effect
   useEffect(() => {
@@ -303,12 +409,15 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
       });
     }, 1000);
 
-    return () => clearInterval(timerRef.current);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
   }, [currentChallenge, isTimerRunning, isRevealed, handleReveal]);
 
   // Reset challenge item when index changes
   useEffect(() => {
     if (challenges.length > 0 && challenges[currentIndex]) {
+      cancelAllAudio();
       const ch = challenges[currentIndex];
       setIsRevealed(false);
       setTimeLeft(ch.estimated_seconds || 6);
@@ -322,7 +431,20 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
         } catch (e) {}
       }
     }
-  }, [currentIndex, challenges]);
+  }, [currentIndex, challenges, cancelAllAudio]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      cancelAllAudio();
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch (e) {}
+      }
+    };
+  }, [cancelAllAudio]);
 
   // Toggle Mic Listener
   const handleToggleMic = () => {
@@ -370,6 +492,12 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
     }
   };
 
+  // Safe Exit helper (stops all audio immediately)
+  const handleSafeClose = useCallback(() => {
+    cancelAllAudio();
+    onClose();
+  }, [cancelAllAudio, onClose]);
+
   // Calculate circular progress SVG values
   const totalSeconds = currentChallenge?.estimated_seconds || 6;
   const timerPercentage = Math.max(0, Math.min(100, (timeLeft / totalSeconds) * 100));
@@ -395,27 +523,41 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
             </div>
           </div>
           <button
-            onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            onClick={handleSafeClose}
+            className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Deck Context Overview */}
-        <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-4 mb-6">
-          <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300">
-            <div className="flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-purple-600" />
-              <span className="font-bold">{folderName || "المجلد الحالي"}</span>
+        {/* 1. Prominent Current Cards Counter Card */}
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-blue-500/10 border border-purple-200 dark:border-purple-800/80 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-purple-600 text-white flex items-center justify-center font-black text-lg shadow-md shadow-purple-500/25 shrink-0">
+              {cards.length}
             </div>
-            <span className="bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 px-2.5 py-0.5 rounded-full font-bold">
-              {cards.length} بطاقة متاحة
-            </span>
+            <div>
+              <div className="text-sm font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                <span>رصيد البطاقات الحالية في المجلد:</span>
+                <span className="text-purple-600 dark:text-purple-400 font-extrabold text-base">
+                  {cards.length} بطاقة
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+                مجلد: <strong className="text-slate-700 dark:text-slate-200">{folderName || "المجلد الحالي"}</strong> — سيقوم الذكاء الاصطناعي باستخراج الكلمات والقواعد منها لتكوين التحديات.
+              </p>
+            </div>
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
-            يقوم الذكاء الاصطناعي بتحليل جميع بطاقات المجلد، وفحص القواعد والمفردات والمستوى، ثم توليد جمل وتحديات نطق تفاعلية مع توجيه بالعربية ومؤقت زمني وصور توضيحية.
-          </p>
+          {cards.length === 0 ? (
+            <span className="text-xs text-rose-600 dark:text-rose-400 font-bold bg-rose-100 dark:bg-rose-950/60 px-3 py-1.5 rounded-xl shrink-0">
+              المجلد فارغ
+            </span>
+          ) : (
+            <span className="text-xs text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-100 dark:bg-emerald-950/60 px-3 py-1.5 rounded-xl flex items-center gap-1 shrink-0">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>جاهزة للتحليل ({cards.length})</span>
+            </span>
+          )}
         </div>
 
         {/* Configuration Controls */}
@@ -454,23 +596,133 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
             </select>
           </div>
 
-          {/* Number of Challenges */}
+          {/* 2. Voice / Speaker Selector for Automatic Pronunciation */}
+          <div>
+            <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
+              <span className="flex items-center gap-1.5">
+                <Volume2 className="w-4 h-4 text-purple-600" />
+                <span>الناطق ومحرك الصوت للنطق التلقائي:</span>
+              </span>
+              <button
+                type="button"
+                onClick={handleToggleVoicePreview}
+                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1 cursor-pointer ${
+                  isPlayingVoiceSample
+                    ? "bg-purple-600 text-white border-purple-600 animate-pulse"
+                    : "bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800 hover:bg-purple-100"
+                }`}
+                title="استمع إلى عينة صوتية بالصوت المحدد"
+              >
+                <Volume2 className="w-3.5 h-3.5" />
+                <span>{isPlayingVoiceSample ? "جاري الاستماع..." : "استمع لعينة الصوت"}</span>
+              </button>
+            </div>
+            <select
+              value={selectedVoice}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedVoice(val);
+                try {
+                  localStorage.setItem("spoken_challenge_voice", val);
+                } catch (err) {}
+              }}
+              className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer shadow-xs"
+            >
+              {CHALLENGE_VOICE_OPTIONS.map((grp) => (
+                <optgroup key={grp.group} label={grp.group}>
+                  {grp.options.map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            <span className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 block">
+              💡 هذا هو الصوت الذي سينطق الجملة الألمانية تلقائياً أو عند الضغط على زر الاستماع.
+            </span>
+          </div>
+
+          {/* 3. Custom Description / Conditions for the AI */}
+          <div>
+            <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
+              <span className="flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                <span>شروط أو وصف مخصص للذكاء الاصطناعي (اختياري):</span>
+              </span>
+              {customConditions.trim() && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomConditions("");
+                    try {
+                      localStorage.removeItem("spoken_challenge_custom_conditions");
+                    } catch {}
+                  }}
+                  className="text-[11px] text-slate-400 hover:text-rose-500 transition-colors cursor-pointer"
+                >
+                  مسح الشروط
+                </button>
+              )}
+            </div>
+            <textarea
+              rows={3}
+              value={customConditions}
+              onChange={(e) => {
+                const val = e.target.value;
+                setCustomConditions(val);
+                try {
+                  localStorage.setItem("spoken_challenge_custom_conditions", val);
+                } catch {}
+              }}
+              placeholder="اكتب هنا أي شروط أو متطلبات خاصة ترغب أن يلتزم بها الذكاء الاصطناعي (مثال: ركز على صيغة الماضي التام Perfekt، أو اجعل الجمل عن حجز الفنادق والسفر، أو استخدم الروابط weil و dass...). إن تركت هذا المربع فارغاً، سيتصرف الذكاء الاصطناعي بطريقته الطبيعية المعتادة."
+              className="w-full p-3 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none leading-relaxed"
+            />
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
+              {customConditions.trim()
+                ? "⚡ سيلتزم الذكاء الاصطناعي بشروطك المكتوبة أثناء صياغة الجمل والتحديات."
+                : "💡 لم يتم إدخال شروط، سيقوم الذكاء الاصطناعي ببناء التحديات بالطريقة المعتادة وفقاً لمستوى البطاقات."}
+            </p>
+          </div>
+
+          {/* 4. Number of Challenges (Allows > 25, up to 100) */}
           <div>
             <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
               <span>عدد التحديات والجمل المطلوبة:</span>
-              <span className="text-purple-600 dark:text-purple-400 text-sm font-black">
-                {challengeCount} جمل
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-400 text-xs">أدخل العدد:</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={challengeCount}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10) || 1;
+                    const clamped = Math.max(1, Math.min(100, val));
+                    setChallengeCount(clamped);
+                    try {
+                      localStorage.setItem("spoken_challenge_count", String(clamped));
+                    } catch {}
+                  }}
+                  className="w-16 px-2 py-1 text-center font-black text-sm text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                <span className="text-xs text-slate-500 font-bold">جملة</span>
+              </div>
             </div>
 
             {/* Quick selector chips */}
-            <div className="grid grid-cols-5 gap-2 mb-3">
-              {[3, 5, 10, 15, 20].map((num) => (
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {[5, 10, 15, 20, 25, 30, 40, 50].map((num) => (
                 <button
                   key={num}
                   type="button"
-                  onClick={() => setChallengeCount(num)}
-                  className={`py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
+                  onClick={() => {
+                    setChallengeCount(num);
+                    try {
+                      localStorage.setItem("spoken_challenge_count", String(num));
+                    } catch {}
+                  }}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
                     challengeCount === num
                       ? "bg-purple-600 text-white border-purple-600 shadow-md shadow-purple-500/20 scale-105"
                       : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-purple-300"
@@ -484,11 +736,22 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
             <input
               type="range"
               min="1"
-              max="25"
-              value={challengeCount}
-              onChange={(e) => setChallengeCount(parseInt(e.target.value, 10))}
+              max="50"
+              value={Math.min(challengeCount, 50)}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                setChallengeCount(val);
+                try {
+                  localStorage.setItem("spoken_challenge_count", String(val));
+                } catch {}
+              }}
               className="w-full accent-purple-600 cursor-pointer"
             />
+            {challengeCount > 50 && (
+              <span className="text-[11px] text-purple-600 dark:text-purple-400 font-bold block mt-1">
+                ⭐ تم اختيار {challengeCount} جملة يدوياً عبر حقل الإدخال.
+              </span>
+            )}
           </div>
         </div>
 
@@ -597,7 +860,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
             <span>إعادة التحدي</span>
           </button>
           <button
-            onClick={onClose}
+            onClick={handleSafeClose}
             className="flex-1 py-3.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-lg shadow-purple-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
           >
             <Check className="w-4 h-4" />
@@ -631,9 +894,32 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
 
         {/* Audio & Playback Controls */}
         <div className="flex items-center gap-2">
+          {/* Voice Selector in active session */}
+          <select
+            value={selectedVoice}
+            onChange={(e) => {
+              const val = e.target.value;
+              setSelectedVoice(val);
+              try {
+                localStorage.setItem("spoken_challenge_voice", val);
+              } catch (err) {}
+            }}
+            className="hidden md:inline-block bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs px-2 py-1 rounded-lg font-bold border-none focus:outline-none cursor-pointer max-w-[150px] truncate"
+            title="الناطق الصوتي المحدد"
+          >
+            {CHALLENGE_VOICE_OPTIONS.map((grp) => (
+              <optgroup key={grp.group} label={grp.group}>
+                {grp.options.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.name}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
           <button
             onClick={() => setAutoPlayAudio(!autoPlayAudio)}
-            className={`px-2.5 py-1 text-xs rounded-lg font-bold transition-colors flex items-center gap-1.5 ${
+            className={`px-2.5 py-1 text-xs rounded-lg font-bold transition-colors flex items-center gap-1.5 cursor-pointer ${
               autoPlayAudio
                 ? "bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-800"
                 : "bg-slate-100 dark:bg-slate-800 text-slate-400"
@@ -653,8 +939,8 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
             <option value="1.2">1.2x</option>
           </select>
           <button
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+            onClick={handleSafeClose}
+            className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
