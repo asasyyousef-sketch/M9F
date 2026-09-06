@@ -2,15 +2,11 @@ import React, { useState, useEffect } from "react";
 import {
   Folder,
   FolderOpen,
-  History,
-  Star,
   Settings,
   ChevronLeft,
   ChevronDown,
   X,
   Database,
-  AlertTriangle,
-  CheckCircle,
   Copy,
   Check,
   Sparkles,
@@ -20,8 +16,6 @@ import {
   Film,
   PanelRightClose,
   PanelRightOpen,
-  Layers,
-  Search,
   BookOpen
 } from "lucide-react";
 import { Folder as FolderType, DbStatus } from "../types";
@@ -79,9 +73,6 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
       return next;
     });
   };
-
-  // Folder search filter in sidebar
-  const [searchQuery, setSearchQuery] = useState("");
 
   // Keep track of expanded state for collapsible folders
   const [isLibraryExpanded, setIsLibraryExpanded] = useState(true);
@@ -148,20 +139,8 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
     (f) => !f.parentId || !folders.some((p) => p.id === f.parentId)
   );
 
-  // Filter folders by search query if present
-  const filteredRootFolders = searchQuery.trim()
-    ? rootFolders.filter((f) =>
-        f.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        folders.some(
-          (sub) =>
-            sub.parentId === f.id &&
-            sub.name.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-      )
-    : rootFolders;
-
   // Consistent sorting: predefined folders first, then custom folders by creation date
-  const sortedRootFolders = [...filteredRootFolders].sort((a, b) => {
+  const sortedRootFolders = [...rootFolders].sort((a, b) => {
     const predefinedOrder = ["folder-math", "folder-chemistry-root", "folder-physics"];
     const indexA = predefinedOrder.indexOf(a.id);
     const indexB = predefinedOrder.indexOf(b.id);
@@ -189,62 +168,76 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
     });
   };
 
-  // Recursive dynamic folder tree renderer
+  // Recursive dynamic folder tree renderer (Windows File Explorer style: clean hierarchy lines, no animation, compact)
   const renderFolderTree = (folder: FolderType, depth: number) => {
     const children = getSortedChildren(folder.id);
     const hasKids = children.length > 0;
     const isExpanded = !!expandedFolders[folder.id];
-    const isActive = activeFolderId === folder.id;
-    const isHighlight = isFolderActiveOrDescendantActive(folder.id);
+    const isActive = activeFolderId === folder.id && activeTab === "library";
+    const isHighlight = isFolderActiveOrDescendantActive(folder.id) && activeTab === "library";
 
     return (
-      <div key={folder.id} className="flex flex-col">
+      <div key={folder.id} className="flex flex-col min-w-0">
         {/* Folder Item Row */}
-        <button
+        <div
           onClick={() => {
             onSelectFolder(folder.id);
             onClose?.();
-            if (hasKids && !isExpanded) {
-              setExpandedFolders((prev) => ({ ...prev, [folder.id]: true }));
-            }
           }}
-          className={`group flex items-center justify-between px-2.5 py-1.5 rounded-lg text-right transition-all text-xs cursor-pointer ${
+          title={folder.name}
+          className={`group flex items-center w-full min-w-0 px-1 py-1 rounded-md text-right text-xs cursor-pointer select-none ${
             isActive
-              ? "bg-[#0056f6]/10 text-[#0056f6] font-bold"
+              ? "bg-blue-100 text-blue-900 font-semibold border-r-2 border-blue-600"
               : isHighlight
-              ? "text-[#0056f6] font-semibold hover:bg-slate-200/50"
-              : "text-slate-700 hover:bg-slate-200/50 font-medium"
+              ? "text-blue-700 bg-blue-50/50 hover:bg-slate-100 font-medium"
+              : "text-slate-700 hover:bg-slate-100 font-normal"
           }`}
-          style={{ marginRight: `${depth * 10}px` }}
         >
-          <div className="flex items-center gap-2 min-w-0 truncate">
-            <span
-              className="w-2 h-2 rounded-full shrink-0"
-              style={{ backgroundColor: folder.color || "#64748b" }}
-            />
-            <span className="truncate">{folder.name}</span>
-          </div>
-
-          {hasKids && (
-            <div
+          {/* Expand/Collapse Toggle Button or Empty Spacer */}
+          {hasKids ? (
+            <button
+              type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 setExpandedFolders((prev) => ({ ...prev, [folder.id]: !prev[folder.id] }));
               }}
-              className="p-1 hover:bg-black/5 rounded-md transition-colors cursor-pointer shrink-0"
+              className="w-4 h-4 flex items-center justify-center shrink-0 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded cursor-pointer ml-0.5"
+              title={isExpanded ? "طي المجلد" : "توسيع المجلد"}
             >
-              <ChevronDown
-                className={`w-3 h-3 text-slate-400 transition-transform ${
-                  isExpanded ? "transform rotate-0" : "transform -rotate-90"
-                }`}
-              />
-            </div>
+              {isExpanded ? (
+                <ChevronDown className="w-3 h-3" />
+              ) : (
+                <ChevronLeft className="w-3 h-3" />
+              )}
+            </button>
+          ) : (
+            <span className="w-4 h-4 shrink-0 ml-0.5" />
           )}
-        </button>
 
-        {/* Nested Children */}
+          {/* Folder Icon (Windows style) */}
+          <span className="shrink-0 ml-1.5 flex items-center">
+            {isExpanded ? (
+              <FolderOpen
+                className="w-3.5 h-3.5"
+                style={{ color: folder.color || "#eab308" }}
+              />
+            ) : (
+              <Folder
+                className="w-3.5 h-3.5"
+                style={{ color: folder.color || "#ca8a04" }}
+              />
+            )}
+          </span>
+
+          {/* Folder Name */}
+          <span className="truncate flex-1 min-w-0 text-xs">
+            {folder.name}
+          </span>
+        </div>
+
+        {/* Nested Children (Tree branch lines) */}
         {hasKids && isExpanded && (
-          <div className="flex flex-col mr-3 border-r border-slate-200 pr-1.5 mt-0.5 mb-1">
+          <div className="flex flex-col mr-2 pr-1.5 border-r border-slate-200/90 space-y-0.5 mt-0.5">
             {children.map((child) => renderFolderTree(child, depth + 1))}
           </div>
         )}
@@ -264,24 +257,31 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
 
       {/* Sidebar aside */}
       <aside
-        className={`fixed inset-y-0 right-0 z-50 bg-[#f8fafc] font-sans text-sm flex flex-col border-l border-slate-200/80 shrink-0 h-full overflow-hidden transition-all duration-300 ease-in-out md:translate-x-0 md:relative md:flex ${
-          isOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"
-        } ${isCollapsed ? "md:w-[68px] w-64" : "w-64"}`}
+        className={`fixed inset-y-0 right-0 z-50 bg-white font-sans text-sm flex flex-col border-l border-slate-200 shrink-0 h-full overflow-hidden transition-all duration-300 ease-in-out md:translate-x-0 md:relative md:flex select-none shadow-xs ${
+          isOpen ? "translate-x-0 shadow-2xl" : "translate-x-full md:translate-x-0"
+        } ${isCollapsed ? "md:w-[68px] md:min-w-[68px] md:max-w-[68px] w-64" : "w-64 min-w-[16rem] max-w-[16rem]"}`}
         dir="rtl"
       >
         {/* ========================================================================= */}
         {/* 1. SIDEBAR HEADER */}
         {/* ========================================================================= */}
-        <div className={`pt-4 pb-3 flex items-center border-b border-slate-200/60 ${isCollapsed ? "px-2.5 justify-center md:flex-col gap-2" : "px-4 justify-between"}`}>
+        <div className={`pt-4 pb-3 flex items-center border-b border-slate-200/80 shrink-0 ${isCollapsed ? "px-2 justify-center md:flex-col gap-2" : "px-3.5 justify-between"}`}>
           {!isCollapsed ? (
             <>
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#0056f6] to-indigo-600 flex items-center justify-center text-white shadow-xs">
-                  <BookOpen className="w-4 h-4" />
+              <div 
+                onClick={onHomeClick}
+                className="flex items-center gap-2.5 cursor-pointer group"
+              >
+                <div className="w-8 h-8 rounded-xl overflow-hidden shadow-2xs border border-slate-200/80 bg-white flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                  <img
+                    src="/ico.png"
+                    alt="مدرب اللغات"
+                    className="w-full h-full object-contain"
+                  />
                 </div>
                 <div>
-                  <h1 className="text-base font-extrabold text-slate-900 tracking-tight leading-none">
-                    StudySmarter
+                  <h1 className="text-sm font-black text-slate-900 tracking-tight leading-none">
+                    مدرب اللغات
                   </h1>
                   <span className="text-[10px] text-slate-400 font-medium">المنصة التعليمية</span>
                 </div>
@@ -292,8 +292,8 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                 <button
                   type="button"
                   onClick={toggleCollapsed}
-                  className="hidden md:flex p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
-                  title="طي القائمة الجانبية (Slim Rail)"
+                  className="hidden md:flex p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                  title="طي القائمة الجانبية"
                 >
                   <PanelRightClose className="w-4 h-4" />
                 </button>
@@ -303,7 +303,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                   <button
                     type="button"
                     onClick={onClose}
-                    className="md:hidden p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
+                    className="md:hidden p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -312,13 +312,21 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
             </>
           ) : (
             <>
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#0056f6] to-indigo-600 flex items-center justify-center text-white shadow-xs" title="StudySmarter">
-                <BookOpen className="w-4 h-4" />
+              <div 
+                onClick={onHomeClick}
+                className="w-9 h-9 rounded-xl overflow-hidden shadow-2xs border border-slate-200/80 bg-white flex items-center justify-center cursor-pointer hover:scale-105 transition-transform" 
+                title="مدرب اللغات"
+              >
+                <img
+                  src="/ico.png"
+                  alt="مدرب اللغات"
+                  className="w-7 h-7 object-contain"
+                />
               </div>
               <button
                 type="button"
                 onClick={toggleCollapsed}
-                className="hidden md:flex p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
+                className="hidden md:flex p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
                 title="توسيع القائمة الجانبية"
               >
                 <PanelRightOpen className="w-4 h-4" />
@@ -328,163 +336,14 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
         </div>
 
         {/* ========================================================================= */}
-        {/* 2. SEARCH BAR (EXPANDED ONLY) */}
+        {/* 2. NAVIGATION ITEMS */}
         {/* ========================================================================= */}
-        {!isCollapsed && (
-          <div className="px-3 pt-2.5 pb-1">
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="بحث في المجلدات..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-2.5 pr-8 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-700 placeholder-slate-400 focus:outline-none focus:border-[#0056f6] transition-all"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery("")}
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* 3. NAVIGATION ITEMS */}
-        {/* ========================================================================= */}
-        <nav className="py-2 px-2 flex-1 overflow-y-auto space-y-4 custom-scrollbar">
+        <nav className="py-2 px-2 flex-1 overflow-y-auto overflow-x-hidden space-y-1 custom-scrollbar">
           
-          {/* SECTION: WORKSPACE & AI TOOLS */}
-          <div className="space-y-0.5">
-            {!isCollapsed && (
-              <div className="px-2 pb-1.5 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider">
-                مساحة العمل والذكاء
-              </div>
-            )}
-
-            {/* AI Assistant */}
-            <button
-              type="button"
-              onClick={() => {
-                onSelectAI?.();
-                onClose?.();
-              }}
-              title="المساعد الذكي"
-              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-right transition-all font-semibold text-xs cursor-pointer group ${
-                isCollapsed ? "justify-center px-0" : ""
-              } ${
-                activeTab === "ai"
-                  ? "bg-violet-600/10 text-violet-700 font-bold shadow-xs border border-violet-200/50"
-                  : "text-slate-700 hover:bg-slate-200/60"
-              }`}
-            >
-              <div className={`p-1 rounded-lg ${activeTab === "ai" ? "bg-violet-600 text-white" : "bg-violet-100 text-violet-600 group-hover:bg-violet-200"}`}>
-                <Sparkles className="w-3.5 h-3.5" />
-              </div>
-              {!isCollapsed && (
-                <div className="flex items-center justify-between flex-1 min-w-0">
-                  <span className="truncate">المساعد الذكي</span>
-                  <span className="text-[9.5px] font-mono font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">AI</span>
-                </div>
-              )}
-            </button>
-
-            {/* YouTube Transcription */}
-            <button
-              type="button"
-              onClick={() => {
-                onSelectYoutube?.();
-                onClose?.();
-              }}
-              title="تفريغ اليوتيوب"
-              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-right transition-all font-semibold text-xs cursor-pointer group ${
-                isCollapsed ? "justify-center px-0" : ""
-              } ${
-                activeTab === "youtube"
-                  ? "bg-rose-600/10 text-rose-700 font-bold shadow-xs border border-rose-200/50"
-                  : "text-slate-700 hover:bg-slate-200/60"
-              }`}
-            >
-              <div className={`p-1 rounded-lg ${activeTab === "youtube" ? "bg-rose-600 text-white" : "bg-rose-100 text-rose-600 group-hover:bg-rose-200"}`}>
-                <Youtube className="w-3.5 h-3.5" />
-              </div>
-              {!isCollapsed && (
-                <div className="flex items-center justify-between flex-1 min-w-0">
-                  <span className="truncate">تفريغ اليوتيوب</span>
-                  <span className="text-[9.5px] font-mono font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-700">spT</span>
-                </div>
-              )}
-            </button>
-
-            {/* AI Corrector */}
-            <button
-              type="button"
-              onClick={() => {
-                onSelectCorrector?.();
-                onClose?.();
-              }}
-              title="المصحح الذكي"
-              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-right transition-all font-semibold text-xs cursor-pointer group ${
-                isCollapsed ? "justify-center px-0" : ""
-              } ${
-                activeTab === "corrector"
-                  ? "bg-emerald-600/10 text-emerald-700 font-bold shadow-xs border border-emerald-200/50"
-                  : "text-slate-700 hover:bg-slate-200/60"
-              }`}
-            >
-              <div className={`p-1 rounded-lg ${activeTab === "corrector" ? "bg-emerald-600 text-white" : "bg-emerald-100 text-emerald-600 group-hover:bg-emerald-200"}`}>
-                <PenTool className="w-3.5 h-3.5" />
-              </div>
-              {!isCollapsed && (
-                <div className="flex items-center justify-between flex-1 min-w-0">
-                  <span className="truncate">المصحح الذكي</span>
-                  <span className="text-[9.5px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">Grammar</span>
-                </div>
-              )}
-            </button>
-
-            {/* Media Player */}
-            <button
-              type="button"
-              onClick={() => {
-                onSelectMedia?.();
-                onClose?.();
-              }}
-              title="مشغل الوسائط"
-              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-right transition-all font-semibold text-xs cursor-pointer group ${
-                isCollapsed ? "justify-center px-0" : ""
-              } ${
-                activeTab === "media"
-                  ? "bg-blue-600/10 text-blue-700 font-bold shadow-xs border border-blue-200/50"
-                  : "text-slate-700 hover:bg-slate-200/60"
-              }`}
-            >
-              <div className={`p-1 rounded-lg ${activeTab === "media" ? "bg-blue-600 text-white" : "bg-blue-100 text-blue-600 group-hover:bg-blue-200"}`}>
-                <Film className="w-3.5 h-3.5" />
-              </div>
-              {!isCollapsed && (
-                <div className="flex items-center justify-between flex-1 min-w-0">
-                  <span className="truncate">مشغل الوسائط</span>
-                  <span className="text-[9.5px] font-mono font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">Media</span>
-                </div>
-              )}
-            </button>
-          </div>
-
-          {/* SECTION: EDUCATIONAL LIBRARY & FOLDERS */}
+          {/* SECTION 1: EDUCATIONAL LIBRARY & FOLDERS (في الأعلى) */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <>
-                <div className="px-2 pb-1 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-                  <span>المكتبة التعليمية</span>
-                  <span className="text-[10px] text-slate-400 font-mono">({folders.length})</span>
-                </div>
-
                 {/* Root Library Button */}
                 <button
                   type="button"
@@ -493,35 +352,53 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                     onClose?.();
                     setIsLibraryExpanded(true);
                   }}
-                  className={`w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-right transition-all font-bold text-xs cursor-pointer ${
+                  className={`w-full flex items-center justify-between px-2 py-1.5 rounded-xl text-right transition-colors font-bold text-xs cursor-pointer group ${
                     activeFolderId === "" && activeTab === "library"
-                      ? "bg-[#0056f6]/10 text-[#0056f6] border border-[#0056f6]/20"
-                      : "text-slate-700 hover:bg-slate-200/60"
+                      ? "bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs"
+                      : "text-slate-700 hover:bg-slate-100"
                   }`}
                 >
-                  <div className="flex items-center gap-2">
-                    <FolderOpen className="w-4 h-4 text-[#0056f6]" />
-                    <span>كافة البطاقات والمجلدات</span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                      activeFolderId === "" && activeTab === "library"
+                        ? "bg-blue-600 text-white shadow-2xs"
+                        : "bg-slate-100 text-slate-500 group-hover:bg-slate-200/80 group-hover:text-slate-800"
+                    }`}>
+                      <FolderOpen className="w-3.5 h-3.5" />
+                    </div>
+                    <span className="truncate font-bold">المكتبة</span>
                   </div>
-                  <div
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsLibraryExpanded(!isLibraryExpanded);
-                    }}
-                    className="p-1 hover:bg-black/5 rounded-md transition-colors cursor-pointer"
-                  >
-                    {isLibraryExpanded ? (
-                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-                    ) : (
-                      <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
-                    )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded-md">
+                      {folders.length}
+                    </span>
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsLibraryExpanded(!isLibraryExpanded);
+                      }}
+                      className="p-1 hover:bg-black/5 rounded-md transition-colors cursor-pointer text-slate-400 hover:text-slate-600"
+                      title={isLibraryExpanded ? "طي المجلدات" : "عرض المجلدات"}
+                    >
+                      {isLibraryExpanded ? (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      ) : (
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                      )}
+                    </div>
                   </div>
                 </button>
 
-                {/* Folder Tree */}
+                {/* Folder Tree (Windows Explorer style, scrollable, max-h-64) */}
                 {isLibraryExpanded && (
-                  <div className="pr-1 space-y-0.5 max-h-60 overflow-y-auto custom-scrollbar">
-                    {sortedRootFolders.map((rootFolder) => renderFolderTree(rootFolder, 0))}
+                  <div className="pr-1 mt-0.5 space-y-0.5 max-h-64 overflow-y-auto overflow-x-hidden custom-scrollbar">
+                    {sortedRootFolders.length > 0 ? (
+                      sortedRootFolders.map((rootFolder) => renderFolderTree(rootFolder, 0))
+                    ) : (
+                      <div className="py-2.5 text-center text-xs text-slate-400">
+                        لا توجد مجلدات حالياً
+                      </div>
+                    )}
                   </div>
                 )}
               </>
@@ -533,59 +410,143 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                     onSelectFolder("");
                     onClose?.();
                   }}
-                  title="المكتبة التعليمية"
-                  className={`w-full flex items-center justify-center py-2 rounded-xl transition-all cursor-pointer ${
+                  title="المكتبة"
+                  className={`w-10 h-10 mx-auto flex items-center justify-center rounded-xl transition-colors cursor-pointer ${
                     activeFolderId === "" && activeTab === "library"
-                      ? "bg-[#0056f6]/10 text-[#0056f6]"
-                      : "text-slate-700 hover:bg-slate-200/60"
+                      ? "bg-blue-600 text-white shadow-2xs"
+                      : "bg-slate-100 text-slate-500 hover:bg-slate-200"
                   }`}
                 >
-                  <FolderOpen className="w-4 h-4 text-[#0056f6]" />
+                  <FolderOpen className="w-4 h-4" />
                 </button>
               </div>
             )}
           </div>
 
-          {/* SECTION: SYSTEM & UTILITY */}
+          {/* DIVIDER */}
+          <div className="my-1.5 border-t border-slate-100" />
+
+          {/* SECTION 2: LEARNING WORKSPACES & TOOLS (بدون شارات) */}
           <div className="space-y-0.5">
-            {!isCollapsed && (
-              <div className="px-2 pb-1.5 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider">
-                النظام والوصول السريع
+
+            {/* AI Assistant */}
+            <button
+              type="button"
+              onClick={() => {
+                onSelectAI?.();
+                onClose?.();
+              }}
+              title="المساعد الذكي"
+              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
+                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
+              } ${
+                activeTab === "ai"
+                  ? "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-2xs"
+                  : "text-slate-700 hover:bg-slate-100"
+              }`}
+            >
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                activeTab === "ai" 
+                  ? "bg-blue-600 text-white shadow-2xs" 
+                  : "bg-slate-100 text-slate-500 group-hover:bg-slate-200/80 group-hover:text-slate-800"
+              }`}>
+                <Sparkles className="w-3.5 h-3.5" />
               </div>
-            )}
+              {!isCollapsed && (
+                <span className="truncate">المساعد الذكي</span>
+              )}
+            </button>
 
-            {/* Recents */}
+            {/* YouTube Transcription */}
             <button
               type="button"
               onClick={() => {
-                onSelectFolder("");
+                onSelectYoutube?.();
                 onClose?.();
               }}
-              title="العناصر الأخيرة"
-              className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl text-right transition-all font-medium text-xs cursor-pointer text-slate-700 hover:bg-slate-200/60 ${
-                isCollapsed ? "justify-center px-0" : ""
+              title="تفريغ اليوتيوب"
+              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
+                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
+              } ${
+                activeTab === "youtube"
+                  ? "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-2xs"
+                  : "text-slate-700 hover:bg-slate-100"
               }`}
             >
-              <History className="w-4 h-4 text-slate-400 shrink-0" />
-              {!isCollapsed && <span>العناصر الأخيرة</span>}
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                activeTab === "youtube" 
+                  ? "bg-blue-600 text-white shadow-2xs" 
+                  : "bg-slate-100 text-slate-500 group-hover:bg-slate-200/80 group-hover:text-slate-800"
+              }`}>
+                <Youtube className="w-3.5 h-3.5" />
+              </div>
+              {!isCollapsed && (
+                <span className="truncate">تفريغ اليوتيوب</span>
+              )}
             </button>
 
-            {/* Favorites */}
+            {/* AI Corrector */}
             <button
               type="button"
               onClick={() => {
-                onSelectFolder("");
+                onSelectCorrector?.();
                 onClose?.();
               }}
-              title="المفضلة"
-              className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl text-right transition-all font-medium text-xs cursor-pointer text-slate-700 hover:bg-slate-200/60 ${
-                isCollapsed ? "justify-center px-0" : ""
+              title="المصحح اللغوي"
+              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
+                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
+              } ${
+                activeTab === "corrector"
+                  ? "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-2xs"
+                  : "text-slate-700 hover:bg-slate-100"
               }`}
             >
-              <Star className="w-4 h-4 text-amber-500 shrink-0" />
-              {!isCollapsed && <span>المفضلة</span>}
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                activeTab === "corrector" 
+                  ? "bg-blue-600 text-white shadow-2xs" 
+                  : "bg-slate-100 text-slate-500 group-hover:bg-slate-200/80 group-hover:text-slate-800"
+              }`}>
+                <PenTool className="w-3.5 h-3.5" />
+              </div>
+              {!isCollapsed && (
+                <span className="truncate">المصحح اللغوي</span>
+              )}
             </button>
 
+            {/* Media Player */}
+            <button
+              type="button"
+              onClick={() => {
+                onSelectMedia?.();
+                onClose?.();
+              }}
+              title="مشغل الوسائط"
+              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
+                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
+              } ${
+                activeTab === "media"
+                  ? "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-2xs"
+                  : "text-slate-700 hover:bg-slate-100"
+              }`}
+            >
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                activeTab === "media" 
+                  ? "bg-blue-600 text-white shadow-2xs" 
+                  : "bg-slate-100 text-slate-500 group-hover:bg-slate-200/80 group-hover:text-slate-800"
+              }`}>
+                <Film className="w-3.5 h-3.5" />
+              </div>
+              {!isCollapsed && (
+                <span className="truncate">مشغل الوسائط</span>
+              )}
+            </button>
+          </div>
+
+          {/* DIVIDER */}
+          <div className="my-1.5 border-t border-slate-100" />
+
+          {/* SECTION 3: SYSTEM & RECYCLE BIN */}
+          <div className="space-y-0.5">
             {/* Trash */}
             <button
               type="button"
@@ -594,29 +555,35 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                 onClose?.();
               }}
               title="سلة المهملات"
-              className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl text-right transition-all font-medium text-xs cursor-pointer ${
-                isCollapsed ? "justify-center px-0" : ""
+              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
+                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
               } ${
                 activeTab === "trash"
-                  ? "bg-rose-50 text-rose-700 border border-rose-200 font-bold"
-                  : "text-slate-700 hover:bg-slate-200/60"
+                  ? "bg-rose-50 text-rose-700 border border-rose-200 font-bold shadow-2xs"
+                  : "text-slate-700 hover:bg-slate-100"
               }`}
             >
-              <Trash2 className="w-4 h-4 text-rose-500 shrink-0" />
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                activeTab === "trash" 
+                  ? "bg-rose-600 text-white shadow-2xs" 
+                  : "bg-slate-100 text-slate-500 group-hover:bg-rose-100 group-hover:text-rose-600"
+              }`}>
+                <Trash2 className="w-3.5 h-3.5" />
+              </div>
               {!isCollapsed && <span>سلة المهملات</span>}
             </button>
           </div>
         </nav>
 
         {/* ========================================================================= */}
-        {/* 4. SLEEK COMPACT FOOTER (SUPABASE PILL + SETTINGS) */}
+        {/* 4. SLEEK COMPACT FOOTER (SYNC STATUS + SETTINGS) */}
         {/* ========================================================================= */}
-        <div className={`p-2.5 border-t border-slate-200/80 bg-white/70 backdrop-blur-xs space-y-2 shrink-0 ${isCollapsed ? "flex flex-col items-center" : ""}`}>
+        <div className={`p-2.5 border-t border-slate-200 bg-slate-50/70 backdrop-blur-xs space-y-1.5 shrink-0 ${isCollapsed ? "flex flex-col items-center" : ""}`}>
           
-          {/* Compact Supabase Sync Status Indicator */}
+          {/* Supabase Status Pill */}
           {dbStatus && dbStatus.supabaseActive ? (
             !isCollapsed ? (
-              <div className="p-2 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between text-xs">
+              <div className="p-2 rounded-xl bg-white border border-slate-200 flex items-center justify-between text-xs shadow-2xs">
                 <div className="flex items-center gap-2 min-w-0">
                   {dbStatus.tablesExist ? (
                     <span className="relative flex h-2 w-2">
@@ -626,7 +593,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                   ) : (
                     <span className="w-2 h-2 rounded-full bg-amber-500"></span>
                   )}
-                  <span className="font-bold text-[11px] text-slate-800 truncate">
+                  <span className="font-semibold text-[11px] text-slate-700 truncate">
                     {dbStatus.tablesExist ? "مزامنة سحابية نشطة" : "إعداد جداول Supabase"}
                   </span>
                 </div>
@@ -646,7 +613,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                 type="button"
                 onClick={() => !dbStatus.tablesExist && setIsSqlModalOpen(true)}
                 title={dbStatus.tablesExist ? "مزامنة سحابية نشطة (Supabase Connected)" : "جداول Supabase مفقودة - اضغط للتهيئة"}
-                className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors cursor-pointer relative"
+                className="w-9 h-9 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 flex items-center justify-center transition-colors cursor-pointer relative shadow-2xs"
               >
                 <Database className="w-4 h-4 text-slate-600" />
                 <span
@@ -666,8 +633,8 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
               onClose?.();
             }}
             title="إعدادات النظام"
-            className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-right text-slate-700 hover:bg-slate-100 transition-colors font-semibold text-xs cursor-pointer ${
-              isCollapsed ? "justify-center px-0 w-9 h-9" : ""
+            className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors font-semibold text-xs cursor-pointer ${
+              isCollapsed ? "justify-center px-0 w-9 h-9 mx-auto" : ""
             }`}
           >
             <Settings className="w-4 h-4 text-slate-500 shrink-0" />
@@ -679,11 +646,11 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
       {/* SQL SCHEMA GENERATOR MODAL */}
       {isSqlModalOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-[9999]" dir="rtl">
-          <div className="bg-white rounded-2xl max-w-xl w-full max-h-[85vh] overflow-hidden flex flex-col shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-2xl max-w-xl w-full max-h-[85vh] overflow-hidden flex flex-col shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200">
             {/* Header */}
             <div className="p-4 border-b border-slate-100 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Database className="w-5 h-5 text-[#0056f6]" />
+                <Database className="w-5 h-5 text-blue-600" />
                 <h3 className="font-bold text-sm text-slate-800">تهيئة قاعدة بيانات Supabase</h3>
               </div>
               <button 
@@ -701,7 +668,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                 مرحباً! لحل مشكلة عدم وجود جداول (<span className="text-rose-600 font-mono text-[11px]">Could not find table public.decks</span>)، يرجى نسخ هذا الكود البرمجي ولصقه في لوحة تحكم Supabase الخاصة بك:
               </p>
 
-              <div className="bg-blue-50/50 border border-blue-100 p-3 rounded-xl space-y-2">
+              <div className="bg-blue-50/70 border border-blue-100 p-3 rounded-xl space-y-2">
                 <span className="font-bold text-blue-900 block">خطوات الإعداد السريعة:</span>
                 <ol className="list-decimal list-inside space-y-1 text-slate-700 leading-relaxed pr-2">
                   <li>افتح لوحة تحكم <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline font-bold">Supabase Dashboard</a> وانتقل إلى مشروعك.</li>

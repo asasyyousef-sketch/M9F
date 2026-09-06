@@ -41,6 +41,7 @@
 html {
   font-size: 12.65px; /* Scaled up by 15% from previous 11px as requested */
   -webkit-touch-callout: default;
+  color-scheme: light;
 }
 
 body {
