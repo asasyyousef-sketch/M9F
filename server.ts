@@ -2257,71 +2257,21 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         }));
       }
 
-      // Fetch images for each challenge in parallel
-      const enrichedChallenges = await Promise.all(
-        parsedChallenges.slice(0, countNum).map(async (item: any, idx: number) => {
-          const query = item.image_prompt || `${item.target_german || "German language"} illustration`;
-          let imageUrl = "";
-
-          try {
-            const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}`;
-            const pageRes = await fetch(searchUrl, {
-              headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9,ar;q=0.8"
-              }
-            });
-            if (pageRes.ok) {
-              const html = await pageRes.text();
-              const match = html.match(/vqd=['"]?([^'"&]+)/) || html.match(/vqd=([0-9-]+)/);
-              if (match && match[1]) {
-                const vqd = match[1];
-                const imgApiUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,`;
-                const imgRes = await fetch(imgApiUrl, {
-                  headers: {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-                    "Referer": "https://duckduckgo.com/"
-                  }
-                });
-                if (imgRes.ok) {
-                  const data = await imgRes.json();
-                  if (data.results && Array.isArray(data.results) && data.results.length > 0) {
-                    const firstValid = data.results.find((it: any) => it.image && it.image.startsWith("http"));
-                    if (firstValid) {
-                      imageUrl = firstValid.image;
-                    }
-                  }
-                }
-              }
-            }
-          } catch (imgErr) {
-            console.warn("DuckDuckGo image search error for challenge:", imgErr);
-          }
-
-          if (!imageUrl) {
-            const defaultUnsplash = [
-              "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=600&q=80",
-              "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&w=600&q=80",
-              "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&w=600&q=80",
-              "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?auto=format&fit=crop&w=600&q=80",
-              "https://images.unsplash.com/photo-1546410531-bb4caa6b424d?auto=format&fit=crop&w=600&q=80"
-            ];
-            imageUrl = defaultUnsplash[idx % defaultUnsplash.length];
-          }
-
-          return {
-            id: item.id || idx + 1,
-            arabic_prompt: String(item.arabic_prompt || "قل هذه الجملة بالألمانية:"),
-            target_german: String(item.target_german || "").trim(),
-            estimated_seconds: Math.max(parseInt(String(item.estimated_seconds), 10) || 6, 3),
-            image_prompt: String(item.image_prompt || query),
-            imageUrl: imageUrl,
-            cefr_level: String(item.cefr_level || "A1"),
-            grammar_focus: String(item.grammar_focus || "عام"),
-            vocab_focus: Array.isArray(item.vocab_focus) ? item.vocab_focus.map(String) : []
-          };
-        })
-      );
+      // Return challenges immediately without parallel image fetching (Lazy loaded per card by client)
+      const enrichedChallenges = parsedChallenges.slice(0, countNum).map((item: any, idx: number) => {
+        const query = item.image_prompt || `${item.target_german || "German language"} illustration`;
+        return {
+          id: item.id || idx + 1,
+          arabic_prompt: String(item.arabic_prompt || "قل هذه الجملة بالألمانية:"),
+          target_german: String(item.target_german || "").trim(),
+          estimated_seconds: Math.max(parseInt(String(item.estimated_seconds), 10) || 6, 3),
+          image_prompt: String(item.image_prompt || query),
+          imageUrl: "",
+          cefr_level: String(item.cefr_level || "A1"),
+          grammar_focus: String(item.grammar_focus || "عام"),
+          vocab_focus: Array.isArray(item.vocab_focus) ? item.vocab_focus.map(String) : []
+        };
+      });
 
       return res.json({
         success: true,
@@ -2333,6 +2283,54 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       return res.status(500).json({
         error: error.message || "حدث خطأ أثناء تحليل المجلد وتوليد التحديات الصوتية."
       });
+    }
+  });
+
+  // API Route - Lazy Fetch Single Image for a Spoken Challenge on Demand
+  app.get("/api/spoken-challenges/image", async (req, res) => {
+    const query = String(req.query.q || "").trim();
+    if (!query) {
+      return res.json({ success: false, imageUrl: "" });
+    }
+
+    try {
+      const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}`;
+      const pageRes = await fetch(searchUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+          "Accept-Language": "en-US,en;q=0.9,ar;q=0.8"
+        }
+      });
+
+      let imageUrl = "";
+      if (pageRes.ok) {
+        const html = await pageRes.text();
+        const match = html.match(/vqd=['"]?([^'"&]+)/) || html.match(/vqd=([0-9-]+)/);
+        if (match && match[1]) {
+          const vqd = match[1];
+          const imgApiUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,`;
+          const imgRes = await fetch(imgApiUrl, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+              "Referer": "https://duckduckgo.com/"
+            }
+          });
+          if (imgRes.ok) {
+            const data = await imgRes.json();
+            if (data.results && Array.isArray(data.results) && data.results.length > 0) {
+              const firstValid = data.results.find((it: any) => it.image && it.image.startsWith("http"));
+              if (firstValid) {
+                imageUrl = firstValid.image;
+              }
+            }
+          }
+        }
+      }
+
+      return res.json({ success: true, imageUrl });
+    } catch (e: any) {
+      console.warn("DuckDuckGo single challenge image search warning:", e?.message || e);
+      return res.json({ success: false, imageUrl: "" });
     }
   });
 

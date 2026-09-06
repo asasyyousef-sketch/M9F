@@ -171,8 +171,46 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
   // Timer reference
   const timerRef = useRef<any>(null);
   const recognitionRef = useRef<any>(null);
+  const fetchingIndicesRef = useRef<Set<number>>(new Set());
 
   const currentChallenge = challenges[currentIndex] || null;
+
+  // Lazy load images on-demand: always fetch current card and next card
+  const fetchChallengeImage = useCallback(async (index: number, challengeList: SpeakingChallengeItem[]) => {
+    if (index < 0 || index >= challengeList.length) return;
+    const item = challengeList[index];
+    if (!item || item.imageUrl || fetchingIndicesRef.current.has(index)) return;
+
+    fetchingIndicesRef.current.add(index);
+    try {
+      const q = item.image_prompt || `${item.target_german} illustration`;
+      const res = await fetch(`/api/spoken-challenges/image?q=${encodeURIComponent(q)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.imageUrl) {
+          setChallenges((prev) => {
+            if (!prev[index] || prev[index].imageUrl) return prev;
+            const updated = [...prev];
+            updated[index] = { ...updated[index], imageUrl: data.imageUrl };
+            return updated;
+          });
+          preloadImage(data.imageUrl).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn(`Failed lazy loading image for challenge ${index}:`, e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (challenges.length === 0) return;
+    // Always fetch current card image if missing
+    fetchChallengeImage(currentIndex, challenges);
+    // And fetch the next card image (lazy prefetch)
+    if (currentIndex + 1 < challenges.length) {
+      fetchChallengeImage(currentIndex + 1, challenges);
+    }
+  }, [currentIndex, challenges, fetchChallengeImage]);
 
   // Initialize Speech Recognition if supported
   useEffect(() => {
@@ -338,11 +376,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
         throw new Error("لم يتم استخراج تحديات من المجلد. يرجى التأكد من محتوى البطاقات.");
       }
 
-      // Preload first few images
-      data.challenges.forEach((ch: SpeakingChallengeItem) => {
-        if (ch.imageUrl) preloadImage(ch.imageUrl).catch(() => {});
-      });
-
+      fetchingIndicesRef.current.clear();
       setChallenges(data.challenges);
       setCurrentIndex(0);
       setIsRevealed(false);
