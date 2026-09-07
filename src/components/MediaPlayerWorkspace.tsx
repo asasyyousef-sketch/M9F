@@ -3113,10 +3113,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   // Dedicated toggles for Circle 1 (Primary / Yellow) and Circle 2 (Secondary / Green)
   const togglePrimarySubtitle = useCallback(() => {
     triggerSubtitleCirclesNotice(3000);
-    if (isFullscreen) {
-      setShowFullscreenControls(true);
-      resetFullscreenControlsTimer();
-    }
     if (isSub1Active) {
       setShowPrimarySubtitle(false);
       showPrimarySubtitleRef.current = false;
@@ -3157,10 +3153,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   const toggleSecondarySubtitle = useCallback(() => {
     triggerSubtitleCirclesNotice(3000);
-    if (isFullscreen) {
-      setShowFullscreenControls(true);
-      resetFullscreenControlsTimer();
-    }
     if (isSub2Active) {
       setShowDualSubtitles(false);
       showDualSubtitlesRef.current = false;
@@ -3638,10 +3630,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       showPrimarySubtitleRef.current = true;
       setShowSubtitlesOverlay(true);
       setShowPrimarySubtitle(true);
-      if (isFullscreen) {
-        setShowFullscreenControls(true);
-        resetFullscreenControlsTimer();
-      }
       return;
     }
 
@@ -3738,16 +3726,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         setFiles((prev) => prev.map((f) => f.id === file.id ? { ...f, secondaryTrackId: targetSecId || undefined, showDualSubtitles: true } : f));
       }
     }
-
-    if (isFullscreen) {
-      setShowFullscreenControls(true);
-      resetFullscreenControlsTimer();
-    }
   }, [
     triggerSubtitlePreview,
-    triggerSubtitleCirclesNotice,
-    isFullscreen,
-    resetFullscreenControlsTimer
+    triggerSubtitleCirclesNotice
   ]);
 
   const handleCenterSwipeDown = useCallback(() => {
@@ -3773,10 +3754,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         window.clearTimeout(swipeSubtitlePreviewTimerRef.current);
       }
       setShowSwipeSubtitlePreview(false);
-      if (isFullscreen) {
-        setShowFullscreenControls(true);
-        resetFullscreenControlsTimer();
-      }
       return;
     }
 
@@ -3825,16 +3802,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         setFiles((prev) => prev.map((f) => f.id === file.id ? { ...f, showDualSubtitles: false } : f));
       }
     }
-
-    if (isFullscreen) {
-      setShowFullscreenControls(true);
-      resetFullscreenControlsTimer();
-    }
   }, [
     triggerSubtitlePreview,
-    triggerSubtitleCirclesNotice,
-    isFullscreen,
-    resetFullscreenControlsTimer
+    triggerSubtitleCirclesNotice
   ]);
 
   // Left Swipe UP / DOWN (Sentence navigation)
