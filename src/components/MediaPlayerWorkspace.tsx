@@ -4078,48 +4078,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const swipeDuration = Date.now() - start.time;
 
     // -------------------------------------------------------------
-    // GESTURE DETECTION (Vertical Swipe, Horizontal Swipe, or Tap)
+    // A. HORIZONTAL SWIPE GESTURE (السحب لليمين أو لليسار للتقديم والتأخير التناسبي)
+    // Priority check for horizontal seeking (+/- seconds) across the player
     // -------------------------------------------------------------
-    const isGestureMovement = (absDeltaX >= 18 || absDeltaY >= 18) && swipeDuration < 1600;
-
-    if (isGestureMovement) {
+    if (absDeltaX >= 22 && absDeltaX > absDeltaY * 0.7 && swipeDuration < 1500) {
       if (tapTrackerRef.current?.timer) {
         window.clearTimeout(tapTrackerRef.current.timer);
         tapTrackerRef.current = null;
       }
 
-      // 1. VERTICAL SWIPE (Dominant axis is vertical: absDeltaY >= absDeltaX)
-      // This prevents accidental diagonal horizontal seeks from swallowing subtitle swipes on mobile/desktop!
-      if (absDeltaY >= absDeltaX) {
-        // Vertical edge swipe threshold: 12% at the left/right edges, giving 76% of width to Subtitles!
-        const edgeThreshold = 0.12;
-
-        if (startXRatio < edgeThreshold) {
-          // LEFT ZONE SWIPE (Sentence Navigation)
-          if (deltaY > 0) {
-            handleLeftSwipeUp(); // Next sentence
-          } else {
-            handleLeftSwipeDown(); // Prev sentence
-          }
-        } else if (startXRatio > (1 - edgeThreshold)) {
-          // RIGHT ZONE SWIPE (Volume Control)
-          if (deltaY > 0) {
-            handleRightSwipeUp(); // Volume Up
-          } else {
-            handleRightSwipeDown(); // Volume Down
-          }
-        } else {
-          // CENTER ZONE SWIPE (Subtitles - Wide Center Area)
-          if (deltaY > 0) {
-            handleCenterSwipeUp();
-          } else {
-            handleCenterSwipeDown();
-          }
-        }
-        return;
-      }
-
-      // 2. HORIZONTAL SWIPE GESTURE (السحب لليمين أو لليسار للتقديم والتأخير التناسبي)
       const effectiveDist = Math.max(0, absDeltaX - 16);
       let seekSeconds = 2;
 
@@ -4159,6 +4126,46 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           subLabel: `سحب لليسار: رجوع ${seekSeconds} ثانية`
         }, 550);
         triggerHud(`رجوع -${seekSeconds} ثانية ⏪`, "سحب ⬅️");
+      }
+      return;
+    }
+
+    // -------------------------------------------------------------
+    // B. VERTICAL SWIPE GESTURES (سحب عمودي للأعلى أو للأسفل)
+    // Left Zone (25% in Fullscreen) = Sentence Navigation
+    // Right Zone (25% in Fullscreen) = Volume Control
+    // Center Zone (50% in Fullscreen) = Subtitles Toggle
+    // -------------------------------------------------------------
+    if (absDeltaY >= 22 && absDeltaY > absDeltaX * 0.7 && swipeDuration < 1200) {
+      if (tapTrackerRef.current?.timer) {
+        window.clearTimeout(tapTrackerRef.current.timer);
+        tapTrackerRef.current = null;
+      }
+
+      // Balanced zone threshold: 25% for sides in fullscreen, 20% in normal player
+      const edgeThreshold = isFullscreen ? 0.25 : 0.20;
+
+      if (startXRatio < edgeThreshold) {
+        // LEFT ZONE SWIPE (Sentence Navigation)
+        if (deltaY > 0) {
+          handleLeftSwipeUp(); // Next sentence
+        } else {
+          handleLeftSwipeDown(); // Prev sentence
+        }
+      } else if (startXRatio > (1 - edgeThreshold)) {
+        // RIGHT ZONE SWIPE (Volume Control)
+        if (deltaY > 0) {
+          handleRightSwipeUp(); // Volume Up
+        } else {
+          handleRightSwipeDown(); // Volume Down
+        }
+      } else {
+        // CENTER ZONE SWIPE (Subtitles - Balanced Center 50%)
+        if (deltaY > 0) {
+          handleCenterSwipeUp();
+        } else {
+          handleCenterSwipeDown();
+        }
       }
       return;
     }
