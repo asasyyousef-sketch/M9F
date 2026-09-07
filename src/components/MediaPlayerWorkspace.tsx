@@ -472,6 +472,14 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   // Subtitle States
   const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
   const [secondaryTrackId, setSecondaryTrackId] = useState<string | null>(null);
+  const [showPrimarySubtitle, setShowPrimarySubtitle] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("media_player_show_primary_subtitle");
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
   const [showDualSubtitles, setShowDualSubtitles] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem("media_player_show_dual_subtitles");
@@ -923,6 +931,17 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       const next = !prev;
       if (next) {
         triggerSubtitlePreview(3200);
+        setShowPrimarySubtitle(true);
+        showPrimarySubtitleRef.current = true;
+        try {
+          localStorage.setItem("media_player_show_primary_subtitle", JSON.stringify(true));
+        } catch (e) {}
+      } else {
+        setShowPrimarySubtitle(false);
+        showPrimarySubtitleRef.current = false;
+        try {
+          localStorage.setItem("media_player_show_primary_subtitle", JSON.stringify(false));
+        } catch (e) {}
       }
       try {
         localStorage.setItem("media_player_show_subtitles_overlay", JSON.stringify(next));
@@ -1139,6 +1158,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   // Synchronized state refs to prevent stale closure race conditions during swipe gestures
   const showSubtitlesOverlayRef = useRef(showSubtitlesOverlay);
+  const showPrimarySubtitleRef = useRef(showPrimarySubtitle);
   const showDualSubtitlesRef = useRef(showDualSubtitles);
   const activeTrackIdRef = useRef(activeTrackId);
   const secondaryTrackIdRef = useRef(secondaryTrackId);
@@ -1147,6 +1167,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   useEffect(() => {
     showSubtitlesOverlayRef.current = showSubtitlesOverlay;
   }, [showSubtitlesOverlay]);
+
+  useEffect(() => {
+    showPrimarySubtitleRef.current = showPrimarySubtitle;
+  }, [showPrimarySubtitle]);
 
   useEffect(() => {
     showDualSubtitlesRef.current = showDualSubtitles;
@@ -3039,6 +3063,129 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     };
   }, [isFullscreen, showFullscreenControls, isScrubbing, resetFullscreenControlsTimer]);
 
+  // Subtitle Active Status for Visual Indicators (Yellow Circle for Subtitle 1, Green Circle for Subtitle 2, Gray when inactive)
+  const isSub1Active = Boolean(
+    showSubtitlesOverlay &&
+    showPrimarySubtitle &&
+    (activeTrack || (currentFile?.subtitles && currentFile.subtitles.length > 0))
+  );
+
+  const isSub2Active = Boolean(
+    showSubtitlesOverlay &&
+    showDualSubtitles &&
+    (secondaryTrack || (currentFile?.subtitles && currentFile.subtitles.length > 1))
+  );
+
+  // Dedicated toggles for Circle 1 (Primary / Yellow) and Circle 2 (Secondary / Green)
+  const togglePrimarySubtitle = useCallback(() => {
+    if (isFullscreen) {
+      setShowFullscreenControls(true);
+      resetFullscreenControlsTimer();
+    }
+    if (isSub1Active) {
+      setShowPrimarySubtitle(false);
+      showPrimarySubtitleRef.current = false;
+      try {
+        localStorage.setItem("media_player_show_primary_subtitle", JSON.stringify(false));
+      } catch (e) {
+        console.error(e);
+      }
+      if (!isSub2Active) {
+        setShowSubtitlesOverlay(false);
+        showSubtitlesOverlayRef.current = false;
+        try {
+          localStorage.setItem("media_player_show_subtitles_overlay", JSON.stringify(false));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } else {
+      setShowPrimarySubtitle(true);
+      showPrimarySubtitleRef.current = true;
+      setShowSubtitlesOverlay(true);
+      showSubtitlesOverlayRef.current = true;
+      try {
+        localStorage.setItem("media_player_show_primary_subtitle", JSON.stringify(true));
+        localStorage.setItem("media_player_show_subtitles_overlay", JSON.stringify(true));
+      } catch (e) {
+        console.error(e);
+      }
+      if (!activeTrackId && currentFile?.subtitles?.length) {
+        const germanOrFirst = currentFile.subtitles.find(
+          (t) => t.source === "transcribe" || t.label.includes("_TRN_") || t.language === "de"
+        ) || currentFile.subtitles[0];
+        setActiveTrackId(germanOrFirst.id);
+        activeTrackIdRef.current = germanOrFirst.id;
+      }
+    }
+  }, [isSub1Active, isSub2Active, isFullscreen, resetFullscreenControlsTimer, activeTrackId, currentFile]);
+
+  const toggleSecondarySubtitle = useCallback(() => {
+    if (isFullscreen) {
+      setShowFullscreenControls(true);
+      resetFullscreenControlsTimer();
+    }
+    if (isSub2Active) {
+      setShowDualSubtitles(false);
+      showDualSubtitlesRef.current = false;
+      try {
+        localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(false));
+      } catch (e) {
+        console.error(e);
+      }
+      if (currentFile) {
+        saveSubtitlePreferencesToServer(currentFile.id, activeTrackIdRef.current, secondaryTrackIdRef.current, false);
+        setCurrentFile((cf) => cf ? { ...cf, showDualSubtitles: false } : null);
+        setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, showDualSubtitles: false } : f));
+      }
+      if (!isSub1Active) {
+        setShowSubtitlesOverlay(false);
+        showSubtitlesOverlayRef.current = false;
+        try {
+          localStorage.setItem("media_player_show_subtitles_overlay", JSON.stringify(false));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } else {
+      setShowSubtitlesOverlay(true);
+      showSubtitlesOverlayRef.current = true;
+      setShowDualSubtitles(true);
+      showDualSubtitlesRef.current = true;
+      try {
+        localStorage.setItem("media_player_show_subtitles_overlay", JSON.stringify(true));
+        localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(true));
+      } catch (e) {
+        console.error(e);
+      }
+
+      let targetSecId = secondaryTrackIdRef.current;
+      if ((!targetSecId || targetSecId === activeTrackIdRef.current) && currentFile?.subtitles && currentFile.subtitles.length > 1) {
+        const arabicOrOther = currentFile.subtitles.find(
+          (t) =>
+            t.id !== activeTrackIdRef.current &&
+            (t.language === "ar" ||
+              t.label.includes("_GEM_AR") ||
+              t.label.includes("عربي") ||
+              t.label.includes("🇸🇦") ||
+              (t.source === "ai" && t.language !== "de" && !t.label.includes("_TRN_") && !t.label.includes("_de")))
+        ) || currentFile.subtitles.find((t) => t.id !== activeTrackIdRef.current);
+        if (arabicOrOther) {
+          targetSecId = arabicOrOther.id;
+          setSecondaryTrackId(arabicOrOther.id);
+          secondaryTrackIdRef.current = arabicOrOther.id;
+        }
+      }
+
+      if (currentFile) {
+        saveSubtitlePreferences(currentFile.id, activeTrackIdRef.current, targetSecId);
+        saveSubtitlePreferencesToServer(currentFile.id, activeTrackIdRef.current, targetSecId, true);
+        setCurrentFile((cf) => cf ? { ...cf, secondaryTrackId: targetSecId || undefined, showDualSubtitles: true } : null);
+        setFiles((prev) => prev.map((f) => f.id === currentFile.id ? { ...f, secondaryTrackId: targetSecId || undefined, showDualSubtitles: true } : f));
+      }
+    }
+  }, [isSub1Active, isSub2Active, isFullscreen, resetFullscreenControlsTimer, currentFile]);
+
   // Close Speed menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -3441,12 +3588,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   // - Fullscreen Single Tap: Only show/hide controls & timeline bar
   // ---------------------------------------------------------
 
-  // Center Swipe UP / DOWN (Subtitles)
+  // Center Swipe UP / DOWN (Subtitles toggling without HUD/center alerts, visual feedback via the two top indicator circles)
   const handleCenterSwipeUp = useCallback(() => {
     const file = currentFileRef.current;
     const availableSubtitles = file?.subtitles || [];
 
     const currentOverlay = showSubtitlesOverlayRef.current;
+    const currentPrimary = showPrimarySubtitleRef.current;
     const currentDual = showDualSubtitlesRef.current;
     const currentActiveId = activeTrackIdRef.current;
     const currentSecId = secondaryTrackIdRef.current;
@@ -3456,23 +3604,22 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
     if (availableSubtitles.length === 0) {
       showSubtitlesOverlayRef.current = true;
+      showPrimarySubtitleRef.current = true;
       setShowSubtitlesOverlay(true);
-      triggerVisualFeedback({
-        type: "swipe_up_sub1",
-        side: "center",
-        label: "معاينة نص تجريبي",
-        subLabel: "سحب للأعلى: عرض نموذج تجريبي للترجمة"
-      });
-      triggerHud("عرض نص تجريبي للترجمة 🎬", "سحب ⬆️");
+      setShowPrimarySubtitle(true);
+      if (isFullscreen) {
+        setShowFullscreenControls(true);
+        resetFullscreenControlsTimer();
+      }
       return;
     }
 
     // Subtitle Visibility State Machine:
-    // State 0: All Hidden (showSubtitlesOverlay === false)
-    // State 1: Primary Subtitle 1 Visible (showSubtitlesOverlay === true && showDualSubtitles === false)
-    // State 2: Both Subtitles 1 & 2 Visible (showSubtitlesOverlay === true && showDualSubtitles === true)
+    // State 0: All Hidden (showSubtitlesOverlay === false || !showPrimarySubtitle)
+    // State 1: Primary Subtitle 1 Visible (Yellow Circle ON, Green Circle OFF)
+    // State 2: Both Subtitles 1 & 2 Visible (Yellow Circle ON, Green Circle ON)
 
-    if (!currentOverlay) {
+    if (!currentOverlay || !currentPrimary) {
       // 1st Swipe UP -> Reveal Primary Subtitle 1 ONLY
       let targetPrimaryId = currentActiveId;
       const hasValidPrimary = Boolean(targetPrimaryId && availableSubtitles.some((t) => t.id === targetPrimaryId));
@@ -3491,41 +3638,29 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       }
 
       showSubtitlesOverlayRef.current = true;
-      showDualSubtitlesRef.current = false;
+      showPrimarySubtitleRef.current = true;
       activeTrackIdRef.current = targetPrimaryId;
 
       setActiveTrackId(targetPrimaryId);
       setShowSubtitlesOverlay(true);
-      setShowDualSubtitles(false);
+      setShowPrimarySubtitle(true);
 
       try {
         localStorage.setItem("media_player_show_subtitles_overlay", JSON.stringify(true));
-        localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(false));
+        localStorage.setItem("media_player_show_primary_subtitle", JSON.stringify(true));
       } catch (e) {
         console.error(e);
       }
 
       if (file && targetPrimaryId) {
         saveSubtitlePreferences(file.id, targetPrimaryId, currentSecId);
-        saveSubtitlePreferencesToServer(file.id, targetPrimaryId, currentSecId, false);
-        setCurrentFile((prev) => prev ? { ...prev, primaryTrackId: targetPrimaryId, showDualSubtitles: false } : null);
-        setFiles((prev) => prev.map((f) => f.id === file.id ? { ...f, primaryTrackId: targetPrimaryId, showDualSubtitles: false } : f));
+        saveSubtitlePreferencesToServer(file.id, targetPrimaryId, currentSecId, currentDual);
+        setCurrentFile((prev) => prev ? { ...prev, primaryTrackId: targetPrimaryId } : null);
+        setFiles((prev) => prev.map((f) => f.id === file.id ? { ...f, primaryTrackId: targetPrimaryId } : f));
       }
-
-      const primTrack = availableSubtitles.find((t) => t.id === targetPrimaryId);
-      const primLabel = primTrack?.label || "الترجمة الأولى";
-
-      triggerVisualFeedback({
-        type: "swipe_up_sub1",
-        side: "center",
-        label: "إظهار الترجمة الأولى",
-        subLabel: `سحب للأعلى: تفعيل (${primLabel})`
-      });
-      triggerHud(`إظهار الترجمة الأولى (${primLabel})`, "سحب ⬆️");
     } else if (!currentDual) {
       // 2nd Swipe UP -> Reveal Secondary / Dual Subtitle 2
       if (availableSubtitles.length <= 1) {
-        triggerHud("يوجد مسار ترجمة واحد فقط متاح", "ℹ️");
         return;
       }
 
@@ -3572,24 +3707,16 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         setCurrentFile((prev) => prev ? { ...prev, secondaryTrackId: targetSecId || undefined, showDualSubtitles: true } : null);
         setFiles((prev) => prev.map((f) => f.id === file.id ? { ...f, secondaryTrackId: targetSecId || undefined, showDualSubtitles: true } : f));
       }
+    }
 
-      const secTrack = availableSubtitles.find((t) => t.id === targetSecId);
-      const secLabel = secTrack?.label || "الترجمة الثانية";
-
-      triggerVisualFeedback({
-        type: "swipe_up_sub2",
-        side: "center",
-        label: "إظهار الترجمة المزدوجة",
-        subLabel: `سحب للأعلى: تفعيل (+ ${secLabel})`
-      });
-      triggerHud(`إظهار الترجمة المزدوجة (+ ${secLabel})`, "سحب ⬆️");
-    } else {
-      triggerHud("كلا الترجمتين مفعّلتان بالفعل", "💬💬");
+    if (isFullscreen) {
+      setShowFullscreenControls(true);
+      resetFullscreenControlsTimer();
     }
   }, [
     triggerSubtitlePreview,
-    triggerVisualFeedback,
-    triggerHud
+    isFullscreen,
+    resetFullscreenControlsTimer
   ]);
 
   const handleCenterSwipeDown = useCallback(() => {
@@ -3597,31 +3724,30 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const availableSubtitles = file?.subtitles || [];
 
     const currentOverlay = showSubtitlesOverlayRef.current;
+    const currentPrimary = showPrimarySubtitleRef.current;
     const currentDual = showDualSubtitlesRef.current;
     const currentActiveId = activeTrackIdRef.current;
     const currentSecId = secondaryTrackIdRef.current;
 
     if (availableSubtitles.length === 0 && currentOverlay) {
       showSubtitlesOverlayRef.current = false;
+      showPrimarySubtitleRef.current = false;
       showDualSubtitlesRef.current = false;
       setShowSubtitlesOverlay(false);
+      setShowPrimarySubtitle(false);
       setShowDualSubtitles(false);
       if (swipeSubtitlePreviewTimerRef.current) {
         window.clearTimeout(swipeSubtitlePreviewTimerRef.current);
       }
       setShowSwipeSubtitlePreview(false);
-      triggerVisualFeedback({
-        type: "swipe_down_all",
-        side: "center",
-        label: "إخفاء النص التجريبي",
-        subLabel: "سحب للأسفل: إخفاء المعاينة"
-      });
-      triggerHud("إخفاء النص التجريبي", "سحب ⬇️");
+      if (isFullscreen) {
+        setShowFullscreenControls(true);
+        resetFullscreenControlsTimer();
+      }
       return;
     }
 
     if (availableSubtitles.length === 0) {
-      triggerHud("لا توجد مسارات ترجمة", "⚠️");
       return;
     }
 
@@ -3642,19 +3768,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         setCurrentFile((cf) => cf ? { ...cf, showDualSubtitles: false } : null);
         setFiles((prev) => prev.map((f) => f.id === file.id ? { ...f, showDualSubtitles: false } : f));
       }
-
-      triggerVisualFeedback({
-        type: "swipe_down_sub2",
-        side: "center",
-        label: "إخفاء الترجمة الثانية",
-        subLabel: "سحب للأسفل: الإبقاء على الترجمة الأولى فقط"
-      });
-      triggerHud("إخفاء الترجمة الثانية (الاحتفاظ بالأولى)", "سحب ⬇️");
-    } else if (currentOverlay) {
+    } else if (currentOverlay && currentPrimary) {
       // 2nd Swipe DOWN -> Hide Subtitle 1 (All subtitles hidden)
       showSubtitlesOverlayRef.current = false;
+      showPrimarySubtitleRef.current = false;
       showDualSubtitlesRef.current = false;
       setShowSubtitlesOverlay(false);
+      setShowPrimarySubtitle(false);
       setShowDualSubtitles(false);
 
       if (swipeSubtitlePreviewTimerRef.current) {
@@ -3664,6 +3784,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
       try {
         localStorage.setItem("media_player_show_subtitles_overlay", JSON.stringify(false));
+        localStorage.setItem("media_player_show_primary_subtitle", JSON.stringify(false));
         localStorage.setItem("media_player_show_dual_subtitles", JSON.stringify(false));
       } catch (e) {
         console.error(e);
@@ -3674,21 +3795,16 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         setCurrentFile((cf) => cf ? { ...cf, showDualSubtitles: false } : null);
         setFiles((prev) => prev.map((f) => f.id === file.id ? { ...f, showDualSubtitles: false } : f));
       }
+    }
 
-      triggerVisualFeedback({
-        type: "swipe_down_all",
-        side: "center",
-        label: "إخفاء الترجمة بالكامل",
-        subLabel: "سحب للأسفل: إخفاء جميع الترجمات"
-      });
-      triggerHud("إخفاء جميع الترجمات", "سحب ⬇️");
-    } else {
-      triggerHud("الترجمة مخفية بالفعل", "🚫");
+    if (isFullscreen) {
+      setShowFullscreenControls(true);
+      resetFullscreenControlsTimer();
     }
   }, [
     triggerSubtitlePreview,
-    triggerVisualFeedback,
-    triggerHud
+    isFullscreen,
+    resetFullscreenControlsTimer
   ]);
 
   // Left Swipe UP / DOWN (Sentence navigation)
@@ -4215,6 +4331,56 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           {isPlayerOpen && currentFile ? (
             /* Actions in Player Mode: Clean and focused on active media */
             <>
+              {/* Dual Subtitle Status Circles (Yellow = Subtitle 1, Green = Subtitle 2, Gray = Inactive) */}
+              <div
+                className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-full border border-slate-200 shadow-2xs shrink-0"
+                title="مؤشرات حالة الترجمة (1 = صفراء، 2 = خضراء، رمادي = معطّلة)"
+              >
+                {/* Circle 1 */}
+                <button
+                  type="button"
+                  onClick={togglePrimarySubtitle}
+                  title={isSub1Active ? "الترجمة الأولى مفعّلة 🇩🇪 (اضغط للتعطيل)" : "الترجمة الأولى معطّلة (اضغط للتفعيل)"}
+                  className="flex items-center gap-1.5 cursor-pointer group focus:outline-hidden"
+                >
+                  <span
+                    className={`w-3 h-3 rounded-full transition-all duration-300 ${
+                      isSub1Active
+                        ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)] scale-110"
+                        : "bg-slate-400 opacity-60"
+                    }`}
+                  />
+                  <span className={`text-[11px] font-bold font-mono ${
+                    isSub1Active ? "text-amber-700 font-black" : "text-slate-500"
+                  }`}>
+                    1
+                  </span>
+                </button>
+
+                <div className="w-[1px] h-3 bg-slate-300 mx-0.5" />
+
+                {/* Circle 2 */}
+                <button
+                  type="button"
+                  onClick={toggleSecondarySubtitle}
+                  title={isSub2Active ? "الترجمة الثانية مفعّلة 🇸🇦 (اضغط للتعطيل)" : "الترجمة الثانية معطّلة (اضغط للتفعيل)"}
+                  className="flex items-center gap-1.5 cursor-pointer group focus:outline-hidden"
+                >
+                  <span
+                    className={`w-3 h-3 rounded-full transition-all duration-300 ${
+                      isSub2Active
+                        ? "bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.9)] scale-110"
+                        : "bg-slate-400 opacity-60"
+                    }`}
+                  />
+                  <span className={`text-[11px] font-bold font-mono ${
+                    isSub2Active ? "text-emerald-700 font-black" : "text-slate-500"
+                  }`}>
+                    2
+                  </span>
+                </button>
+              </div>
+
               {/* Side Panel (Transcript / Subtitles) Toggle */}
               <button
                 onClick={() => {
@@ -4417,16 +4583,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       : "relative rounded-lg bg-black overflow-hidden flex items-center justify-center min-h-[260px] sm:min-h-[380px] group border border-slate-800 shadow-inner cursor-pointer select-none touch-none"
                   }
                 >
-                  {/* Sleek Floating Top Header (Fullscreen & Immersive Mode) */}
-                  {(isImmersiveMode || isFullscreen) && (
-                    <div
-                      className={`absolute top-0 inset-x-0 z-40 bg-gradient-to-b from-black/85 via-slate-950/60 to-transparent p-2.5 sm:p-3.5 flex items-center justify-between text-white transition-all duration-300 pointer-events-auto select-none ${
-                        isFullscreen
-                          ? showFullscreenControls
-                            ? "opacity-100 translate-y-0"
-                            : "opacity-0 -translate-y-6 pointer-events-none"
-                          : "opacity-100 translate-y-0"
-                      }`}
+                  {/* Sleek Floating Top Header (Normal, Immersive, and Fullscreen) */}
+                  <div
+                    className={`absolute top-0 inset-x-0 z-40 bg-gradient-to-b from-black/85 via-slate-950/60 to-transparent p-2.5 sm:p-3.5 flex items-center justify-between text-white transition-all duration-300 pointer-events-auto select-none ${
+                      isFullscreen
+                        ? showFullscreenControls
+                          ? "opacity-100 translate-y-0"
+                          : "opacity-0 -translate-y-6 pointer-events-none"
+                        : "opacity-100 translate-y-0"
+                    }`}
                       onClick={(e) => {
                         e.stopPropagation();
                         if (isFullscreen && showFullscreenControls) resetFullscreenControlsTimer();
@@ -4448,9 +4613,65 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           <ChevronLeft className="w-4 h-4 rtl:rotate-180" />
                         </button>
 
-                        <h2 className="text-xs sm:text-sm font-bold text-white truncate max-w-[160px] xs:max-w-[220px] sm:max-w-md">
+                        <h2 className="text-xs sm:text-sm font-bold text-white truncate max-w-[120px] xs:max-w-[180px] sm:max-w-xs md:max-w-sm">
                           {currentFile.title || currentFile.originalName}
                         </h2>
+                      </div>
+
+                      {/* Center: Two Simple Subtitle Status Circles (Yellow = Subtitle 1, Green = Subtitle 2, Gray = Inactive) */}
+                      <div
+                        className="flex items-center gap-2 bg-black/60 hover:bg-black/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/15 shadow-lg shrink-0 transition-colors mx-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {/* Circle 1: Primary Subtitle (Yellow / صفراء when active, Gray / رمادي when inactive) */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            togglePrimarySubtitle();
+                          }}
+                          title={isSub1Active ? "الترجمة الأولى (مفعّلة 🇩🇪) - اضغط للإخفاء" : "الترجمة الأولى (معطّلة) - اضغط للإظهار"}
+                          className="flex items-center gap-1.5 cursor-pointer focus:outline-hidden group"
+                        >
+                          <span
+                            className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${
+                              isSub1Active
+                                ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.85)] scale-110"
+                                : "bg-slate-600 hover:bg-slate-500 opacity-60"
+                            }`}
+                          />
+                          <span className={`text-[11px] font-bold font-mono transition-colors ${
+                            isSub1Active ? "text-amber-300" : "text-slate-400"
+                          }`}>
+                            1
+                          </span>
+                        </button>
+
+                        <div className="w-[1px] h-3 bg-white/20 mx-0.5" />
+
+                        {/* Circle 2: Secondary Subtitle (Green / خضراء when active, Gray / رمادي when inactive) */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSecondarySubtitle();
+                          }}
+                          title={isSub2Active ? "الترجمة الثانية (مفعّلة 🇸🇦) - اضغط للإخفاء" : "الترجمة الثانية (معطّلة) - اضغط للإظهار"}
+                          className="flex items-center gap-1.5 cursor-pointer focus:outline-hidden group"
+                        >
+                          <span
+                            className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${
+                              isSub2Active
+                                ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.85)] scale-110"
+                                : "bg-slate-600 hover:bg-slate-500 opacity-60"
+                            }`}
+                          />
+                          <span className={`text-[11px] font-bold font-mono transition-colors ${
+                            isSub2Active ? "text-emerald-300" : "text-slate-400"
+                          }`}>
+                            2
+                          </span>
+                        </button>
                       </div>
 
                       {/* Right: Clean Action Controls */}
@@ -4645,7 +4866,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                         </div>
                       </div>
                     </div>
-                  )}
 
                   {/* YouTube-Style Dynamic Gesture Visual Overlays */}
                   {/* 1. Center Tap: Play / Pause or Fullscreen / Minimize */}
@@ -5004,7 +5224,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   )}
 
                   {/* FLOATING SUBTITLES OVERLAY (Identical floating behavior & styling for BOTH Video & Audio) */}
-                  {showSubtitlesOverlay && (currentCue || (showDualSubtitles && currentSecondaryCue) || showSwipeSubtitlePreview || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && (
+                  {showSubtitlesOverlay && ((showPrimarySubtitle && currentCue) || (showDualSubtitles && currentSecondaryCue) || showSwipeSubtitlePreview || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal) && (
                     <>
                       {primarySubStyle.position === secondarySubStyle.position ? (
                         <div
@@ -5012,7 +5232,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           style={getSubtitlePositionStyle(primarySubStyle.position, primarySubStyle.offsetY)}
                         >
                           {/* Primary Subtitle (e.g., German / Original) */}
-                          {(currentCue || (((showSwipeSubtitlePreview || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal)) && !currentCue)) && (() => {
+                          {showPrimarySubtitle && (currentCue || (((showSwipeSubtitlePreview || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal)) && !currentCue)) && (() => {
                             const text = currentCue ? currentCue.text : getSamplePrimarySubtitleText();
                             const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
@@ -5042,7 +5262,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       ) : (
                         <>
                           {/* Primary Subtitle in its dedicated position */}
-                          {(currentCue || (((showSwipeSubtitlePreview || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal)) && !currentCue)) && (() => {
+                          {showPrimarySubtitle && (currentCue || (((showSwipeSubtitlePreview || (showTranscriptPanel && sidePanelView === "style") || showSubtitleStyleModal)) && !currentCue)) && (() => {
                             const text = currentCue ? currentCue.text : getSamplePrimarySubtitleText();
                             const dir = primarySubStyle.direction === "rtl" ? "rtl" : primarySubStyle.direction === "ltr" ? "ltr" : detectTextDirection(text);
                             return (
