@@ -1165,9 +1165,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
     const measure = () => {
       if (controlsBarRef.current) {
-        const rect = controlsBarRef.current.getBoundingClientRect();
-        if (rect.height > 0) {
-          setControlsBarHeight(rect.height);
+        const el = controlsBarRef.current;
+        // In rotated landscape mode (90° / 270°), getBoundingClientRect swaps width and height,
+        // which was returning 700px-900px (the entire screen width!) and pushing subtitles off-screen.
+        // offsetHeight/clientHeight gives the true unrotated height of the controls bar (around 80-100px).
+        const h = el.offsetHeight || el.clientHeight || 0;
+        if (h > 0 && h < 220) {
+          setControlsBarHeight(h);
+        } else {
+          setControlsBarHeight(92);
         }
       }
     };
@@ -4207,17 +4213,25 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
     // Consistent bottom positioning across standard, immersive, and fullscreen modes
     // In Fullscreen mode: when controls bar (scrubber & playback controls) is visible,
-    // dynamically offset the subtitle by the exact total height and bottom margin of the controls box.
-    // This guarantees that if offsetY is 0px, the subtitle sits exactly 0px directly above the controls box (never hidden behind it).
-    const isSmallScreen = typeof window !== "undefined" ? window.innerWidth < 640 : false;
-    const controlsBottomMargin = isSmallScreen ? 12 : 24; // matches bottom-3 (12px) vs sm:bottom-6 (24px)
-    const measuredHeight = controlsBarHeight > 0 ? controlsBarHeight : 108;
-    const fullscreenControlsClearance = measuredHeight + controlsBottomMargin + 2;
+    // offset the subtitle so it sits neatly directly above the controls bar without jumping off screen.
+    const isSmallScreen = typeof window !== "undefined" ? window.innerWidth < 640 || window.innerHeight < 520 : false;
+    const controlsBottomMargin = isSmallScreen ? 10 : 20;
+    // Strictly cap measuredHeight to avoid excessive clearance (max 92px on small screens / mobile)
+    const measuredHeight = Math.min(isSmallScreen ? 88 : 108, Math.max(60, controlsBarHeight > 0 && controlsBarHeight < 200 ? controlsBarHeight : 84));
+    const fullscreenControlsClearance = measuredHeight + controlsBottomMargin;
 
     const extraBottom = isFullscreen && showFullscreenControls ? fullscreenControlsClearance : 0;
+    const totalBottom = offsetY + extraBottom;
+
+    // Safety clamp: On mobile devices in landscape / fullscreen, screen height is often only 360-420px.
+    // The bottom offset must NEVER push subtitles into or beyond the upper half of the screen.
+    const maxAllowedBottom = isSmallScreen ? 116 : 220;
+    const safeBottom = Math.min(totalBottom, maxAllowedBottom);
+
     return {
-      bottom: `${offsetY + extraBottom}px`,
+      bottom: `${safeBottom}px`,
       top: "auto",
+      maxHeight: isFullscreen && showFullscreenControls ? "calc(100% - 120px)" : "calc(100% - 28px)",
       transform: "none",
       transition: "bottom 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s ease"
     };
