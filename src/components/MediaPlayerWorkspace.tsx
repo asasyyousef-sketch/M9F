@@ -374,6 +374,13 @@ interface ActiveGestureOverlay {
   subLabel?: string;
 }
 
+interface UnifiedPillNotice {
+  type: "subtitles" | "sentence_next" | "sentence_prev" | "volume" | "seek_forward" | "seek_backward" | "play" | "pause";
+  text?: string;
+  volumePercent?: number;
+  seekAmount?: number;
+}
+
 interface MediaPlayerWorkspaceProps {
   onToggleSidebar?: () => void;
   onBackToLibrary?: () => void;
@@ -1023,20 +1030,25 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }, durationMs);
   }, []);
 
-  // 3-Second Subtitle Status Circles Notice Toast (Appears for 3 seconds on swipe or interaction, disappears if untouched)
-  const [showSubtitleCirclesNotice, setShowSubtitleCirclesNotice] = useState<boolean>(false);
-  const subtitleCirclesTimerRef = useRef<number | null>(null);
+  // Unified Floating Pill Notice (Subtitles circles, Previous/Next sentence, Volume meter, Seek +/-s, Play/Pause)
+  const [unifiedPillNotice, setUnifiedPillNotice] = useState<UnifiedPillNotice | null>(null);
+  const unifiedPillTimerRef = useRef<number | null>(null);
 
-  const triggerSubtitleCirclesNotice = useCallback((durationMs: number = 3000) => {
-    if (subtitleCirclesTimerRef.current) {
-      window.clearTimeout(subtitleCirclesTimerRef.current);
+  const triggerUnifiedNotice = useCallback((notice: UnifiedPillNotice, durationMs: number = 2500) => {
+    if (unifiedPillTimerRef.current) {
+      window.clearTimeout(unifiedPillTimerRef.current);
+      unifiedPillTimerRef.current = null;
     }
-    setShowSubtitleCirclesNotice(true);
-    subtitleCirclesTimerRef.current = window.setTimeout(() => {
-      setShowSubtitleCirclesNotice(false);
-      subtitleCirclesTimerRef.current = null;
+    setUnifiedPillNotice(notice);
+    unifiedPillTimerRef.current = window.setTimeout(() => {
+      setUnifiedPillNotice(null);
+      unifiedPillTimerRef.current = null;
     }, durationMs);
   }, []);
+
+  const triggerSubtitleCirclesNotice = useCallback((durationMs: number = 3000) => {
+    triggerUnifiedNotice({ type: "subtitles" }, durationMs);
+  }, [triggerUnifiedNotice]);
 
   // YouTube-style Gesture Overlay, Multi-Tap & Swipe Engine States
   const [activeGesture, setActiveGesture] = useState<ActiveGestureOverlay | null>(null);
@@ -3810,48 +3822,38 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   // Left Swipe UP / DOWN (Sentence navigation)
   const handleLeftSwipeUp = useCallback(() => {
     jumpToNextSentence(true);
-    triggerVisualFeedback({
-      type: "next_sentence",
-      side: "left",
-      label: "الجملة التالية",
-      subLabel: "سحب للأعلى: تقديم جملة"
-    });
-  }, [jumpToNextSentence, triggerVisualFeedback]);
+    triggerUnifiedNotice({
+      type: "sentence_next",
+      text: "الجملة التالية"
+    }, 2200);
+  }, [jumpToNextSentence, triggerUnifiedNotice]);
 
   const handleLeftSwipeDown = useCallback(() => {
     jumpToPreviousSentence(true);
-    triggerVisualFeedback({
-      type: "prev_sentence",
-      side: "left",
-      label: "الجملة السابقة",
-      subLabel: "سحب للأسفل: تراجع جملة"
-    });
-  }, [jumpToPreviousSentence, triggerVisualFeedback]);
+    triggerUnifiedNotice({
+      type: "sentence_prev",
+      text: "الجملة السابقة"
+    }, 2200);
+  }, [jumpToPreviousSentence, triggerUnifiedNotice]);
 
   // Right Swipe UP / DOWN (Volume Control)
   const handleRightSwipeUp = useCallback(() => {
     const nextVol = Math.min(2.0, Math.round((volume + 0.10) * 100) / 100);
     handleVolumeChange(nextVol);
-    triggerSamsungVolumeBar();
-    triggerVisualFeedback({
-      type: "volume_up",
-      side: "right",
-      label: `مستوى الصوت: ${Math.round(nextVol * 100)}%`,
-      subLabel: nextVol > 1.0 ? "⚡ تعزيز الصوت الفائق" : "سحب للأعلى: رفع الصوت"
-    });
-  }, [volume, handleVolumeChange, triggerVisualFeedback, triggerSamsungVolumeBar]);
+    triggerUnifiedNotice({
+      type: "volume",
+      volumePercent: Math.round(nextVol * 100)
+    }, 2200);
+  }, [volume, handleVolumeChange, triggerUnifiedNotice]);
 
   const handleRightSwipeDown = useCallback(() => {
     const nextVol = Math.max(0, Math.round((volume - 0.10) * 100) / 100);
     handleVolumeChange(nextVol);
-    triggerSamsungVolumeBar();
-    triggerVisualFeedback({
-      type: "volume_down",
-      side: "right",
-      label: `مستوى الصوت: ${Math.round(nextVol * 100)}%`,
-      subLabel: nextVol === 0 ? "كتم الصوت" : "سحب للأسفل: خفض الصوت"
-    });
-  }, [volume, handleVolumeChange, triggerVisualFeedback, triggerSamsungVolumeBar]);
+    triggerUnifiedNotice({
+      type: "volume",
+      volumePercent: Math.round(nextVol * 100)
+    }, 2200);
+  }, [volume, handleVolumeChange, triggerUnifiedNotice]);
 
   const handleStageTap = useCallback(
     (xRatio: number, yRatio: number = 0.5) => {
@@ -3885,12 +3887,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           const el = getMediaElement();
           const willPlay = el ? el.paused : !isPlaying;
           togglePlay();
-          triggerVisualFeedback({
+          triggerUnifiedNotice({
             type: willPlay ? "play" : "pause",
-            side: "center",
-            label: willPlay ? "تشغيل" : "إيقاف مؤقت"
-          });
-          triggerHud(willPlay ? "تشغيل الفيديو" : "إيقاف مؤقت", willPlay ? "▶️" : "⏸️");
+            text: willPlay ? "تشغيل" : "إيقاف مؤقت"
+          }, 1800);
           return;
         }
 
@@ -3931,41 +3931,32 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           if (isImmersiveMode && !isFullscreen) {
             // In Cinema mode (and not fullscreen): Double click in center opens Fullscreen!
             handleToggleFullscreen();
-            triggerVisualFeedback({
-              type: "fullscreen",
-              side: "center",
-              label: "تكبير شامل للشاشة",
-              subLabel: "الوضع السينمائي: تكبير ملء الشاشة"
-            });
           } else {
             // In Standard Mode: Double click in center = Play / Pause
             const el = getMediaElement();
             const willPlay = el ? el.paused : !isPlaying;
             togglePlay();
-            triggerVisualFeedback({
+            triggerUnifiedNotice({
               type: willPlay ? "play" : "pause",
-              side: "center",
-              label: willPlay ? "تشغيل" : "إيقاف مؤقت"
-            });
+              text: willPlay ? "تشغيل" : "إيقاف مؤقت"
+            }, 1800);
           }
         } else if (side === "right") {
           // Right 20% Double Tap: Skip Forward 5s (+5s)
           skipSeconds(5);
-          triggerVisualFeedback({
-            type: "seek_forward_5s",
-            side: "right",
-            label: "+5 ثواني",
-            subLabel: "تقديم 5 ثواني"
-          });
+          triggerUnifiedNotice({
+            type: "seek_forward",
+            text: "+5 ثواني",
+            seekAmount: 5
+          }, 2000);
         } else if (side === "left") {
           // Left 20% Double Tap: Rewind 5s (-5s)
           skipSeconds(-5);
-          triggerVisualFeedback({
-            type: "seek_backward_5s",
-            side: "left",
-            label: "-5 ثواني",
-            subLabel: "تراجع 5 ثواني"
-          });
+          triggerUnifiedNotice({
+            type: "seek_backward",
+            text: "-5 ثواني",
+            seekAmount: 5
+          }, 2000);
         }
         return;
       }
@@ -3982,11 +3973,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           const el = getMediaElement();
           const willPlay = el ? el.paused : !isPlaying;
           togglePlay();
-          triggerVisualFeedback({
+          triggerUnifiedNotice({
             type: willPlay ? "play" : "pause",
-            side: "center",
-            label: willPlay ? "تشغيل" : "إيقاف مؤقت"
-          });
+            text: willPlay ? "تشغيل" : "إيقاف مؤقت"
+          }, 1800);
         }
       }, 230);
 
@@ -4005,8 +3995,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       isPlaying,
       togglePlay,
       skipSeconds,
-      triggerVisualFeedback,
-      triggerHud,
+      triggerUnifiedNotice,
       scrollToActiveCue
     ]
   );
@@ -4109,23 +4098,19 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       if (deltaX > 0) {
         // Swiped RIGHT -> Seek Forward (تقديم للأمام)
         skipSeconds(seekSeconds);
-        triggerVisualFeedback({
-          type: "seek_forward_swipe",
-          side: "right",
-          label: `+${seekSeconds} ثانية`,
-          subLabel: `سحب لليمين: تقديم ${seekSeconds} ثانية`
-        }, 550);
-        triggerHud(`تقديم +${seekSeconds} ثانية ⏩`, "سحب ➡️");
+        triggerUnifiedNotice({
+          type: "seek_forward",
+          text: `+${seekSeconds} ثانية`,
+          seekAmount: seekSeconds
+        }, 2200);
       } else {
         // Swiped LEFT -> Seek Backward (رجوع للخلف)
         skipSeconds(-seekSeconds);
-        triggerVisualFeedback({
-          type: "seek_backward_swipe",
-          side: "left",
-          label: `-${seekSeconds} ثانية`,
-          subLabel: `سحب لليسار: رجوع ${seekSeconds} ثانية`
-        }, 550);
-        triggerHud(`رجوع -${seekSeconds} ثانية ⏪`, "سحب ⬅️");
+        triggerUnifiedNotice({
+          type: "seek_backward",
+          text: `-${seekSeconds} ثانية`,
+          seekAmount: seekSeconds
+        }, 2200);
       }
       return;
     }
@@ -4760,217 +4745,196 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     </div>
                   )}
 
-                  {/* Floating Subtitle Status Circles Notification Toast (Appears for 3 seconds on swipe/toggle, disappears if untouched) */}
+                  {/* Unified Floating Top Pill Bar Notification (Subtitles, Sentence, Volume, Seek, Playback) */}
                   <div
                     className={`absolute top-4 sm:top-6 inset-x-0 flex justify-center items-center z-45 transition-all duration-300 ease-out ${
-                      showSubtitleCirclesNotice
+                      unifiedPillNotice
                         ? "opacity-100 translate-y-0 scale-100 pointer-events-auto"
                         : "opacity-0 -translate-y-3 scale-95 pointer-events-none"
                     }`}
                   >
                     <div
-                      className="flex items-center gap-2.5 bg-black/85 hover:bg-black/95 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/20 shadow-2xl transition-all cursor-default select-none"
+                      className="flex items-center gap-2.5 bg-black/85 hover:bg-black/95 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/20 shadow-2xl transition-all cursor-default select-none text-white"
                       onClick={(e) => e.stopPropagation()}
                       onPointerDown={(e) => e.stopPropagation()}
                       onPointerEnter={() => {
                         // Pause timer when hovered so user can comfortably inspect or click
-                        if (subtitleCirclesTimerRef.current) {
-                          window.clearTimeout(subtitleCirclesTimerRef.current);
-                          subtitleCirclesTimerRef.current = null;
+                        if (unifiedPillTimerRef.current) {
+                          window.clearTimeout(unifiedPillTimerRef.current);
+                          unifiedPillTimerRef.current = null;
                         }
                       }}
                       onPointerLeave={() => {
-                        // Resume 3-second countdown on pointer leave
-                        triggerSubtitleCirclesNotice(3000);
+                        // Resume dismissal countdown on pointer leave
+                        if (unifiedPillNotice) {
+                          triggerUnifiedNotice(unifiedPillNotice, 2200);
+                        }
                       }}
-                      title="مؤشرات حالة الترجمة (1: صفراء للأساسية، 2: خضراء للثانوية، رمادي: معطّلة)"
                     >
-                      {/* Circle 1: Primary Subtitle (Yellow / صفراء when active, Gray / رمادي when inactive) */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          togglePrimarySubtitle();
-                        }}
-                        title={isSub1Active ? "الترجمة الأولى (مفعّلة 🇩🇪) - اضغط للإخفاء" : "الترجمة الأولى (معطّلة) - اضغط للإظهار"}
-                        className="flex items-center gap-1.5 cursor-pointer focus:outline-hidden group"
-                      >
-                        <span
-                          className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${
-                            isSub1Active
-                              ? "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.95)] ring-2 ring-amber-400/40 scale-110"
-                              : "bg-slate-600 hover:bg-slate-500 opacity-60 group-hover:opacity-85"
-                          }`}
-                        />
-                        <span className={`text-[11px] font-bold font-mono transition-colors ${
-                          isSub1Active ? "text-amber-300 font-black" : "text-slate-400"
-                        }`}>
-                          1
-                        </span>
-                      </button>
-
-                      {/* Circle 2: Secondary Subtitle (Green / خضراء when active, Gray / رمادي when inactive) - ONLY rendered if secondary subtitle option exists! */}
-                      {hasSecondarySubtitleOption && (
+                      {/* 1. Subtitles Mode (Circles 1 and 2) */}
+                      {unifiedPillNotice?.type === "subtitles" && (
                         <>
-                          <div className="w-[1px] h-3 bg-white/20 mx-0.5" />
+                          {/* Circle 1: Primary Subtitle (Yellow when active, Gray when inactive) */}
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              toggleSecondarySubtitle();
+                              togglePrimarySubtitle();
                             }}
-                            title={isSub2Active ? "الترجمة الثانية (مفعّلة 🇸🇦) - اضغط للإخفاء" : "الترجمة الثانية (معطّلة) - اضغط للإظهار"}
+                            title={isSub1Active ? "الترجمة الأولى (مفعّلة 🇩🇪) - اضغط للإخفاء" : "الترجمة الأولى (معطّلة) - اضغط للإظهار"}
                             className="flex items-center gap-1.5 cursor-pointer focus:outline-hidden group"
                           >
                             <span
                               className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${
-                                isSub2Active
-                                  ? "bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.95)] ring-2 ring-emerald-400/40 scale-110"
+                                isSub1Active
+                                  ? "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.95)] ring-2 ring-amber-400/40 scale-110"
                                   : "bg-slate-600 hover:bg-slate-500 opacity-60 group-hover:opacity-85"
                               }`}
                             />
                             <span className={`text-[11px] font-bold font-mono transition-colors ${
-                              isSub2Active ? "text-emerald-300 font-black" : "text-slate-400"
+                              isSub1Active ? "text-amber-300 font-black" : "text-slate-400"
                             }`}>
-                              2
+                              1
                             </span>
                           </button>
+
+                          {/* Circle 2: Secondary Subtitle (Green when active, Gray when inactive) - only if option exists */}
+                          {hasSecondarySubtitleOption && (
+                            <>
+                              <div className="w-[1px] h-3 bg-white/20 mx-0.5" />
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleSecondarySubtitle();
+                                }}
+                                title={isSub2Active ? "الترجمة الثانية (مفعّلة 🇸🇦) - اضغط للإخفاء" : "الترجمة الثانية (معطّلة) - اضغط للإظهار"}
+                                className="flex items-center gap-1.5 cursor-pointer focus:outline-hidden group"
+                              >
+                                <span
+                                  className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${
+                                    isSub2Active
+                                      ? "bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.95)] ring-2 ring-emerald-400/40 scale-110"
+                                      : "bg-slate-600 hover:bg-slate-500 opacity-60 group-hover:opacity-85"
+                                  }`}
+                                />
+                                <span className={`text-[11px] font-bold font-mono transition-colors ${
+                                  isSub2Active ? "text-emerald-300 font-black" : "text-slate-400"
+                                }`}>
+                                  2
+                                </span>
+                              </button>
+                            </>
+                          )}
                         </>
+                      )}
+
+                      {/* 2. Sentence Navigation Mode */}
+                      {unifiedPillNotice?.type === "sentence_next" && (
+                        <div className="flex items-center gap-2">
+                          <div className="w-5 h-5 rounded-full bg-sky-500/20 flex items-center justify-center shrink-0">
+                            <SkipForward className="w-3.5 h-3.5 text-sky-400" />
+                          </div>
+                          <span className="text-xs font-bold text-white tracking-wide">
+                            {unifiedPillNotice.text || "الجملة التالية"}
+                          </span>
+                        </div>
+                      )}
+
+                      {unifiedPillNotice?.type === "sentence_prev" && (
+                        <div className="flex items-center gap-2">
+                          <div className="w-5 h-5 rounded-full bg-sky-500/20 flex items-center justify-center shrink-0">
+                            <SkipBack className="w-3.5 h-3.5 text-sky-400" />
+                          </div>
+                          <span className="text-xs font-bold text-white tracking-wide">
+                            {unifiedPillNotice.text || "الجملة السابقة"}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* 3. Volume Adjustment Mode */}
+                      {unifiedPillNotice?.type === "volume" && (
+                        <div className="flex items-center gap-2.5">
+                          <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
+                            (unifiedPillNotice.volumePercent ?? 0) === 0 || isMuted
+                              ? "bg-rose-500/20 text-rose-300"
+                              : (unifiedPillNotice.volumePercent ?? 0) > 100
+                              ? "bg-purple-500/20 text-purple-300"
+                              : "bg-emerald-500/20 text-emerald-300"
+                          }`}>
+                            {(unifiedPillNotice.volumePercent ?? 0) === 0 || isMuted ? (
+                              <VolumeX className="w-3.5 h-3.5" />
+                            ) : (unifiedPillNotice.volumePercent ?? 0) > 100 ? (
+                              <Zap className="w-3.5 h-3.5 text-purple-400 fill-current" />
+                            ) : (unifiedPillNotice.volumePercent ?? 0) < 50 ? (
+                              <Volume1 className="w-3.5 h-3.5" />
+                            ) : (
+                              <Volume2 className="w-3.5 h-3.5" />
+                            )}
+                          </div>
+
+                          <span className="text-xs font-bold font-mono text-white">
+                            {isMuted ? "كتم الصوت" : `${unifiedPillNotice.volumePercent ?? Math.round(volume * 100)}%`}
+                          </span>
+
+                          {!isMuted && (
+                            <div className="w-16 h-1.5 bg-white/20 rounded-full overflow-hidden shrink-0">
+                              <div
+                                className={`h-full rounded-full transition-all duration-150 ${
+                                  (unifiedPillNotice.volumePercent ?? 0) > 100 ? "bg-purple-400" : "bg-emerald-400"
+                                }`}
+                                style={{
+                                  width: `${Math.min(100, ((unifiedPillNotice.volumePercent ?? 0) / ((unifiedPillNotice.volumePercent ?? 0) > 100 ? 200 : 100)) * 100)}%`
+                                }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* 4. Seek Modes */}
+                      {unifiedPillNotice?.type === "seek_forward" && (
+                        <div className="flex items-center gap-2">
+                          <div className="w-5 h-5 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
+                            <RotateCw className="w-3.5 h-3.5 text-amber-400" />
+                          </div>
+                          <span className="text-xs font-black font-mono text-amber-300 tracking-wide">
+                            {unifiedPillNotice.text || `+${unifiedPillNotice.seekAmount || 5}s`}
+                          </span>
+                        </div>
+                      )}
+
+                      {unifiedPillNotice?.type === "seek_backward" && (
+                        <div className="flex items-center gap-2">
+                          <div className="w-5 h-5 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
+                            <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                          </div>
+                          <span className="text-xs font-black font-mono text-amber-300 tracking-wide">
+                            {unifiedPillNotice.text || `-${unifiedPillNotice.seekAmount || 5}s`}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* 5. Play / Pause Modes */}
+                      {unifiedPillNotice?.type === "play" && (
+                        <div className="flex items-center gap-2">
+                          <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0">
+                            <Play className="w-3 h-3 text-emerald-400 fill-current translate-x-0.5" />
+                          </div>
+                          <span className="text-xs font-bold text-white tracking-wide">تشغيل</span>
+                        </div>
+                      )}
+
+                      {unifiedPillNotice?.type === "pause" && (
+                        <div className="flex items-center gap-2">
+                          <div className="w-5 h-5 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
+                            <Pause className="w-3 h-3 text-amber-400 fill-current" />
+                          </div>
+                          <span className="text-xs font-bold text-white tracking-wide">إيقاف مؤقت</span>
+                        </div>
                       )}
                     </div>
                   </div>
-                  {/* 1. Center Tap: Play / Pause or Fullscreen / Minimize */}
-                  {activeGesture && activeGesture.side === "center" && (activeGesture.type === "play" || activeGesture.type === "pause" || activeGesture.type === "fullscreen" || activeGesture.type === "minimize") && (
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-35 animate-yt-pop">
-                      <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-black/75 backdrop-blur-md border border-white/20 flex flex-col items-center justify-center text-white shadow-2xl gap-1">
-                        {activeGesture.type === "play" ? (
-                          <Play className="w-10 h-10 sm:w-12 sm:h-12 fill-white text-white translate-x-1" />
-                        ) : activeGesture.type === "pause" ? (
-                          <Pause className="w-10 h-10 sm:w-12 sm:h-12 fill-white text-white" />
-                        ) : activeGesture.type === "fullscreen" ? (
-                          <Expand className="w-10 h-10 sm:w-12 sm:h-12 text-white" />
-                        ) : (
-                          <Shrink className="w-10 h-10 sm:w-12 sm:h-12 text-white" />
-                        )}
-                        <span className="text-[10px] sm:text-xs font-bold text-slate-200">
-                          {activeGesture.label}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 2. Swipe Up / Swipe Down Overlays */}
-                  {activeGesture && (activeGesture.type.startsWith("swipe_up") || activeGesture.type.startsWith("swipe_down")) && (
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-35 animate-yt-pop">
-                      <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700/90 rounded-2xl px-6 py-4 flex flex-col items-center gap-2 shadow-2xl text-white">
-                        <div className="w-12 h-12 rounded-full bg-blue-600/30 border border-blue-400/50 flex items-center justify-center">
-                          {activeGesture.type.startsWith("swipe_up") ? (
-                            <ArrowUp className="w-6 h-6 text-blue-300 animate-bounce" />
-                          ) : (
-                            <ArrowDown className="w-6 h-6 text-amber-300 animate-bounce" />
-                          )}
-                        </div>
-                        <div className="text-center">
-                          <p className="text-xs sm:text-sm font-bold text-slate-100">{activeGesture.label}</p>
-                          {activeGesture.subLabel && (
-                            <p className="text-[11px] text-slate-400 mt-0.5">{activeGesture.subLabel}</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 3. Left Zone: Previous / Next Sentence (Swipe) or Double-Tap -5s or Horizontal Swipe Rewind */}
-                  {activeGesture && activeGesture.side === "left" && (
-                    <div className="absolute left-0 inset-y-0 w-1/3 flex items-center justify-start pl-6 sm:pl-10 pointer-events-none z-35 animate-yt-side">
-                      <div className="bg-black/80 backdrop-blur-md border border-white/20 rounded-2xl px-4 sm:px-5 py-3.5 sm:py-4 flex flex-col items-center gap-1.5 shadow-2xl text-white">
-                        {activeGesture.type === "seek_backward_5s" || activeGesture.type === "seek_backward_swipe" ? (
-                          <>
-                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/20 flex items-center justify-center">
-                              <RotateCcw className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
-                            </div>
-                            <span className="text-xs sm:text-sm font-black font-mono text-white tracking-wide">
-                              {activeGesture.label || "-5 ثواني"}
-                            </span>
-                            <span className="text-[10px] text-slate-300 font-bold bg-white/10 px-2 py-0.5 rounded-full">
-                              {activeGesture.type === "seek_backward_swipe" ? "سحب ⬅️" : "نقرتان"}
-                            </span>
-                          </>
-                        ) : activeGesture.type === "next_sentence" ? (
-                          <>
-                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-blue-600/50 border border-blue-400/50 flex items-center justify-center">
-                              <SkipForward className="w-6 h-6 sm:w-7 sm:h-7 text-blue-200" />
-                            </div>
-                            <span className="text-xs sm:text-sm font-bold text-slate-100">الجملة التالية</span>
-                            <span className="text-[10px] text-blue-300 font-bold bg-blue-500/20 px-2 py-0.5 rounded-full">سحب ⬆️</span>
-                          </>
-                        ) : (
-                          <>
-                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-blue-600/50 border border-blue-400/50 flex items-center justify-center">
-                              <SkipBack className="w-6 h-6 sm:w-7 sm:h-7 text-blue-200" />
-                            </div>
-                            <span className="text-xs sm:text-sm font-bold text-slate-100">الجملة السابقة</span>
-                            <span className="text-[10px] text-blue-300 font-bold bg-blue-500/20 px-2 py-0.5 rounded-full">سحب ⬇️</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 4. Right Zone: Volume Up/Down (Swipe) or Double-Tap +5s or Horizontal Swipe Forward */}
-                  {activeGesture && activeGesture.side === "right" && (
-                    <div className="absolute right-0 inset-y-0 w-1/3 flex items-center justify-end pr-6 sm:pr-10 pointer-events-none z-35 animate-yt-side">
-                      <div className="bg-black/80 backdrop-blur-md border border-white/20 rounded-2xl px-4 sm:px-5 py-3.5 sm:py-4 flex flex-col items-center gap-1.5 shadow-2xl text-white">
-                        {activeGesture.type === "seek_forward_5s" || activeGesture.type === "seek_forward_swipe" ? (
-                          <>
-                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/20 flex items-center justify-center">
-                              <RotateCw className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
-                            </div>
-                            <span className="text-xs sm:text-sm font-black font-mono text-white tracking-wide">
-                              {activeGesture.label || "+5 ثواني"}
-                            </span>
-                            <span className="text-[10px] text-slate-300 font-bold bg-white/10 px-2 py-0.5 rounded-full">
-                              {activeGesture.type === "seek_forward_swipe" ? "سحب ➡️" : "نقرتان"}
-                            </span>
-                          </>
-                        ) : activeGesture.type === "volume_up" ? (
-                          <>
-                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-emerald-600/50 border border-emerald-400/50 flex items-center justify-center">
-                              <Volume2 className="w-6 h-6 sm:w-7 sm:h-7 text-emerald-200" />
-                            </div>
-                            <span className="text-xs sm:text-sm font-bold text-slate-100">{activeGesture.label}</span>
-                            <span className="text-[10px] text-emerald-300 font-bold bg-emerald-500/20 px-2 py-0.5 rounded-full">سحب ⬆️</span>
-                          </>
-                        ) : (
-                          <>
-                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-amber-600/50 border border-amber-400/50 flex items-center justify-center">
-                              {volume <= 0.05 || isMuted ? (
-                                <VolumeX className="w-6 h-6 sm:w-7 sm:h-7 text-amber-200" />
-                              ) : (
-                                <Volume2 className="w-6 h-6 sm:w-7 sm:h-7 text-amber-200" />
-                              )}
-                            </div>
-                            <span className="text-xs sm:text-sm font-bold text-slate-100">{activeGesture.label}</span>
-                            <span className="text-[10px] text-amber-300 font-bold bg-amber-500/20 px-2 py-0.5 rounded-full">سحب ⬇️</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Floating HUD Indicator for Shortcuts */}
-                  {hudToast && (
-                    <div className="absolute top-5 inset-x-0 flex justify-center pointer-events-none z-30 animate-fadeIn">
-                      <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/90 text-white px-3.5 py-1.5 rounded-lg shadow-2xl flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-100">{hudToast.text}</span>
-                        {hudToast.sub && (
-                          <kbd className="px-2 py-0.5 bg-blue-600/40 text-blue-300 border border-blue-500/50 rounded-md text-xs font-mono font-black">
-                            {hudToast.sub}
-                          </kbd>
-                        )}
-                      </div>
-                    </div>
-                  )}
 
                   {/* Studio-Grade Samsung-Style Floating Volume & Audio Booster HUD */}
                   {showSamsungVolumeBar && (
