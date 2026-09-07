@@ -3378,12 +3378,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
     let targetCue: SubtitleCue;
     if (currentIdx > 0) {
-      // If user is more than 1.2s into current cue, restart current cue, otherwise go to previous
-      if (time - activeCues[currentIdx].startTime > 1.2) {
-        targetCue = activeCues[currentIdx];
-      } else {
-        targetCue = activeCues[currentIdx - 1];
-      }
+      // Always jump directly to the previous sentence
+      targetCue = activeCues[currentIdx - 1];
     } else if (currentIdx === 0) {
       targetCue = activeCues[0];
     } else {
