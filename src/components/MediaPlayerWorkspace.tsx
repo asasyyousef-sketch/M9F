@@ -1227,6 +1227,12 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       }
     } catch (e) {}
 
+    // Reset active/secondary track refs so the file's own tracks are properly loaded without contamination
+    activeTrackIdRef.current = null;
+    secondaryTrackIdRef.current = null;
+    setActiveTrackId(null);
+    setSecondaryTrackId(null);
+
     setCurrentFile(file);
     setIsPlaying(autoPlay);
     if (file) {
@@ -1511,9 +1517,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       } else if (savedPrefs.primaryId && currentFile.subtitles.some((t) => t.id === savedPrefs.primaryId)) {
         chosenPrimaryId = savedPrefs.primaryId;
       } else {
-        // Find German or uploaded track first
+        // Find German, audio transcription, or uploaded original track first
         const germanOrOriginal = currentFile.subtitles.find(
-          (t) => t.language === "de" || t.source === "uploaded" || t.source === "manual"
+          (t) =>
+            t.source === "transcribe" ||
+            t.label.includes("_TRN_") ||
+            t.label.includes("TRN") ||
+            t.language === "de" ||
+            t.source === "uploaded" ||
+            t.source === "manual"
         );
         chosenPrimaryId = germanOrOriginal ? germanOrOriginal.id : currentFile.subtitles[0].id;
       }
@@ -1546,7 +1558,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         chosenSecondaryId = savedPrefs.secondaryId;
       } else if (currentFile.subtitles.length > 1) {
         const arabicOrTranslated = currentFile.subtitles.find(
-          (t) => t.id !== chosenPrimaryId && (t.language === "ar" || t.source === "ai" || t.label.includes("عربي") || t.label.includes("🇸🇦"))
+          (t) =>
+            t.id !== chosenPrimaryId &&
+            (t.language === "ar" ||
+              t.label.includes("_GEM_AR") ||
+              t.label.includes("عربي") ||
+              t.label.includes("🇸🇦") ||
+              (t.source === "ai" && t.language !== "de" && !t.label.includes("_TRN_") && !t.label.includes("_de")))
         );
         const otherTrack = arabicOrTranslated || currentFile.subtitles.find((t) => t.id !== chosenPrimaryId);
         chosenSecondaryId = otherTrack ? otherTrack.id : null;
@@ -2095,8 +2113,12 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     mediaId: string,
     label: string,
     cues: SubtitleCue[],
-    source: "uploaded" | "ai" | "manual",
-    trackId?: string
+    source: "uploaded" | "ai" | "manual" | "transcribe",
+    trackId?: string,
+    options?: {
+      asPrimary?: boolean;
+      language?: string;
+    }
   ) => {
     // Optimistic local state update for instant UI response
     const cleanCues = cues.map((c, idx) => ({
@@ -2105,6 +2127,14 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       endTime: Math.max(0.1, parseFloat(String(c.endTime)) || 1),
       text: (c.text || "").trim()
     })).filter((c) => c.text.length > 0);
+
+    const shouldBePrimary = options?.asPrimary !== undefined
+      ? options.asPrimary
+      : (source === "transcribe" || label.includes("_TRN_") || !activeTrackIdRef.current);
+
+    const trackLanguage = options?.language || (source === "transcribe" || label.includes("_TRN_") ? "de" : "de");
+
+    let createdTrackId = trackId;
 
     setCurrentFile((prev) => {
       if (!prev || prev.id !== mediaId) return prev;
@@ -2116,10 +2146,12 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           t.id === trackId ? { ...t, cues: cleanCues, label: label || t.label } : t
         );
       } else {
-        const fallbackLabel = formatSubtitleTrackProtocol(source || "uploaded", "de");
+        const fallbackLabel = formatSubtitleTrackProtocol(source || "uploaded", trackLanguage);
+        createdTrackId = trackId || `sub-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
         const dummyTrack: MediaSubtitleTrack = {
-          id: trackId || `sub-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          id: createdTrackId,
           label: label || fallbackLabel,
+          language: trackLanguage,
           cues: cleanCues,
           source,
           uploadedAt: new Date().toISOString()
@@ -2127,7 +2159,32 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         updatedSubs = [dummyTrack, ...existingSubs];
       }
 
-      const updatedFile = { ...prev, subtitles: updatedSubs };
+      let updatedPrimary = prev.primaryTrackId;
+      let updatedSecondary = prev.secondaryTrackId;
+      let updatedDual = prev.showDualSubtitles;
+
+      if (!trackId && createdTrackId) {
+        if (shouldBePrimary) {
+          const oldPrimary = prev.primaryTrackId || activeTrackIdRef.current;
+          updatedPrimary = createdTrackId;
+          // If there was an existing primary, preserve it as secondary so existing track is not lost
+          if (oldPrimary && oldPrimary !== createdTrackId) {
+            updatedSecondary = oldPrimary;
+            updatedDual = true;
+          }
+        } else {
+          updatedSecondary = createdTrackId;
+          updatedDual = true;
+        }
+      }
+
+      const updatedFile = {
+        ...prev,
+        subtitles: updatedSubs,
+        primaryTrackId: updatedPrimary,
+        secondaryTrackId: updatedSecondary,
+        showDualSubtitles: updatedDual
+      };
       setFiles((fList) => fList.map((f) => (f.id === mediaId ? updatedFile : f)));
       return updatedFile;
     });
@@ -2136,34 +2193,65 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       const res = await fetch(`/api/media/${mediaId}/subtitles`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label, cues: cleanCues, source, trackId })
+        body: JSON.stringify({
+          label,
+          cues: cleanCues,
+          source,
+          trackId,
+          language: trackLanguage,
+          asPrimary: shouldBePrimary
+        })
       });
 
       if (!res.ok) throw new Error("فشل حفظ ملف الترجمة على السيرفر");
       const data = await res.json();
 
       setSuccessMsg(`تم حفظ وتحديث الترجمة بنجاح! (${cleanCues.length} مقطع)`);
+
+      const actualTrackId = data.track?.id || createdTrackId;
+
       if (data.file) {
         setCurrentFile((prev) => {
           if (!prev || prev.id !== data.file.id) return prev;
           return {
             ...data.file,
-            primaryTrackId: prev.primaryTrackId || data.file.primaryTrackId || activeTrackId || undefined,
-            secondaryTrackId: prev.secondaryTrackId || data.file.secondaryTrackId || secondaryTrackId || undefined,
-            showDualSubtitles: prev.showDualSubtitles !== undefined ? prev.showDualSubtitles : data.file.showDualSubtitles
+            primaryTrackId: shouldBePrimary ? (actualTrackId || data.file.primaryTrackId) : (prev.primaryTrackId || data.file.primaryTrackId),
+            secondaryTrackId: shouldBePrimary && prev.primaryTrackId && prev.primaryTrackId !== actualTrackId
+              ? prev.primaryTrackId
+              : (prev.secondaryTrackId || data.file.secondaryTrackId),
+            showDualSubtitles: data.file.showDualSubtitles !== undefined ? data.file.showDualSubtitles : prev.showDualSubtitles
           };
         });
-        setFiles((prev) => prev.map((f) => (f.id === data.file.id ? { ...f, subtitles: data.file.subtitles } : f)));
+        setFiles((prev) => prev.map((f) => (f.id === data.file.id ? { ...f, subtitles: data.file.subtitles, primaryTrackId: data.file.primaryTrackId, secondaryTrackId: data.file.secondaryTrackId } : f)));
       }
-      // ONLY set active/secondary track if this was a brand new track and no track was active
-      if (data.track && !trackId) {
-        if (!activeTrackIdRef.current) {
-          activeTrackIdRef.current = data.track.id;
-          setActiveTrackId(data.track.id);
-        } else if (!secondaryTrackIdRef.current && data.track.id !== activeTrackIdRef.current) {
-          secondaryTrackIdRef.current = data.track.id;
-          setSecondaryTrackId(data.track.id);
-          setShowDualSubtitles(true);
+
+      if (actualTrackId && !trackId) {
+        if (shouldBePrimary) {
+          const oldPrimary = activeTrackIdRef.current;
+          activeTrackIdRef.current = actualTrackId;
+          setActiveTrackId(actualTrackId);
+
+          if (oldPrimary && oldPrimary !== actualTrackId) {
+            secondaryTrackIdRef.current = oldPrimary;
+            setSecondaryTrackId(oldPrimary);
+            setShowDualSubtitles(true);
+            saveSubtitlePreferences(mediaId, actualTrackId, oldPrimary);
+            saveSubtitlePreferencesToServer(mediaId, actualTrackId, oldPrimary, true);
+          } else {
+            saveSubtitlePreferences(mediaId, actualTrackId, secondaryTrackIdRef.current);
+            saveSubtitlePreferencesToServer(mediaId, actualTrackId, secondaryTrackIdRef.current, showDualSubtitles);
+          }
+        } else {
+          if (!activeTrackIdRef.current) {
+            activeTrackIdRef.current = actualTrackId;
+            setActiveTrackId(actualTrackId);
+          } else if (actualTrackId !== activeTrackIdRef.current) {
+            secondaryTrackIdRef.current = actualTrackId;
+            setSecondaryTrackId(actualTrackId);
+            setShowDualSubtitles(true);
+            saveSubtitlePreferences(mediaId, activeTrackIdRef.current, actualTrackId);
+            saveSubtitlePreferencesToServer(mediaId, activeTrackIdRef.current, actualTrackId, true);
+          }
         }
       }
     } catch (err: any) {
@@ -3451,7 +3539,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           targetSecId = savedPrefs.secondaryId;
         } else {
           const arabicOrOther = availableSubtitles.find(
-            (t) => t.id !== currentActiveId && (t.language === "ar" || t.source === "ai" || t.label.includes("عربي") || t.label.includes("🇸🇦"))
+            (t) =>
+              t.id !== currentActiveId &&
+              (t.language === "ar" ||
+                t.label.includes("_GEM_AR") ||
+                t.label.includes("عربي") ||
+                t.label.includes("🇸🇦") ||
+                (t.source === "ai" && t.language !== "de" && !t.label.includes("_TRN_") && !t.label.includes("_de")))
           ) || availableSubtitles.find((t) => t.id !== currentActiveId);
           targetSecId = arabicOrOther ? arabicOrOther.id : null;
         }
@@ -6403,10 +6497,22 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           setShowGradioModal(false);
           triggerHud("تم حفظ وتشغيل الفيديو بنجاح", "⚡");
         }}
-        onSubtitlesGenerated={async (trackLabel, cues, rawSrt) => {
+        onSubtitlesGenerated={async (trackLabel, cues, rawSrt, targetSlot = "primary") => {
           if (currentFile) {
-            await saveSubtitleTrackToServer(currentFile.id, trackLabel, cues, "ai");
+            const isPrimary = targetSlot === "primary";
+            await saveSubtitleTrackToServer(
+              currentFile.id,
+              trackLabel,
+              cues,
+              "transcribe",
+              undefined,
+              { asPrimary: isPrimary, language: "de" }
+            );
             setShowGradioModal(false);
+            triggerHud(
+              isPrimary ? "تم تعيين التفريغ الصوتي الألماني كمسار أساسي 🇩🇪" : "تم تعيين التفريغ الصوتي كمسار ثانوي",
+              "✓"
+            );
           }
         }}
       />

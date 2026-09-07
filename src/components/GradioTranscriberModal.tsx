@@ -50,7 +50,7 @@ interface GradioTranscriberModalProps {
   onClose: () => void;
   currentFile: MediaFile | null;
   initialMode?: "youtube" | "current" | "upload";
-  onSubtitlesGenerated: (trackLabel: string, cues: SubtitleCue[], rawSrt: string) => Promise<void>;
+  onSubtitlesGenerated: (trackLabel: string, cues: SubtitleCue[], rawSrt: string, targetSlot?: "primary" | "secondary") => Promise<void>;
   onVideoDownloaded?: (mediaFile: MediaFile, rawSrt: string, cues: SubtitleCue[]) => Promise<void>;
   onOpenStyleModal?: () => void;
 }
@@ -68,6 +68,9 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
   const [sourceMode, setSourceMode] = useState<"youtube" | "current" | "upload">(
     initialMode || (currentFile ? "current" : "youtube")
   );
+
+  // Target subtitle track slot in media player: 'primary' (default for German audio) or 'secondary'
+  const [targetTrackSlot, setTargetTrackSlot] = useState<"primary" | "secondary">("primary");
 
   // Sync initialMode when modal opens
   useEffect(() => {
@@ -439,7 +442,7 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
         setParsedCuesCount(cues.length);
         if (cues.length > 0) {
           const trackLabel = formatSubtitleTrackProtocol("TRN", "de");
-          await onSubtitlesGenerated(trackLabel, cues, res.srtText);
+          await onSubtitlesGenerated(trackLabel, cues, res.srtText, targetTrackSlot);
         }
       }
     } catch (err: any) {
@@ -955,6 +958,69 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
               </div>
             )}
           </div>
+
+          {/* TARGET TRACK DESTINATION SELECTOR */}
+          {sourceMode !== "youtube" && (
+            <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>تعيين مسار التفريغ الصوتي في المشغل كـ:</span>
+                </span>
+                <span className="text-[11px] text-indigo-300 bg-indigo-950/60 border border-indigo-800/40 px-2 py-0.5 rounded-md font-mono">
+                  {targetTrackSlot === "primary" ? "مسار أساسي (🇩🇪)" : "مسار ثانوي"}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setTargetTrackSlot("primary")}
+                  className={`p-2.5 rounded-xl border flex items-center gap-2.5 text-right transition-all cursor-pointer ${
+                    targetTrackSlot === "primary"
+                      ? "bg-indigo-600/20 border-indigo-500 text-white font-bold shadow-xs"
+                      : "bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                    targetTrackSlot === "primary" ? "border-indigo-400 bg-indigo-600" : "border-slate-600"
+                  }`}>
+                    {targetTrackSlot === "primary" && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
+                      <span>المسار الأساسي (الأصلي 🇩🇪)</span>
+                      <span className="text-[10px] text-amber-400 font-normal">موصى به</span>
+                    </div>
+                    <div className="text-[10.5px] text-slate-400 truncate mt-0.5">
+                      النص الألماني المنطوق المباشر
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTargetTrackSlot("secondary")}
+                  className={`p-2.5 rounded-xl border flex items-center gap-2.5 text-right transition-all cursor-pointer ${
+                    targetTrackSlot === "secondary"
+                      ? "bg-indigo-600/20 border-indigo-500 text-white font-bold shadow-xs"
+                      : "bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                    targetTrackSlot === "secondary" ? "border-indigo-400 bg-indigo-600" : "border-slate-600"
+                  }`}>
+                    {targetTrackSlot === "secondary" && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-100">المسار الثانوي</div>
+                    <div className="text-[10.5px] text-slate-400 truncate mt-0.5">
+                      يُعرض كمساعد أسفل المسار الأساسي
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* STATUS & 3-STEP DEDICATED PIPELINE PROGRESS */}
           {isProcessing && (

@@ -298,7 +298,7 @@ export interface MediaSubtitleTrack {
   label: string;      // e.g. "العربية (SRT)" or "English"
   language?: string;  // e.g. "ar", "en"
   cues: SubtitleCue[];
-  source?: "uploaded" | "ai" | "manual";
+  source?: "uploaded" | "ai" | "manual" | "transcribe";
   uploadedAt?: string;
 }
 

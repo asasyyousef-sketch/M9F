@@ -239,7 +239,12 @@ export const SubtitleOptionsPanel: React.FC<SubtitleOptionsPanelProps> = ({
                           <div className="min-w-0">
                             <p className="text-xs font-bold truncate flex items-center gap-1.5 flex-wrap">
                               <span className="truncate">{track.label}</span>
-                              {track.source === "ai" && (
+                              {(track.source === "transcribe" || track.label.includes("_TRN_")) && (
+                                <span className="text-[8.5px] bg-sky-950/80 text-sky-300 px-1.5 py-0.2 rounded border border-sky-500/30">
+                                  تفريغ 🎙️
+                                </span>
+                              )}
+                              {track.source === "ai" && !track.label.includes("_TRN_") && (
                                 <span className="text-[8.5px] bg-emerald-950 text-emerald-300 px-1 py-0.2 rounded border border-emerald-500/30">
                                   AI
                                 </span>

@@ -305,7 +305,7 @@ async function startServer() {
     label: string;
     language?: string;
     cues: ServerSubtitleCue[];
-    source?: "uploaded" | "ai" | "manual";
+    source?: "uploaded" | "ai" | "manual" | "transcribe";
     uploadedAt?: string;
   }
 
@@ -1196,7 +1196,7 @@ async function startServer() {
   app.post("/api/media/:id/subtitles", (req, res) => {
     try {
       const { id } = req.params;
-      const { label, language, cues, source, trackId } = req.body;
+      const { label, language, cues, source, trackId, asPrimary } = req.body;
 
       if (!Array.isArray(cues) || cues.length === 0) {
         return res.status(400).json({ error: "قائمة مقاطع الترجمة (Cues) غير صالحة أو فارغة" });
@@ -1238,20 +1238,33 @@ async function startServer() {
         });
       }
 
+      const targetLanguage = language || (source === "transcribe" || label?.includes("_TRN_") ? "de" : "de");
       const newTrack: ServerSubtitleTrack = {
         id: "sub-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
-        label: label?.trim() || formatSubtitleTrackProtocol(source || "UPL", language || "de"),
-        language: language || "de",
+        label: label?.trim() || formatSubtitleTrackProtocol(source || "UPL", targetLanguage),
+        language: targetLanguage,
         cues: cleanCues,
         source: source || "uploaded",
         uploadedAt: new Date().toISOString()
       };
 
-      // Add new track to subtitles array (maintain original primary track as first)
-      if (!item.primaryTrackId) {
+      // Determine if this new track should be primary:
+      // When explicitly marked asPrimary, or when it is an audio transcription (source === "transcribe" or TRN)
+      const shouldBePrimary = asPrimary === true || source === "transcribe" || Boolean(label && label.includes("_TRN_"));
+
+      if (shouldBePrimary) {
+        const oldPrimary = item.primaryTrackId;
+        item.primaryTrackId = newTrack.id;
+        // If there was an existing primary track, preserve it as secondary so existing translations/tracks are kept!
+        if (oldPrimary && oldPrimary !== newTrack.id) {
+          item.secondaryTrackId = oldPrimary;
+          item.showDualSubtitles = true;
+        }
+      } else if (!item.primaryTrackId) {
         item.primaryTrackId = newTrack.id;
       } else if (!item.secondaryTrackId && item.subtitles.length >= 1) {
         item.secondaryTrackId = newTrack.id;
+        item.showDualSubtitles = true;
       }
 
       item.subtitles.push(newTrack);
