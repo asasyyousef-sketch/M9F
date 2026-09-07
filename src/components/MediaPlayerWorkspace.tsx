@@ -2673,15 +2673,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const totalDuration = duration || el.duration || 0;
     const boundedTime = Math.max(0, Math.min(newTime, totalDuration > 0 ? totalDuration : Infinity));
 
-    if ("fastSeek" in el && typeof (el as any).fastSeek === "function") {
-      try {
-        (el as any).fastSeek(boundedTime);
-      } catch {
-        el.currentTime = boundedTime;
-      }
-    } else {
-      el.currentTime = boundedTime;
-    }
+    // Direct currentTime assignment is hardware-accelerated, frame-accurate, and avoids keyframe-snapping delay
+    el.currentTime = boundedTime;
     setCurrentTime(boundedTime);
   }, [duration, currentFile]);
 
@@ -3394,7 +3387,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     if (targetCue) {
       singleSentencePlaybackEndRef.current = null;
       handleSeek(targetCue.startTime);
-      if (isCurrentlyPlaying && keepPlayingState) {
+      // Only call smoothPlay if currently paused but playback state was active;
+      // if already playing, changing currentTime continues playback without interruption!
+      if (isCurrentlyPlaying && keepPlayingState && el?.paused) {
         smoothPlay();
       }
       triggerHud("الجملة السابقة", "[");
@@ -3427,7 +3422,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     if (targetCue) {
       singleSentencePlaybackEndRef.current = null;
       handleSeek(targetCue.startTime);
-      if (isCurrentlyPlaying && keepPlayingState) {
+      // Only call smoothPlay if currently paused but playback state was active;
+      // if already playing, changing currentTime continues playback without interruption!
+      if (isCurrentlyPlaying && keepPlayingState && el?.paused) {
         smoothPlay();
       }
       triggerHud("الجملة التالية", "]");
@@ -3461,8 +3458,23 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const onLoadedMetadata = () => {
       setDuration(el.duration);
       syncAudioGain(volume, isMuted, voiceClarifier);
+      // Prime mobile browser decoders (Android Chrome & iOS Safari) to immediately decode and paint the first frame
+      // instead of showing a black or blank box until play is tapped:
+      if (el.currentTime === 0) {
+        try {
+          el.currentTime = 0.001;
+        } catch {}
+      }
       if (isPlaying) {
         el.play().catch(console.error);
+      }
+    };
+    const onCanPlay = () => {
+      // Ensure first frame is displayed on mobile hardware video decoders
+      if (el.currentTime === 0) {
+        try {
+          el.currentTime = 0.001;
+        } catch {}
       }
     };
     const onProgress = () => {
@@ -3482,6 +3494,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     el.addEventListener("pause", onPause);
     el.addEventListener("timeupdate", onTimeUpdate);
     el.addEventListener("loadedmetadata", onLoadedMetadata);
+    el.addEventListener("canplay", onCanPlay);
     el.addEventListener("progress", onProgress);
     el.addEventListener("ended", onEnded);
 
@@ -3490,6 +3503,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       el.removeEventListener("pause", onPause);
       el.removeEventListener("timeupdate", onTimeUpdate);
       el.removeEventListener("loadedmetadata", onLoadedMetadata);
+      el.removeEventListener("canplay", onCanPlay);
       el.removeEventListener("progress", onProgress);
       el.removeEventListener("ended", onEnded);
     };
@@ -5117,7 +5131,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           ? "w-full h-full object-contain pointer-events-none"
                           : "w-full max-h-[500px] object-contain pointer-events-none"
                       }
-                      preload="metadata"
+                      preload="auto"
                       playsInline
                     />
                   ) : (
@@ -5130,7 +5144,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       <audio
                         ref={audioRef}
                         src={resolveMediaStreamUrl(currentFile)}
-                        preload="metadata"
+                        preload="auto"
                       />
 
                       {/* Rotating Vinyl Record Graphic */}

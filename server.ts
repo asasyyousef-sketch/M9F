@@ -1065,8 +1065,9 @@ async function startServer() {
         const parts = range.replace(/bytes=/, "").split("-");
         const start = parseInt(parts[0], 10);
         
-        // Use optimal 3MB chunk size if browser didn't specify end range, ensuring lightning-fast seek response
-        const CHUNK_SIZE = 1024 * 1024 * 3; // 3 MB
+        // Use 12MB chunk size if browser didn't specify end range, ensuring ample ahead-of-time buffering
+        // and lightning-fast sentence navigation from browser memory cache without continuous round-trips
+        const CHUNK_SIZE = 1024 * 1024 * 12; // 12 MB
         const requestedEnd = parts[1] ? parseInt(parts[1], 10) : NaN;
         const end = !isNaN(requestedEnd) ? Math.min(requestedEnd, fileSize - 1) : Math.min(start + CHUNK_SIZE, fileSize - 1);
         
@@ -1078,7 +1079,7 @@ async function startServer() {
           "Accept-Ranges": "bytes",
           "Content-Length": chunksize,
           "Content-Type": contentType,
-          "Cache-Control": "public, max-age=86400, no-transform",
+          "Cache-Control": "public, max-age=31536000, immutable",
           "Access-Control-Allow-Origin": "*"
         };
         
