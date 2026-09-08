@@ -29,12 +29,13 @@ interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
   dbStatus?: DbStatus;
-  activeTab?: "library" | "ai" | "trash" | "youtube" | "corrector" | "media";
+  activeTab?: "library" | "ai" | "trash" | "youtube" | "corrector" | "media" | "notes";
   onSelectAI?: () => void;
   onSelectTrash?: () => void;
   onSelectYoutube?: () => void;
   onSelectCorrector?: () => void;
   onSelectMedia?: () => void;
+  onSelectNotes?: () => void;
   onDataReloaded?: (folders: any[], cards: any[]) => void;
 }
 
@@ -53,6 +54,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   onSelectYoutube,
   onSelectCorrector,
   onSelectMedia,
+  onSelectNotes,
   onDataReloaded
 }) => {
   // Collapsible Mini-Rail state (Slim Icon Bar)
@@ -538,6 +540,34 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
               </div>
               {!isCollapsed && (
                 <span className="truncate">مشغل الوسائط</span>
+              )}
+            </button>
+
+            {/* Notes & Writings (الكتابات) */}
+            <button
+              type="button"
+              onClick={() => {
+                onSelectNotes?.();
+                onClose?.();
+              }}
+              title="الكتابات"
+              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
+                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
+              } ${
+                activeTab === "notes"
+                  ? "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-2xs"
+                  : "text-slate-700 hover:bg-slate-100"
+              }`}
+            >
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                activeTab === "notes" 
+                  ? "bg-blue-600 text-white shadow-2xs" 
+                  : "bg-slate-100 text-slate-500 group-hover:bg-slate-200/80 group-hover:text-slate-800"
+              }`}>
+                <BookOpen className="w-3.5 h-3.5" />
+              </div>
+              {!isCollapsed && (
+                <span className="truncate">الكتابات</span>
               )}
             </button>
           </div>

@@ -518,3 +518,398 @@ body {
 .table-scrollbar-light::-webkit-scrollbar-thumb:hover {
   background: rgba(59, 130, 246, 0.8);
 }
+
+/* ========================================================================= */
+/* REALISTIC PAPER SHEET STYLING FOR "الكتابات" (WRITINGS / NOTES) */
+/* ========================================================================= */
+
+.paper-sheet-container {
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.08), 0 20px 40px -15px rgba(0, 0, 0, 0.05), 0 0 1px 1px rgba(0, 0, 0, 0.04);
+  transition: all 0.25s ease-in-out;
+}
+
+/* Base paper styles on container */
+.paper-style-plain {
+  background-color: #ffffff;
+  color: #1e293b;
+}
+
+.paper-style-ruled {
+  background-color: #ffffff;
+  color: #1e293b;
+}
+
+.paper-style-grid {
+  background-color: #ffffff;
+  color: #1e293b;
+}
+
+.paper-style-ivory {
+  background-color: #faf6ee;
+  color: #2c2523;
+}
+
+.paper-style-legal {
+  background-color: #fefce8;
+  color: #1c1917;
+  border-right: 3px double #f87171;
+}
+
+.paper-style-dark {
+  background-color: #182234;
+  color: #f1f5f9;
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.5), 0 0 1px 1px rgba(255, 255, 255, 0.08);
+}
+
+/* ========================================================================= */
+/* EXACT RULED LINES ALIGNED TO TEXT BASELINE (ملاصق للخط لجميع السطور واللغات) */
+/* ========================================================================= */
+
+:root {
+  --paper-line-height: 40px;
+  --paper-baseline-pos: 25px;
+  --paper-line-thickness: 1.5px;
+}
+
+.paper-font-tajawal {
+  --paper-font: 'Tajawal', system-ui, sans-serif;
+  --paper-baseline-pos: 25px;
+}
+
+.paper-font-cairo {
+  --paper-font: 'Cairo', system-ui, sans-serif;
+  --paper-baseline-pos: 26.5px;
+}
+
+.paper-font-inter {
+  --paper-font: 'Inter', 'Plus Jakarta Sans', system-ui, sans-serif;
+  --paper-baseline-pos: 25px;
+}
+
+.paper-font-amiri {
+  --paper-font: 'Amiri', serif;
+  --paper-baseline-pos: 25.5px;
+}
+
+.paper-style-ruled .paper-content-area {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent var(--paper-baseline-pos, 25px),
+    #cbd5e1 var(--paper-baseline-pos, 25px),
+    #cbd5e1 calc(var(--paper-baseline-pos, 25px) + var(--paper-line-thickness, 1.5px)),
+    transparent calc(var(--paper-baseline-pos, 25px) + var(--paper-line-thickness, 1.5px)),
+    transparent var(--paper-line-height, 40px)
+  );
+  background-size: 100% var(--paper-line-height, 40px);
+  background-repeat: repeat-y;
+}
+
+.paper-style-legal .paper-content-area {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent var(--paper-baseline-pos, 25px),
+    rgba(147, 197, 253, 0.7) var(--paper-baseline-pos, 25px),
+    rgba(147, 197, 253, 0.7) calc(var(--paper-baseline-pos, 25px) + var(--paper-line-thickness, 1.5px)),
+    transparent calc(var(--paper-baseline-pos, 25px) + var(--paper-line-thickness, 1.5px)),
+    transparent var(--paper-line-height, 40px)
+  );
+  background-size: 100% var(--paper-line-height, 40px);
+  background-repeat: repeat-y;
+}
+
+.paper-style-ivory .paper-content-area {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent var(--paper-baseline-pos, 25px),
+    rgba(202, 185, 165, 0.6) var(--paper-baseline-pos, 25px),
+    rgba(202, 185, 165, 0.6) calc(var(--paper-baseline-pos, 25px) + var(--paper-line-thickness, 1.5px)),
+    transparent calc(var(--paper-baseline-pos, 25px) + var(--paper-line-thickness, 1.5px)),
+    transparent var(--paper-line-height, 40px)
+  );
+  background-size: 100% var(--paper-line-height, 40px);
+  background-repeat: repeat-y;
+}
+
+.paper-style-dark .paper-content-area {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent var(--paper-baseline-pos, 25px),
+    rgba(71, 85, 105, 0.65) var(--paper-baseline-pos, 25px),
+    rgba(71, 85, 105, 0.65) calc(var(--paper-baseline-pos, 25px) + var(--paper-line-thickness, 1.5px)),
+    transparent calc(var(--paper-baseline-pos, 25px) + var(--paper-line-thickness, 1.5px)),
+    transparent var(--paper-line-height, 40px)
+  );
+  background-size: 100% var(--paper-line-height, 40px);
+  background-repeat: repeat-y;
+}
+
+.paper-style-grid .paper-content-area {
+  background-image: 
+    linear-gradient(to right, rgba(203, 213, 225, 0.6) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(203, 213, 225, 0.6) 1px, transparent 1px);
+  background-size: var(--paper-line-height, 40px) var(--paper-line-height, 40px);
+  background-position: 0 var(--paper-baseline-pos, 25px);
+}
+
+/* Rich text editor content styling */
+.paper-content-area {
+  min-height: 600px;
+  outline: none;
+  font-family: var(--paper-font, 'Tajawal', 'Inter', 'Cairo', system-ui, sans-serif);
+  font-size: 18px;
+  line-height: var(--paper-line-height, 40px);
+  padding: 0 4px;
+}
+
+/* Disable native browser spellcheck red squiggly / zigzag / triangular underlines */
+.paper-content-area::spelling-error,
+.paper-content-area::grammar-error,
+.paper-content-area *::spelling-error,
+.paper-content-area *::grammar-error,
+::spelling-error,
+::grammar-error {
+  text-decoration: none !important;
+  color: inherit !important;
+}
+
+/* Ensure every line, paragraph, and div in the editor matches the 40px line grid */
+.paper-content-area,
+.paper-content-area p,
+.paper-content-area div,
+.paper-content-area li {
+  line-height: var(--paper-line-height, 40px) !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  min-height: var(--paper-line-height, 40px);
+}
+
+.paper-content-area:empty:before {
+  content: attr(data-placeholder);
+  color: #94a3b8;
+  pointer-events: none;
+  display: block;
+  line-height: 40px !important;
+  height: 40px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.paper-content-area h1 {
+  font-size: 1.85rem;
+  font-weight: 800;
+  line-height: 80px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.paper-content-area h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 40px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.paper-content-area h3 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 40px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.paper-content-area ul,
+.paper-content-area ol {
+  margin: 0 !important;
+  padding-inline-start: 1.5rem !important;
+}
+
+.paper-content-area li {
+  line-height: 40px !important;
+  margin: 0 !important;
+}
+
+.paper-content-area blockquote {
+  border-inline-start: 4px solid #3b82f6;
+  padding-inline-start: 0.75rem;
+  margin: 0 !important;
+  line-height: 40px !important;
+  font-style: italic;
+}
+
+.paper-content-area pre {
+  background-color: rgba(15, 23, 42, 0.06);
+  border-radius: 0.5rem;
+  padding: 0.5rem 1rem;
+  margin: 0.5rem 0 !important;
+  overflow-x: auto;
+  font-family: "Fira Code", monospace;
+  font-size: 0.9em;
+  line-height: 1.5 !important;
+}
+
+.paper-style-dark .paper-content-area pre {
+  background-color: rgba(15, 23, 42, 0.6);
+  color: #38bdf8;
+}
+
+.paper-content-area code {
+  background-color: rgba(15, 23, 42, 0.06);
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.25rem;
+  font-family: "Fira Code", monospace;
+  font-size: 0.9em;
+}
+
+.paper-style-dark .paper-content-area code {
+  background-color: rgba(15, 23, 42, 0.5);
+  color: #38bdf8;
+}
+
+.paper-content-area hr {
+  border: 0;
+  height: 1px;
+  background: rgba(148, 163, 184, 0.4);
+  margin: 0 !important;
+}
+
+.paper-content-area table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+}
+
+.paper-content-area table th,
+.paper-content-area table td {
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  padding: 0.25rem 0.5rem;
+  text-align: start;
+  line-height: 36px;
+}
+
+.paper-content-area table th {
+  background-color: rgba(148, 163, 184, 0.1);
+  font-weight: 700;
+}
+
+/* Interactive To-Do check items inside paper */
+.paper-content-area .paper-todo-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  height: 40px;
+  line-height: 40px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  user-select: text;
+}
+
+.paper-content-area .paper-todo-item input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: #2563eb;
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.paper-content-area .paper-todo-item.checked {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+/* ========================================================================= */
+/* AI PROOFREADING ERROR HIGHLIGHTS (Subtle background + underline without shifting baseline) */
+/* ========================================================================= */
+
+.ai-proofread-error {
+  position: relative;
+  display: inline !important;
+  line-height: inherit !important;
+  font-family: inherit !important;
+  font-size: inherit !important;
+  vertical-align: baseline !important;
+  padding: 0 2px !important;
+  margin: 0 !important;
+  cursor: pointer;
+  border-radius: 3px;
+  background-color: rgba(244, 63, 94, 0.15);
+  border-bottom: 2px dashed #f43f5e;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  user-select: text;
+}
+
+.ai-proofread-error:hover,
+.ai-proofread-error.active-hover {
+  background-color: rgba(244, 63, 94, 0.28);
+  border-bottom-color: #e11d48;
+}
+
+.ai-proofread-error.ai-type-grammar {
+  background-color: rgba(59, 130, 246, 0.14);
+  border-bottom: 2px solid #3b82f6;
+}
+.ai-proofread-error.ai-type-grammar:hover,
+.ai-proofread-error.ai-type-grammar.active-hover {
+  background-color: rgba(59, 130, 246, 0.26);
+  border-bottom-color: #2563eb;
+}
+
+.ai-proofread-error.ai-type-spelling {
+  background-color: rgba(239, 68, 68, 0.15);
+  border-bottom: 2px dashed #ef4444;
+}
+.ai-proofread-error.ai-type-spelling:hover,
+.ai-proofread-error.ai-type-spelling.active-hover {
+  background-color: rgba(239, 68, 68, 0.28);
+  border-bottom-color: #dc2626;
+}
+
+.ai-proofread-error.ai-type-word-choice {
+  background-color: rgba(168, 85, 247, 0.14);
+  border-bottom: 2px dotted #a855f7;
+}
+.ai-proofread-error.ai-type-word-choice:hover,
+.ai-proofread-error.ai-type-word-choice.active-hover {
+  background-color: rgba(168, 85, 247, 0.26);
+  border-bottom-color: #9333ea;
+}
+
+/* ========================================================================= */
+/* AI MISSING WORD CARET (علامة إقحام للكلمات المفقودة بين الكلمات بدون تظليل الجملة) */
+/* ========================================================================= */
+
+.ai-proofread-missing-caret {
+  position: relative;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  vertical-align: baseline !important;
+  margin: 0 4px !important;
+  padding: 0 5px !important;
+  height: 20px;
+  border-radius: 4px;
+  background-color: #ede9fe;
+  color: #7c3aed;
+  border: 1.5px dashed #8b5cf6;
+  font-family: system-ui, -apple-system, sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 3px rgba(124, 58, 237, 0.18);
+}
+
+.ai-proofread-missing-caret:hover,
+.ai-proofread-missing-caret.active-hover {
+  background-color: #ddd6fe;
+  color: #6d28d9;
+  border-color: #6d28d9;
+  transform: scale(1.15);
+  box-shadow: 0 2px 6px rgba(109, 40, 217, 0.28);
+}
+

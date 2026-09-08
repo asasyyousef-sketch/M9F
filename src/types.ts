@@ -331,5 +331,28 @@ export interface MediaFile {
   showDualSubtitles?: boolean;
 }
 
+export type PaperStyle = "plain" | "ruled" | "grid" | "ivory" | "legal" | "dark";
 
+export interface NoteItem {
+  id: string;
+  title: string;
+  content: string; // HTML content
+  plainText?: string;
+  category?: string; // e.g. "عام", "مفردات", "قواعد", "مذكرات", "أفكار"
+  tags?: string[];
+  isPinned: boolean;
+  color?: string; // card accent color
+  paperStyle?: PaperStyle;
+  paperWidth?: "normal" | "wide" | "compact";
+  fontSize?: "sm" | "base" | "lg" | "xl";
+  fontFamily?: "cairo" | "amiri" | "tajawal" | "inter" | "mono";
+  dir?: "rtl" | "ltr";
+  createdAt: string;
+  updatedAt: string;
+}
 
+export interface NoteCategory {
+  id: string;
+  name: string;
+  color: string;
+}

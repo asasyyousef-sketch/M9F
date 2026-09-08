@@ -6390,6 +6390,392 @@ ${
     }
   });
 
+  // API Endpoint: AI Notebook Proofreading & Grammar Correction
+  app.post("/api/notes/proofread", express.json(), async (req, res) => {
+    try {
+      const {
+        text,
+        targetLanguage = "German",
+        selectedModel = "gemini-3.6-flash",
+        customApiKey,
+        geminiApiKey,
+        groqApiKey: bodyGroqApiKey
+      } = req.body;
+
+      if (!text || !text.trim()) {
+        return res.status(400).json({ error: "لا يوجد نص في الصفحة للتدقيق اللغوي" });
+      }
+
+      const effectiveGroqKey = bodyGroqApiKey || req.body.groqApiKey || (selectedModel && selectedModel.includes("groq") ? customApiKey : "") || process.env.GROQ_API_KEY || "";
+      const effectiveGeminiKey = geminiApiKey || customApiKey || process.env.GEMINI_API_KEY || "";
+
+      // Model resolution
+      const reqModel = selectedModel || "gemini-3.6-flash";
+      let isGroq = reqModel === "groq-llama-3.3-70b" || reqModel.includes("groq");
+
+      const systemInstruction = `You are a world-class linguistic proofreader, lexicographer, and grammar instructor for the language: ${targetLanguage}.
+Your task is to analyze the user's text written in ${targetLanguage} with utmost accuracy and academic rigor.
+
+Find all errors in the text:
+1. Grammar mistakes (Grammatik) - verb conjugation, cases (Nominativ, Akkusativ, Dativ, Genitiv), gender / articles (der/die/das), prepositions, adjective endings, missing words.
+2. Spelling mistakes (Rechtschreibung) - especially capitalization rules (e.g. in German, all nouns MUST be capitalized like 'das Haus', 'die Schule', 'die Arbeit').
+3. Sentence structure / Word order (Satzbau) - subordinate clauses (Nebensätze with conjugated verb at the end), inversion, word position.
+4. Word choice / Syntax / Punctuation (Kommasetzung).
+
+CRITICAL RULES FOR TARGETING AND OMISSION/MISSING WORDS:
+⚠️ RULE 1 (ABSOLUTELY MANDATORY): NEVER EVER mark or return an entire sentence or clause! Only target the MINIMAL exact word or two words that are wrong. Marking a whole sentence is strictly forbidden.
+
+⚠️ RULE 2 (MISSING WORD IN GRAMMAR - عند نسيان كلمة بين كلمتين):
+When a word is missing or omitted between two words (such as a missing preposition, article, pronoun, negation 'nicht', auxiliary verb, etc.):
+- "type": "missing-word"
+- "beforeWord": The single word immediately preceding where the missing word should be inserted.
+- "afterWord": The single word immediately following where the missing word should be inserted.
+- "original": Exact string "beforeWord afterWord" as written in the text.
+- "replacement": The exact missing word or words to be inserted between beforeWord and afterWord (e.g. "in die", "nicht", "nach", etc.).
+- "explanation": A clear, educational explanation in Arabic (باللغة العربية) explaining why this word was missed and the grammar rule (e.g., "ينقص هنا حرف الجر والأداة 'in die' لأن الذهاب إلى المدرسة يتطلب حركة بحالة Akkusativ").
+DO NOT mark the whole sentence! The UI will place a subtle insertion marker strictly between beforeWord and afterWord.
+
+⚠️ RULE 3 (FOR SPELLING, GRAMMAR, AND OTHER ERRORS):
+- "original": MUST be strictly the single wrong word (or max 2 adjacent wrong words). Never a whole sentence.
+- "replacement": The exact corrected replacement word.
+- "explanation": Clear explanation in Arabic (باللغة العربية) explaining why it's wrong and the rule.
+- "type": "spelling", "grammar", or "word-choice".
+
+⚠️ RULE 4 (MANDATORY LINE/SENTENCE CONTEXT):
+For EVERY error (whether spelling, grammar, word-choice, or missing-word):
+- "context": You MUST provide the exact full sentence or clause from the user's text containing this error (copied verbatim as written by the user).
+This is crucial so the system highlights the exact line where the error occurred, and never accidentally highlights a similar word or occurrence in a preceding or subsequent line.
+
+If the text is completely correct with no mistakes, return "hasErrors": false, and "corrections": [].
+Do NOT flag text that is already grammatically and orthographically correct.`;
+
+      let responseText = "";
+      let modelActuallyUsed = reqModel;
+
+      // 1. If Groq model is selected and Groq key is present, try Groq first
+      if (isGroq && effectiveGroqKey) {
+        try {
+          const resGroq = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${effectiveGroqKey}`
+            },
+            body: JSON.stringify({
+              model: "llama-3.3-70b-versatile",
+              response_format: { type: "json_object" },
+              messages: [
+                {
+                  role: "system",
+                  content: `${systemInstruction}\n\nRespond ONLY with valid JSON with properties: hasErrors (boolean), corrections (array of {original, replacement, explanation, type, beforeWord, afterWord, context}), overallScore (number), summary (string in Arabic).`
+                },
+                {
+                  role: "user",
+                  content: `Please proofread this ${targetLanguage} text and return structured JSON:\n\n${text}`
+                }
+              ],
+              temperature: 0.2
+            })
+          });
+
+          if (resGroq.ok) {
+            const dataGroq = await resGroq.json();
+            const output = dataGroq?.choices?.[0]?.message?.content || "";
+            if (output.trim()) {
+              responseText = output.trim();
+              modelActuallyUsed = "groq-llama-3.3-70b";
+            }
+          } else {
+            console.warn(`[Proofread Groq Warning] Status: ${resGroq.status}. Falling back to Gemini...`);
+          }
+        } catch (groqErr) {
+          console.warn("[Proofread Groq Error] Falling back to Gemini:", groqErr);
+        }
+      }
+
+      // 2. Gemini execution (if Groq was not used or failed)
+      if (!responseText) {
+        if (!effectiveGeminiKey) {
+          return res.status(400).json({ error: "مفتاح Gemini API غير مكوّن. يرجى إضافته في إعدادات التطبيق." });
+        }
+
+        const ai = new GoogleGenAI({ apiKey: effectiveGeminiKey });
+
+        // Map grok-2 to gemini if Groq key isn't used
+        let targetGeminiModel = reqModel;
+        if (targetGeminiModel === "grok-2" || targetGeminiModel.includes("groq")) {
+          targetGeminiModel = "gemini-3.6-flash";
+        }
+
+        const candidateModels = [
+          targetGeminiModel,
+          "gemini-3.6-flash",
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+          "gemini-3.5-flash",
+          "gemini-2.5-flash",
+          "gemini-2.5-flash-lite",
+          "gemini-1.5-flash"
+        ];
+        const validCandidates = Array.from(new Set(candidateModels.filter(Boolean)));
+
+        let lastErr: any = null;
+
+        for (const candidate of validCandidates) {
+          try {
+            const result = await ai.models.generateContent({
+              model: candidate,
+              contents: `Please proofread this ${targetLanguage} text and return structured JSON:\n\n${text}`,
+              config: {
+                systemInstruction,
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    hasErrors: { type: Type.BOOLEAN },
+                    corrections: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          original: { type: Type.STRING },
+                          replacement: { type: Type.STRING },
+                          explanation: { type: Type.STRING },
+                          type: { type: Type.STRING },
+                          beforeWord: { type: Type.STRING },
+                          afterWord: { type: Type.STRING },
+                          context: { type: Type.STRING }
+                        },
+                        required: ["original", "replacement", "explanation", "type"]
+                      }
+                    },
+                    overallScore: { type: Type.NUMBER },
+                    summary: { type: Type.STRING }
+                  },
+                  required: ["hasErrors", "corrections", "overallScore", "summary"]
+                }
+              }
+            });
+
+            if (result.text) {
+              responseText = result.text;
+              modelActuallyUsed = candidate;
+              break;
+            }
+          } catch (err: any) {
+            lastErr = err;
+            console.warn(`[Proofread Warning] Candidate '${candidate}' failed:`, err?.message || err);
+          }
+        }
+
+        if (!responseText) {
+          throw lastErr || new Error("فشل تدقيق النص بالذكاء الاصطناعي");
+        }
+      }
+
+      const parsed = safeExtractAndParseJSON(responseText, {
+        hasErrors: false,
+        corrections: [],
+        overallScore: 100,
+        summary: "النص سليم وخالٍ من الأخطاء"
+      });
+
+      // Calculate exact character offsets within input text to eliminate ambiguous word selection
+      if (parsed.corrections && Array.isArray(parsed.corrections)) {
+        let lastEnd = 0;
+        const normText = text.replace(/[\u00A0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/g, " ");
+
+        parsed.corrections.forEach((cor: any) => {
+          const orig = (cor.original || "").trim();
+          const ctx = (cor.context || "").replace(/[\u00A0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/g, " ").trim();
+          let bWord = (cor.beforeWord || "").trim();
+          let aWord = (cor.afterWord || "").trim();
+          if ((cor.type === "missing-word" || !bWord || !aWord) && orig) {
+            const origParts = orig.split(/\s+/).filter(Boolean);
+            if (origParts.length >= 2) {
+              if (!bWord) bWord = origParts[0];
+              if (!aWord) aWord = origParts[origParts.length - 1];
+            } else if (origParts.length === 1) {
+              if (!bWord) bWord = origParts[0];
+            }
+          }
+          cor.beforeWord = bWord;
+          cor.afterWord = aWord;
+          const isMissing = cor.type === "missing-word" || (bWord && aWord);
+
+          let matchIdx = -1;
+          let matchLen = orig.length;
+
+          // 1. Try to find match via context
+          if (ctx) {
+            let cIdx = normText.indexOf(ctx, lastEnd);
+            if (cIdx === -1) cIdx = normText.indexOf(ctx);
+            if (cIdx === -1) {
+              const lowerText = normText.toLowerCase();
+              const lowerCtx = ctx.toLowerCase();
+              cIdx = lowerText.indexOf(lowerCtx, lastEnd);
+              if (cIdx === -1) cIdx = lowerText.indexOf(lowerCtx);
+            }
+
+            if (cIdx !== -1) {
+              const sub = normText.substring(cIdx, cIdx + ctx.length);
+              if (isMissing && bWord && aWord) {
+                const pairRegex = new RegExp(`(?:^|[^\\p{L}\\p{N}])(${bWord.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(\\s+)(${aWord.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?=[^\\p{L}\\p{N}]|$)`, "iu");
+                const m = pairRegex.exec(sub);
+                if (m) {
+                  const bOffset = m[0].indexOf(m[1]);
+                  matchIdx = cIdx + m.index + bOffset;
+                  matchLen = m[1].length + m[2].length + m[3].length;
+                }
+              } else if (orig) {
+                let oIdx = sub.indexOf(orig);
+                if (oIdx === -1) oIdx = sub.toLowerCase().indexOf(orig.toLowerCase());
+                if (oIdx !== -1) {
+                  matchIdx = cIdx + oIdx;
+                  matchLen = orig.length;
+                }
+              }
+            }
+
+            // 1b. Try neighbor-anchored matching if exact context block was not found directly
+            if (matchIdx === -1 && orig) {
+              const ctxWords = ctx.split(/\s+/).filter(Boolean);
+              const origLower = orig.toLowerCase();
+              let wIdx = -1;
+              for (let w = 0; w < ctxWords.length; w++) {
+                const cleanW = ctxWords[w].replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "").toLowerCase();
+                if (cleanW === origLower) {
+                  wIdx = w;
+                  break;
+                }
+              }
+
+              if (wIdx !== -1) {
+                const prevW = wIdx > 0 ? ctxWords[wIdx - 1].replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "") : "";
+                const nextW = wIdx < ctxWords.length - 1 ? ctxWords[wIdx + 1].replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "") : "";
+
+                const anchorPatterns: { pattern: string; offsetInPattern: number }[] = [];
+                if (prevW && nextW) {
+                  const p = `${prevW} ${orig} ${nextW}`;
+                  anchorPatterns.push({ pattern: p, offsetInPattern: p.indexOf(orig) });
+                }
+                if (nextW) {
+                  const p = `${orig} ${nextW}`;
+                  anchorPatterns.push({ pattern: p, offsetInPattern: 0 });
+                }
+                if (prevW) {
+                  const p = `${prevW} ${orig}`;
+                  anchorPatterns.push({ pattern: p, offsetInPattern: p.indexOf(orig) });
+                }
+
+                for (const anch of anchorPatterns) {
+                  const patLower = anch.pattern.toLowerCase();
+                  const docLower = normText.toLowerCase();
+                  let aIdx = docLower.indexOf(patLower, lastEnd);
+                  if (aIdx === -1) aIdx = docLower.indexOf(patLower);
+                  if (aIdx !== -1) {
+                    matchIdx = aIdx + anch.offsetInPattern;
+                    matchLen = orig.length;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+
+          // 2. Candidate scoring if context is provided but exact match wasn't found above
+          if (matchIdx === -1 && orig && ctx) {
+            const candList: number[] = [];
+            const docLower = normText.toLowerCase();
+            const origLower = orig.toLowerCase();
+            let pos = 0;
+            while (pos <= normText.length - orig.length) {
+              const idx = docLower.indexOf(origLower, pos);
+              if (idx === -1) break;
+              // Check word boundary
+              const isBoundaryBefore = idx === 0 || !/[\p{L}\p{N}]/u.test(normText[idx - 1]);
+              const end = idx + orig.length;
+              const isBoundaryAfter = end >= normText.length || !/[\p{L}\p{N}]/u.test(normText[end]);
+              if (isBoundaryBefore && isBoundaryAfter) {
+                candList.push(idx);
+              }
+              pos = idx + 1;
+            }
+
+            if (candList.length > 0) {
+              const ctxWords = ctx
+                .toLowerCase()
+                .split(/\s+/)
+                .map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
+                .filter((w) => w.length > 1 && w !== origLower);
+
+              let bestCand = -1;
+              let bestScore = -1;
+
+              for (const cand of candList) {
+                const winStart = Math.max(0, cand - 60);
+                const winEnd = Math.min(normText.length, cand + orig.length + 60);
+                const winText = normText.substring(winStart, winEnd).toLowerCase();
+
+                let score = 0;
+                for (const cw of ctxWords) {
+                  if (winText.includes(cw)) score += 15;
+                }
+                if (cand >= lastEnd) score += 5;
+
+                if (score > bestScore) {
+                  bestScore = score;
+                  bestCand = cand;
+                }
+              }
+
+              if (bestCand !== -1 && bestScore > 0) {
+                matchIdx = bestCand;
+                matchLen = orig.length;
+              }
+            }
+          }
+
+          // 3. Sequential forward search from lastEnd as fallback
+          if (matchIdx === -1) {
+            if (isMissing && bWord && aWord) {
+              const sub = normText.substring(lastEnd);
+              const pairRegex = new RegExp(`(?:^|[^\\p{L}\\p{N}])(${bWord.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(\\s+)(${aWord.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?=[^\\p{L}\\p{N}]|$)`, "iu");
+              const m = pairRegex.exec(sub);
+              if (m) {
+                const bOffset = m[0].indexOf(m[1]);
+                matchIdx = lastEnd + m.index + bOffset;
+                matchLen = m[1].length + m[2].length + m[3].length;
+              }
+            } else if (orig) {
+              let fwd = normText.indexOf(orig, lastEnd);
+              if (fwd === -1) fwd = normText.toLowerCase().indexOf(orig.toLowerCase(), lastEnd);
+              if (fwd === -1) {
+                fwd = normText.indexOf(orig);
+                if (fwd === -1) fwd = normText.toLowerCase().indexOf(orig.toLowerCase());
+              }
+              if (fwd !== -1) {
+                matchIdx = fwd;
+                matchLen = orig.length;
+              }
+            }
+          }
+
+          if (matchIdx !== -1) {
+            cor.startIndex = matchIdx;
+            cor.endIndex = matchIdx + matchLen;
+            lastEnd = matchIdx + matchLen;
+          }
+        });
+      }
+
+      return res.json({ success: true, ...parsed, modelUsed: modelActuallyUsed });
+    } catch (err: any) {
+      console.error("Notes proofread endpoint failed:", err);
+      return res.status(500).json({ error: err.message || "حدث خطأ أثناء تدقيق النص بالذكاء الاصطناعي" });
+    }
+  });
+
   // API Endpoint: Create a flashcard from quoted text via AI
   app.post("/api/ai/make-card-from-text", express.json(), async (req, res) => {
     try {

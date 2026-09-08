@@ -6,6 +6,7 @@ import { AICorrectorWorkspace } from "./components/AICorrectorWorkspace";
 import { RecycleBin } from "./components/RecycleBin";
 import { YoutubeWorkspace } from "./components/YoutubeWorkspace";
 import { MediaPlayerWorkspace } from "./components/MediaPlayerWorkspace";
+import { NotesWorkspace } from "./components/NotesWorkspace";
 import {
   CreateFolderModal,
   AddCardModal,
@@ -97,8 +98,8 @@ export default function App() {
   // Mobile sidebar visibility state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Tab navigation view state: "library" | "ai" | "trash" | "youtube" | "corrector" | "media"
-  const [viewMode, setViewMode] = useState<"library" | "ai" | "trash" | "youtube" | "corrector" | "media">("library");
+  // Tab navigation view state: "library" | "ai" | "trash" | "youtube" | "corrector" | "media" | "notes"
+  const [viewMode, setViewMode] = useState<"library" | "ai" | "trash" | "youtube" | "corrector" | "media" | "notes">("library");
 
   // YouTube transcripts (spT) state
   const [transcripts, setTranscripts] = useState<TranscriptDocument[]>(() => {
@@ -925,6 +926,10 @@ export default function App() {
     setViewMode("media");
   }, []);
 
+  const handleSelectNotes = useCallback(() => {
+    setViewMode("notes");
+  }, []);
+
   const handleDataReloaded = useCallback((newFolders: Folder[], newCards: Flashcard[]) => {
     setFolders(newFolders);
     setCards(newCards);
@@ -1021,11 +1026,17 @@ export default function App() {
           onSelectYoutube={handleSelectYoutube}
           onSelectCorrector={handleSelectCorrector}
           onSelectMedia={handleSelectMedia}
+          onSelectNotes={handleSelectNotes}
           onDataReloaded={handleDataReloaded}
         />
 
         {/* Center Canvas Workspace */}
-        {viewMode === "media" ? (
+        {viewMode === "notes" ? (
+          <NotesWorkspace
+            onToggleSidebar={handleToggleSidebar}
+            onBackToLibrary={handleHomeClick}
+          />
+        ) : viewMode === "media" ? (
           <MediaPlayerWorkspace
             onToggleSidebar={handleToggleSidebar}
             onBackToLibrary={handleHomeClick}

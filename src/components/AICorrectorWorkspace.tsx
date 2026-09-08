@@ -4189,6 +4189,9 @@ ${personaInstruction}
                 ref={textareaRef}
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
+                spellCheck={false}
+                autoCorrect="off"
+                autoCapitalize="off"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
                     e.preventDefault();
