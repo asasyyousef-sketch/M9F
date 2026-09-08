@@ -30,7 +30,13 @@ import {
   Languages,
   Cpu,
   CheckCheck,
-  AlertCircle
+  AlertCircle,
+  PenTool,
+  SlidersHorizontal,
+  Type,
+  Volume2,
+  VolumeX,
+  Settings
 } from "lucide-react";
 import { NoteItem, PaperStyle } from "../types";
 import { ALL_AVAILABLE_MODELS, type AIModelOption } from "./AICorrectorWorkspace";
@@ -45,6 +51,22 @@ const PROOFREAD_LANGUAGES = [
   { id: "Spanish", name: "الإسبانية", native: "Español", flag: "🇪🇸" },
   { id: "Italian", name: "الإيطالية", native: "Italiano", flag: "🇮🇹" }
 ];
+
+const LANG_TO_TTS_CODE: Record<string, string> = {
+  German: "de-DE",
+  English: "en-US",
+  Arabic: "ar-SA",
+  French: "fr-FR",
+  Spanish: "es-ES",
+  Italian: "it-IT"
+};
+
+interface SelectionBubbleInfo {
+  text: string;
+  top: number;
+  left: number;
+  isFlipped: boolean;
+}
 
 interface HoveredCorrectionInfo {
   id: string;
@@ -134,6 +156,7 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
   const [isCopied, setIsCopied] = useState(false);
   const [showTextColorPicker, setShowTextColorPicker] = useState(false);
   const [showHighlightPicker, setShowHighlightPicker] = useState(false);
+  const [mobileToolTab, setMobileToolTab] = useState<"formatting" | "paper">("formatting");
 
   // AI Proofreading states
   const [proofreadLanguage, setProofreadLanguage] = useState<string>(() => {
@@ -153,6 +176,53 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
   const [activeCorrectionsCount, setActiveCorrectionsCount] = useState<number>(0);
   const [hoveredCorrection, setHoveredCorrection] = useState<HoveredCorrectionInfo | null>(null);
   const popoverCloseTimeoutRef = useRef<any>(null);
+
+  // Floating text selection bubble states (Listen / Speak & Copy)
+  const [selectionBubble, setSelectionBubble] = useState<SelectionBubbleInfo | null>(null);
+  const [isSpeakingSelection, setIsSpeakingSelection] = useState(false);
+  const [selectionCopied, setSelectionCopied] = useState(false);
+  const selectionTimeoutRef = useRef<any>(null);
+
+  // Voice Model Settings Modal state
+  const [showVoiceSettingsModal, setShowVoiceSettingsModal] = useState(false);
+  const [selectedVoiceModel, setSelectedVoiceModel] = useState<string>(() => {
+    return localStorage.getItem("notes_tts_voice_model") || "google";
+  });
+  const [speechRate, setSpeechRate] = useState<number>(() => {
+    const saved = localStorage.getItem("notes_tts_speech_rate");
+    return saved ? Number(saved) : 0.95;
+  });
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [installedPiperModels, setInstalledPiperModels] = useState<Array<{ id: string; name?: string; lang?: string; flag?: string }>>([]);
+  const [testVoiceLang, setTestVoiceLang] = useState<string>(() => proofreadLanguage || "German");
+  const [isTestingVoice, setIsTestingVoice] = useState(false);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const loadVoices = () => {
+      const v = window.speechSynthesis.getVoices();
+      if (v && v.length > 0) {
+        setAvailableVoices(v);
+      }
+    };
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    return () => {
+      window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/tts/models")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && Array.isArray(data.models)) {
+          setInstalledPiperModels(data.models);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const selectedLangObj = useMemo(() => {
     return PROOFREAD_LANGUAGES.find((l) => l.id === proofreadLanguage) || PROOFREAD_LANGUAGES[0];
@@ -999,6 +1069,7 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
 
   // Editor hover & click interactions for proofread spans and missing word carets
   const handleEditorMouseMove = (e: React.MouseEvent) => {
+    if (selectionBubble) return;
     const target = (e.target as HTMLElement).closest(".ai-proofread-error, .ai-proofread-missing-caret") as HTMLElement | null;
     if (target && (target.dataset.original || target.dataset.replacement)) {
       if (popoverCloseTimeoutRef.current) {
@@ -1175,6 +1246,328 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
     return text.split(/\s+/).filter(Boolean).length;
   }, [activeNote]);
 
+  // Helper to retrieve Piper models per language
+  const getPiperModelsForLang = useCallback((langId: string) => {
+    const defaultPiperModels: Record<string, Array<{ id: string; name: string; flag: string; desc: string }>> = {
+      German: [
+        { id: "de_DE-thorsten-medium", name: "Thorsten Medium", flag: "🇩🇪", desc: "ألماني - معتدل متزن" },
+        { id: "de_DE-thorsten-high", name: "Thorsten High", flag: "🇩🇪", desc: "ألماني - عالي الدقة وواقعي" },
+        { id: "de_DE-kerstin-low", name: "Kerstin Low", flag: "🇩🇪", desc: "ألماني أنثوي - طبيعي وهادئ" },
+        { id: "de_DE-amany-medium", name: "Amany Medium", flag: "🇩🇪", desc: "ألماني - نطق تعليمي واضح" },
+        { id: "de_DE-pavoque-low", name: "Pavoque Low", flag: "🇩🇪", desc: "ألماني - سريع وخفيف" },
+      ],
+      Arabic: [
+        { id: "ar_JO-kareem-medium", name: "Kareem Medium", flag: "🇸🇦", desc: "عربي فصيح متقن وواضح" },
+      ],
+      English: [
+        { id: "en_US-lessac-medium", name: "Lessac Medium", flag: "🇺🇸", desc: "إنجليزي أمريكي - احترافي" },
+        { id: "en_US-bryce-medium", name: "Bryce Medium", flag: "🇺🇸", desc: "إنجليزي هادئ ومريح" },
+      ],
+      French: [
+        { id: "fr_FR-siwis-medium", name: "Siwis Medium", flag: "🇫🇷", desc: "فرنسي متوازن وأصيل" },
+      ],
+      Spanish: [
+        { id: "es_ES-davefx-medium", name: "Dave Medium", flag: "🇪🇸", desc: "إسباني طبيعي واضح" },
+      ],
+      Italian: [
+        { id: "it_IT-riccardo-x_low", name: "Riccardo Low", flag: "🇮🇹", desc: "إيطالي سلس وخفيف" },
+      ]
+    };
+
+    const defaults = defaultPiperModels[langId] || [];
+    const langShort = langId === "German" ? "de" : langId === "Arabic" ? "ar" : langId === "English" ? "en" : langId === "French" ? "fr" : langId === "Spanish" ? "es" : "it";
+
+    const extraInstalled = installedPiperModels
+      .filter((m) => m.id.toLowerCase().startsWith(`${langShort}_`) && !defaults.some((d) => d.id === m.id))
+      .map((m) => ({ id: m.id, name: m.name || m.id, flag: m.flag || "🧠", desc: "نموذج عصبي محلي" }));
+
+    return [...defaults, ...extraInstalled];
+  }, [installedPiperModels]);
+
+  // Handle setting voice model
+  const handleSelectVoiceModel = (model: string) => {
+    setSelectedVoiceModel(model);
+    localStorage.setItem("notes_tts_voice_model", model);
+  };
+
+  // Handle setting speech rate
+  const handleSetSpeechRate = (rate: number) => {
+    setSpeechRate(rate);
+    localStorage.setItem("notes_tts_speech_rate", String(rate));
+  };
+
+  // Speak selected text via configured voice model (Google TTS, Piper Neural, or Web Speech)
+  const speakSelectedText = useCallback(
+    (textToSpeak?: string, customModel?: string, customRate?: number, customLang?: string) => {
+      const text = textToSpeak || selectionBubble?.text;
+      if (!text || typeof window === "undefined") return;
+
+      try {
+        // If already speaking and no explicit test text passed, toggle off / stop immediately
+        if (isSpeakingSelection && !textToSpeak) {
+          if (currentAudioRef.current) {
+            currentAudioRef.current.pause();
+            currentAudioRef.current.src = "";
+            currentAudioRef.current = null;
+          }
+          if ("speechSynthesis" in window) {
+            window.speechSynthesis.cancel();
+          }
+          setIsSpeakingSelection(false);
+          return;
+        }
+
+        // Stop any current audio
+        if (currentAudioRef.current) {
+          currentAudioRef.current.pause();
+          currentAudioRef.current.src = "";
+          currentAudioRef.current = null;
+        }
+        if ("speechSynthesis" in window) {
+          window.speechSynthesis.cancel();
+        }
+
+        // Determine language: If text has Arabic chars, prioritize Arabic, else active note's or custom language
+        const hasArabic = /[\u0600-\u06FF]/.test(text);
+        const targetLang = customLang || (hasArabic ? "Arabic" : proofreadLanguage);
+        const langShort = targetLang === "German" ? "de"
+          : targetLang === "Arabic" ? "ar"
+          : targetLang === "English" ? "en"
+          : targetLang === "French" ? "fr"
+          : targetLang === "Spanish" ? "es"
+          : targetLang === "Italian" ? "it"
+          : "de";
+        const langIso = LANG_TO_TTS_CODE[targetLang] || "de-DE";
+
+        const voice = customModel !== undefined ? customModel : selectedVoiceModel;
+        const rate = customRate !== undefined ? customRate : speechRate;
+
+        // Fallback or native Web Speech API implementation
+        const speakViaWebSpeech = () => {
+          if (!("speechSynthesis" in window)) {
+            setIsSpeakingSelection(false);
+            return;
+          }
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = langIso;
+          utterance.rate = rate;
+
+          if (voice && voice !== "webspeech" && voice !== "google" && !voice.includes("medium") && !voice.includes("high") && !voice.includes("low")) {
+            const matched = availableVoices.find((v) => v.voiceURI === voice || v.name === voice);
+            if (matched) utterance.voice = matched;
+          } else {
+            const match = availableVoices.find((v) => v.lang.toLowerCase().startsWith(langShort));
+            if (match) utterance.voice = match;
+          }
+
+          utterance.onstart = () => setIsSpeakingSelection(true);
+          utterance.onend = () => setIsSpeakingSelection(false);
+          utterance.onerror = () => setIsSpeakingSelection(false);
+
+          window.speechSynthesis.speak(utterance);
+        };
+
+        // Determine if server-based Piper model or Google Translate TTS is chosen
+        const isPiperOrGoogle =
+          voice === "google" ||
+          voice === "google_tts" ||
+          voice?.startsWith("de_") ||
+          voice?.startsWith("ar_") ||
+          voice?.startsWith("en_") ||
+          voice?.startsWith("fr_") ||
+          voice?.startsWith("es_") ||
+          voice?.startsWith("it_") ||
+          voice?.includes("medium") ||
+          voice?.includes("high") ||
+          voice?.includes("low") ||
+          voice?.endsWith(".onnx");
+
+        if (isPiperOrGoogle) {
+          setIsSpeakingSelection(true);
+
+          // Language mismatch safety check
+          let effectiveVoice = voice;
+          if (effectiveVoice.startsWith("de_") && langShort !== "de") {
+            effectiveVoice = langShort === "ar" ? "ar_JO-kareem-medium" : langShort === "en" ? "en_US-lessac-medium" : "google";
+          } else if (effectiveVoice.startsWith("ar_") && langShort !== "ar") {
+            effectiveVoice = langShort === "de" ? "de_DE-thorsten-medium" : langShort === "en" ? "en_US-lessac-medium" : "google";
+          }
+
+          const voiceParam = `&voice=${encodeURIComponent(effectiveVoice)}`;
+          const ttsUrl = `/api/tts?text=${encodeURIComponent(text)}&lang=${langShort}${voiceParam}`;
+
+          const audio = new Audio(ttsUrl);
+          audio.playbackRate = rate;
+          currentAudioRef.current = audio;
+
+          audio.onplay = () => {
+            setIsSpeakingSelection(true);
+          };
+          audio.onended = () => {
+            setIsSpeakingSelection(false);
+            currentAudioRef.current = null;
+          };
+          audio.onerror = () => {
+            console.warn("TTS Audio endpoint failed, falling back to Web Speech API");
+            speakViaWebSpeech();
+          };
+
+          audio.play().catch((err) => {
+            console.warn("Audio playback rejected, falling back to Web Speech API:", err);
+            speakViaWebSpeech();
+          });
+          return;
+        }
+
+        // WebSpeech API
+        speakViaWebSpeech();
+      } catch (err) {
+        console.error("Speech synthesis error:", err);
+        setIsSpeakingSelection(false);
+      }
+    },
+    [selectionBubble, isSpeakingSelection, proofreadLanguage, selectedVoiceModel, speechRate, availableVoices]
+  );
+
+  // Test voice sample in settings modal
+  const handleTestVoiceInModal = (modelToTest?: string) => {
+    const model = modelToTest || selectedVoiceModel;
+    const testTexts: Record<string, string> = {
+      German: "Guten Tag! Dies ist eine Hörprobe für die ausgewählte Stimme.",
+      Arabic: "مرحباً بك! هذا اختبار صوتي واضح للنموذج المختار للنطق.",
+      English: "Hello! This is a voice sample for your chosen speech model.",
+      French: "Bonjour! Ceci est un échantillon vocal pour le modèle choisi.",
+      Spanish: "¡Hola! Esta es una prueba de voz para el modelo seleccionado.",
+      Italian: "Ciao! Questo è un test vocale per il modello selezionato."
+    };
+    const sample = testTexts[testVoiceLang] || testTexts["German"];
+    setIsTestingVoice(true);
+    speakSelectedText(sample, model, speechRate, testVoiceLang);
+    setTimeout(() => {
+      setIsTestingVoice(false);
+    }, 3500);
+  };
+
+  // Copy selected text to clipboard
+  const handleCopySelection = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!selectionBubble?.text) return;
+    navigator.clipboard.writeText(selectionBubble.text);
+    setSelectionCopied(true);
+    setTimeout(() => setSelectionCopied(false), 2000);
+  };
+
+  // Inspect current user text selection on paper/editor
+  const checkSelection = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) {
+      setSelectionBubble(null);
+      return;
+    }
+
+    const text = sel.toString().trim();
+    if (!text || text.length === 0) {
+      setSelectionBubble(null);
+      return;
+    }
+
+    const sheet = document.getElementById("printable-paper-sheet");
+    if (!sheet) {
+      setSelectionBubble(null);
+      return;
+    }
+
+    const anchor = sel.anchorNode;
+    const focus = sel.focusNode;
+    const isInside =
+      (anchor && sheet.contains(anchor)) ||
+      (focus && sheet.contains(focus));
+
+    if (!isInside) {
+      setSelectionBubble(null);
+      return;
+    }
+
+    try {
+      const range = sel.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      if (!rect || (rect.width === 0 && rect.height === 0)) {
+        setSelectionBubble(null);
+        return;
+      }
+
+      // If near top of screen, place bubble beneath selection; else above
+      const isFlipped = rect.top < 85;
+      const top = isFlipped ? rect.bottom + 8 : rect.top - 8;
+      const left = rect.left + rect.width / 2;
+
+      setSelectionBubble({
+        text,
+        top,
+        left,
+        isFlipped
+      });
+    } catch (e) {
+      setSelectionBubble(null);
+    }
+  }, []);
+
+  // Selection change listener effect
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      if (selectionTimeoutRef.current) {
+        clearTimeout(selectionTimeoutRef.current);
+      }
+      selectionTimeoutRef.current = setTimeout(() => {
+        checkSelection();
+      }, 120);
+    };
+
+    const handlePointerEnd = () => {
+      if (selectionTimeoutRef.current) {
+        clearTimeout(selectionTimeoutRef.current);
+      }
+      selectionTimeoutRef.current = setTimeout(() => {
+        checkSelection();
+      }, 40);
+    };
+
+    const handleScrollOrResize = () => {
+      checkSelection();
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectionBubble(null);
+      }
+    };
+
+    document.addEventListener("selectionchange", handleSelectionChange);
+    document.addEventListener("mouseup", handlePointerEnd);
+    document.addEventListener("touchend", handlePointerEnd);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleScrollOrResize, { passive: true });
+    window.addEventListener("scroll", handleScrollOrResize, { passive: true, capture: true });
+
+    return () => {
+      if (selectionTimeoutRef.current) {
+        clearTimeout(selectionTimeoutRef.current);
+      }
+      document.removeEventListener("selectionchange", handleSelectionChange);
+      document.removeEventListener("mouseup", handlePointerEnd);
+      document.removeEventListener("touchend", handlePointerEnd);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleScrollOrResize);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, [checkSelection]);
+
   const currentPaperStyle = activeNote?.paperStyle || "ruled";
 
   return (
@@ -1186,68 +1579,70 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
       dir="rtl"
     >
       {/* ================================================================= */}
-      {/* 1. TOP HEADER (Simple, Clean, Direct) */}
+      {/* 1. TOP HEADER (Responsive: Fits mobile screen smoothly) */}
       {/* ================================================================= */}
-      <header className="h-14 bg-white border-b border-slate-200 px-3 md:px-6 flex items-center justify-between shrink-0 select-none z-30 shadow-2xs">
-        <div className="flex items-center gap-2 md:gap-3">
+      <header className="h-13 sm:h-14 bg-white border-b border-slate-200 px-2 sm:px-4 md:px-6 flex items-center justify-between shrink-0 select-none z-30 shadow-2xs">
+        <div className="flex items-center gap-1.5 sm:gap-2 md:gap-3 min-w-0">
           {onToggleSidebar && (
             <button
               type="button"
               onClick={onToggleSidebar}
-              className="md:hidden p-2 text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+              className="md:hidden p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer shrink-0"
               title="القائمة"
             >
               <Menu className="w-5 h-5" />
             </button>
           )}
 
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold shrink-0">
               <BookOpen className="w-4 h-4" />
             </div>
-            <span className="font-bold text-sm text-slate-800 hidden sm:inline">
+            <span className="font-bold text-xs sm:text-sm text-slate-800 hidden xs:inline">
               الكتابات
             </span>
           </div>
 
-          <div className="h-4 w-px bg-slate-200 mx-1" />
+          <div className="h-4 w-px bg-slate-200 mx-0.5 sm:mx-1 shrink-0" />
 
           {/* New Note Button */}
           <button
             type="button"
             onClick={handleCreateNewNote}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-2xs cursor-pointer"
+            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-[11px] sm:text-xs font-bold transition-all shadow-2xs cursor-pointer shrink-0"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>ورقة جديدة</span>
+            <span className="hidden sm:inline">ورقة جديدة</span>
+            <span className="sm:hidden">جديدة</span>
           </button>
 
           {/* Writings List Drawer Toggle */}
           <button
             type="button"
             onClick={() => setShowNotesList(!showNotesList)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+            className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold transition-colors cursor-pointer shrink-0 ${
               showNotesList
                 ? "bg-slate-800 text-white"
                 : "bg-slate-100 text-slate-700 hover:bg-slate-200"
             }`}
           >
             <FileText className="w-3.5 h-3.5" />
-            <span>كتاباتي ({notes.length})</span>
+            <span className="hidden sm:inline">كتاباتي</span>
+            <span>({notes.length})</span>
           </button>
         </div>
 
         {/* Top Right Status & Quick Actions */}
-        <div className="flex items-center gap-1.5 md:gap-2">
+        <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
           {/* Save status */}
-          <div className="text-xs text-slate-500 font-medium px-2 py-1">
+          <div className="text-xs text-slate-500 font-medium px-1 sm:px-2 py-1">
             {isSaved ? (
-              <span className="flex items-center gap-1 text-emerald-600">
-                <Check className="w-3 h-3" />
-                <span>تم الحفظ</span>
+              <span className="flex items-center gap-1 text-emerald-600 text-[11px] sm:text-xs">
+                <Check className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">تم الحفظ</span>
               </span>
             ) : (
-              <span className="text-amber-600">جاري الحفظ...</span>
+              <span className="text-amber-600 text-[11px]">جاري الحفظ...</span>
             )}
           </div>
 
@@ -1255,27 +1650,27 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
           <button
             type="button"
             onClick={handleCopy}
-            className="p-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
+            className="p-1.5 sm:p-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
             title="نسخ النص"
           >
             {isCopied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
           </button>
 
-          {/* Print Button */}
+          {/* Print Button (hidden on mobile) */}
           <button
             type="button"
             onClick={handlePrint}
-            className="p-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
+            className="hidden md:flex p-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
             title="طباعة الورقة"
           >
             <Printer className="w-4 h-4" />
           </button>
 
-          {/* Fullscreen Toggle */}
+          {/* Fullscreen Toggle (hidden on small mobile) */}
           <button
             type="button"
             onClick={() => setIsFullscreen(!isFullscreen)}
-            className="p-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
+            className="hidden sm:flex p-1.5 sm:p-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
             title={isFullscreen ? "تصغير الشاشة" : "ملء الشاشة"}
           >
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -1285,7 +1680,7 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
           <button
             type="button"
             onClick={handleDeleteCurrentNote}
-            className="p-2 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 transition-colors cursor-pointer"
+            className="p-1.5 sm:p-2 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 transition-colors cursor-pointer"
             title="حذف هذه الورقة"
           >
             <Trash2 className="w-4 h-4" />
@@ -1294,9 +1689,11 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
       </header>
 
       {/* ================================================================= */}
-      {/* 2. SIMPLE UNIFIED TOOLBAR (Direct paper style + essential formatting) */}
+      {/* 2. ADAPTIVE RESPONSIVE TOOLBAR */}
       {/* ================================================================= */}
-      <div className="bg-white border-b border-slate-200 px-3 py-1.5 shrink-0 flex items-center justify-between select-none shadow-2xs relative z-40 gap-3 flex-wrap lg:flex-nowrap">
+
+      {/* DESKTOP TOOLBAR (md and above: single wide bar) */}
+      <div className="hidden md:flex bg-white border-b border-slate-200 px-3 py-1.5 shrink-0 items-center justify-between select-none shadow-2xs relative z-40 gap-3">
         {/* Left Side: Paper Type 1-Click Switcher & Font Alignment */}
         <div className="flex items-center gap-2 shrink-0">
           {/* Paper Type Switcher */}
@@ -1348,7 +1745,7 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
 
           {/* Baseline Nudge: ضبط ملاصقة السطر */}
           <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-xl text-xs text-slate-600">
-            <span className="text-[11px] font-medium hidden sm:inline">ملاصقة السطر:</span>
+            <span className="text-[11px] font-medium hidden lg:inline">ملاصقة السطر:</span>
             <button
               type="button"
               onClick={() => adjustBaseline(-1)}
@@ -1410,56 +1807,9 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
                 <span className="text-[11px] font-bold">{selectedLangObj.name}</span>
                 <ChevronDown className="w-3 h-3 text-slate-400" />
               </button>
-
-              {showLangPicker && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setShowLangPicker(false)}
-                  />
-                  <div
-                    className="absolute top-full mt-2 right-0 bg-white border border-slate-200 rounded-2xl p-3 shadow-2xl z-50 w-64 max-w-[calc(100vw-24px)] text-right animate-in fade-in zoom-in-95 font-sans"
-                    dir="rtl"
-                  >
-                    <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
-                      <span className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
-                        <Languages className="w-3.5 h-3.5 text-violet-600" />
-                        لغة النص (الافتراضية: الألمانية)
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowLangPicker(false)}
-                        className="text-slate-400 hover:text-slate-600 p-0.5 rounded cursor-pointer"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {PROOFREAD_LANGUAGES.map((l) => (
-                        <button
-                          key={l.id}
-                          type="button"
-                          onClick={() => {
-                            handleSetLanguage(l.id);
-                            setShowLangPicker(false);
-                          }}
-                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer text-right ${
-                            proofreadLanguage === l.id
-                              ? "bg-violet-50 border-violet-400 text-violet-900 font-bold shadow-2xs"
-                              : "bg-slate-50/70 border-slate-200 text-slate-700 hover:bg-slate-100"
-                          }`}
-                        >
-                          <span className="text-sm">{l.flag}</span>
-                          <span className="truncate">{l.name}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
             </div>
 
-            {/* AI Model Selector Button (Same models as in قسم صحح) */}
+            {/* AI Model Selector Button */}
             <div className="relative">
               <button
                 type="button"
@@ -1472,150 +1822,14 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
                     ? "bg-violet-100/90 border-violet-400 text-violet-900 ring-2 ring-violet-200"
                     : "bg-white hover:bg-violet-50 border-slate-200 text-slate-700 hover:text-violet-900"
                 }`}
-                title="تحديد موديل الذكاء للتصحيح (نفس موديلات قسم صحح)"
+                title="تحديد موديل الذكاء للتصحيح"
               >
                 <Cpu className="w-3.5 h-3.5 text-violet-600 shrink-0" />
-                <span className="max-w-[125px] sm:max-w-[160px] truncate text-[11px] font-bold">
+                <span className="max-w-[125px] lg:max-w-[160px] truncate text-[11px] font-bold">
                   {selectedModelObj.name}
                 </span>
                 <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
               </button>
-
-              {showModelPicker && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setShowModelPicker(false)}
-                  />
-                  <div
-                    className="absolute top-full mt-2 right-0 bg-white border border-slate-200/90 rounded-2xl p-3.5 shadow-2xl z-50 w-80 sm:w-96 max-w-[calc(100vw-24px)] text-right animate-in fade-in zoom-in-95 font-sans"
-                    dir="rtl"
-                  >
-                    <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-100">
-                      <div>
-                        <div className="font-extrabold text-xs text-slate-900 flex items-center gap-1.5">
-                          <Cpu className="w-4 h-4 text-violet-600" />
-                          موديل الذكاء للتصحيح (موديلات صحح)
-                        </div>
-                        <div className="text-[10px] text-slate-500 mt-0.5">
-                          اختر الموديل المناسب للحصة وسرعة التدقيق اللغوي
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowModelPicker(false)}
-                        className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    <div className="max-h-[380px] overflow-y-auto space-y-3.5 pr-1 pl-0.5 custom-scrollbar">
-                      {/* Group 1: High Quota Models (500 RPD) */}
-                      <div>
-                        <div className="flex items-center justify-between mb-1.5 px-1">
-                          <span className="text-[11px] font-black text-amber-900 flex items-center gap-1">
-                            <span>⚡ موديلات الحصة العالية (500 طلب يومياً)</span>
-                          </span>
-                          <span className="text-[9px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded-md">
-                            بدون انقطاع
-                          </span>
-                        </div>
-                        <div className="space-y-1.5">
-                          {ALL_AVAILABLE_MODELS.filter((m) => m.group === "high_quota").map((m) => {
-                            const isSelected = proofreadModel === m.key;
-                            return (
-                              <button
-                                key={m.key}
-                                type="button"
-                                onClick={() => {
-                                  handleSetModel(m.key);
-                                  setShowModelPicker(false);
-                                }}
-                                className={`w-full flex items-center justify-between p-2.5 rounded-xl border text-right transition-all cursor-pointer ${
-                                  isSelected
-                                    ? "bg-amber-50/90 border-amber-400 text-slate-900 shadow-2xs ring-1 ring-amber-300"
-                                    : "bg-slate-50/70 hover:bg-amber-50/40 border-slate-200/80 text-slate-700"
-                                }`}
-                              >
-                                <div className="flex items-center gap-2.5">
-                                  <div
-                                    className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                                      isSelected
-                                        ? "border-amber-500 bg-amber-500"
-                                        : "border-slate-300"
-                                    }`}
-                                  >
-                                    {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
-                                  </div>
-                                  <div>
-                                    <div className="font-bold text-xs text-slate-900">{m.name}</div>
-                                    <div className="text-[10px] text-slate-500 font-normal">{m.desc}</div>
-                                  </div>
-                                </div>
-                                <span className="text-[10px] bg-white px-2 py-0.5 rounded-lg border border-amber-200 text-amber-800 font-bold shrink-0 mr-2 shadow-2xs">
-                                  {m.badge}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      {/* Group 2: General & Advanced Models */}
-                      <div>
-                        <div className="flex items-center justify-between mb-1.5 px-1">
-                          <span className="text-[11px] font-black text-violet-900 flex items-center gap-1">
-                            <span>💎 الموديلات العامة والمتقدمة</span>
-                          </span>
-                          <span className="text-[9px] bg-violet-100 text-violet-800 font-bold px-1.5 py-0.5 rounded-md">
-                            تحليل لغوي عميق
-                          </span>
-                        </div>
-                        <div className="space-y-1.5">
-                          {ALL_AVAILABLE_MODELS.filter((m) => m.group !== "high_quota").map((m) => {
-                            const isSelected = proofreadModel === m.key;
-                            return (
-                              <button
-                                key={m.key}
-                                type="button"
-                                onClick={() => {
-                                  handleSetModel(m.key);
-                                  setShowModelPicker(false);
-                                }}
-                                className={`w-full flex items-center justify-between p-2.5 rounded-xl border text-right transition-all cursor-pointer ${
-                                  isSelected
-                                    ? "bg-violet-50/90 border-violet-400 text-slate-900 shadow-2xs ring-1 ring-violet-300"
-                                    : "bg-slate-50/70 hover:bg-violet-50/40 border-slate-200/80 text-slate-700"
-                                }`}
-                              >
-                                <div className="flex items-center gap-2.5">
-                                  <div
-                                    className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                                      isSelected
-                                        ? "border-violet-600 bg-violet-600"
-                                        : "border-slate-300"
-                                    }`}
-                                  >
-                                    {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
-                                  </div>
-                                  <div>
-                                    <div className="font-bold text-xs text-slate-900">{m.name}</div>
-                                    <div className="text-[10px] text-slate-500 font-normal">{m.desc}</div>
-                                  </div>
-                                </div>
-                                <span className="text-[10px] bg-white px-2 py-0.5 rounded-lg border border-slate-200 text-violet-800 font-bold shrink-0 mr-2 shadow-2xs">
-                                  {m.badge}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
             </div>
 
             {/* Active Corrections Summary Badge */}
@@ -1643,7 +1857,7 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
           </div>
         </div>
 
-        {/* Center / Right: Essential Text Formatting Tools (No shortcut codes) */}
+        {/* Center / Right: Essential Text Formatting Tools */}
         <div className="flex items-center gap-1 shrink-0">
           {/* Undo / Redo */}
           <button
@@ -1812,13 +2026,558 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
         </div>
       </div>
 
+      {/* MOBILE TOOLBAR (< md: Fully customized to fit phone screen width without breaking) */}
+      <div className="flex md:hidden flex-col w-full bg-white border-b border-slate-200 shadow-2xs relative z-40">
+        {/* Mobile Row 1: AI Proofreading Bar (Compact & Perfectly Sized) */}
+        <div className="flex items-center justify-between gap-1.5 px-2.5 py-1.5 bg-gradient-to-l from-violet-50/90 via-purple-50/60 to-white border-b border-violet-100">
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* AI Proofread Button */}
+            <button
+              type="button"
+              onClick={handleStartProofread}
+              disabled={isProofreading}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 active:bg-violet-700 active:scale-95 text-white font-bold text-xs rounded-xl shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+              title="تصحيح النص بالذكاء الاصطناعي"
+            >
+              {isProofreading ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>تدقيق...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 text-violet-200" />
+                  <span>تصحيح بالذكاء</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1.5 min-w-0">
+            {/* Language Selector Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setShowLangPicker(!showLangPicker);
+                setShowModelPicker(false);
+              }}
+              className="flex items-center gap-1 px-2 py-1.5 text-xs font-bold rounded-xl bg-white border border-slate-200 text-slate-700 shadow-2xs shrink-0 active:bg-slate-50"
+              title="تحديد لغة الكتابة والتدقيق"
+            >
+              <span className="text-sm">{selectedLangObj.flag}</span>
+              <span className="text-[11px] font-bold">{selectedLangObj.name}</span>
+              <ChevronDown className="w-3 h-3 text-slate-400" />
+            </button>
+
+            {/* AI Model Selector Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setShowModelPicker(!showModelPicker);
+                setShowLangPicker(false);
+              }}
+              className="flex items-center gap-1 px-2 py-1.5 text-xs font-bold rounded-xl bg-white border border-slate-200 text-slate-700 shadow-2xs shrink-0 max-w-[120px] active:bg-slate-50"
+              title="تحديد موديل الذكاء"
+            >
+              <Cpu className="w-3 h-3 text-violet-600 shrink-0" />
+              <span className="truncate text-[10px] font-bold">
+                {selectedModelObj.name.replace(/^(Gemini|Groq)\s*/i, "")}
+              </span>
+              <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile Corrections Notification Pill (if any errors found) */}
+        {activeCorrectionsCount > 0 && (
+          <div className="flex items-center justify-between px-3 py-1.5 bg-rose-50 border-b border-rose-200 text-xs font-bold text-rose-800 animate-in fade-in slide-in-from-top-1">
+            <span className="flex items-center gap-1.5 text-[11px]">
+              <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+              <span>تم رصد {activeCorrectionsCount} ملاحظات</span>
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={applyAllCorrections}
+                className="px-2.5 py-1 bg-rose-600 text-white rounded-lg text-[11px] font-bold active:scale-95 shadow-2xs cursor-pointer"
+              >
+                تطبيق الكل
+              </button>
+              <button
+                type="button"
+                onClick={clearAllMarks}
+                className="p-1 text-rose-500 hover:text-rose-700 rounded-lg cursor-pointer"
+                title="مسح العلامات"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Mobile Row 2: Category Segment Switcher (التنسيق vs الورقة والخط) */}
+        <div className="flex items-center justify-between px-2 pt-1.5 pb-1 bg-white border-b border-slate-100">
+          <div className="flex items-center bg-slate-100/90 p-0.5 rounded-xl w-full">
+            <button
+              type="button"
+              onClick={() => setMobileToolTab("formatting")}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                mobileToolTab === "formatting"
+                  ? "bg-white text-blue-700 shadow-2xs font-extrabold"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <PenTool className="w-3 h-3" />
+              <span>تنسيق النص</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileToolTab("paper")}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                mobileToolTab === "paper"
+                  ? "bg-white text-blue-700 shadow-2xs font-extrabold"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <SlidersHorizontal className="w-3 h-3" />
+              <span>نوع الورقة والخط</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile Row 3: Active Tool Actions (Never wraps, cleanly scrollable if screen is tiny) */}
+        {mobileToolTab === "formatting" ? (
+          <div className="flex items-center justify-between px-2 py-1.5 gap-1 overflow-x-auto no-scrollbar whitespace-nowrap">
+            {/* Undo / Redo */}
+            <div className="flex items-center gap-0.5 shrink-0 bg-slate-50 p-0.5 rounded-lg border border-slate-200/70">
+              <button
+                type="button"
+                onClick={() => formatText("undo")}
+                className="p-1.5 text-slate-700 active:bg-white rounded-md cursor-pointer"
+                title="تراجع"
+              >
+                <Undo2 className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => formatText("redo")}
+                className="p-1.5 text-slate-700 active:bg-white rounded-md cursor-pointer"
+                title="إعادة"
+              >
+                <Redo2 className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Bold / Italic / Underline */}
+            <div className="flex items-center gap-0.5 shrink-0 bg-slate-50 p-0.5 rounded-lg border border-slate-200/70">
+              <button
+                type="button"
+                onClick={() => formatText("bold")}
+                className="p-1.5 text-slate-800 active:bg-white rounded-md cursor-pointer font-black"
+                title="خط عريض"
+              >
+                <Bold className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => formatText("italic")}
+                className="p-1.5 text-slate-700 active:bg-white rounded-md cursor-pointer"
+                title="خط مائل"
+              >
+                <Italic className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => formatText("underline")}
+                className="p-1.5 text-slate-700 active:bg-white rounded-md cursor-pointer"
+                title="تحته خط"
+              >
+                <Underline className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Colors */}
+            <div className="flex items-center gap-0.5 shrink-0 bg-slate-50 p-0.5 rounded-lg border border-slate-200/70">
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowTextColorPicker(!showTextColorPicker);
+                    setShowHighlightPicker(false);
+                  }}
+                  className="p-1.5 text-slate-700 active:bg-white rounded-md cursor-pointer flex items-center"
+                  title="لون الخط"
+                >
+                  <Palette className="w-4 h-4 text-blue-600" />
+                </button>
+                {showTextColorPicker && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setShowTextColorPicker(false)}
+                    />
+                    <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 bg-white border border-slate-200 rounded-xl p-2 shadow-2xl z-50 flex gap-1.5 animate-in fade-in zoom-in-95">
+                      {[
+                        { color: "#000000", title: "أسود" },
+                        { color: "#2563eb", title: "أزرق" },
+                        { color: "#dc2626", title: "أحمر" },
+                        { color: "#16a34a", title: "أخضر" },
+                        { color: "#7c3aed", title: "بنفسجي" }
+                      ].map((item) => (
+                        <button
+                          key={item.color}
+                          type="button"
+                          onClick={() => {
+                            formatText("foreColor", item.color);
+                            setShowTextColorPicker(false);
+                          }}
+                          className="w-5 h-5 rounded-full border border-slate-300 hover:scale-110 transition-transform cursor-pointer"
+                          style={{ backgroundColor: item.color }}
+                          title={item.title}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowHighlightPicker(!showHighlightPicker);
+                    setShowTextColorPicker(false);
+                  }}
+                  className="p-1.5 text-slate-700 active:bg-white rounded-md cursor-pointer flex items-center"
+                  title="تظليل ماركر"
+                >
+                  <Highlighter className="w-4 h-4 text-amber-500" />
+                </button>
+                {showHighlightPicker && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setShowHighlightPicker(false)}
+                    />
+                    <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 bg-white border border-slate-200 rounded-xl p-2 shadow-2xl z-50 flex gap-1.5 animate-in fade-in zoom-in-95">
+                      {[
+                        { color: "#fef08a", title: "أصفر فسفوري" },
+                        { color: "#bbf7d0", title: "أخضر فاتح" },
+                        { color: "#bae6fd", title: "سماوي" },
+                        { color: "#fbcfe8", title: "وردي" }
+                      ].map((item) => (
+                        <button
+                          key={item.color}
+                          type="button"
+                          onClick={() => {
+                            formatText("hiliteColor", item.color);
+                            setShowHighlightPicker(false);
+                          }}
+                          className="w-5 h-5 rounded-full border border-slate-300 hover:scale-110 transition-transform cursor-pointer"
+                          style={{ backgroundColor: item.color }}
+                          title={item.title}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Lists & Clear */}
+            <div className="flex items-center gap-0.5 shrink-0 bg-slate-50 p-0.5 rounded-lg border border-slate-200/70">
+              <button
+                type="button"
+                onClick={() => formatText("insertUnorderedList")}
+                className="p-1.5 text-slate-700 active:bg-white rounded-md cursor-pointer"
+                title="قائمة نقطية"
+              >
+                <List className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => formatText("insertOrderedList")}
+                className="p-1.5 text-slate-700 active:bg-white rounded-md cursor-pointer"
+                title="قائمة مرقمة"
+              >
+                <ListOrdered className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => formatText("removeFormat")}
+                className="p-1.5 text-slate-500 hover:text-rose-600 active:bg-white rounded-md cursor-pointer"
+                title="مسح التنسيق"
+              >
+                <RemoveFormatting className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between px-2 py-1.5 gap-1.5 overflow-x-auto no-scrollbar whitespace-nowrap">
+            {/* Paper Type Switcher */}
+            <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl shrink-0">
+              {[
+                { id: "ruled", label: "مسطر" },
+                { id: "plain", label: "سادة" },
+                { id: "grid", label: "مربعات" },
+                { id: "legal", label: "أصفر" }
+              ].map((style) => (
+                <button
+                  key={style.id}
+                  type="button"
+                  onClick={() => setPaperStyle(style.id as PaperStyle)}
+                  className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    currentPaperStyle === style.id
+                      ? "bg-white text-blue-700 shadow-2xs"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  {style.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Font Selector */}
+            <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl shrink-0">
+              {[
+                { id: "tajawal", label: "تجوال" },
+                { id: "cairo", label: "كايرو" },
+                { id: "inter", label: "Eng" },
+                { id: "amiri", label: "أميري" }
+              ].map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setFont(f.id as any)}
+                  className={`px-1.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    selectedFont === f.id
+                      ? "bg-white text-blue-700 shadow-2xs font-bold"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Baseline Nudge */}
+            <div className="flex items-center gap-1 bg-slate-100 px-1.5 py-1 rounded-xl text-xs text-slate-600 shrink-0">
+              <button
+                type="button"
+                onClick={() => adjustBaseline(-1)}
+                className="w-5 h-5 flex items-center justify-center rounded bg-white text-slate-700 font-bold cursor-pointer"
+                title="رفع السطر للأعلى"
+              >
+                -
+              </button>
+              <span className="text-[11px] font-mono font-bold text-blue-700 w-3.5 text-center">
+                {baselineOffset > 0 ? `+${baselineOffset}` : baselineOffset}
+              </span>
+              <button
+                type="button"
+                onClick={() => adjustBaseline(1)}
+                className="w-5 h-5 flex items-center justify-center rounded bg-white text-slate-700 font-bold cursor-pointer"
+                title="خفض السطر للأسفل"
+              >
+                +
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* SHARED LANGUAGE PICKER MODAL (Docked bottom on mobile, dropdown on desktop) */}
+        {showLangPicker && (
+          <>
+            <div
+              className="fixed inset-0 bg-black/40 z-50 backdrop-blur-2xs"
+              onClick={() => setShowLangPicker(false)}
+            />
+            <div
+              className="fixed inset-x-3 bottom-4 sm:bottom-auto sm:inset-x-auto sm:top-24 sm:right-10 bg-white border border-slate-200 rounded-2xl p-4 shadow-2xl z-50 w-auto sm:w-64 max-w-[calc(100vw-24px)] text-right animate-in fade-in zoom-in-95 font-sans"
+              dir="rtl"
+            >
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
+                <span className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                  <Languages className="w-3.5 h-3.5 text-violet-600" />
+                  لغة النص والتدقيق (الافتراضية: الألمانية)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowLangPicker(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {PROOFREAD_LANGUAGES.map((l) => (
+                  <button
+                    key={l.id}
+                    type="button"
+                    onClick={() => {
+                      handleSetLanguage(l.id);
+                      setShowLangPicker(false);
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer text-right ${
+                      proofreadLanguage === l.id
+                        ? "bg-violet-50 border-violet-400 text-violet-900 font-bold shadow-2xs"
+                        : "bg-slate-50/70 border-slate-200 text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    <span className="text-base">{l.flag}</span>
+                    <span className="truncate">{l.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* SHARED AI MODEL PICKER MODAL (Docked bottom on mobile, dropdown on desktop) */}
+        {showModelPicker && (
+          <>
+            <div
+              className="fixed inset-0 bg-black/40 z-50 backdrop-blur-2xs"
+              onClick={() => setShowModelPicker(false)}
+            />
+            <div
+              className="fixed inset-x-3 bottom-4 sm:bottom-auto sm:inset-x-auto sm:top-24 sm:right-20 bg-white border border-slate-200/90 rounded-2xl p-4 shadow-2xl z-50 w-auto sm:w-96 max-w-[calc(100vw-24px)] text-right animate-in fade-in zoom-in-95 font-sans max-h-[85vh] flex flex-col"
+              dir="rtl"
+            >
+              <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-100 shrink-0">
+                <div>
+                  <div className="font-extrabold text-xs text-slate-900 flex items-center gap-1.5">
+                    <Cpu className="w-4 h-4 text-violet-600" />
+                    موديل الذكاء للتصحيح (نفس موديلات قسم صحح)
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">
+                    اختر الموديل المناسب للحصة وسرعة التدقيق اللغوي
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowModelPicker(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="overflow-y-auto space-y-3.5 pr-1 pl-0.5 custom-scrollbar flex-1">
+                {/* Group 1: High Quota Models (500 RPD) */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5 px-1">
+                    <span className="text-[11px] font-black text-amber-900 flex items-center gap-1">
+                      <span>⚡ موديلات الحصة العالية (500 طلب يومياً)</span>
+                    </span>
+                    <span className="text-[9px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded-md">
+                      بدون انقطاع
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {ALL_AVAILABLE_MODELS.filter((m) => m.group === "high_quota").map((m) => {
+                      const isSelected = proofreadModel === m.key;
+                      return (
+                        <button
+                          key={m.key}
+                          type="button"
+                          onClick={() => {
+                            handleSetModel(m.key);
+                            setShowModelPicker(false);
+                          }}
+                          className={`w-full flex items-center justify-between p-2.5 rounded-xl border text-right transition-all cursor-pointer ${
+                            isSelected
+                              ? "bg-amber-50/90 border-amber-400 text-slate-900 shadow-2xs ring-1 ring-amber-300"
+                              : "bg-slate-50/70 hover:bg-amber-50/40 border-slate-200/80 text-slate-700"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div
+                              className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                                isSelected
+                                  ? "border-amber-500 bg-amber-500"
+                                  : "border-slate-300"
+                              }`}
+                            >
+                              {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                            </div>
+                            <div>
+                              <div className="font-bold text-xs text-slate-900">{m.name}</div>
+                              <div className="text-[10px] text-slate-500 font-normal">{m.desc}</div>
+                            </div>
+                          </div>
+                          <span className="text-[10px] bg-white px-2 py-0.5 rounded-lg border border-amber-200 text-amber-800 font-bold shrink-0 mr-2 shadow-2xs">
+                            {m.badge}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Group 2: General & Advanced Models */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5 px-1">
+                    <span className="text-[11px] font-black text-violet-900 flex items-center gap-1">
+                      <span>💎 الموديلات العامة والمتقدمة</span>
+                    </span>
+                    <span className="text-[9px] bg-violet-100 text-violet-800 font-bold px-1.5 py-0.5 rounded-md">
+                      تحليل لغوي عميق
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {ALL_AVAILABLE_MODELS.filter((m) => m.group !== "high_quota").map((m) => {
+                      const isSelected = proofreadModel === m.key;
+                      return (
+                        <button
+                          key={m.key}
+                          type="button"
+                          onClick={() => {
+                            handleSetModel(m.key);
+                            setShowModelPicker(false);
+                          }}
+                          className={`w-full flex items-center justify-between p-2.5 rounded-xl border text-right transition-all cursor-pointer ${
+                            isSelected
+                              ? "bg-violet-50/90 border-violet-400 text-slate-900 shadow-2xs ring-1 ring-violet-300"
+                              : "bg-slate-50/70 hover:bg-violet-50/40 border-slate-200/80 text-slate-700"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div
+                              className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                                isSelected
+                                  ? "border-violet-600 bg-violet-600"
+                                  : "border-slate-300"
+                              }`}
+                            >
+                              {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                            </div>
+                            <div>
+                              <div className="font-bold text-xs text-slate-900">{m.name}</div>
+                              <div className="text-[10px] text-slate-500 font-normal">{m.desc}</div>
+                            </div>
+                          </div>
+                          <span className="text-[10px] bg-white px-2 py-0.5 rounded-lg border border-slate-200 text-violet-800 font-bold shrink-0 mr-2 shadow-2xs">
+                            {m.badge}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
       {/* ================================================================= */}
       {/* 3. WRITING DESK & THE PAPER SHEET */}
       {/* ================================================================= */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Main writing canvas */}
         <div
-          className="flex-1 overflow-y-auto px-4 py-6 md:py-8 flex flex-col items-center custom-scrollbar"
+          className="flex-1 overflow-y-auto px-2 sm:px-4 py-4 md:py-8 flex flex-col items-center custom-scrollbar"
           onClick={(e) => {
             if (e.target === e.currentTarget && editorRef.current) {
               editorRef.current.focus();
@@ -1865,7 +2624,7 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
               {/* The Realistic Paper Sheet - Clean pure page */}
               <div
                 id="printable-paper-sheet"
-                className={`w-full paper-style-${currentPaperStyle} paper-font-${selectedFont} paper-sheet-container rounded-lg p-6 sm:p-10 md:p-14 min-h-[700px] flex flex-col mb-12 relative transition-all`}
+                className={`w-full paper-style-${currentPaperStyle} paper-font-${selectedFont} paper-sheet-container rounded-lg p-3.5 sm:p-8 md:p-14 min-h-[600px] sm:min-h-[700px] flex flex-col mb-12 relative transition-all`}
                 style={{
                   "--paper-baseline-pos": `${effectiveBaseline}px`,
                 } as React.CSSProperties}
@@ -1980,7 +2739,7 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
             className="fixed z-50 pointer-events-auto transition-all duration-150 animate-in fade-in zoom-in-95 select-none"
             style={{
               top: `${Math.max(12, hoveredCorrection.top)}px`,
-              left: `${Math.min(window.innerWidth - 170, Math.max(170, hoveredCorrection.left))}px`,
+              left: `${Math.min(window.innerWidth - 145, Math.max(145, hoveredCorrection.left))}px`,
               transform: hoveredCorrection.isFlipped ? "translate(-50%, 0)" : "translate(-50%, -100%)",
             }}
             onMouseEnter={() => {
@@ -1997,7 +2756,7 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
             }}
             dir="rtl"
           >
-            <div className="w-72 sm:w-80 bg-white/98 backdrop-blur-md border border-slate-200 shadow-2xl rounded-2xl p-3.5 text-right font-sans text-slate-800 ring-1 ring-black/5">
+            <div className="w-[calc(100vw-24px)] max-w-[320px] sm:max-w-[340px] bg-white/98 backdrop-blur-md border border-slate-200 shadow-2xl rounded-2xl p-3 sm:p-3.5 text-right font-sans text-slate-800 ring-1 ring-black/5">
               {/* Header: Error Type Badge + Close */}
               <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2.5">
                 <span
@@ -2100,6 +2859,422 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
                     : "-bottom-1.5 border-b border-r border-slate-200"
                 }`}
               />
+            </div>
+          </div>
+        )}
+
+        {/* ================================================================= */}
+        {/* 6. FLOATING SELECTION BUBBLE (Listen to selected text + Copy) */}
+        {/* ================================================================= */}
+        {selectionBubble && (
+          <div
+            id="text-selection-floating-bubble"
+            className="fixed z-50 pointer-events-auto transition-all duration-150 animate-in fade-in zoom-in-95 select-none"
+            style={{
+              top: `${Math.max(12, selectionBubble.top)}px`,
+              left: `${Math.min(window.innerWidth - 140, Math.max(140, selectionBubble.left))}px`,
+              transform: selectionBubble.isFlipped ? "translate(-50%, 0)" : "translate(-50%, -100%)",
+            }}
+            onMouseDown={(e) => {
+              // Crucial: prevent losing text selection and focus inside contentEditable
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onTouchStart={(e) => {
+              e.stopPropagation();
+            }}
+            dir="rtl"
+          >
+            <div className="bg-slate-900/98 text-white p-1.5 rounded-2xl shadow-2xl border border-slate-700/80 flex items-center gap-1.5 whitespace-nowrap text-xs font-sans ring-1 ring-black/20">
+              {/* Arrow pointing to selected text */}
+              <div
+                className={`absolute left-1/2 -translate-x-1/2 border-4 border-transparent ${
+                  selectionBubble.isFlipped
+                    ? "bottom-full border-b-slate-900"
+                    : "top-full border-t-slate-900"
+                }`}
+              />
+
+              {/* Speak / Listen Button */}
+              <button
+                type="button"
+                id="btn-speak-selected-text"
+                onClick={() => speakSelectedText()}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition-all active:scale-95 cursor-pointer shadow-xs ${
+                  isSpeakingSelection
+                    ? "bg-amber-500 hover:bg-amber-600 text-slate-950 animate-pulse ring-2 ring-amber-300"
+                    : "bg-blue-600 hover:bg-blue-500 text-white"
+                }`}
+                title="استماع لنطق النص المحدد بالصوت"
+              >
+                {isSpeakingSelection ? (
+                  <>
+                    <VolumeX className="w-4 h-4 shrink-0" />
+                    <span>إيقاف النطق</span>
+                  </>
+                ) : (
+                  <>
+                    <Volume2 className="w-4 h-4 text-blue-100 shrink-0" />
+                    <span>استماع</span>
+                    <span className="text-[11px] opacity-85">
+                      {/[\u0600-\u06FF]/.test(selectionBubble.text) ? "🇸🇦" : selectedLangObj.flag}
+                    </span>
+                  </>
+                )}
+              </button>
+
+              {/* Voice Model Settings Button */}
+              <button
+                type="button"
+                id="btn-voice-settings-in-bubble"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setTestVoiceLang(proofreadLanguage);
+                  setShowVoiceSettingsModal(true);
+                }}
+                className="p-1.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer border border-transparent hover:border-slate-700 active:scale-95"
+                title="إعدادات واختيار موديل الصوت للنطق"
+              >
+                <Settings className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Copy Selected Text Button */}
+              <button
+                type="button"
+                id="btn-copy-selected-text"
+                onClick={handleCopySelection}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl font-semibold transition-all active:scale-95 cursor-pointer border ${
+                  selectionCopied
+                    ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-500"
+                    : "bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
+                }`}
+                title="نسخ النص المحدد للحافظة"
+              >
+                {selectionCopied ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-white stroke-[2.5]" />
+                    <span className="text-[11px]">تم النسخ</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-slate-300" />
+                    <span className="text-[11px]">نسخ</span>
+                  </>
+                )}
+              </button>
+
+              <div className="w-px h-4 bg-slate-700/80 mx-0.5" />
+
+              {/* Quick Formatting: Bold */}
+              <button
+                type="button"
+                onClick={() => formatText("bold")}
+                className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                title="خط عريض"
+              >
+                <Bold className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Quick Formatting: Highlight */}
+              <button
+                type="button"
+                onClick={() => formatText("hiliteColor", "#fef08a")}
+                className="p-1.5 rounded-lg text-amber-300 hover:text-amber-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                title="تظليل فسفوري"
+              >
+                <Highlighter className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Dismiss Button */}
+              <button
+                type="button"
+                onClick={() => setSelectionBubble(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer ml-0.5"
+                title="إغلاق الفقاعة"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ================================================================= */}
+        {/* 7. VOICE MODEL SELECTION & AUDIO SETTINGS MODAL */}
+        {/* ================================================================= */}
+        {showVoiceSettingsModal && (
+          <div
+            id="voice-settings-modal-backdrop"
+            className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150"
+            dir="rtl"
+            onClick={() => setShowVoiceSettingsModal(false)}
+          >
+            <div
+              id="voice-settings-modal-card"
+              className="bg-white max-w-lg w-full rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] border border-slate-200/80 animate-in zoom-in-95 duration-150"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="p-4 sm:p-5 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white flex items-center justify-between shrink-0 shadow-sm border-b border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-blue-600/30 border border-blue-400/40 flex items-center justify-center text-xl shadow-inner shrink-0 text-blue-300">
+                    🎙️
+                  </div>
+                  <div>
+                    <h3 className="font-black text-sm sm:text-base tracking-tight leading-tight flex items-center gap-1.5">
+                      <span>إعدادات موديل الصوت والنطق</span>
+                    </h3>
+                    <p className="text-[11px] text-slate-300 font-medium mt-0.5">
+                      اختر محرك الذكاء الاصطناعي أو نموذج الصوت المفضل لقراءة النصوص
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  id="btn-close-voice-settings"
+                  onClick={() => setShowVoiceSettingsModal(false)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  title="إغلاق"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 text-slate-800">
+                {/* 1. Language selector for testing & voice preview */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                    <span>لغة النطق ومعاينة الصوت:</span>
+                    <span className="text-[10px] font-normal text-slate-500">
+                      (تلقائياً تعتمد على لغة النص والملاحظة)
+                    </span>
+                  </label>
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                    {PROOFREAD_LANGUAGES.map((lang) => (
+                      <button
+                        key={lang.id}
+                        type="button"
+                        onClick={() => setTestVoiceLang(lang.id)}
+                        className={`py-1.5 px-2 rounded-xl text-[11px] font-bold transition-all border cursor-pointer flex items-center justify-center gap-1 ${
+                          testVoiceLang === lang.id
+                            ? "bg-blue-50 border-blue-500 text-blue-800 shadow-2xs font-extrabold ring-1 ring-blue-500"
+                            : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
+                        }`}
+                      >
+                        <span>{lang.flag}</span>
+                        <span>{lang.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 2. Voice Models Options */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-700 block">
+                    موديل الصوت المشغل (Speech Voice Model):
+                  </label>
+
+                  {/* Primary recommended option: Google TTS */}
+                  <div
+                    onClick={() => handleSelectVoiceModel("google")}
+                    className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-start gap-3 ${
+                      selectedVoiceModel === "google"
+                        ? "bg-blue-50/90 border-blue-500 ring-2 ring-blue-400/30"
+                        : "bg-white hover:bg-slate-50 border-slate-200"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="voice-model"
+                      checked={selectedVoiceModel === "google"}
+                      onChange={() => handleSelectVoiceModel("google")}
+                      className="mt-1 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-extrabold text-xs text-slate-900">
+                          ⚡ سيرفرات Google Translate TTS
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-blue-100 text-blue-700">
+                          موصى به أونلاين
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        صوت سريع جداً، عالي الثبات، يدعم النطق الدقيق لجميع اللغات (ألماني، عربي، إنجليزي...).
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Piper Neural Models for chosen language */}
+                  {getPiperModelsForLang(testVoiceLang).length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <div className="text-[11px] font-extrabold text-purple-900 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                        <span>نماذج الذكاء الاصطناعي العصبية (Piper Neural Voices) لـ {testVoiceLang}:</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {getPiperModelsForLang(testVoiceLang).map((model) => (
+                          <div
+                            key={model.id}
+                            onClick={() => handleSelectVoiceModel(model.id)}
+                            className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-start gap-2.5 ${
+                              selectedVoiceModel === model.id
+                                ? "bg-purple-50 border-purple-500 ring-2 ring-purple-400/30"
+                                : "bg-slate-50/70 hover:bg-slate-100 border-slate-200"
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="voice-model"
+                              checked={selectedVoiceModel === model.id}
+                              onChange={() => handleSelectVoiceModel(model.id)}
+                              className="mt-0.5 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="font-bold text-xs text-slate-900 flex items-center gap-1 truncate">
+                                <span>{model.flag}</span>
+                                <span>{model.name}</span>
+                              </div>
+                              <div className="text-[10px] text-slate-500 mt-0.5 truncate">
+                                {model.desc}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Browser Native Web Speech API Voices */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="text-[11px] font-extrabold text-emerald-900 flex items-center gap-1.5">
+                      <Volume2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>أصوات نظام التشغيل والمتصفح (Web Speech):</span>
+                    </div>
+
+                    <div
+                      onClick={() => handleSelectVoiceModel("webspeech")}
+                      className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-start gap-2.5 ${
+                        selectedVoiceModel === "webspeech"
+                          ? "bg-emerald-50 border-emerald-500 ring-2 ring-emerald-400/30"
+                          : "bg-slate-50/70 hover:bg-slate-100 border-slate-200"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="voice-model"
+                        checked={selectedVoiceModel === "webspeech"}
+                        onChange={() => handleSelectVoiceModel("webspeech")}
+                        className="mt-0.5 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
+                          <span>🌐 نطق المتصفح الافتراضي</span>
+                          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded-md">
+                            أوفلاين وبدون استهلاك بيانات
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">
+                          يعتمد على محرك الصوت المثبت على جهازك مباشرة (Android / iOS / Windows / Mac).
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Specific browser installed voices dropdown if available */}
+                    {availableVoices.length > 0 && (
+                      <div className="pt-1">
+                        <select
+                          value={
+                            selectedVoiceModel.startsWith("de_") ||
+                            selectedVoiceModel.startsWith("ar_") ||
+                            selectedVoiceModel.startsWith("en_") ||
+                            selectedVoiceModel === "google" ||
+                            selectedVoiceModel === "webspeech"
+                              ? ""
+                              : selectedVoiceModel
+                          }
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              handleSelectVoiceModel(e.target.value);
+                            }
+                          }}
+                          className="w-full text-xs font-semibold p-2.5 rounded-xl bg-slate-50 border border-slate-200 hover:bg-slate-100 cursor-pointer text-slate-700"
+                        >
+                          <option value="">-- أو اختر صوتاً محدداً من أصوات جهازك --</option>
+                          {availableVoices.map((v) => (
+                            <option key={v.voiceURI} value={v.voiceURI}>
+                              🗣️ {v.name} ({v.lang})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. Speech Speed Rate */}
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-xs font-bold text-slate-700 block">
+                    سرعة النطق (Speed Rate):
+                  </label>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[
+                      { rate: 0.8, label: "بطيء (0.8x) 🐢" },
+                      { rate: 0.92, label: "متأنٍ (0.9x) 🎧" },
+                      { rate: 1.0, label: "عادي (1.0x) 🗣️" },
+                      { rate: 1.2, label: "سريع (1.2x) 🚀" },
+                    ].map((item) => (
+                      <button
+                        key={item.rate}
+                        type="button"
+                        onClick={() => handleSetSpeechRate(item.rate)}
+                        className={`py-2 px-1.5 rounded-xl font-bold text-xs transition-all border cursor-pointer text-center ${
+                          speechRate === item.rate
+                            ? "bg-slate-900 text-white border-slate-900 shadow-2xs font-extrabold"
+                            : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 4. Live Audio Test */}
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    id="btn-test-voice-sample"
+                    onClick={() => handleTestVoiceInModal()}
+                    className={`w-full py-3 rounded-2xl font-black text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm border ${
+                      isTestingVoice
+                        ? "bg-amber-500 hover:bg-amber-600 text-slate-950 border-amber-400 animate-pulse ring-2 ring-amber-300"
+                        : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border-blue-500 shadow-blue-500/20"
+                    }`}
+                  >
+                    <Volume2 className="w-4 h-4" />
+                    <span>
+                      {isTestingVoice ? "جارٍ تشغيل العينة الصوتية..." : `تجربة نطق الصوت الآن 🔊 (${testVoiceLang})`}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-3.5 sm:p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
+                <div className="text-[11px] text-slate-500 font-medium">
+                  يتم حفظ إعدادات الصوت تلقائياً
+                </div>
+                <button
+                  type="button"
+                  id="btn-save-voice-settings"
+                  onClick={() => setShowVoiceSettingsModal(false)}
+                  className="px-6 py-2 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs rounded-xl transition-all shadow-sm cursor-pointer active:scale-95"
+                >
+                  تم وحفظ ✨
+                </button>
+              </div>
             </div>
           </div>
         )}
