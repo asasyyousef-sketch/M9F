@@ -39,7 +39,9 @@ import {
   VolumeX,
   Settings,
   ArrowLeftRight,
-  ExternalLink
+  ExternalLink,
+  Replace,
+  RotateCw
 } from "lucide-react";
 import { NoteItem, PaperStyle } from "../types";
 import { ALL_AVAILABLE_MODELS, type AIModelOption } from "./AICorrectorWorkspace";
@@ -205,6 +207,7 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
   const [isSpeakingSelection, setIsSpeakingSelection] = useState(false);
   const [selectionCopied, setSelectionCopied] = useState(false);
   const selectionTimeoutRef = useRef<any>(null);
+  const bubbleRef = useRef<HTMLDivElement | null>(null);
 
   // Google Translate states (official Google Translate, strictly no AI)
   const [isTranslateOpen, setIsTranslateOpen] = useState(false);
@@ -1502,23 +1505,22 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
     if (typeof window === "undefined") return;
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || !sel.rangeCount) {
-      if (!isTranslateOpen) {
-        setSelectionBubble(null);
-      }
+      setSelectionBubble(null);
+      setIsTranslateOpen(false);
       return;
     }
 
     const text = sel.toString().trim();
     if (!text || text.length === 0) {
-      if (!isTranslateOpen) {
-        setSelectionBubble(null);
-      }
+      setSelectionBubble(null);
+      setIsTranslateOpen(false);
       return;
     }
 
     const sheet = document.getElementById("printable-paper-sheet");
     if (!sheet) {
       setSelectionBubble(null);
+      setIsTranslateOpen(false);
       return;
     }
 
@@ -1529,9 +1531,8 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
       (focus && sheet.contains(focus));
 
     if (!isInside) {
-      if (!isTranslateOpen) {
-        setSelectionBubble(null);
-      }
+      setSelectionBubble(null);
+      setIsTranslateOpen(false);
       return;
     }
 
@@ -1540,9 +1541,8 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
       savedRangeRef.current = range.cloneRange();
       const rect = range.getBoundingClientRect();
       if (!rect || (rect.width === 0 && rect.height === 0)) {
-        if (!isTranslateOpen) {
-          setSelectionBubble(null);
-        }
+        setSelectionBubble(null);
+        setIsTranslateOpen(false);
         return;
       }
 
@@ -1564,11 +1564,10 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
         };
       });
     } catch (e) {
-      if (!isTranslateOpen) {
-        setSelectionBubble(null);
-      }
+      setSelectionBubble(null);
+      setIsTranslateOpen(false);
     }
-  }, [isTranslateOpen]);
+  }, []);
 
   // Perform official Google Translate query (free Google GTX API, strictly non-AI)
   const handleTranslateGoogle = useCallback(
@@ -2029,9 +2028,22 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
       checkSelection();
     };
 
+    const handleDocumentPointerDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (bubbleRef.current && !bubbleRef.current.contains(target)) {
+        // Dismiss bubble and translation if clicking outside, unless clicking within a modal
+        const isInsideModal = (target as HTMLElement).closest?.("[role='dialog'], .modal-overlay, #voice-settings-modal, #google-translate-modal");
+        if (!isInsideModal) {
+          setSelectionBubble(null);
+          setIsTranslateOpen(false);
+        }
+      }
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setSelectionBubble(null);
+        setIsTranslateOpen(false);
       }
 
       // Check for Shift + Ctrl/Cmd/Alt + ArrowDown to duplicate line down
@@ -2054,6 +2066,8 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
     document.addEventListener("selectionchange", handleSelectionChange);
     document.addEventListener("mouseup", handlePointerEnd);
     document.addEventListener("touchend", handlePointerEnd);
+    document.addEventListener("mousedown", handleDocumentPointerDown);
+    document.addEventListener("touchstart", handleDocumentPointerDown, { passive: true });
     document.addEventListener("keydown", handleKeyDown);
     window.addEventListener("resize", handleScrollOrResize, { passive: true });
     window.addEventListener("scroll", handleScrollOrResize, { passive: true, capture: true });
@@ -2065,6 +2079,8 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
       document.removeEventListener("selectionchange", handleSelectionChange);
       document.removeEventListener("mouseup", handlePointerEnd);
       document.removeEventListener("touchend", handlePointerEnd);
+      document.removeEventListener("mousedown", handleDocumentPointerDown);
+      document.removeEventListener("touchstart", handleDocumentPointerDown);
       document.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("resize", handleScrollOrResize);
       window.removeEventListener("scroll", handleScrollOrResize, true);
@@ -3435,10 +3451,11 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
         )}
 
         {/* ================================================================= */}
-        {/* 6. FLOATING SELECTION BUBBLE (Listen to selected text + Copy) */}
+        {/* 6. FLOATING SELECTION BUBBLE (Icon-only, clean, minimal toolbar) */}
         {/* ================================================================= */}
         {selectionBubble && (
           <div
+            ref={bubbleRef}
             id="text-selection-floating-bubble"
             className="fixed z-50 pointer-events-auto transition-all duration-150 animate-in fade-in zoom-in-95 select-none"
             style={{
@@ -3448,7 +3465,6 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
             }}
             onMouseDown={(e) => {
               // Crucial: prevent losing text selection and focus inside contentEditable
-              e.preventDefault();
               e.stopPropagation();
             }}
             onTouchStart={(e) => {
@@ -3456,7 +3472,7 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
             }}
             dir="rtl"
           >
-            <div className={`bg-slate-900/98 text-white p-1.5 rounded-2xl shadow-2xl border border-slate-700/80 flex flex-col gap-1 text-xs font-sans ring-1 ring-black/20 ${isTranslateOpen ? "w-[340px] sm:w-[410px] max-w-[94vw]" : "whitespace-nowrap"}`}>
+            <div className={`bg-slate-900/98 text-white p-1 rounded-2xl shadow-2xl border border-slate-700/80 flex flex-col gap-1 text-xs font-sans ring-1 ring-black/20 ${isTranslateOpen ? "w-[290px] sm:w-[350px] max-w-[94vw] p-2" : "whitespace-nowrap"}`}>
               {/* Arrow pointing to selected text */}
               <div
                 className={`absolute left-1/2 -translate-x-1/2 border-4 border-transparent ${
@@ -3466,53 +3482,28 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
                 }`}
               />
 
-              {/* Top Controls Row */}
-              <div className="flex items-center gap-1.5 whitespace-nowrap overflow-x-auto scrollbar-none py-0.5">
-                {/* Speak / Listen Button */}
+              {/* Top Controls Row - Minimalist Icon-only Layout */}
+              <div className="flex items-center gap-0.5 whitespace-nowrap py-0.5 px-0.5">
+                {/* 1. Speak / Listen Button (Icon only) */}
                 <button
                   type="button"
                   id="btn-speak-selected-text"
                   onClick={() => speakSelectedText()}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition-all active:scale-95 cursor-pointer shadow-xs ${
+                  className={`p-2 rounded-xl transition-all active:scale-95 cursor-pointer shrink-0 ${
                     isSpeakingSelection
-                      ? "bg-amber-500 hover:bg-amber-600 text-slate-950 animate-pulse ring-2 ring-amber-300"
-                      : "bg-blue-600 hover:bg-blue-500 text-white"
+                      ? "bg-amber-500 text-slate-950 animate-pulse ring-2 ring-amber-300"
+                      : "text-slate-300 hover:text-white hover:bg-slate-800"
                   }`}
-                  title="استماع لنطق النص المحدد بالصوت"
+                  title={isSpeakingSelection ? "إيقاف النطق" : "استماع لنطق النص المحدد"}
                 >
                   {isSpeakingSelection ? (
-                    <>
-                      <VolumeX className="w-4 h-4 shrink-0" />
-                      <span>إيقاف النطق</span>
-                    </>
+                    <VolumeX className="w-4 h-4 text-slate-950" />
                   ) : (
-                    <>
-                      <Volume2 className="w-4 h-4 text-blue-100 shrink-0" />
-                      <span>استماع</span>
-                      <span className="text-[11px] opacity-85">
-                        {/[\u0600-\u06FF]/.test(selectionBubble.text) ? "🇸🇦" : selectedLangObj.flag}
-                      </span>
-                    </>
+                    <Volume2 className="w-4 h-4 text-blue-400" />
                   )}
                 </button>
 
-                {/* Voice Model Settings Button */}
-                <button
-                  type="button"
-                  id="btn-voice-settings-in-bubble"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setTestVoiceLang(proofreadLanguage);
-                    setShowVoiceSettingsModal(true);
-                  }}
-                  className="p-1.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer border border-transparent hover:border-slate-700 active:scale-95 shrink-0"
-                  title="إعدادات واختيار موديل الصوت للنطق"
-                >
-                  <Settings className="w-3.5 h-3.5" />
-                </button>
-
-                {/* Google Translate Button (Official Google Translate, Strictly No AI) */}
+                {/* 2. Google Translate Button (Icon only) */}
                 <button
                   type="button"
                   id="btn-google-translate-bubble"
@@ -3525,75 +3516,71 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
                       handleTranslateGoogle();
                     }
                   }}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl font-bold transition-all active:scale-95 cursor-pointer shadow-xs border shrink-0 ${
+                  className={`p-2 rounded-xl transition-all active:scale-95 cursor-pointer shrink-0 ${
                     isTranslateOpen
-                      ? "bg-sky-600 hover:bg-sky-500 text-white border-sky-400 ring-2 ring-sky-400/40"
-                      : "bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-white border-slate-700"
+                      ? "bg-sky-600 text-white ring-2 ring-sky-400/40 shadow-xs"
+                      : "text-slate-300 hover:text-white hover:bg-slate-800"
                   }`}
-                  title="ترجمة جوجل الرسمية (Google Translate - بدون ذكاء اصطناعي)"
+                  title="ترجمة Google"
                 >
-                  <Languages className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                  <span className="text-[11px]">ترجمة Google</span>
+                  <Languages className="w-4 h-4 text-sky-400" />
                 </button>
 
-                {/* Copy Selected Text Button */}
+                {/* Divider between Audio/Translate and Formatting */}
+                <div className="w-px h-4 bg-slate-700/80 mx-0.5 shrink-0" />
+
+                {/* 3. Highlight Button (Icon only) */}
+                <button
+                  type="button"
+                  onClick={() => formatText("hiliteColor", "#fef08a")}
+                  className="p-2 rounded-xl text-amber-300 hover:text-amber-200 hover:bg-slate-800 transition-all active:scale-95 cursor-pointer shrink-0"
+                  title="تظليل فسفوري"
+                >
+                  <Highlighter className="w-4 h-4" />
+                </button>
+
+                {/* 4. Bold Button (Icon only) */}
+                <button
+                  type="button"
+                  onClick={() => formatText("bold")}
+                  className="p-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-all active:scale-95 cursor-pointer shrink-0"
+                  title="خط عريض"
+                >
+                  <Bold className="w-4 h-4" />
+                </button>
+
+                {/* Divider between Formatting and Utilities */}
+                <div className="w-px h-4 bg-slate-700/80 mx-0.5 shrink-0" />
+
+                {/* 5. Copy Button (Icon only) */}
                 <button
                   type="button"
                   id="btn-copy-selected-text"
                   onClick={handleCopySelection}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl font-semibold transition-all active:scale-95 cursor-pointer border shrink-0 ${
-                    selectionCopied
-                      ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-500"
-                      : "bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
-                  }`}
-                  title="نسخ النص المحدد للحافظة"
+                  className="p-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-all active:scale-95 cursor-pointer shrink-0"
+                  title="نسخ النص المحدد"
                 >
                   {selectionCopied ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-white stroke-[2.5]" />
-                      <span className="text-[11px]">تم النسخ</span>
-                    </>
+                    <Check className="w-4 h-4 text-emerald-400 stroke-[2.5]" />
                   ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5 text-slate-300" />
-                      <span className="text-[11px]">نسخ</span>
-                    </>
+                    <Copy className="w-4 h-4" />
                   )}
                 </button>
 
-                <div className="w-px h-4 bg-slate-700/80 mx-0.5 shrink-0" />
-
-                {/* Quick Formatting: Bold */}
+                {/* 6. Settings Button (Icon only) */}
                 <button
                   type="button"
-                  onClick={() => formatText("bold")}
-                  className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
-                  title="خط عريض"
-                >
-                  <Bold className="w-3.5 h-3.5" />
-                </button>
-
-                {/* Quick Formatting: Highlight */}
-                <button
-                  type="button"
-                  onClick={() => formatText("hiliteColor", "#fef08a")}
-                  className="p-1.5 rounded-lg text-amber-300 hover:text-amber-200 hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
-                  title="تظليل فسفوري"
-                >
-                  <Highlighter className="w-3.5 h-3.5" />
-                </button>
-
-                {/* Dismiss Button */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectionBubble(null);
-                    setIsTranslateOpen(false);
+                  id="btn-voice-settings-in-bubble"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setTestVoiceLang(proofreadLanguage);
+                    setShowVoiceSettingsModal(true);
                   }}
-                  className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer ml-0.5 shrink-0"
-                  title="إغلاق الفقاعة"
+                  className="p-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-all active:scale-95 cursor-pointer shrink-0"
+                  title="إعدادات الصوت والنطق"
                 >
-                  <X className="w-3 h-3" />
+                  <Settings className="w-4 h-4" />
                 </button>
               </div>
 
@@ -3601,153 +3588,158 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
               {isTranslateOpen && (
                 <div
                   id="bubble-google-translate-card"
-                  className="pt-2 border-t border-slate-700/80 w-full text-right animate-in fade-in zoom-in-95 duration-150"
+                  className="pt-1.5 border-t border-slate-800 w-full text-right animate-in fade-in zoom-in-95 duration-150"
                 >
-                  {/* Language Direction Header */}
-                  <div className="flex items-center justify-between gap-1.5 mb-2 px-1">
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-4 h-4 rounded-md bg-blue-500/30 border border-blue-400/50 flex items-center justify-center text-blue-300 text-[10px] font-black shrink-0">
-                        G
-                      </div>
-                      <span className="text-[10px] sm:text-[11px] font-black text-slate-200">
-                        ترجمة Google
-                      </span>
-                      <span className="text-[9px] font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-700/60 px-1 py-0.2 rounded-md">
-                        GTX رسمي
-                      </span>
-                    </div>
-
-                    {/* Language Switcher */}
-                    <div className="flex items-center gap-1 text-[10px] bg-slate-950/90 border border-slate-700 rounded-lg px-1.5 py-0.5 shrink-0">
-                      <span className="font-bold text-slate-300">
+                  {/* Language Selection Header (Clean, Minimalist, No White Borders) */}
+                  <div className="flex items-center justify-between gap-1 mb-1 px-1">
+                    {/* Language Switcher - Simple and Borderless */}
+                    <div className="flex items-center gap-1 text-[11px] py-0.5 text-slate-300 select-none">
+                      <span className="font-medium text-slate-300">
                         {translationState?.sourceLang === "ar"
-                          ? "🇸🇦 عربي"
+                          ? "عربي"
                           : translationState?.sourceLang === "de"
-                          ? "🇩🇪 ألماني"
+                          ? "ألماني"
                           : translationState?.sourceLang === "en"
-                          ? "🇬🇧 إنجليزي"
+                          ? "إنجليزي"
                           : translationState?.sourceLang === "fr"
-                          ? "🇫🇷 فرنسي"
+                          ? "فرنسي"
                           : translationState?.sourceLang === "es"
-                          ? "🇪🇸 إسباني"
+                          ? "إسباني"
                           : translationState?.sourceLang === "it"
-                          ? "🇮🇹 إيطالي"
+                          ? "إيطالي"
                           : (translationState?.sourceLang || "تلقائي")}
                       </span>
                       <button
                         type="button"
                         onClick={handleSwapTranslationLanguages}
-                        className="p-0.5 hover:bg-slate-800 rounded text-sky-400 transition-colors cursor-pointer"
-                        title="عكس اتجاه لغات الترجمة"
+                        className="p-1 text-slate-400 hover:text-sky-300 hover:bg-slate-800/60 rounded-md transition-colors cursor-pointer"
+                        title="عكس اللغات"
                       >
-                        <ArrowLeftRight className="w-2.5 h-2.5" />
+                        <ArrowLeftRight className="w-3 h-3" />
                       </button>
-                      <select
-                        value={translationState?.targetLang || "ar"}
-                        onChange={(e) => handleChangeTranslationTargetLang(e.target.value)}
-                        className="bg-transparent text-sky-300 font-extrabold text-[10px] cursor-pointer outline-none"
+                      <div className="relative inline-flex items-center">
+                        <select
+                          value={translationState?.targetLang || "ar"}
+                          onChange={(e) => handleChangeTranslationTargetLang(e.target.value)}
+                          className="bg-transparent text-sky-400 font-medium text-[11px] cursor-pointer appearance-none outline-none border-none pr-0 pl-3.5 focus:ring-0"
+                        >
+                          {GOOGLE_TRANSLATE_LANGS.map((lang) => (
+                            <option key={lang.code} value={lang.code} className="bg-slate-900 text-white">
+                              {lang.name}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown className="w-2.5 h-2.5 text-slate-400 pointer-events-none absolute left-0" />
+                      </div>
+                    </div>
+
+                    {/* Quick controls: Refresh & Close */}
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleTranslateGoogle()}
+                        className="p-1 rounded-lg text-slate-400 hover:text-sky-300 hover:bg-slate-800/60 transition-colors cursor-pointer"
+                        title="إعادة الترجمة"
                       >
-                        {GOOGLE_TRANSLATE_LANGS.map((lang) => (
-                          <option key={lang.code} value={lang.code} className="bg-slate-900 text-white">
-                            {lang.flag} {lang.name}
-                          </option>
-                        ))}
-                      </select>
+                        <RotateCw className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsTranslateOpen(false)}
+                        className="p-1 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-slate-800/60 transition-colors cursor-pointer"
+                        title="إغلاق صندوق الترجمة"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
                     </div>
                   </div>
 
                   {/* Result Body */}
-                  <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-2.5 space-y-2">
+                  <div className="bg-slate-950/70 rounded-xl p-2.5 space-y-2">
                     {translationState?.isLoading ? (
-                      <div className="flex items-center justify-center gap-2 py-3 text-sky-300 font-semibold text-xs">
-                        <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
-                        <span>جارٍ الترجمة عبر خوادم Google Translate...</span>
+                      <div className="flex items-center justify-center gap-2 py-2.5 text-sky-300 font-medium text-xs">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
+                        <span>جارٍ الترجمة...</span>
                       </div>
                     ) : translationState?.error ? (
-                      <div className="py-2 text-center space-y-1">
+                      <div className="py-1.5 text-center space-y-1">
                         <p className="text-[11px] text-rose-400">{translationState.error}</p>
                         <button
                           type="button"
                           onClick={() => handleTranslateGoogle()}
-                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                          className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
+                          title="إعادة المحاولة"
                         >
-                          إعادة المحاولة ↻
+                          <RotateCw className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     ) : (
                       <>
                         {/* The Translated Text */}
-                        <div className="font-bold text-white text-xs sm:text-sm leading-relaxed select-text break-words">
-                          {translationState?.translatedText || "لا توجد ترجمة متاحة"}
+                        <div className="font-medium text-white text-xs sm:text-sm leading-relaxed select-text break-words">
+                          {translationState?.translatedText || "لا توجد ترجمة"}
                         </div>
 
-                        {/* Action buttons */}
-                        <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-slate-800/90">
-                          {/* Listen to translation */}
-                          <button
-                            type="button"
-                            onClick={handleSpeakTranslation}
-                            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 font-bold text-[10px] cursor-pointer active:scale-95 transition-all"
-                            title="استماع لنطق النص المترجم"
-                          >
-                            <Volume2 className="w-3 h-3 text-sky-400" />
-                            <span>استماع</span>
-                          </button>
+                        {/* Icon-only Action Controls */}
+                        <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80">
+                          <div className="flex items-center gap-1">
+                            {/* 1. Listen */}
+                            <button
+                              type="button"
+                              onClick={handleSpeakTranslation}
+                              className="p-1.5 rounded-lg text-slate-300 hover:text-sky-300 hover:bg-slate-800 active:scale-95 transition-all cursor-pointer"
+                              title="استماع لنطق الترجمة"
+                            >
+                              <Volume2 className="w-3.5 h-3.5 text-sky-400" />
+                            </button>
 
-                          {/* Copy translation */}
-                          <button
-                            type="button"
-                            onClick={handleCopyTranslation}
-                            className={`flex items-center gap-1 px-2 py-1 rounded-lg font-bold text-[10px] cursor-pointer active:scale-95 transition-all border ${
-                              translationCopied
-                                ? "bg-emerald-600 border-emerald-500 text-white"
-                                : "bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200"
-                            }`}
-                            title="نسخ الترجمة للحافظة"
-                          >
-                            {translationCopied ? (
-                              <>
-                                <Check className="w-3 h-3 text-white stroke-[2.5]" />
-                                <span>تم النسخ</span>
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="w-3 h-3 text-slate-300" />
-                                <span>نسخ</span>
-                              </>
-                            )}
-                          </button>
+                            {/* 2. Copy */}
+                            <button
+                              type="button"
+                              onClick={handleCopyTranslation}
+                              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 active:scale-95 transition-all cursor-pointer"
+                              title="نسخ الترجمة"
+                            >
+                              {translationCopied ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-400 stroke-[2.5]" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
 
-                          {/* Replace in document */}
-                          <button
-                            type="button"
-                            onClick={handleReplaceSelectionWithTranslation}
-                            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-600/90 hover:bg-blue-600 text-white font-bold text-[10px] cursor-pointer active:scale-95 transition-all shadow-xs"
-                            title="استبدال النص المحدد في الورقة بهذه الترجمة"
-                          >
-                            <span>استبدال في الورقة</span>
-                          </button>
+                            {/* Divider */}
+                            <div className="w-px h-3 bg-slate-800 mx-0.5" />
 
-                          {/* Insert after in document */}
-                          <button
-                            type="button"
-                            onClick={handleInsertTranslationAfter}
-                            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold text-[10px] cursor-pointer active:scale-95 transition-all"
-                            title="إدراج الترجمة بين قوسين بجانب النص في الورقة"
-                          >
-                            <Plus className="w-2.5 h-2.5" />
-                            <span>إدراج بجانب النص</span>
-                          </button>
+                            {/* 3. Replace selected text */}
+                            <button
+                              type="button"
+                              onClick={handleReplaceSelectionWithTranslation}
+                              className="p-1.5 rounded-lg text-slate-300 hover:text-emerald-300 hover:bg-slate-800 active:scale-95 transition-all cursor-pointer"
+                              title="استبدال النص المحدد بهذه الترجمة"
+                            >
+                              <Replace className="w-3.5 h-3.5 text-emerald-400" />
+                            </button>
 
-                          {/* External Google Translate link */}
+                            {/* 4. Insert after text */}
+                            <button
+                              type="button"
+                              onClick={handleInsertTranslationAfter}
+                              className="p-1.5 rounded-lg text-slate-300 hover:text-blue-300 hover:bg-slate-800 active:scale-95 transition-all cursor-pointer"
+                              title="إدراج الترجمة بين قوسين بجانب النص"
+                            >
+                              <Plus className="w-3.5 h-3.5 text-blue-400" />
+                            </button>
+                          </div>
+
+                          {/* 5. External link */}
                           <a
                             href={`https://translate.google.com/?sl=auto&tl=${translationState?.targetLang || "ar"}&text=${encodeURIComponent(translationState?.originalText || "")}&op=translate`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors mr-auto"
-                            title="فتح في Google Translate الرسمي"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 active:scale-95 transition-all cursor-pointer"
+                            title="فتح في Google Translate"
                           >
-                            <ExternalLink className="w-3 h-3" />
+                            <ExternalLink className="w-3.5 h-3.5" />
                           </a>
                         </div>
                       </>
