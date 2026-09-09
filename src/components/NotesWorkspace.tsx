@@ -1595,9 +1595,9 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
       });
 
       try {
+        // 1. First try server-side Google Translate proxy
         const res = await fetch(
-          `/api/translate?text=${encodeURIComponent(text)}&sl=${encodeURIComponent(defaultSrc)}&tl=${encodeURIComponent(defaultTgt)}`,
-          { signal: AbortSignal.timeout(12000) }
+          `/api/translate?text=${encodeURIComponent(text)}&sl=${encodeURIComponent(defaultSrc)}&tl=${encodeURIComponent(defaultTgt)}`
         );
         if (res.ok) {
           const data = await res.json();
@@ -1613,8 +1613,26 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
           }
         }
 
-        const errData = await res.json().catch(() => null);
-        throw new Error(errData?.error || "تعذر إتمام الترجمة من Google Translate");
+        // 2. Direct browser fallback to Google Translate endpoint
+        const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(defaultSrc)}&tl=${encodeURIComponent(defaultTgt)}&dt=t&q=${encodeURIComponent(text)}`;
+        const gtxRes = await fetch(gtxUrl);
+        if (gtxRes.ok) {
+          const gtxData = await gtxRes.json();
+          if (Array.isArray(gtxData[0])) {
+            const translated = gtxData[0].map((item: any) => (item && item[0]) || "").join("");
+            const detectedSource = gtxData[2] || defaultSrc;
+            setTranslationState({
+              originalText: text,
+              translatedText: translated,
+              sourceLang: detectedSource,
+              targetLang: defaultTgt,
+              isLoading: false
+            });
+            return;
+          }
+        }
+
+        throw new Error("تعذر جلب الترجمة من Google Translate");
       } catch (err: any) {
         console.error("Google Translation error:", err);
         setTranslationState((prev) =>
@@ -1622,7 +1640,7 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
             ? {
                 ...prev,
                 isLoading: false,
-                error: err?.message || "تعذر إتمام الترجمة. يرجى المحاولة مرة أخرى."
+                error: "تعذر الاتصال بخدمة الترجمة. يرجى التحقق من الاتصال بالإنترنت."
               }
             : null
         );
