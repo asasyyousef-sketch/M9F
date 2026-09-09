@@ -4523,41 +4523,85 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       return res.status(400).json({ error: "النص المطلوب ترجمته فارغ" });
     }
 
+    // 1. Try primary Google Translate gtx endpoint (with dt=t only, avoiding sentence breakdown conflicts)
     try {
-      const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&dt=t&dt=bd&dt=rm&q=${encodeURIComponent(text)}`;
+      const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(text)}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4500);
+
       const response = await fetch(gtxUrl, {
+        signal: controller.signal,
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         }
       });
+      clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        throw new Error(`Google Translate response error: ${response.status} ${response.statusText}`);
+      if (response.ok) {
+        const data: any = await response.json();
+        let translatedText = "";
+        if (Array.isArray(data[0])) {
+          translatedText = data[0].map((item: any) => (item && item[0]) || "").join("");
+        }
+        const detectedSource = data[2] || (sl !== "auto" ? sl : "auto");
+
+        if (translatedText) {
+          return res.json({
+            success: true,
+            translatedText,
+            originalText: text,
+            sourceLang: detectedSource,
+            targetLang: tl,
+            service: "Google Translate"
+          });
+        }
       }
-
-      const data: any = await response.json();
-      let translatedText = "";
-      if (Array.isArray(data[0])) {
-        translatedText = data[0].map((item: any) => (item && item[0]) || "").join("");
-      }
-
-      const detectedSource = data[2] || (sl !== "auto" ? sl : "auto");
-
-      return res.json({
-        success: true,
-        translatedText,
-        originalText: text,
-        sourceLang: detectedSource,
-        targetLang: tl,
-        service: "Google Translate"
-      });
     } catch (err: any) {
-      console.error("Google Translate error:", err);
-      return res.status(500).json({
-        error: err.message || "تعذر إتمام الترجمة من Google Translate",
-        service: "Google Translate"
-      });
+      console.warn("Primary Google Translate gtx attempt error:", err?.message);
     }
+
+    // 2. Secondary fallback endpoint (Google Chrome Extension translate endpoint)
+    try {
+      const fallbackUrl = `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&q=${encodeURIComponent(text)}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4500);
+
+      const response = await fetch(fallbackUrl, {
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        }
+      });
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data: any = await response.json();
+        let translatedText = "";
+        if (Array.isArray(data)) {
+          translatedText = (typeof data[0] === "string" ? data[0] : (Array.isArray(data[0]) ? data[0][0] : "")) || "";
+        } else if (typeof data === "string") {
+          translatedText = data;
+        }
+
+        if (translatedText) {
+          return res.json({
+            success: true,
+            translatedText,
+            originalText: text,
+            sourceLang: sl,
+            targetLang: tl,
+            service: "Google Translate"
+          });
+        }
+      }
+    } catch (fallbackErr: any) {
+      console.error("Fallback Google Translate error:", fallbackErr?.message);
+    }
+
+    return res.status(500).json({
+      error: "تعذر إتمام الترجمة من Google Translate",
+      service: "Google Translate"
+    });
   });
 
   app.get("/api/tts", async (req, res) => {

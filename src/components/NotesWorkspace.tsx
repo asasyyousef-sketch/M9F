@@ -1595,7 +1595,30 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
       });
 
       try {
-        // 1. First try server-side Google Translate proxy
+        // 1. Direct browser fetch to Google Translate (Instant: ~80ms, zero server load, directly from user's browser)
+        try {
+          const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(defaultSrc)}&tl=${encodeURIComponent(defaultTgt)}&dt=t&q=${encodeURIComponent(text)}`;
+          const gtxRes = await fetch(gtxUrl);
+          if (gtxRes.ok) {
+            const gtxData = await gtxRes.json();
+            if (Array.isArray(gtxData[0])) {
+              const translated = gtxData[0].map((item: any) => (item && item[0]) || "").join("");
+              const detectedSource = gtxData[2] || defaultSrc;
+              setTranslationState({
+                originalText: text,
+                translatedText: translated,
+                sourceLang: detectedSource,
+                targetLang: defaultTgt,
+                isLoading: false
+              });
+              return;
+            }
+          }
+        } catch (directErr) {
+          // Direct fetch blocked (e.g. browser extension or ad-blocker), fallback to server proxy below
+        }
+
+        // 2. Server-side Google Translate proxy fallback
         const res = await fetch(
           `/api/translate?text=${encodeURIComponent(text)}&sl=${encodeURIComponent(defaultSrc)}&tl=${encodeURIComponent(defaultTgt)}`
         );
@@ -1606,25 +1629,6 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
               originalText: text,
               translatedText: data.translatedText,
               sourceLang: data.sourceLang || defaultSrc,
-              targetLang: defaultTgt,
-              isLoading: false
-            });
-            return;
-          }
-        }
-
-        // 2. Direct browser fallback to Google Translate endpoint
-        const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(defaultSrc)}&tl=${encodeURIComponent(defaultTgt)}&dt=t&q=${encodeURIComponent(text)}`;
-        const gtxRes = await fetch(gtxUrl);
-        if (gtxRes.ok) {
-          const gtxData = await gtxRes.json();
-          if (Array.isArray(gtxData[0])) {
-            const translated = gtxData[0].map((item: any) => (item && item[0]) || "").join("");
-            const detectedSource = gtxData[2] || defaultSrc;
-            setTranslationState({
-              originalText: text,
-              translatedText: translated,
-              sourceLang: detectedSource,
               targetLang: defaultTgt,
               isLoading: false
             });
