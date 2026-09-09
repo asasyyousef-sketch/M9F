@@ -4523,11 +4523,11 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       return res.status(400).json({ error: "النص المطلوب ترجمته فارغ" });
     }
 
-    // 1. Try primary Google Translate gtx endpoint (with dt=t only, avoiding sentence breakdown conflicts)
+    // 1. Try primary Google Translate dict-chrome-ex endpoint (Ultra-fast, reliable, no 429 rate limit)
     try {
-      const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(text)}`;
+      const gtxUrl = `https://translate.googleapis.com/translate_a/t?client=dict-chrome-ex&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&q=${encodeURIComponent(text)}`;
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4500);
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
 
       const response = await fetch(gtxUrl, {
         signal: controller.signal,
@@ -4540,10 +4540,20 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       if (response.ok) {
         const data: any = await response.json();
         let translatedText = "";
-        if (Array.isArray(data[0])) {
-          translatedText = data[0].map((item: any) => (item && item[0]) || "").join("");
+        let detectedSource = sl !== "auto" ? sl : "auto";
+
+        if (Array.isArray(data)) {
+          if (Array.isArray(data[0])) {
+            translatedText = (typeof data[0][0] === "string" ? data[0][0] : "") || "";
+            if (data[0][1] && typeof data[0][1] === "string") {
+              detectedSource = data[0][1];
+            }
+          } else if (typeof data[0] === "string") {
+            translatedText = data[0];
+          }
+        } else if (typeof data === "string") {
+          translatedText = data;
         }
-        const detectedSource = data[2] || (sl !== "auto" ? sl : "auto");
 
         if (translatedText) {
           return res.json({
@@ -4557,7 +4567,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         }
       }
     } catch (err: any) {
-      console.warn("Primary Google Translate gtx attempt error:", err?.message);
+      console.warn("Primary Google Translate attempt error:", err?.message);
     }
 
     // 2. Secondary fallback endpoint (Google Chrome Extension translate endpoint)

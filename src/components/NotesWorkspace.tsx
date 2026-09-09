@@ -1594,15 +1594,29 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
       });
 
       try {
-        // 1. Direct browser fetch to Google Translate (Instant: ~80ms, zero server load, directly from user's browser)
+        // 1. Direct browser fetch to Google Translate (client=dict-chrome-ex has Access-Control-Allow-Origin: * and avoids 429 rate limit)
         try {
-          const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(defaultSrc)}&tl=${encodeURIComponent(defaultTgt)}&dt=t&q=${encodeURIComponent(text)}`;
+          const gtxUrl = `https://translate.googleapis.com/translate_a/t?client=dict-chrome-ex&sl=${encodeURIComponent(defaultSrc)}&tl=${encodeURIComponent(defaultTgt)}&q=${encodeURIComponent(text)}`;
           const gtxRes = await fetch(gtxUrl);
           if (gtxRes.ok) {
             const gtxData = await gtxRes.json();
-            if (Array.isArray(gtxData[0])) {
-              const translated = gtxData[0].map((item: any) => (item && item[0]) || "").join("");
-              const detectedSource = gtxData[2] || defaultSrc;
+            let translated = "";
+            let detectedSource = defaultSrc;
+
+            if (Array.isArray(gtxData)) {
+              if (Array.isArray(gtxData[0])) {
+                translated = (typeof gtxData[0][0] === "string" ? gtxData[0][0] : "") || "";
+                if (gtxData[0][1] && typeof gtxData[0][1] === "string") {
+                  detectedSource = gtxData[0][1];
+                }
+              } else if (typeof gtxData[0] === "string") {
+                translated = gtxData[0];
+              }
+            } else if (typeof gtxData === "string") {
+              translated = gtxData;
+            }
+
+            if (translated) {
               setTranslationState({
                 originalText: text,
                 translatedText: translated,
@@ -1614,7 +1628,7 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
             }
           }
         } catch (directErr) {
-          // Direct fetch blocked (e.g. browser extension or ad-blocker), fallback to server proxy below
+          // Fallback to server proxy below if browser network blocks direct call
         }
 
         // 2. Server-side Google Translate proxy fallback
