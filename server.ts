@@ -4515,34 +4515,96 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
 
   // Google Translate Proxy Endpoint (Free Google Translate API, No AI/LLM)
   app.get("/api/translate", async (req, res) => {
-    const text = (req.query.text as string || "").trim();
-    const sl = (req.query.sl as string || "auto").trim();
-    const tl = (req.query.tl as string || "ar").trim();
+    const text = ((req.query.text as string) || "").trim();
+    const sl = ((req.query.sl as string) || "auto").trim();
+    const tl = ((req.query.tl as string) || "ar").trim();
 
     if (!text) {
       return res.status(400).json({ error: "النص المطلوب ترجمته فارغ" });
     }
 
+    let translatedText = "";
+    let detectedSource = sl !== "auto" ? sl : "auto";
+
+    // ─── Tier 1: clients5.google.com dict-chrome-ex (Fastest, zero rate limit) ───
     try {
-      const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&dt=t&dt=bd&dt=rm&q=${encodeURIComponent(text)}`;
-      const response = await fetch(gtxUrl, {
+      const url1 = `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&q=${encodeURIComponent(text)}`;
+      const res1 = await fetch(url1, {
+        signal: AbortSignal.timeout(4500),
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          Accept: "*/*"
         }
       });
-
-      if (!response.ok) {
-        throw new Error(`Google Translate response error: ${response.status} ${response.statusText}`);
+      if (res1.ok) {
+        const data1: any = await res1.json();
+        if (Array.isArray(data1) && data1.length > 0) {
+          if (Array.isArray(data1[0])) {
+            translatedText = data1.map((item: any) => (item && item[0]) || "").join(" ").trim();
+            if (data1[0][1]) detectedSource = data1[0][1];
+          } else if (typeof data1[0] === "string") {
+            translatedText = data1[0];
+            if (data1[1]) detectedSource = data1[1];
+          }
+        }
       }
+    } catch (e: any) {
+      console.warn("[Google Translate] Tier 1 warning:", e?.message);
+    }
 
-      const data: any = await response.json();
-      let translatedText = "";
-      if (Array.isArray(data[0])) {
-        translatedText = data[0].map((item: any) => (item && item[0]) || "").join("");
+    // ─── Tier 2: translate.googleapis.com with client=gtx (clean single segment) ───
+    if (!translatedText) {
+      try {
+        const url2 = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(text)}`;
+        const res2 = await fetch(url2, {
+          signal: AbortSignal.timeout(4500),
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            Accept: "*/*"
+          }
+        });
+        if (res2.ok) {
+          const data2: any = await res2.json();
+          if (Array.isArray(data2[0])) {
+            translatedText = data2[0].map((item: any) => (item && item[0]) || "").join("");
+          }
+          if (data2[2]) detectedSource = data2[2];
+        }
+      } catch (e: any) {
+        console.warn("[Google Translate] Tier 2 warning:", e?.message);
       }
+    }
 
-      const detectedSource = data[2] || (sl !== "auto" ? sl : "auto");
+    // ─── Tier 3: translate.google.com/m mobile interface (extremely reliable) ───
+    if (!translatedText) {
+      try {
+        const url3 = `https://translate.google.com/m?sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&q=${encodeURIComponent(text)}`;
+        const res3 = await fetch(url3, {
+          signal: AbortSignal.timeout(4500),
+          headers: {
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+          }
+        });
+        if (res3.ok) {
+          const html3 = await res3.text();
+          const match = html3.match(/<div class="result-container">([^<]+)<\/div>/i);
+          if (match && match[1]) {
+            translatedText = match[1]
+              .replace(/&quot;/g, '"')
+              .replace(/&#39;/g, "'")
+              .replace(/&amp;/g, "&")
+              .replace(/&lt;/g, "<")
+              .replace(/&gt;/g, ">")
+              .trim();
+          }
+        }
+      } catch (e: any) {
+        console.warn("[Google Translate] Tier 3 warning:", e?.message);
+      }
+    }
 
+    if (translatedText) {
       return res.json({
         success: true,
         translatedText,
@@ -4551,13 +4613,12 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         targetLang: tl,
         service: "Google Translate"
       });
-    } catch (err: any) {
-      console.error("Google Translate error:", err);
-      return res.status(500).json({
-        error: err.message || "تعذر إتمام الترجمة من Google Translate",
-        service: "Google Translate"
-      });
     }
+
+    return res.status(500).json({
+      error: "تعذر إتمام الترجمة من Google Translate حالياً. يرجى المحاولة مرة أخرى.",
+      service: "Google Translate"
+    });
   });
 
   app.get("/api/tts", async (req, res) => {
