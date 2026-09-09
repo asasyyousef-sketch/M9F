@@ -4513,6 +4513,53 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
     }
   });
 
+  // Google Translate Proxy Endpoint (Free Google Translate API, No AI/LLM)
+  app.get("/api/translate", async (req, res) => {
+    const text = (req.query.text as string || "").trim();
+    const sl = (req.query.sl as string || "auto").trim();
+    const tl = (req.query.tl as string || "ar").trim();
+
+    if (!text) {
+      return res.status(400).json({ error: "النص المطلوب ترجمته فارغ" });
+    }
+
+    try {
+      const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&dt=t&dt=bd&dt=rm&q=${encodeURIComponent(text)}`;
+      const response = await fetch(gtxUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Google Translate response error: ${response.status} ${response.statusText}`);
+      }
+
+      const data: any = await response.json();
+      let translatedText = "";
+      if (Array.isArray(data[0])) {
+        translatedText = data[0].map((item: any) => (item && item[0]) || "").join("");
+      }
+
+      const detectedSource = data[2] || (sl !== "auto" ? sl : "auto");
+
+      return res.json({
+        success: true,
+        translatedText,
+        originalText: text,
+        sourceLang: detectedSource,
+        targetLang: tl,
+        service: "Google Translate"
+      });
+    } catch (err: any) {
+      console.error("Google Translate error:", err);
+      return res.status(500).json({
+        error: err.message || "تعذر إتمام الترجمة من Google Translate",
+        service: "Google Translate"
+      });
+    }
+  });
+
   app.get("/api/tts", async (req, res) => {
     const text = req.query.text as string;
     const lang = (req.query.lang as string || "en").toLowerCase();
