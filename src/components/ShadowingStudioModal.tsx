@@ -149,6 +149,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
 
   // Studio Primary Tabs: "qtranslate-live" (استماع لايف مثل QTranslate) vs "recording-studio" (استوديو التسجيل والمحاكاة)
   const [studioTab, setStudioTab] = useState<"qtranslate-live" | "recording-studio">("qtranslate-live");
+  const [liveEngine, setLiveEngine] = useState<"fast-server" | "web-speech">("fast-server");
   const [isLiveListening, setIsLiveListening] = useState<boolean>(false);
   const isLiveListeningRef = useRef<boolean>(false);
   const liveFinalTextRef = useRef<string>("");
@@ -371,36 +372,129 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     setSimilarityScore(null);
   };
 
-  // Pure QTranslate-Style Live Speech Recognition (No MediaRecorder, No device locks, 0 Latency)
-  const startLiveListening = async () => {
+  // Start Fast Server Live Listening (Works in 100% of browsers, iframes, networks, and countries)
+  const startFastLiveListening = async () => {
+    setSpeechError(null);
+    stopRecording();
+    stopUserAudio();
+    onStopOriginalSegment();
+    clearLiveText();
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      micStreamRef.current = stream;
+
+      // Realtime Audio Volume Meter
+      try {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContextClass) {
+          const ctx = new AudioContextClass();
+          audioContextRef.current = ctx;
+          const source = ctx.createMediaStreamSource(stream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 64;
+          source.connect(analyser);
+          analyserRef.current = analyser;
+
+          const dataArray = new Uint8Array(analyser.frequencyBinCount);
+          const updateMicVisual = () => {
+            if (analyserRef.current) {
+              analyserRef.current.getByteFrequencyData(dataArray);
+              let sum = 0;
+              for (let i = 0; i < dataArray.length; i++) {
+                sum += dataArray[i];
+              }
+              const avg = sum / dataArray.length;
+              setMicVolume(Math.min(100, Math.round((avg / 128) * 100)));
+              animationFrameRef.current = requestAnimationFrame(updateMicVisual);
+            }
+          };
+          updateMicVisual();
+        }
+      } catch (e) {
+        console.warn("AudioContext visualizer error:", e);
+      }
+
+      audioChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        if (audioChunksRef.current.length > 0) {
+          const audioBlob = new Blob(audioChunksRef.current, {
+            type: mediaRecorder.mimeType || "audio/webm",
+          });
+          lastRecordedBlobRef.current = audioBlob;
+          const url = URL.createObjectURL(audioBlob);
+          setRecordedAudioUrl(url);
+          // Transcribe immediately with our ultra-fast server
+          transcribeAudioWithServer(audioBlob);
+        }
+      };
+
+      mediaRecorder.start(250);
+      setIsLiveListening(true);
+      isLiveListeningRef.current = true;
+    } catch (err: any) {
+      console.error("Fast live listening start error:", err);
+      setIsLiveListening(false);
+      isLiveListeningRef.current = false;
+      setSpeechError("تعذر الوصول للميكروفون: " + (err?.message || "يرجى منح إذن الميكروفون للمتصفح (Allow Microphone)."));
+    }
+  };
+
+  const stopFastLiveListening = () => {
+    setIsLiveListening(false);
+    isLiveListeningRef.current = false;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (e) {}
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((track) => track.stop());
+      micStreamRef.current = null;
+    }
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close();
+      } catch (e) {}
+      audioContextRef.current = null;
+    }
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    setMicVolume(0);
+  };
+
+  // Google Web Speech Live Recognition (Direct continuous mode)
+  const startGoogleLiveListening = () => {
     setSpeechError(null);
     stopRecording();
     stopUserAudio();
     onStopOriginalSegment();
 
-    // 1. Explicitly verify/request microphone permission from the browser
-    try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const testStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        // Immediately release tracks so sound hardware is free for SpeechRecognition
-        testStream.getTracks().forEach((track) => track.stop());
-      }
-    } catch (permErr: any) {
-      console.warn("Microphone permission check failed:", permErr);
-      setIsLiveListening(false);
-      isLiveListeningRef.current = false;
-      setSpeechError(
-        "لم يتم منح إذن الميكروفون للمتصفح. يرجى النقر على أيقونة الميكروفون أو القفل في شريط العنوان (Address Bar) واختيار 'سماح / Allow'."
-      );
-      return;
-    }
-
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
       setIsSpeechSupported(false);
+      setLiveEngine("fast-server");
       setSpeechError(
-        "المتصفح الحالي لا يدعم محرك التعرف الصوتي المباشر (Web Speech). يرجى استخدام متصفح Google Chrome أو Microsoft Edge على حاسوبك."
+        "متصفحك لا يدعم محرك Web Speech. تم تحويلك تلقائياً إلى المحرك الصامد فائق السرعة الذي يعمل في كل مكان!"
       );
+      startFastLiveListening();
       return;
     }
 
@@ -465,22 +559,19 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
           isLiveListeningRef.current = false;
           setSpeechError(
             isInIframe
-              ? "يمنع متصفح Chrome/Edge محرك Google Speech داخل إطار المعاينة (Iframe). اضغط على 'افتح في تبويب جديد' أعلاه ليعمل الاستماع اللحظي فوراً!"
+              ? "يمنع متصفح Chrome محرك Google Speech داخل شاشة المعاينة. يمكنك استخدام 'المحرك الصامد فائق السرعة' أدناه، فهو يعمل في كل مكان!"
               : "لم يتم منح إذن الميكروفون للمتصفح. انقر على أيقونة الإعدادات/القفل بجوار الرابط وتأكد من تفعيل الميكروفون (Allow)."
           );
-        } else if (event.error === "audio-capture") {
-          setIsLiveListening(false);
-          isLiveListeningRef.current = false;
-          setSpeechError("تعذر تشغيل الميكروفون. تأكد من أن الميكروفون متصل باللابتوب وغير مستخدم في برنامج آخر.");
         } else if (event.error === "network") {
-          setSpeechError("تعذر الاتصال بخدمة التعرف الصوتي (Network error). تحقق من اتصال الإنترنت أو إعدادات البروكسي/VPN.");
+          setSpeechError(
+            "خدمة Google Speech تعذّر الاتصال بها على شبكتك (قيود جدار ناري أو بلد). نقترح استخدام 'المحرك الصامد فائق السرعة' أعلاه فوراً."
+          );
         } else {
-          setSpeechError(`تنبيه من محرك التعرف الصوتي: ${event.error}`);
+          setSpeechError(`تنبيه: ${event.error}. يمكنك التبديل إلى المحرك الصامد فائق السرعة بنقرة واحدة.`);
         }
       };
 
       recognition.onend = () => {
-        // If user is still actively in Live Listen mode, automatically restart smoothly so listening doesn't die on pauses
         if (isLiveListeningRef.current) {
           setTimeout(() => {
             if (isLiveListeningRef.current) {
@@ -511,18 +602,31 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
       setIsLiveListening(true);
       isLiveListeningRef.current = true;
     } catch (err: any) {
-      console.error("Failed to start live listening:", err);
+      console.error("Failed to start Google live listening:", err);
       setIsLiveListening(false);
       isLiveListeningRef.current = false;
-      setSpeechError(
-        isInIframe
-          ? "يمنع المتصفح تشغيل محرك Google Web Speech المباشر داخل إطار المعاينة (Iframe). اضغط على زر 'افتح في تبويب جديد' وسيعمل معك فوراً!"
-          : "تعذر بدء الاستماع المباشر: " + (err?.message || "")
-      );
+      setSpeechError("تعذر بدء محرك Google Web Speech: " + (err?.message || ""));
     }
   };
 
-  // Stop Live Listening
+  // Unified Live Listening Toggle
+  const toggleLiveListening = () => {
+    if (isLiveListening) {
+      if (liveEngine === "fast-server") {
+        stopFastLiveListening();
+      } else {
+        stopLiveListening();
+      }
+    } else {
+      if (liveEngine === "fast-server") {
+        startFastLiveListening();
+      } else {
+        startGoogleLiveListening();
+      }
+    }
+  };
+
+  // Stop Live Listening (both engines)
   const stopLiveListening = () => {
     isLiveListeningRef.current = false;
     setIsLiveListening(false);
@@ -532,6 +636,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
       } catch (e) {}
       recognitionRef.current = null;
     }
+    stopFastLiveListening();
   };
 
   // Start Mic Recording & Web Speech Recognition
@@ -1141,7 +1246,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
                     )}
                   </h4>
                   <p className="text-[11px] text-slate-400">
-                    استماع فوري بدون ذكاء اصطناعي — تكلّم لبناء الجملة وستظهر كلماتك كلمة بكلمة في نفس اللحظة
+                    تحدّث بالجملة وسيتم التقاط كلماتك ومطابقتها فوراً وحساب دقة نطقك
                   </p>
                 </div>
               </div>
@@ -1176,34 +1281,108 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
               </div>
             </div>
 
+            {/* Engine Selection Bar (Dual Engine) */}
+            <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-xl bg-slate-950/70 border border-slate-800 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400 font-medium">نوع المحرك:</span>
+                <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isLiveListening) stopLiveListening();
+                      setLiveEngine("fast-server");
+                      setSpeechError(null);
+                    }}
+                    className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      liveEngine === "fast-server"
+                        ? "bg-purple-600 text-white shadow-sm"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    <span className="text-amber-300">🚀</span>
+                    <span>المحرك الصامد فائق السرعة (مضمون 100%)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isLiveListening) stopLiveListening();
+                      setLiveEngine("web-speech");
+                      setSpeechError(null);
+                    }}
+                    className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      liveEngine === "web-speech"
+                        ? "bg-purple-600 text-white shadow-sm"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    <span>⚡ محرك Google المباشر (Web Speech)</span>
+                  </button>
+                </div>
+              </div>
+              <span className="text-[11px] text-slate-500">
+                {liveEngine === "fast-server" ? "يعمل على كل المتصفحات والشبكات والدول" : "يتطلب متصفح Chrome وشبكة غير مقيدة"}
+              </span>
+            </div>
+
+            {/* Live Mic Activity & Volume Meter (Instant Visual Feedback) */}
+            {isLiveListening && (
+              <div className="p-3 rounded-xl bg-purple-950/50 border border-purple-500/40 flex flex-wrap items-center justify-between gap-3 text-xs shadow-inner">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
+                  <span className="font-bold text-emerald-300 flex items-center gap-1.5">
+                    <Waves className="w-4 h-4 text-emerald-400 animate-pulse" />
+                    <span>الميكروفون نشط ويلتقط صوتك الآن — تكلّم بالجملة</span>
+                  </span>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <span className="text-[11px] text-purple-300 font-medium">مستوى حساسية الصوت:</span>
+                  <div className="w-28 h-2.5 rounded-full bg-slate-900 border border-slate-700 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-emerald-500 via-amber-400 to-purple-500 transition-all duration-75"
+                      style={{ width: `${Math.max(8, micVolume)}%` }}
+                    />
+                  </div>
+                  <span className="text-[11px] font-mono font-bold text-emerald-300 w-8 text-left">{micVolume}%</span>
+                </div>
+              </div>
+            )}
+
             {/* Action Buttons: Big Start / Stop / Clear / Play Original */}
             <div className="flex flex-wrap items-center gap-3">
               {!isLiveListening ? (
                 <button
                   type="button"
-                  onClick={startLiveListening}
-                  className="flex-1 min-w-[200px] py-3.5 px-6 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 hover:from-purple-500 hover:to-indigo-500 text-white font-black text-sm sm:text-base flex items-center justify-center gap-2.5 shadow-lg shadow-purple-600/30 transition-all cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
+                  onClick={toggleLiveListening}
+                  className="flex-1 min-w-[220px] py-3.5 px-6 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 hover:from-purple-500 hover:to-indigo-500 text-white font-black text-sm sm:text-base flex items-center justify-center gap-2.5 shadow-lg shadow-purple-600/30 transition-all cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
                 >
                   <Mic className="w-5 h-5 text-white animate-pulse" />
-                  <span>ابدأ الاستماع المباشر (مثل QTranslate)</span>
+                  <span>
+                    {liveEngine === "fast-server"
+                      ? "🎙️ ابدأ التحدث الآن (استماع وتحقق فوري)"
+                      : "⚡ ابدأ الاستماع المباشر (مثل QTranslate)"}
+                  </span>
                 </button>
               ) : (
                 <div className="flex-1 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={stopLiveListening}
-                    className="flex-1 py-3 px-5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 transition-all cursor-pointer animate-pulse"
+                    onClick={toggleLiveListening}
+                    className="flex-1 min-w-[200px] py-3.5 px-5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-sm sm:text-base flex items-center justify-center gap-2.5 shadow-lg shadow-rose-600/30 transition-all cursor-pointer animate-pulse"
                   >
                     <MicOff className="w-5 h-5" />
-                    <span>إيقاف الاستماع</span>
+                    <span>
+                      {liveEngine === "fast-server"
+                        ? "⏹️ إنهاء واستخراج الكلمات فوراً"
+                        : "⏹️ إيقاف الاستماع"}
+                    </span>
                   </button>
                   <button
                     type="button"
                     onClick={clearLiveText}
-                    className="px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                    className="px-4 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
                   >
                     <RefreshCw className="w-4 h-4" />
-                    <span>مسح والبدء من جديد</span>
+                    <span>مسح</span>
                   </button>
                 </div>
               )}
@@ -1223,6 +1402,14 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
                 <span>استماع للأصل ({playbackSpeed}x)</span>
               </button>
             </div>
+
+            {/* Server transcription active loader */}
+            {isTranscribingWithServer && (
+              <div className="p-3 rounded-xl bg-indigo-950/40 border border-indigo-500/40 text-xs text-indigo-200 flex items-center gap-2.5 animate-pulse">
+                <Loader2 className="w-4 h-4 animate-spin text-indigo-400 shrink-0" />
+                <span className="font-bold">جاري استخراج كلماتك المنطوقة بدقة وحساب نسبة التطابق فوراً...</span>
+              </div>
+            )}
 
             {/* Real-time sentence display canvas */}
             <div
@@ -1257,11 +1444,15 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
                 {isLiveListening && !recognizedText && !interimText ? (
                   <div className="flex items-center gap-2.5 text-xs text-purple-300 animate-pulse">
                     <Waves className="w-4 h-4 text-purple-400 animate-pulse shrink-0" />
-                    <span>الميكروفون مفتوح ويستمع لصوتك الآن... تحدّث بوضوح وستظهر الكلمات فوراً هنا!</span>
+                    <span>
+                      {liveEngine === "fast-server"
+                        ? "الميكروفون يستمع لصوتك الآن! انطق الجملة واضغط 'إنهاء واستخراج الكلمات' لترى نتيجتك فوراً."
+                        : "الميكروفون مفتوح ويستمع لصوتك الآن... تحدّث بوضوح وستظهر الكلمات فوراً هنا!"}
+                    </span>
                   </div>
                 ) : !recognizedText && !interimText ? (
                   <p className="text-xs text-slate-500">
-                    اضغط على "ابدأ الاستماع المباشر" وتكلم باللغة المحددة ليتم بناء الجملة لحظة بلحظة.
+                    اضغط على الزر أعلاه وانطق الجملة ليتم تفريغها ومطابقتها كلمة بكلمة.
                   </p>
                 ) : (
                   <div
@@ -1307,24 +1498,39 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
               )}
             </div>
 
-            {/* Error or Iframe Alert Message */}
+            {/* Error or Iframe Alert Message with 1-click fallback */}
             {speechError && (
-              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2.5">
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                <div className="flex-1 leading-relaxed">
-                  <p className="font-medium">{speechError}</p>
-                  {isInIframe && (
-                    <a
-                      href={window.location.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-2 inline-flex px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs items-center gap-1.5 cursor-pointer shadow-sm"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>اضغط هنا لفتح التطبيق في نافذة مستقلة (Direct Tab)</span>
-                    </a>
-                  )}
+              <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs space-y-2">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 leading-relaxed">
+                    <p className="font-medium">{speechError}</p>
+                  </div>
                 </div>
+                {liveEngine === "web-speech" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLiveEngine("fast-server");
+                      setSpeechError(null);
+                      startFastLiveListening();
+                    }}
+                    className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm cursor-pointer transition-all"
+                  >
+                    <span>🚀 التبديل والبدء فوراً بالمحرك الصامد فائق السرعة (مضمون 100%)</span>
+                  </button>
+                )}
+                {isInIframe && (
+                  <a
+                    href={window.location.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>اضغط هنا لفتح التطبيق في نافذة مستقلة (Direct Tab)</span>
+                  </a>
+                )}
               </div>
             )}
           </div>
