@@ -90,6 +90,7 @@ import { ALL_AVAILABLE_MODELS, AIModelOption } from "./AICorrectorWorkspace";
 import { MediaExplorerView } from "./MediaExplorerView";
 import { formatSubtitleTrackProtocol } from "../utils/subtitleNaming";
 import { ReviewChatModal, ReviewChatMessage } from "./ReviewChatModal";
+import { ShadowingStudioModal } from "./ShadowingStudioModal";
 import { speakClient } from "./Modals";
 
 export interface SubtitleTrackStyleConfig {
@@ -577,6 +578,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     setChatNextCues(nextCuesList);
     setIsSentenceChatOpen(true);
   };
+
+  // Shadowing Studio Modal State & Standard Practice Workflow
+  const [isShadowingStudioOpen, setIsShadowingStudioOpen] = useState<boolean>(false);
+  const [shadowingTargetCue, setShadowingTargetCue] = useState<(SubtitleCue & { secondaryText?: string }) | null>(null);
 
   // Top Video/Media Header Options Menu State
   const [showTopOptionsMenu, setShowTopOptionsMenu] = useState<boolean>(false);
@@ -3437,6 +3442,41 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   }, [activeCues, currentTime, handleSeek, isPlaying, smoothPlay, skipSeconds, triggerHud]);
 
+  // Shadowing Studio Modal Handlers
+  const handleOpenShadowing = useCallback((targetCue: SubtitleCue) => {
+    smoothPause();
+    const matchingSec = secondaryCueMap.get(targetCue.id);
+    setShadowingTargetCue({
+      ...targetCue,
+      secondaryText: matchingSec?.text,
+    });
+    setIsShadowingStudioOpen(true);
+  }, [secondaryCueMap, smoothPause]);
+
+  const handlePlayShadowingSegment = useCallback((startTime: number, endTime: number, speed: number = 1.0) => {
+    singleSentencePlaybackEndRef.current = endTime;
+    const el = getMediaElement();
+    if (el) {
+      el.playbackRate = speed;
+    }
+    handleSeek(startTime);
+    smoothPlay();
+  }, [getMediaElement, handleSeek, smoothPlay]);
+
+  const handleStopShadowingSegment = useCallback(() => {
+    singleSentencePlaybackEndRef.current = null;
+    smoothPause();
+  }, [smoothPause]);
+
+  const handleSelectShadowingCue = useCallback((newCue: SubtitleCue) => {
+    const matchingSec = secondaryCueMap.get(newCue.id);
+    setShadowingTargetCue({
+      ...newCue,
+      secondaryText: matchingSec?.text,
+    });
+    handleSeek(newCue.startTime);
+  }, [secondaryCueMap, handleSeek]);
+
   // Sync media element events and buffer indicator
   useEffect(() => {
     const el = currentFile?.type === "video" ? videoRef.current : audioRef.current;
@@ -3538,6 +3578,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       } else if (e.key === "r" || e.key === "R" || e.code === "KeyR" || e.key === "ق") {
         e.preventDefault();
         replayCurrentSentenceOnly();
+      } else if (e.key === "s" || e.key === "S" || e.key === "س") {
+        e.preventDefault();
+        const target = currentCue || (activeCues.length > 0 ? (activeCues.find(c => c.startTime <= currentTime && c.endTime >= currentTime) || activeCues.slice().reverse().find(c => c.startTime <= currentTime) || activeCues[0]) : null);
+        if (target) {
+          handleOpenShadowing(target);
+          triggerHud("استوديو الشادوينج", "S");
+        }
       } else if (e.key === "j" || e.key === "J") {
         e.preventDefault();
         singleSentencePlaybackEndRef.current = null;
@@ -3594,7 +3641,11 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     jumpToNextSentence,
     replayCurrentSentenceOnly,
     togglePlay,
-    triggerHud
+    triggerHud,
+    handleOpenShadowing,
+    currentCue,
+    activeCues,
+    currentTime
   ]);
 
   // Copy full transcript text
@@ -5436,6 +5487,21 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                             <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
                           </button>
 
+                          {/* Shadowing Studio Practice Button */}
+                          <button
+                            onClick={() => {
+                              const target = currentCue || (activeCues.length > 0 ? (activeCues.find(c => c.startTime <= currentTime && c.endTime >= currentTime) || activeCues.slice().reverse().find(c => c.startTime <= currentTime) || activeCues[0]) : null);
+                              if (target) {
+                                handleOpenShadowing(target);
+                              }
+                            }}
+                            className="h-7 px-1.5 sm:h-8 sm:px-2 flex items-center gap-1 text-purple-300 hover:text-purple-200 active:bg-purple-600/30 rounded-md transition-colors cursor-pointer"
+                            title="ممارسة الشادوينج للجملة الحالية (S / شادوينج)"
+                          >
+                            <Mic className="w-3.5 h-3.5 text-purple-400" />
+                            <span className="hidden md:inline text-[11px] font-bold">شادوينج</span>
+                          </button>
+
                           {/* Next Sentence */}
                           <button
                             onClick={() => jumpToNextSentence(true)}
@@ -5904,11 +5970,23 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                                     >
                                       {matchingSec.text}
                                     </p>
-                                  )}
+                                   )}
                                 </div>
 
                                 {/* Sentence Options Button (Symbolic Icon Only, Compact & Borderless) */}
-                                <div className="relative shrink-0 self-center" onClick={(e) => e.stopPropagation()}>
+                                <div className="relative shrink-0 self-center flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenShadowing(cue);
+                                    }}
+                                    className="p-1 rounded-md text-slate-400 hover:text-purple-300 hover:bg-purple-500/20 transition-all cursor-pointer flex items-center justify-center border-0 outline-none"
+                                    title="ممارسة الشادوينج والمحاكاة الصوتية (Shadowing)"
+                                  >
+                                    <Mic className="w-3.5 h-3.5" />
+                                  </button>
+
                                   <button
                                     type="button"
                                     onClick={(e) => handleToggleCueMenu(cue, e)}
@@ -5991,7 +6069,23 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   <span>نسخ</span>
                 </button>
 
-                {/* 3. AI Sentence Chat / سؤال الذكاء 🤖 (الخيار الرابع التفاعلي مع 20 جملة قبل وبعد) */}
+                {/* 3. Shadowing / شادوينج ومحاكاة النطق 🎙️ */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const targetCue = cueMenuAnchor.cue;
+                    setCueOptionsMenuId(null);
+                    setCueMenuAnchor(null);
+                    handleOpenShadowing(targetCue);
+                  }}
+                  className="w-full px-2.5 py-2 hover:bg-purple-500/20 text-purple-300 hover:text-purple-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0"
+                >
+                  <Mic className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                  <span>شادوينج (Shadowing) 🎙️</span>
+                </button>
+
+                {/* 4. AI Sentence Chat / سؤال الذكاء 🤖 (الخيار التفاعلي مع 20 جملة قبل وبعد) */}
                 <button
                   type="button"
                   onClick={(e) => {
@@ -6778,6 +6872,30 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           onPlayPronunciation={(text, lang) => {
             speakClient(text, lang || activeTrack?.language || "de");
           }}
+        />
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: SHADOWING & PRONUNCIATION STUDIO (STANDARD PRACTICE) */}
+      {/* ======================================================== */}
+      {isShadowingStudioOpen && shadowingTargetCue && (
+        <ShadowingStudioModal
+          isOpen={isShadowingStudioOpen}
+          onClose={() => {
+            setIsShadowingStudioOpen(false);
+            setShadowingTargetCue(null);
+            handleStopShadowingSegment();
+          }}
+          cue={shadowingTargetCue}
+          allCues={activeCues}
+          currentCueIndex={Math.max(0, activeCues.findIndex((c) => c.id === shadowingTargetCue.id))}
+          onSelectCue={handleSelectShadowingCue}
+          primaryLanguage={activeTrack?.language || "de"}
+          secondaryLanguage={secondaryTrack?.language || "ar"}
+          onPlayOriginalSegment={handlePlayShadowingSegment}
+          onStopOriginalSegment={handleStopShadowingSegment}
+          isPlayingOriginal={isPlaying}
+          currentTime={currentTime}
         />
       )}
 
