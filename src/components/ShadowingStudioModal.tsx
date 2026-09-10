@@ -20,11 +20,43 @@ import {
   Loader2,
   Lightbulb,
   Radio,
-  VolumeX
+  VolumeX,
+  Activity,
+  Globe,
+  Waves
 } from "lucide-react";
 import { SubtitleCue } from "../types";
 import { formatSecondsToClock } from "../utils/subtitleParser";
 import { speakClient } from "./Modals";
+
+export const SUPPORTED_SPEECH_LANGS = [
+  { code: "de-DE", label: "الألمانية (Deutsch)", flag: "🇩🇪" },
+  { code: "en-US", label: "الإنجليزية (English - US)", flag: "🇺🇸" },
+  { code: "en-GB", label: "الإنجليزية (English - UK)", flag: "🇬🇧" },
+  { code: "fr-FR", label: "الفرنسية (Français)", flag: "🇫🇷" },
+  { code: "es-ES", label: "الإسبانية (Español)", flag: "🇪🇸" },
+  { code: "it-IT", label: "الإيطالية (Italiano)", flag: "🇮🇹" },
+  { code: "ru-RU", label: "الروسية (Русский)", flag: "🇷🇺" },
+  { code: "ar-SA", label: "العربية (العالم العربي)", flag: "🇸🇦" },
+  { code: "tr-TR", label: "التركية (Türkçe)", flag: "🇹🇷" },
+  { code: "ja-JP", label: "اليابانية (日本語)", flag: "🇯🇵" },
+  { code: "zh-CN", label: "الصينية (中文)", flag: "🇨🇳" },
+];
+
+export function resolveSpeechLang(lang?: string): string {
+  const code = (lang || "").toLowerCase();
+  if (code.startsWith("de")) return "de-DE";
+  if (code.startsWith("en")) return "en-US";
+  if (code.startsWith("fr")) return "fr-FR";
+  if (code.startsWith("es")) return "es-ES";
+  if (code.startsWith("it")) return "it-IT";
+  if (code.startsWith("ru")) return "ru-RU";
+  if (code.startsWith("ar")) return "ar-SA";
+  if (code.startsWith("tr")) return "tr-TR";
+  if (code.startsWith("ja")) return "ja-JP";
+  if (code.startsWith("zh")) return "zh-CN";
+  return "de-DE";
+}
 
 export interface ShadowingStudioModalProps {
   isOpen: boolean;
@@ -111,6 +143,11 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   const [micVolume, setMicVolume] = useState<number>(0);
 
   // Speech Recognition & Scoring States
+  const [selectedSpeechLang, setSelectedSpeechLang] = useState<string>(() => resolveSpeechLang(primaryLanguage));
+  const [interimText, setInterimText] = useState<string>("");
+  const [finalText, setFinalText] = useState<string>("");
+  const [isSpeechListening, setIsSpeechListening] = useState<boolean>(false);
+  const [isSpeechSupported, setIsSpeechSupported] = useState<boolean>(true);
   const [recognizedText, setRecognizedText] = useState<string>("");
   const [similarityScore, setSimilarityScore] = useState<number | null>(null);
   const [speechError, setSpeechError] = useState<string | null>(null);
@@ -121,6 +158,8 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   const [showAiTips, setShowAiTips] = useState<boolean>(false);
 
   // Refs
+  const isRecordingRef = useRef<boolean>(false);
+  const recognizedTextRef = useRef<string>("");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const userAudioElementRef = useRef<HTMLAudioElement | null>(null);
@@ -132,6 +171,17 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   const animationFrameRef = useRef<number | null>(null);
   const loopTimerRef = useRef<number | null>(null);
 
+  // Synchronize language when primaryLanguage prop changes
+  useEffect(() => {
+    setSelectedSpeechLang(resolveSpeechLang(primaryLanguage));
+  }, [primaryLanguage]);
+
+  // Check Web Speech API support
+  useEffect(() => {
+    const hasSR = !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+    setIsSpeechSupported(hasSR);
+  }, []);
+
   // Reset state when cue changes
   useEffect(() => {
     stopRecording();
@@ -139,6 +189,9 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     onStopOriginalSegment();
     setRecordedAudioUrl(null);
     setRecognizedText("");
+    setFinalText("");
+    setInterimText("");
+    recognizedTextRef.current = "";
     setSimilarityScore(null);
     setSpeechError(null);
     setAiTips(null);
@@ -288,8 +341,12 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   const startRecording = async () => {
     setSpeechError(null);
     setRecognizedText("");
+    setFinalText("");
+    setInterimText("");
+    recognizedTextRef.current = "";
     setSimilarityScore(null);
     stopUserAudio();
+    isRecordingRef.current = true;
 
     // If simultaneous shadowing mode is on, play original audio at the exact same moment!
     if (shadowingMode === "simultaneous") {
@@ -363,56 +420,86 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
         setRecordingSeconds((prev) => prev + 1);
       }, 1000);
 
-      // Web Speech Recognition
+      // Web Speech Recognition (Google Speech Engine in Chrome/Edge/Android)
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRecognition) {
         const recognition = new SpeechRecognition();
         recognition.continuous = true;
         recognition.interimResults = true;
-        // Set speech language code based on primary language
-        const langMap: Record<string, string> = {
-          de: "de-DE",
-          en: "en-US",
-          fr: "fr-FR",
-          es: "es-ES",
-          it: "it-IT",
-          ru: "ru-RU",
-          ar: "ar-SA",
-          tr: "tr-TR"
+        recognition.maxAlternatives = 1;
+        recognition.lang = selectedSpeechLang;
+
+        recognition.onstart = () => {
+          setIsSpeechListening(true);
+          setSpeechError(null);
         };
-        recognition.lang = langMap[primaryLanguage] || `${primaryLanguage}-${primaryLanguage.toUpperCase()}`;
 
         recognition.onresult = (event: any) => {
-          let transcript = "";
+          let final = "";
+          let interim = "";
           for (let i = 0; i < event.results.length; i++) {
-            transcript += event.results[i][0].transcript;
+            const item = event.results[i];
+            if (item.isFinal) {
+              final += item[0].transcript + " ";
+            } else {
+              interim += item[0].transcript;
+            }
           }
-          setRecognizedText(transcript);
-          const score = evaluatePronunciation(transcript, cue.text);
-          setSimilarityScore(score);
+          const cleanFinal = final.trim();
+          const cleanInterim = interim.trim();
+          setFinalText(cleanFinal);
+          setInterimText(cleanInterim);
+
+          const full = (final + interim).trim();
+          recognizedTextRef.current = full;
+          setRecognizedText(full);
+
+          if (full) {
+            const score = evaluatePronunciation(full, cue.text);
+            setSimilarityScore(score);
+          }
         };
 
         recognition.onerror = (event: any) => {
           console.warn("Speech recognition error:", event.error);
           if (event.error === "not-allowed") {
             setSpeechError("يرجى إعطاء الإذن للمتصفح باستخدام الميكروفون.");
+          } else if (event.error === "network") {
+            setSpeechError("تعذر الاتصال بمحرك التعرف الصوتي، يرجى التحقق من الاتصال بالإنترنت.");
+          }
+        };
+
+        recognition.onend = () => {
+          setIsSpeechListening(false);
+          // If the user is still actively recording, restart recognition so listening never drops
+          if (isRecordingRef.current) {
+            try {
+              recognition.start();
+              setIsSpeechListening(true);
+            } catch (e) {}
           }
         };
 
         try {
           recognition.start();
           recognitionRef.current = recognition;
-        } catch (e) {}
+        } catch (e) {
+          console.warn("Recognition start failed:", e);
+        }
+      } else {
+        setIsSpeechSupported(false);
       }
     } catch (err: any) {
       console.error("Microphone access error:", err);
       setSpeechError("تعذر الوصول للميكروفون. يرجى التحقق من أذونات المتصفح.");
       setIsRecording(false);
+      isRecordingRef.current = false;
     }
   };
 
   // Stop Recording
   const stopRecording = () => {
+    isRecordingRef.current = false;
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
@@ -445,11 +532,13 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     }
 
     setIsRecording(false);
+    setIsSpeechListening(false);
     setMicVolume(0);
 
-    // Final evaluation if recognizedText exists
-    if (recognizedText) {
-      const finalScore = evaluatePronunciation(recognizedText, cue.text);
+    // Final evaluation with latest recognized speech
+    const latestText = (recognizedTextRef.current || recognizedText).trim();
+    if (latestText) {
+      const finalScore = evaluatePronunciation(latestText, cue.text);
       setSimilarityScore(finalScore);
     }
   };
@@ -510,10 +599,11 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
 
   // Word-level Visualizer Tokens
   const targetWords = cue.text.split(/\s+/).filter(Boolean);
-  const recognizedCleanWords = recognizedText.split(/\s+/).map(cleanWord).filter(Boolean);
+  const currentFullSpeech = (recognizedTextRef.current || recognizedText || "").trim();
+  const recognizedCleanWords = currentFullSpeech.split(/\s+/).map(cleanWord).filter(Boolean);
 
   const getWordMatchStatus = (word: string): "correct" | "close" | "missing" | "untested" => {
-    if (!recognizedText || similarityScore === null) return "untested";
+    if (!currentFullSpeech) return "untested";
     const cleaned = cleanWord(word);
     if (!cleaned) return "untested";
 
@@ -524,8 +614,18 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
       (rw) => levenshteinDistance(rw, cleaned) <= 1 || (cleaned.length > 5 && levenshteinDistance(rw, cleaned) <= 2)
     );
     if (hasClose) return "close";
+
+    // While recording is in progress, words not yet spoken remain pending (untested)
+    if (isRecording) {
+      return "untested";
+    }
     return "missing";
   };
+
+  const matchedWordsCount = targetWords.filter((w) => {
+    const s = getWordMatchStatus(w);
+    return s === "correct" || s === "close";
+  }).length;
 
   if (!isOpen) return null;
 
@@ -616,6 +716,12 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
               <span className="text-slate-500">
                 ({(cue.endTime - cue.startTime).toFixed(1)} ثانية)
               </span>
+              {isRecording && (
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold animate-pulse flex items-center gap-1 mr-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                  مطابقة حية: {matchedWordsCount}/{targetWords.length}
+                </span>
+              )}
             </div>
 
             <div className="flex items-center gap-2">
@@ -641,7 +747,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
                 const status = getWordMatchStatus(word);
                 let badgeStyle = "text-slate-100 bg-slate-800/60 border-slate-700/60";
                 if (status === "correct") {
-                  badgeStyle = "text-emerald-300 bg-emerald-950/80 border-emerald-500/80 font-bold shadow-xs";
+                  badgeStyle = "text-emerald-300 bg-emerald-950/90 border-emerald-400 font-bold shadow-sm shadow-emerald-500/20 ring-1 ring-emerald-500/50 scale-[1.02]";
                 } else if (status === "close") {
                   badgeStyle = "text-amber-300 bg-amber-950/80 border-amber-500/80 font-bold";
                 } else if (status === "missing") {
@@ -651,7 +757,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
                 return (
                   <span
                     key={idx}
-                    className={`inline-block px-1.5 py-0.5 rounded-md border text-sm sm:text-base transition-all ${badgeStyle}`}
+                    className={`inline-block px-2 py-0.5 rounded-lg border text-sm sm:text-base transition-all duration-150 ${badgeStyle}`}
                   >
                     {word}
                   </span>
@@ -871,6 +977,113 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Live Speech Recognition & Streaming Box (عرض الكلمات مباشرة أثناء التسجيل) */}
+        {(isRecording || recognizedText || interimText) && (
+          <div
+            className={`p-4 rounded-2xl border transition-all duration-200 space-y-3 ${
+              isRecording
+                ? "bg-slate-900/90 border-purple-500/70 shadow-xl shadow-purple-950/40 ring-1 ring-purple-500/30"
+                : "bg-slate-800/70 border-slate-700/70"
+            }`}
+          >
+            {/* Box Header: Status, Live Indicator, Match Counter, and Speech Language Selector */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2.5">
+              <div className="flex items-center gap-2">
+                {isRecording ? (
+                  <span className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+                  </span>
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                )}
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-purple-400" />
+                    <span>{isRecording ? "الاستماع المباشر لكلماتك (Google Speech Engine)" : "ما تم التقاطه صوتياً"}</span>
+                  </span>
+                  {isSpeechListening && isRecording && (
+                    <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold animate-pulse">
+                      الاستماع نشط
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Language Selector & Matched Count */}
+              <div className="flex items-center gap-2">
+                {/* Matched Words Counter */}
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded-lg bg-slate-800 border border-slate-700 text-purple-300 font-bold">
+                  🎯 {matchedWordsCount} / {targetWords.length} كلمات مطابقة
+                </span>
+
+                {/* Speech Language Dropdown */}
+                <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 px-2 py-0.5 rounded-lg text-xs">
+                  <Globe className="w-3 h-3 text-slate-400 shrink-0" />
+                  <select
+                    value={selectedSpeechLang}
+                    disabled={isRecording}
+                    onChange={(e) => setSelectedSpeechLang(e.target.value)}
+                    className="bg-transparent text-slate-200 text-[11px] font-bold outline-none cursor-pointer disabled:opacity-60"
+                    title="اختر لغة التعرف الصوتي"
+                  >
+                    {SUPPORTED_SPEECH_LANGS.map((lang) => (
+                      <option key={lang.code} value={lang.code} className="bg-slate-900 text-white">
+                        {lang.flag} {lang.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Live Text Display Stream */}
+            <div className="min-h-[48px] flex items-center px-1">
+              {isRecording && !recognizedText && !interimText ? (
+                <div className="flex items-center gap-2.5 text-xs text-slate-400 animate-pulse py-1">
+                  <Waves className="w-4 h-4 text-purple-400 animate-pulse shrink-0" />
+                  <span>تكلّم الآن بصوت واضح... ما تقوله سيظهر هنا كلمة بكلمة في الوقت الفعلي أثناء نطقك.</span>
+                </div>
+              ) : (
+                <div
+                  className="w-full text-sm sm:text-base leading-relaxed break-words select-text font-medium"
+                  dir={detectDirection(recognizedText || interimText)}
+                >
+                  {/* Final recognized words */}
+                  {finalText && (
+                    <span className="text-white font-bold drop-shadow-xs">{finalText} </span>
+                  )}
+                  {/* Interim streaming words */}
+                  {interimText && (
+                    <span className="text-purple-300 italic font-semibold">{interimText}</span>
+                  )}
+                  {isRecording && (
+                    <span className="inline-block w-1.5 h-4 bg-purple-400 animate-pulse align-middle ml-1 mr-0.5 rounded-xs" />
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Live Recognition Hint for user */}
+            {isRecording && (
+              <div className="flex items-center justify-between text-[10px] text-slate-400 pt-2 border-t border-slate-800/80">
+                <span>💡 تحدّث بطلاقة، الكلمات المطابقة للجملة أعلاه ستضيء فوراً بالأخضر!</span>
+                <span className="text-purple-300 font-mono font-bold">Live STT Active</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!isSpeechSupported && (
+          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+            <span>
+              متصفحك الحالي لا يدعم محرك Web Speech المباشر. لرؤية كلماتك تظهر مباشرة أثناء النطق، يرجى فتح التطبيق في <strong>Google Chrome</strong> أو <strong>Microsoft Edge</strong> أو متصفح أندرويد.
+            </span>
+          </div>
+        )}
 
         {/* Pronunciation Assessment & Feedback Box */}
         {speechError && (
