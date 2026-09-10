@@ -26,7 +26,9 @@ import {
   Waves,
   ExternalLink,
   RefreshCw,
-  Zap
+  Zap,
+  Copy,
+  Trash2
 } from "lucide-react";
 import { SubtitleCue } from "../types";
 import { formatSecondsToClock } from "../utils/subtitleParser";
@@ -145,6 +147,12 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
   const [micVolume, setMicVolume] = useState<number>(0);
 
+  // Studio Primary Tabs: "qtranslate-live" (استماع لايف مثل QTranslate) vs "recording-studio" (استوديو التسجيل والمحاكاة)
+  const [studioTab, setStudioTab] = useState<"qtranslate-live" | "recording-studio">("qtranslate-live");
+  const [isLiveListening, setIsLiveListening] = useState<boolean>(false);
+  const isLiveListeningRef = useRef<boolean>(false);
+  const liveFinalTextRef = useRef<string>("");
+
   // Speech Recognition & Scoring States
   const [selectedSpeechLang, setSelectedSpeechLang] = useState<string>(() => resolveSpeechLang(primaryLanguage));
   const [interimText, setInterimText] = useState<string>("");
@@ -202,15 +210,12 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
 
   // Reset state when cue changes
   useEffect(() => {
+    stopLiveListening();
     stopRecording();
     stopUserAudio();
     onStopOriginalSegment();
     setRecordedAudioUrl(null);
-    setRecognizedText("");
-    setFinalText("");
-    setInterimText("");
-    recognizedTextRef.current = "";
-    setSimilarityScore(null);
+    clearLiveText();
     setSpeechError(null);
     setAiTips(null);
     setShowAiTips(false);
@@ -220,6 +225,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   // Clean up on unmount
   useEffect(() => {
     return () => {
+      stopLiveListening();
       stopRecording();
       stopUserAudio();
       onStopOriginalSegment();
@@ -353,6 +359,161 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     userAudioElementRef.current.play().then(() => {
       setIsPlayingUserAudio(true);
     }).catch(console.error);
+  };
+
+  // Clear recognized live text
+  const clearLiveText = () => {
+    liveFinalTextRef.current = "";
+    setRecognizedText("");
+    recognizedTextRef.current = "";
+    setInterimText("");
+    setFinalText("");
+    setSimilarityScore(null);
+  };
+
+  // Pure QTranslate-Style Live Speech Recognition (No MediaRecorder, No device locks, 0 Latency)
+  const startLiveListening = () => {
+    setSpeechError(null);
+    stopRecording();
+    stopUserAudio();
+    onStopOriginalSegment();
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setIsSpeechSupported(false);
+      setSpeechError(
+        "المتصفح الحالي لا يدعم محرك التعرف الصوتي المباشر (Web Speech). يرجى استخدام متصفح Google Chrome أو Microsoft Edge."
+      );
+      return;
+    }
+
+    // Stop any existing recognition cleanly
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort();
+      } catch (e) {}
+      recognitionRef.current = null;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+      recognition.lang = selectedSpeechLang;
+
+      recognition.onstart = () => {
+        setIsLiveListening(true);
+        isLiveListeningRef.current = true;
+        setSpeechError(null);
+      };
+
+      recognition.onresult = (event: any) => {
+        let currentInterim = "";
+        let finalChunk = "";
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const item = event.results[i];
+          const transcript = item[0].transcript;
+          if (item.isFinal) {
+            finalChunk += transcript + " ";
+          } else {
+            currentInterim += transcript;
+          }
+        }
+
+        if (finalChunk) {
+          liveFinalTextRef.current = (liveFinalTextRef.current ? liveFinalTextRef.current + " " : "") + finalChunk.trim();
+        }
+
+        const combined = (liveFinalTextRef.current + " " + currentInterim).trim();
+        setRecognizedText(combined);
+        recognizedTextRef.current = combined;
+        setInterimText(currentInterim);
+        setFinalText(liveFinalTextRef.current);
+
+        if (combined) {
+          const score = evaluatePronunciation(combined, cue.text);
+          setSimilarityScore(score);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.warn("Live Speech recognition error:", event.error);
+        if (event.error === "no-speech") {
+          return;
+        }
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+          setIsLiveListening(false);
+          isLiveListeningRef.current = false;
+          setSpeechError(
+            isInIframe
+              ? "يمنع متصفح Chrome/Edge محرك Google Speech داخل إطار المعاينة (Iframe). اضغط على 'فتح في نافذة مستقلة' أعلاه ليعمل الاستماع اللحظي فوراً مثل QTranslate بدون أي مانع!"
+              : "لم يتم منح إذن الميكروفون للمتصفح. يرجى الضغط على أيقونة القفل أو الميكروفون في شريط عنوان المتصفح ومنح الإذن."
+          );
+        } else if (event.error === "audio-capture") {
+          setIsLiveListening(false);
+          isLiveListeningRef.current = false;
+          setSpeechError("تعذر تشغيل الميكروفون، يرجى التأكد من عدم استخدام برنامج آخر له على جهازك.");
+        } else if (event.error === "network") {
+          setSpeechError("تعذر الاتصال بخدمة Google للتعرف الصوتي، يرجى التحقق من اتصال الإنترنت.");
+        }
+      };
+
+      recognition.onend = () => {
+        // If user is still actively in Live Listen mode, automatically restart smoothly so listening doesn't die on pauses
+        if (isLiveListeningRef.current) {
+          try {
+            recognition.start();
+          } catch (e) {
+            setTimeout(() => {
+              if (isLiveListeningRef.current) {
+                try {
+                  const freshRec = new SpeechRecognition();
+                  freshRec.continuous = true;
+                  freshRec.interimResults = true;
+                  freshRec.maxAlternatives = 1;
+                  freshRec.lang = selectedSpeechLang;
+                  freshRec.onresult = recognition.onresult;
+                  freshRec.onerror = recognition.onerror;
+                  freshRec.onend = recognition.onend;
+                  freshRec.start();
+                  recognitionRef.current = freshRec;
+                } catch (err) {}
+              }
+            }, 100);
+          }
+        } else {
+          setIsLiveListening(false);
+        }
+      };
+
+      recognition.start();
+      recognitionRef.current = recognition;
+      setIsLiveListening(true);
+      isLiveListeningRef.current = true;
+    } catch (err: any) {
+      console.error("Failed to start live listening:", err);
+      setIsLiveListening(false);
+      isLiveListeningRef.current = false;
+      setSpeechError(
+        isInIframe
+          ? "يمنع المتصفح تشغيل محرك Google Web Speech المباشر داخل إطار المعاينة (Iframe). اضغط على زر 'فتح في نافذة مستقلة' وسيعمل معك فوراً!"
+          : "تعذر بدء الاستماع المباشر: " + (err?.message || "")
+      );
+    }
+  };
+
+  // Stop Live Listening
+  const stopLiveListening = () => {
+    isLiveListeningRef.current = false;
+    setIsLiveListening(false);
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {}
+      recognitionRef.current = null;
+    }
   };
 
   // Start Mic Recording & Web Speech Recognition
@@ -842,7 +1003,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
               <span className="text-slate-500">
                 ({(cue.endTime - cue.startTime).toFixed(1)} ثانية)
               </span>
-              {isRecording && (
+              {(isRecording || isLiveListening) && (
                 <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold animate-pulse flex items-center gap-1 mr-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                   مطابقة حية: {matchedWordsCount}/{targetWords.length}
@@ -908,6 +1069,250 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
           )}
         </div>
 
+        {/* Primary Studio Selector: QTranslate Live vs Recording Studio */}
+        <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+          <button
+            type="button"
+            onClick={() => {
+              setStudioTab("qtranslate-live");
+              stopRecording();
+            }}
+            className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
+              studioTab === "qtranslate-live"
+                ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md shadow-purple-600/30"
+                : "text-slate-400 hover:text-white hover:bg-slate-700/50"
+            }`}
+          >
+            <Zap className="w-4 h-4 text-amber-300" />
+            <span>⚡ استماع لايف وبناء الجمل (مثل QTranslate)</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setStudioTab("recording-studio");
+              stopLiveListening();
+            }}
+            className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
+              studioTab === "recording-studio"
+                ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md shadow-purple-600/30"
+                : "text-slate-400 hover:text-white hover:bg-slate-700/50"
+            }`}
+          >
+            <Mic className="w-4 h-4 text-purple-300" />
+            <span>🎙️ استوديو التسجيل الصوتي والمحاكاة</span>
+          </button>
+        </div>
+
+        {/* TAB 1: QTranslate Live Speech Recognition Panel */}
+        {studioTab === "qtranslate-live" && (
+          <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-b from-slate-900/95 via-slate-900/90 to-slate-950 border border-purple-500/40 shadow-xl shadow-purple-950/30 space-y-4">
+            {/* Top Bar: Description, Live Status & Language selector */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-purple-500/20 border border-purple-500/30 text-purple-300">
+                  <Zap className="w-4 h-4 text-amber-300" />
+                </div>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-bold text-white flex items-center gap-2">
+                    <span>محرك الاستماع اللحظي (Direct Live STT)</span>
+                    {isLiveListening && (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold animate-pulse">
+                        🟢 يستمع لك الآن
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-[11px] text-slate-400">
+                    استماع فوري بدون ذكاء اصطناعي — تكلّم لبناء الجملة وستظهر كلماتك كلمة بكلمة في نفس اللحظة
+                  </p>
+                </div>
+              </div>
+
+              {/* Speech Language Selector & Match Badge */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-mono px-2 py-1 rounded-lg bg-slate-800 border border-slate-700 text-purple-300 font-bold">
+                  🎯 مطابقة: {matchedWordsCount} / {targetWords.length}
+                </span>
+
+                <div className="flex items-center gap-1.5 bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-lg text-xs">
+                  <Globe className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <select
+                    value={selectedSpeechLang}
+                    disabled={isLiveListening}
+                    onChange={(e) => {
+                      setSelectedSpeechLang(e.target.value);
+                      if (isLiveListening) {
+                        stopLiveListening();
+                      }
+                    }}
+                    className="bg-transparent text-slate-200 text-xs font-bold outline-none cursor-pointer disabled:opacity-60"
+                    title="لغة الاستماع الصوتي"
+                  >
+                    {SUPPORTED_SPEECH_LANGS.map((lang) => (
+                      <option key={lang.code} value={lang.code} className="bg-slate-900 text-white">
+                        {lang.flag} {lang.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons: Big Start / Stop / Clear / Play Original */}
+            <div className="flex flex-wrap items-center gap-3">
+              {!isLiveListening ? (
+                <button
+                  type="button"
+                  onClick={startLiveListening}
+                  className="flex-1 min-w-[200px] py-3.5 px-6 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 hover:from-purple-500 hover:to-indigo-500 text-white font-black text-sm sm:text-base flex items-center justify-center gap-2.5 shadow-lg shadow-purple-600/30 transition-all cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
+                >
+                  <Mic className="w-5 h-5 text-white animate-pulse" />
+                  <span>ابدأ الاستماع المباشر (مثل QTranslate)</span>
+                </button>
+              ) : (
+                <div className="flex-1 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={stopLiveListening}
+                    className="flex-1 py-3 px-5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 transition-all cursor-pointer animate-pulse"
+                  >
+                    <MicOff className="w-5 h-5" />
+                    <span>إيقاف الاستماع</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearLiveText}
+                    className="px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    <span>مسح والبدء من جديد</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Play original audio segment button for fast listening */}
+              <button
+                type="button"
+                onClick={handlePlayOriginal}
+                className={`py-3 px-4 rounded-2xl font-bold text-xs transition-all flex items-center gap-2 cursor-pointer border ${
+                  isPlayingOriginal
+                    ? "bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30"
+                    : "bg-slate-800/80 hover:bg-slate-700 text-indigo-300 border-slate-700"
+                }`}
+                title="استمع للمتحدث الأصلي لمقارنة النطق"
+              >
+                {isPlayingOriginal ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                <span>استماع للأصل ({playbackSpeed}x)</span>
+              </button>
+            </div>
+
+            {/* Real-time sentence display canvas */}
+            <div
+              className={`p-4 rounded-2xl min-h-[90px] border transition-all flex flex-col justify-between gap-2 ${
+                isLiveListening
+                  ? "bg-slate-950 border-purple-500/60 shadow-inner ring-1 ring-purple-500/20"
+                  : "bg-slate-950/70 border-slate-800"
+              }`}
+            >
+              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <span className="font-bold flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-purple-400" />
+                  <span>ما تنطقه يظهر هنا مباشرة كلمة بكلمة:</span>
+                </span>
+                {similarityScore !== null && (
+                  <span
+                    className={`font-bold px-2 py-0.5 rounded-lg border text-xs ${
+                      similarityScore >= 80
+                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                        : similarityScore >= 50
+                        ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                        : "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                    }`}
+                  >
+                    🏆 نسبة الدقة: {similarityScore}%
+                  </span>
+                )}
+              </div>
+
+              {/* Words Output Canvas */}
+              <div className="py-2">
+                {isLiveListening && !recognizedText && !interimText ? (
+                  <div className="flex items-center gap-2.5 text-xs text-purple-300 animate-pulse">
+                    <Waves className="w-4 h-4 text-purple-400 animate-pulse shrink-0" />
+                    <span>الميكروفون مفتوح ويستمع لصوتك الآن... تحدّث بوضوح وستظهر الكلمات فوراً هنا!</span>
+                  </div>
+                ) : !recognizedText && !interimText ? (
+                  <p className="text-xs text-slate-500">
+                    اضغط على "ابدأ الاستماع المباشر" وتكلم باللغة المحددة ليتم بناء الجملة لحظة بلحظة.
+                  </p>
+                ) : (
+                  <div
+                    className="text-base sm:text-lg leading-relaxed font-semibold break-words select-text"
+                    dir={detectDirection(recognizedText || interimText)}
+                  >
+                    {finalText && <span className="text-white font-bold">{finalText} </span>}
+                    {interimText && (
+                      <span className="text-purple-300 italic font-semibold border-b border-purple-400/50">
+                        {interimText}
+                      </span>
+                    )}
+                    {isLiveListening && (
+                      <span className="inline-block w-2 h-4 bg-purple-400 animate-pulse align-middle ml-1 mr-0.5 rounded-xs" />
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Bottom Actions on Recognized Text */}
+              {recognizedText && (
+                <div className="flex items-center justify-between pt-2 border-t border-slate-900 text-xs text-slate-400">
+                  <span>{recognizedText.split(/\s+/).filter(Boolean).length} كلمة تم التقاطها</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => navigator.clipboard.writeText(recognizedText)}
+                      className="text-[11px] font-bold text-slate-400 hover:text-white flex items-center gap-1 hover:bg-slate-800 px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <Copy className="w-3 h-3" />
+                      <span>نسخ النص</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearLiveText}
+                      className="text-[11px] font-bold text-rose-400 hover:text-rose-300 flex items-center gap-1 hover:bg-rose-950/30 px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>مسح</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Error or Iframe Alert Message */}
+            {speechError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <div className="flex-1 leading-relaxed">
+                  <p className="font-medium">{speechError}</p>
+                  {isInIframe && (
+                    <button
+                      type="button"
+                      onClick={() => window.open(window.location.href, "_blank")}
+                      className="mt-2 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>اضغط هنا لفتح التطبيق في نافذة مستقلة (Direct Tab)</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 2: Recording Studio & Simulation */}
+        {studioTab === "recording-studio" && (
+          <div className="space-y-3">
         {/* Shadowing Modes & Speed Bar */}
         <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-xl bg-slate-800/50 border border-slate-700/60">
           {/* Mode Tabs */}
@@ -1254,6 +1659,8 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
             )}
           </div>
         )}
+          </div>
+        )}
 
         {!isSpeechSupported && (
           <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
@@ -1265,14 +1672,14 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
         )}
 
         {/* Pronunciation Assessment & Feedback Box */}
-        {speechError && (
+        {speechError && studioTab === "recording-studio" && (
           <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
             <span>{speechError}</span>
           </div>
         )}
 
-        {similarityScore !== null && (
+        {similarityScore !== null && studioTab === "recording-studio" && (
           <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-950/40 via-slate-800/80 to-slate-800/80 border border-purple-500/40 space-y-2.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
