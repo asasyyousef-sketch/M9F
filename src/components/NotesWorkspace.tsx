@@ -108,8 +108,10 @@ function computeBubblePosition(
   const viewportH = typeof window !== "undefined" ? window.innerHeight : 800;
   const padding = 12; // safe distance from all browser borders to prevent any cut-off
 
+  const measuredH = element?.offsetHeight || 0;
   const bubbleW = element?.offsetWidth || (isTranslate ? Math.min(340, viewportW - 24) : 210);
-  const bubbleH = element?.offsetHeight || (isTranslate ? 230 : 44);
+  // For translation, anticipate realistic height (at least 230px) so even during loading/server response it reserves enough space above
+  const bubbleH = isTranslate ? Math.max(measuredH, 230) : (measuredH || 44);
 
   let rectTop = bubbleInfo.rectTop ?? bubbleInfo.top;
   let rectBottom = bubbleInfo.rectBottom ?? (bubbleInfo.top + 20);
@@ -142,32 +144,45 @@ function computeBubblePosition(
   arrowX = Math.max(20, Math.min(arrowX, bubbleW - 20));
 
   // Vertical placement:
+  // Provide extra clearance so the box stays comfortably higher and above the selected/translated text
+  const bubbleGap = isTranslate ? 18 : 10;
   const spaceAbove = rectTop;
   const spaceBelow = viewportH - rectBottom;
-  const neededAbove = bubbleH + 16;
+  const neededAbove = bubbleH + bubbleGap + 12;
 
   let isFlipped = false;
   let y = 0;
 
-  if (spaceAbove < neededAbove && spaceBelow >= bubbleH + 8) {
-    isFlipped = true;
-    y = rectBottom + 8;
-  } else if (spaceAbove >= neededAbove) {
+  if (spaceAbove >= neededAbove) {
     isFlipped = false;
-    y = rectTop - bubbleH - 8;
+    y = rectTop - bubbleH - bubbleGap;
+  } else if (spaceBelow >= bubbleH + bubbleGap + 12) {
+    isFlipped = true;
+    y = rectBottom + bubbleGap;
   } else {
     // Limited room on both sides: pick whichever has more space
     if (spaceBelow > spaceAbove) {
       isFlipped = true;
-      y = rectBottom + 8;
+      y = rectBottom + bubbleGap;
     } else {
       isFlipped = false;
-      y = rectTop - bubbleH - 8;
+      y = rectTop - bubbleH - bubbleGap;
     }
   }
 
   // Final safety clamp on Y so it never renders offscreen
   y = Math.max(padding, Math.min(y, viewportH - bubbleH - padding));
+
+  // Anti-overlap safeguard: if placed above, guarantee the bottom edge never covers the original text (rectTop)
+  if (!isFlipped && (y + bubbleH > rectTop - 6)) {
+    if (spaceBelow > spaceAbove) {
+      isFlipped = true;
+      y = rectBottom + bubbleGap;
+      y = Math.max(padding, Math.min(y, viewportH - bubbleH - padding));
+    } else {
+      y = Math.max(padding, rectTop - bubbleH - bubbleGap);
+    }
+  }
 
   return { x, y, arrowX, isFlipped };
 }
@@ -322,13 +337,36 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
     };
     updatePos();
 
+    // Dynamically observe size changes of the bubble (e.g. when server responds with translation)
+    let resizeObserver: ResizeObserver | null = null;
+    if (bubbleRef.current && typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(() => {
+        updatePos();
+      });
+      resizeObserver.observe(bubbleRef.current);
+    }
+
+    const rafId = requestAnimationFrame(updatePos);
+
     window.addEventListener("resize", updatePos);
     window.addEventListener("scroll", updatePos, true);
     return () => {
+      cancelAnimationFrame(rafId);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
       window.removeEventListener("resize", updatePos);
       window.removeEventListener("scroll", updatePos, true);
     };
-  }, [selectionBubble, isTranslateOpen]);
+  }, [
+    selectionBubble,
+    isTranslateOpen,
+    translationState?.translatedText,
+    translationState?.isLoading,
+    translationState?.error,
+    translationState?.sourceLang,
+    translationState?.targetLang
+  ]);
 
   const activeBubblePos = selectionBubble
     ? (bubbleLayout || computeBubblePosition(selectionBubble, isTranslateOpen, bubbleRef.current, savedRangeRef.current))
@@ -3807,7 +3845,7 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
                     ) : (
                       <>
                         {/* The Translated Text */}
-                        <div className="font-medium text-white text-xs sm:text-sm leading-relaxed select-text break-words">
+                        <div className="font-medium text-white text-xs sm:text-sm leading-relaxed select-text break-words max-h-48 overflow-y-auto pr-1">
                           {translationState?.translatedText || "لا توجد ترجمة"}
                         </div>
 
