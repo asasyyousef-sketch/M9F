@@ -107,11 +107,11 @@ function computeBubblePosition(
   const viewportW = typeof window !== "undefined" ? window.innerWidth : 1200;
   const viewportH = typeof window !== "undefined" ? window.innerHeight : 800;
   const padding = 12; // safe distance from all browser borders to prevent any cut-off
+  const gap = 8; // exact original clean distance directly above/below the selected text
 
   const measuredH = element?.offsetHeight || 0;
   const bubbleW = element?.offsetWidth || (isTranslate ? Math.min(340, viewportW - 24) : 210);
-  // For translation, anticipate realistic height (at least 230px) so even during loading/server response it reserves enough space above
-  const bubbleH = isTranslate ? Math.max(measuredH, 230) : (measuredH || 44);
+  const bubbleH = measuredH || (isTranslate ? 210 : 44);
 
   let rectTop = bubbleInfo.rectTop ?? bubbleInfo.top;
   let rectBottom = bubbleInfo.rectBottom ?? (bubbleInfo.top + 20);
@@ -144,47 +144,44 @@ function computeBubblePosition(
   arrowX = Math.max(20, Math.min(arrowX, bubbleW - 20));
 
   // Vertical placement:
-  // Provide extra clearance so the box stays comfortably higher and above the selected/translated text
-  const bubbleGap = isTranslate ? 18 : 10;
   const spaceAbove = rectTop;
   const spaceBelow = viewportH - rectBottom;
-  const neededAbove = bubbleH + bubbleGap + 12;
+  const neededAbove = bubbleH + gap + 10;
 
+  // Only flip below if there is not enough room above AND there is more room below
   let isFlipped = false;
-  let y = 0;
-
-  if (spaceAbove >= neededAbove) {
-    isFlipped = false;
-    y = rectTop - bubbleH - bubbleGap;
-  } else if (spaceBelow >= bubbleH + bubbleGap + 12) {
+  if (spaceAbove < neededAbove && spaceBelow > spaceAbove) {
     isFlipped = true;
-    y = rectBottom + bubbleGap;
   } else {
-    // Limited room on both sides: pick whichever has more space
-    if (spaceBelow > spaceAbove) {
-      isFlipped = true;
-      y = rectBottom + bubbleGap;
-    } else {
-      isFlipped = false;
-      y = rectTop - bubbleH - bubbleGap;
-    }
+    isFlipped = false;
   }
 
-  // Final safety clamp on Y so it never renders offscreen
-  y = Math.max(padding, Math.min(y, viewportH - bubbleH - padding));
+  // When not flipped (above text):
+  // The bottom of the bubble should sit directly at `rectTop - gap`
+  // Distance from bottom of viewport: bottom = viewportH - rectTop + gap
+  // This ensures that when translation expands, it expands UPWARDS naturally,
+  // keeping its bottom edge locked at exactly `gap` (8px) directly above the selection.
+  let bottom = viewportH - rectTop + gap;
+  let y = rectTop - bubbleH - gap;
 
-  // Anti-overlap safeguard: if placed above, guarantee the bottom edge never covers the original text (rectTop)
-  if (!isFlipped && (y + bubbleH > rectTop - 6)) {
-    if (spaceBelow > spaceAbove) {
-      isFlipped = true;
-      y = rectBottom + bubbleGap;
-      y = Math.max(padding, Math.min(y, viewportH - bubbleH - padding));
-    } else {
-      y = Math.max(padding, rectTop - bubbleH - bubbleGap);
-    }
+  // When flipped (below text):
+  // The top of the bubble sits directly at `rectBottom + gap`
+  if (isFlipped) {
+    y = rectBottom + gap;
+    y = Math.max(padding, Math.min(y, viewportH - bubbleH - padding));
+  } else {
+    // When above, if the top of the bubble would go above viewport top padding:
+    const maxBottom = viewportH - padding - bubbleH;
+    bottom = Math.min(bottom, maxBottom);
+    y = Math.max(padding, y);
   }
 
-  return { x, y, arrowX, isFlipped };
+  // Max height allowed for the bubble so it never overflows the viewport
+  const maxH = isFlipped
+    ? Math.max(120, viewportH - y - padding)
+    : Math.max(120, rectTop - gap - padding);
+
+  return { x, y, bottom, arrowX, isFlipped, maxH };
 }
 
 interface HoveredCorrectionInfo {
@@ -322,8 +319,10 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
   const [bubbleLayout, setBubbleLayout] = useState<{
     x: number;
     y: number;
+    bottom: number;
     arrowX: number;
     isFlipped: boolean;
+    maxH: number;
   } | null>(null);
 
   useLayoutEffect(() => {
@@ -3626,8 +3625,11 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
             id="text-selection-floating-bubble"
             className="fixed z-50 pointer-events-auto transition-all duration-150 animate-in fade-in zoom-in-95 select-none"
             style={{
-              top: `${activeBubblePos.y}px`,
               left: `${activeBubblePos.x}px`,
+              ...(activeBubblePos.isFlipped
+                ? { top: `${activeBubblePos.y}px`, bottom: "auto" }
+                : { bottom: `${activeBubblePos.bottom}px`, top: "auto" }),
+              maxHeight: `${activeBubblePos.maxH}px`,
             }}
             onMouseDown={(e) => {
               // Crucial: prevent losing text selection and focus inside contentEditable
