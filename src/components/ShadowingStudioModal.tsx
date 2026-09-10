@@ -372,17 +372,34 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   };
 
   // Pure QTranslate-Style Live Speech Recognition (No MediaRecorder, No device locks, 0 Latency)
-  const startLiveListening = () => {
+  const startLiveListening = async () => {
     setSpeechError(null);
     stopRecording();
     stopUserAudio();
     onStopOriginalSegment();
 
+    // 1. Explicitly verify/request microphone permission from the browser
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const testStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Immediately release tracks so sound hardware is free for SpeechRecognition
+        testStream.getTracks().forEach((track) => track.stop());
+      }
+    } catch (permErr: any) {
+      console.warn("Microphone permission check failed:", permErr);
+      setIsLiveListening(false);
+      isLiveListeningRef.current = false;
+      setSpeechError(
+        "لم يتم منح إذن الميكروفون للمتصفح. يرجى النقر على أيقونة الميكروفون أو القفل في شريط العنوان (Address Bar) واختيار 'سماح / Allow'."
+      );
+      return;
+    }
+
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
       setIsSpeechSupported(false);
       setSpeechError(
-        "المتصفح الحالي لا يدعم محرك التعرف الصوتي المباشر (Web Speech). يرجى استخدام متصفح Google Chrome أو Microsoft Edge."
+        "المتصفح الحالي لا يدعم محرك التعرف الصوتي المباشر (Web Speech). يرجى استخدام متصفح Google Chrome أو Microsoft Edge على حاسوبك."
       );
       return;
     }
@@ -448,41 +465,42 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
           isLiveListeningRef.current = false;
           setSpeechError(
             isInIframe
-              ? "يمنع متصفح Chrome/Edge محرك Google Speech داخل إطار المعاينة (Iframe). اضغط على 'فتح في نافذة مستقلة' أعلاه ليعمل الاستماع اللحظي فوراً مثل QTranslate بدون أي مانع!"
-              : "لم يتم منح إذن الميكروفون للمتصفح. يرجى الضغط على أيقونة القفل أو الميكروفون في شريط عنوان المتصفح ومنح الإذن."
+              ? "يمنع متصفح Chrome/Edge محرك Google Speech داخل إطار المعاينة (Iframe). اضغط على 'افتح في تبويب جديد' أعلاه ليعمل الاستماع اللحظي فوراً!"
+              : "لم يتم منح إذن الميكروفون للمتصفح. انقر على أيقونة الإعدادات/القفل بجوار الرابط وتأكد من تفعيل الميكروفون (Allow)."
           );
         } else if (event.error === "audio-capture") {
           setIsLiveListening(false);
           isLiveListeningRef.current = false;
-          setSpeechError("تعذر تشغيل الميكروفون، يرجى التأكد من عدم استخدام برنامج آخر له على جهازك.");
+          setSpeechError("تعذر تشغيل الميكروفون. تأكد من أن الميكروفون متصل باللابتوب وغير مستخدم في برنامج آخر.");
         } else if (event.error === "network") {
-          setSpeechError("تعذر الاتصال بخدمة Google للتعرف الصوتي، يرجى التحقق من اتصال الإنترنت.");
+          setSpeechError("تعذر الاتصال بخدمة التعرف الصوتي (Network error). تحقق من اتصال الإنترنت أو إعدادات البروكسي/VPN.");
+        } else {
+          setSpeechError(`تنبيه من محرك التعرف الصوتي: ${event.error}`);
         }
       };
 
       recognition.onend = () => {
         // If user is still actively in Live Listen mode, automatically restart smoothly so listening doesn't die on pauses
         if (isLiveListeningRef.current) {
-          try {
-            recognition.start();
-          } catch (e) {
-            setTimeout(() => {
-              if (isLiveListeningRef.current) {
-                try {
-                  const freshRec = new SpeechRecognition();
-                  freshRec.continuous = true;
-                  freshRec.interimResults = true;
-                  freshRec.maxAlternatives = 1;
-                  freshRec.lang = selectedSpeechLang;
-                  freshRec.onresult = recognition.onresult;
-                  freshRec.onerror = recognition.onerror;
-                  freshRec.onend = recognition.onend;
-                  freshRec.start();
-                  recognitionRef.current = freshRec;
-                } catch (err) {}
+          setTimeout(() => {
+            if (isLiveListeningRef.current) {
+              try {
+                const freshRec = new SpeechRecognition();
+                freshRec.continuous = true;
+                freshRec.interimResults = true;
+                freshRec.maxAlternatives = 1;
+                freshRec.lang = selectedSpeechLang;
+                freshRec.onstart = recognition.onstart;
+                freshRec.onresult = recognition.onresult;
+                freshRec.onerror = recognition.onerror;
+                freshRec.onend = recognition.onend;
+                freshRec.start();
+                recognitionRef.current = freshRec;
+              } catch (e) {
+                console.warn("Speech recognition restart error:", e);
               }
-            }, 100);
-          }
+            }
+          }, 100);
         } else {
           setIsLiveListening(false);
         }
@@ -498,7 +516,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
       isLiveListeningRef.current = false;
       setSpeechError(
         isInIframe
-          ? "يمنع المتصفح تشغيل محرك Google Web Speech المباشر داخل إطار المعاينة (Iframe). اضغط على زر 'فتح في نافذة مستقلة' وسيعمل معك فوراً!"
+          ? "يمنع المتصفح تشغيل محرك Google Web Speech المباشر داخل إطار المعاينة (Iframe). اضغط على زر 'افتح في تبويب جديد' وسيعمل معك فوراً!"
           : "تعذر بدء الاستماع المباشر: " + (err?.message || "")
       );
     }
@@ -969,25 +987,26 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
 
         {/* Iframe tip banner: Explains why Web Speech API behaves in preview and gives 1-click open in new tab */}
         {isInIframe && (
-          <div className="p-3 rounded-2xl bg-gradient-to-r from-purple-950/70 via-indigo-950/60 to-slate-900 border border-purple-500/40 text-xs flex flex-wrap items-center justify-between gap-3 text-purple-200 shadow-md">
-            <div className="flex items-center gap-2.5">
-              <span className="text-lg">💡</span>
+          <div className="p-3.5 rounded-2xl bg-gradient-to-r from-purple-950/80 via-indigo-950/70 to-slate-900 border border-purple-500/50 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-purple-200 shadow-lg">
+            <div className="flex items-start sm:items-center gap-3">
+              <span className="text-2xl shrink-0">🌐</span>
               <div className="leading-snug">
-                <span className="font-bold text-white">تلميح استماع Google الحي (مثل QTranslate):</span>
-                <p className="text-[11px] text-purple-300/90 mt-0.5">
-                  محرك الاستماع اللحظي يمنعه المتصفح داخل نوافذ المعاينة المصغرة (Iframe). افتح التطبيق في نافذة مستقلة ليعمل الاستماع الحي الفوري أثناء نطقك مباشرة!
+                <span className="font-bold text-white text-xs sm:text-sm">كيف يعمل الاستماع اللحظي (مثل QTranslate)؟</span>
+                <p className="text-[11px] text-purple-300/90 mt-0.5 max-w-xl">
+                  متصفحك (Chrome/Edge) يمنع الميكروفون المباشر داخل شاشة المعاينة المصغّرة. افتح التطبيق في <strong>صفحة متصفح مستقلة (New Tab)</strong> وسيعمل معك الاستماع اللحظي وبناء الجمل فوراً!
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => window.open(window.location.href, "_blank")}
-              className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all shrink-0 cursor-pointer"
-              title="فتح التطبيق مباشرة في نافذة متصفح كاملة"
+            <a
+              href={window.location.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all shrink-0 cursor-pointer text-center"
+              title="فتح التطبيق في صفحة متصفح جديدة مستقلة"
             >
-              <ExternalLink className="w-3.5 h-3.5" />
-              <span>فتح بنافذة مستقلة (Direct Tab)</span>
-            </button>
+              <ExternalLink className="w-4 h-4 shrink-0" />
+              <span>افتح في تبويب جديد (اضغط هنا)</span>
+            </a>
           </div>
         )}
 
@@ -1295,14 +1314,15 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
                 <div className="flex-1 leading-relaxed">
                   <p className="font-medium">{speechError}</p>
                   {isInIframe && (
-                    <button
-                      type="button"
-                      onClick={() => window.open(window.location.href, "_blank")}
-                      className="mt-2 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    <a
+                      href={window.location.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-flex px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs items-center gap-1.5 cursor-pointer shadow-sm"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
                       <span>اضغط هنا لفتح التطبيق في نافذة مستقلة (Direct Tab)</span>
-                    </button>
+                    </a>
                   )}
                 </div>
               </div>
