@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import {
   BookOpen,
   Plus,
@@ -91,6 +91,85 @@ interface SelectionBubbleInfo {
   top: number;
   left: number;
   isFlipped: boolean;
+  rectTop?: number;
+  rectBottom?: number;
+  rectLeft?: number;
+  rectRight?: number;
+  rectWidth?: number;
+}
+
+function computeBubblePosition(
+  bubbleInfo: SelectionBubbleInfo,
+  isTranslate: boolean,
+  element: HTMLDivElement | null,
+  range: Range | null
+) {
+  const viewportW = typeof window !== "undefined" ? window.innerWidth : 1200;
+  const viewportH = typeof window !== "undefined" ? window.innerHeight : 800;
+  const padding = 12; // safe distance from all browser borders to prevent any cut-off
+
+  const bubbleW = element?.offsetWidth || (isTranslate ? Math.min(340, viewportW - 24) : 210);
+  const bubbleH = element?.offsetHeight || (isTranslate ? 230 : 44);
+
+  let rectTop = bubbleInfo.rectTop ?? bubbleInfo.top;
+  let rectBottom = bubbleInfo.rectBottom ?? (bubbleInfo.top + 20);
+  let rectLeft = bubbleInfo.rectLeft ?? (bubbleInfo.left - 20);
+  let rectWidth = bubbleInfo.rectWidth ?? 40;
+
+  if (range) {
+    try {
+      const rRect = range.getBoundingClientRect();
+      if (rRect && (rRect.width > 0 || rRect.height > 0)) {
+        rectTop = rRect.top;
+        rectBottom = rRect.bottom;
+        rectLeft = rRect.left;
+        rectWidth = rRect.width;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const selectionCenterX = rectLeft + rectWidth / 2;
+
+  // Horizontal clamping: keep the entire bubble strictly inside [padding, viewportW - bubbleW - padding]
+  const maxAllowedX = Math.max(padding, viewportW - bubbleW - padding);
+  let x = selectionCenterX - bubbleW / 2;
+  x = Math.max(padding, Math.min(x, maxAllowedX));
+
+  // Arrow position relative to the bubble's container (clamped so it stays on the bubble rounded edge)
+  let arrowX = selectionCenterX - x;
+  arrowX = Math.max(20, Math.min(arrowX, bubbleW - 20));
+
+  // Vertical placement:
+  const spaceAbove = rectTop;
+  const spaceBelow = viewportH - rectBottom;
+  const neededAbove = bubbleH + 16;
+
+  let isFlipped = false;
+  let y = 0;
+
+  if (spaceAbove < neededAbove && spaceBelow >= bubbleH + 8) {
+    isFlipped = true;
+    y = rectBottom + 8;
+  } else if (spaceAbove >= neededAbove) {
+    isFlipped = false;
+    y = rectTop - bubbleH - 8;
+  } else {
+    // Limited room on both sides: pick whichever has more space
+    if (spaceBelow > spaceAbove) {
+      isFlipped = true;
+      y = rectBottom + 8;
+    } else {
+      isFlipped = false;
+      y = rectTop - bubbleH - 8;
+    }
+  }
+
+  // Final safety clamp on Y so it never renders offscreen
+  y = Math.max(padding, Math.min(y, viewportH - bubbleH - padding));
+
+  return { x, y, arrowX, isFlipped };
 }
 
 interface HoveredCorrectionInfo {
@@ -223,6 +302,37 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
   const savedRangeRef = useRef<Range | null>(null);
   const [showTranslateModal, setShowTranslateModal] = useState(false);
   const [customTranslateInput, setCustomTranslateInput] = useState("");
+
+  // Position layout state to guarantee the bubble NEVER overflows any screen edges
+  const [bubbleLayout, setBubbleLayout] = useState<{
+    x: number;
+    y: number;
+    arrowX: number;
+    isFlipped: boolean;
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!selectionBubble) {
+      setBubbleLayout(null);
+      return;
+    }
+    const updatePos = () => {
+      const pos = computeBubblePosition(selectionBubble, isTranslateOpen, bubbleRef.current, savedRangeRef.current);
+      setBubbleLayout(pos);
+    };
+    updatePos();
+
+    window.addEventListener("resize", updatePos);
+    window.addEventListener("scroll", updatePos, true);
+    return () => {
+      window.removeEventListener("resize", updatePos);
+      window.removeEventListener("scroll", updatePos, true);
+    };
+  }, [selectionBubble, isTranslateOpen]);
+
+  const activeBubblePos = selectionBubble
+    ? (bubbleLayout || computeBubblePosition(selectionBubble, isTranslateOpen, bubbleRef.current, savedRangeRef.current))
+    : null;
 
   // Voice Model Settings Modal state
   const [showVoiceSettingsModal, setShowVoiceSettingsModal] = useState(false);
@@ -1560,7 +1670,12 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
           text,
           top,
           left,
-          isFlipped
+          isFlipped,
+          rectTop: rect.top,
+          rectBottom: rect.bottom,
+          rectLeft: rect.left,
+          rectRight: rect.right,
+          rectWidth: rect.width,
         };
       });
     } catch (e) {
@@ -3467,15 +3582,14 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
         {/* ================================================================= */}
         {/* 6. FLOATING SELECTION BUBBLE (Icon-only, clean, minimal toolbar) */}
         {/* ================================================================= */}
-        {selectionBubble && (
+        {selectionBubble && activeBubblePos && (
           <div
             ref={bubbleRef}
             id="text-selection-floating-bubble"
             className="fixed z-50 pointer-events-auto transition-all duration-150 animate-in fade-in zoom-in-95 select-none"
             style={{
-              top: `${Math.max(12, selectionBubble.top)}px`,
-              left: `${Math.min(window.innerWidth - 140, Math.max(140, selectionBubble.left))}px`,
-              transform: selectionBubble.isFlipped ? "translate(-50%, 0)" : "translate(-50%, -100%)",
+              top: `${activeBubblePos.y}px`,
+              left: `${activeBubblePos.x}px`,
             }}
             onMouseDown={(e) => {
               // Crucial: prevent losing text selection and focus inside contentEditable
@@ -3486,14 +3600,17 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
             }}
             dir="rtl"
           >
-            <div className={`bg-slate-900/98 text-white p-1 rounded-2xl shadow-2xl border border-slate-700/80 flex flex-col gap-1 text-xs font-sans ring-1 ring-black/20 ${isTranslateOpen ? "w-[290px] sm:w-[350px] max-w-[94vw] p-2" : "whitespace-nowrap"}`}>
+            <div className={`bg-slate-900/98 text-white p-1 rounded-2xl shadow-2xl border border-slate-700/80 flex flex-col gap-1 text-xs font-sans ring-1 ring-black/20 ${isTranslateOpen ? "w-[290px] sm:w-[350px] max-w-[calc(100vw-24px)] p-2" : "whitespace-nowrap"}`}>
               {/* Arrow pointing to selected text */}
               <div
-                className={`absolute left-1/2 -translate-x-1/2 border-4 border-transparent ${
-                  selectionBubble.isFlipped
+                className={`absolute -translate-x-1/2 border-4 border-transparent ${
+                  activeBubblePos.isFlipped
                     ? "bottom-full border-b-slate-900"
                     : "top-full border-t-slate-900"
                 }`}
+                style={{
+                  left: `${activeBubblePos.arrowX}px`,
+                }}
               />
 
               {/* Top Controls Row - Minimalist Icon-only Layout */}
