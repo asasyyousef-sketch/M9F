@@ -23,7 +23,10 @@ import {
   VolumeX,
   Activity,
   Globe,
-  Waves
+  Waves,
+  ExternalLink,
+  RefreshCw,
+  Zap
 } from "lucide-react";
 import { SubtitleCue } from "../types";
 import { formatSecondsToClock } from "../utils/subtitleParser";
@@ -152,6 +155,12 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   const [similarityScore, setSimilarityScore] = useState<number | null>(null);
   const [speechError, setSpeechError] = useState<string | null>(null);
 
+  // Fast Cloud STT / Server Fallback States (Like QTranslate)
+  const [isTranscribingWithServer, setIsTranscribingWithServer] = useState<boolean>(false);
+  const [transcriptionNotice, setTranscriptionNotice] = useState<string | null>(null);
+  const [isInIframe, setIsInIframe] = useState<boolean>(false);
+  const lastRecordedBlobRef = useRef<Blob | null>(null);
+
   // AI Pronunciation Coach States
   const [aiTips, setAiTips] = useState<string | null>(null);
   const [isLoadingAiTips, setIsLoadingAiTips] = useState<boolean>(false);
@@ -170,6 +179,15 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   const micStreamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const loopTimerRef = useRef<number | null>(null);
+
+  // Detect iframe environment (Crucial for Chromium Web Speech API permission handling)
+  useEffect(() => {
+    try {
+      setIsInIframe(window.self !== window.top);
+    } catch (e) {
+      setIsInIframe(true);
+    }
+  }, []);
 
   // Synchronize language when primaryLanguage prop changes
   useEffect(() => {
@@ -407,8 +425,15 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
 
       mediaRecorder.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        lastRecordedBlobRef.current = audioBlob;
         const url = URL.createObjectURL(audioBlob);
         setRecordedAudioUrl(url);
+
+        // Fallback: If Web Speech did not yield recognized words (e.g. iframe sandbox or Firefox), auto-transcribe!
+        const currentText = (recognizedTextRef.current || "").trim();
+        if (!currentText && audioBlob.size > 2000) {
+          transcribeAudioWithServer(audioBlob);
+        }
       };
 
       mediaRecorder.start();
@@ -462,21 +487,40 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
 
         recognition.onerror = (event: any) => {
           console.warn("Speech recognition error:", event.error);
-          if (event.error === "not-allowed") {
-            setSpeechError("يرجى إعطاء الإذن للمتصفح باستخدام الميكروفون.");
+          if (event.error === "no-speech") {
+            // Silence or brief pause - ignore silently and let it continue listening
+            return;
+          }
+          if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+            setSpeechError(
+              isInIframe
+                ? "يمنع المتصفح محرك Google Web Speech المباشر داخل إطار المعاينة (Iframe). اضغط على 'فتح في نافذة مستقلة' أعلاه ليعمل فوراً، أو سيقوم النظام بتفريغ صوتك تلقائياً عند إنهاء التسجيل."
+                : "يرجى منح إذن الميكروفون للمتصفح."
+            );
           } else if (event.error === "network") {
-            setSpeechError("تعذر الاتصال بمحرك التعرف الصوتي، يرجى التحقق من الاتصال بالإنترنت.");
+            setSpeechError("تعذر الاتصال بخدمة Google للتعرف الصوتي، سيتم تفريغ الصوت عبر المحرك البديل تلقائياً.");
           }
         };
 
         recognition.onend = () => {
           setIsSpeechListening(false);
-          // If the user is still actively recording, restart recognition so listening never drops
+          // If the user is still actively recording, restart recognition cleanly with a fresh instance
           if (isRecordingRef.current) {
             try {
-              recognition.start();
+              const freshRec = new SpeechRecognition();
+              freshRec.continuous = true;
+              freshRec.interimResults = true;
+              freshRec.maxAlternatives = 1;
+              freshRec.lang = selectedSpeechLang;
+              freshRec.onresult = recognition.onresult;
+              freshRec.onerror = recognition.onerror;
+              freshRec.onend = recognition.onend;
+              freshRec.start();
+              recognitionRef.current = freshRec;
               setIsSpeechListening(true);
-            } catch (e) {}
+            } catch (e) {
+              console.warn("Speech recognition restart failed:", e);
+            }
           }
         };
 
@@ -494,6 +538,61 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
       setSpeechError("تعذر الوصول للميكروفون. يرجى التحقق من أذونات المتصفح.");
       setIsRecording(false);
       isRecordingRef.current = false;
+    }
+  };
+
+  // Fast Server Speech Transcription (Works in all browsers, iframes, Firefox, Chrome, Safari)
+  const transcribeAudioWithServer = async (audioBlob: Blob) => {
+    if (!audioBlob || audioBlob.size < 500) return;
+    setIsTranscribingWithServer(true);
+    setTranscriptionNotice("جاري استخراج الكلمات المنطوقة من تسجيلك الصوتي بدقة وسرعة...");
+    try {
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+      });
+      reader.readAsDataURL(audioBlob);
+      const dataUrl = await base64Promise;
+
+      let customApiKey = "";
+      try {
+        customApiKey =
+          localStorage.getItem("gemini_api_key") ||
+          sessionStorage.getItem("gemini_api_key") ||
+          "";
+      } catch (e) {}
+
+      const res = await fetch("/api/shadowing/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          audioBase64: dataUrl,
+          mimeType: audioBlob.type || "audio/webm",
+          language: selectedSpeechLang,
+          targetSentence: cue.text,
+          customApiKey,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.text) {
+        const cleanText = data.text.trim();
+        setFinalText(cleanText);
+        setInterimText("");
+        setRecognizedText(cleanText);
+        recognizedTextRef.current = cleanText;
+        const score = evaluatePronunciation(cleanText, cue.text);
+        setSimilarityScore(score);
+        setTranscriptionNotice("✅ تم تفريغ الكلمات بنجاح ومطابقتها مع النص!");
+      } else {
+        setTranscriptionNotice("لم يتم رصد كلمات واضحة في التسجيل الصوتي.");
+      }
+    } catch (err: any) {
+      console.error("Transcription error:", err);
+      setTranscriptionNotice("تعذر التفريغ التلقائي، يمكنك إعادة المحاولة بالضغط على زر التفريغ السريع.");
+    } finally {
+      setIsTranscribingWithServer(false);
     }
   };
 
@@ -540,6 +639,9 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     if (latestText) {
       const finalScore = evaluatePronunciation(latestText, cue.text);
       setSimilarityScore(finalScore);
+    } else if (lastRecordedBlobRef.current && lastRecordedBlobRef.current.size > 2000) {
+      // If Web Speech API didn't pick up speech, fallback to server transcription immediately
+      transcribeAudioWithServer(lastRecordedBlobRef.current);
     }
   };
 
@@ -703,6 +805,30 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Iframe tip banner: Explains why Web Speech API behaves in preview and gives 1-click open in new tab */}
+        {isInIframe && (
+          <div className="p-3 rounded-2xl bg-gradient-to-r from-purple-950/70 via-indigo-950/60 to-slate-900 border border-purple-500/40 text-xs flex flex-wrap items-center justify-between gap-3 text-purple-200 shadow-md">
+            <div className="flex items-center gap-2.5">
+              <span className="text-lg">💡</span>
+              <div className="leading-snug">
+                <span className="font-bold text-white">تلميح استماع Google الحي (مثل QTranslate):</span>
+                <p className="text-[11px] text-purple-300/90 mt-0.5">
+                  محرك الاستماع اللحظي يمنعه المتصفح داخل نوافذ المعاينة المصغرة (Iframe). افتح التطبيق في نافذة مستقلة ليعمل الاستماع الحي الفوري أثناء نطقك مباشرة!
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => window.open(window.location.href, "_blank")}
+              className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all shrink-0 cursor-pointer"
+              title="فتح التطبيق مباشرة في نافذة متصفح كاملة"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>فتح بنافذة مستقلة (Direct Tab)</span>
+            </button>
+          </div>
+        )}
 
         {/* Target Sentence Card */}
         <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-b from-slate-800/80 to-slate-900 border border-slate-700/80 relative overflow-hidden space-y-3">
@@ -978,8 +1104,8 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
           </div>
         </div>
 
-        {/* Live Speech Recognition & Streaming Box (عرض الكلمات مباشرة أثناء التسجيل) */}
-        {(isRecording || recognizedText || interimText) && (
+        {/* Live Speech Recognition & Streaming Box (عرض الكلمات مباشرة أثناء التسجيل ومحرك STT السريع) */}
+        {(isRecording || recognizedText || interimText || recordedAudioUrl || isTranscribingWithServer) && (
           <div
             className={`p-4 rounded-2xl border transition-all duration-200 space-y-3 ${
               isRecording
@@ -1002,7 +1128,13 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-white flex items-center gap-1.5">
                     <Activity className="w-3.5 h-3.5 text-purple-400" />
-                    <span>{isRecording ? "الاستماع المباشر لكلماتك (Google Speech Engine)" : "ما تم التقاطه صوتياً"}</span>
+                    <span>
+                      {isRecording
+                        ? "الاستماع المباشر لكلماتك (Google Speech Engine)"
+                        : isTranscribingWithServer
+                        ? "جاري تفريغ الصوت السريع..."
+                        : "ما تم التقاطه صوتياً"}
+                    </span>
                   </span>
                   {isSpeechListening && isRecording && (
                     <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold animate-pulse">
@@ -1012,8 +1144,26 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
                 </div>
               </div>
 
-              {/* Language Selector & Matched Count */}
+              {/* Language Selector, Retranscribe button, & Matched Count */}
               <div className="flex items-center gap-2">
+                {/* Fast STT button for recorded audio */}
+                {recordedAudioUrl && !isRecording && (
+                  <button
+                    type="button"
+                    disabled={isTranscribingWithServer}
+                    onClick={() => lastRecordedBlobRef.current && transcribeAudioWithServer(lastRecordedBlobRef.current)}
+                    className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                    title="إعادة تفريغ الكلمات من تسجيلك الصوتي بدقة وسرعة"
+                  >
+                    {isTranscribingWithServer ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Zap className="w-3 h-3 text-amber-300" />
+                    )}
+                    <span>تفريغ سريع (Fast STT)</span>
+                  </button>
+                )}
+
                 {/* Matched Words Counter */}
                 <span className="text-[11px] font-mono px-2 py-0.5 rounded-lg bg-slate-800 border border-slate-700 text-purple-300 font-bold">
                   🎯 {matchedWordsCount} / {targetWords.length} كلمات مطابقة
@@ -1041,10 +1191,31 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
 
             {/* Live Text Display Stream */}
             <div className="min-h-[48px] flex items-center px-1">
-              {isRecording && !recognizedText && !interimText ? (
+              {isTranscribingWithServer ? (
+                <div className="flex items-center gap-2.5 text-xs text-purple-300 animate-pulse py-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-purple-400 shrink-0" />
+                  <span>جاري استخراج الكلمات المنطوقة من تسجيلك بسرعة وبدون تأخير...</span>
+                </div>
+              ) : isRecording && !recognizedText && !interimText ? (
                 <div className="flex items-center gap-2.5 text-xs text-slate-400 animate-pulse py-1">
                   <Waves className="w-4 h-4 text-purple-400 animate-pulse shrink-0" />
                   <span>تكلّم الآن بصوت واضح... ما تقوله سيظهر هنا كلمة بكلمة في الوقت الفعلي أثناء نطقك.</span>
+                </div>
+              ) : !isRecording && !recognizedText && !interimText && recordedAudioUrl ? (
+                <div className="flex items-center justify-between w-full py-1 text-xs text-slate-400">
+                  <span className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>لم يتم التقاط الكلمات تلقائياً أثناء التسجيل. اضغط لتفريغها الآن من تسجيلك:</span>
+                  </span>
+                  <button
+                    type="button"
+                    disabled={isTranscribingWithServer}
+                    onClick={() => lastRecordedBlobRef.current && transcribeAudioWithServer(lastRecordedBlobRef.current)}
+                    className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>تفريغ التسجيل الآن</span>
+                  </button>
                 </div>
               ) : (
                 <div
@@ -1065,6 +1236,14 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Transcription notice banner */}
+            {transcriptionNotice && (
+              <div className="text-[11px] text-purple-300 bg-purple-950/40 border border-purple-500/30 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                <span>{transcriptionNotice}</span>
+              </div>
+            )}
 
             {/* Live Recognition Hint for user */}
             {isRecording && (
