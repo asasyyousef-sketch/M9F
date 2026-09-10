@@ -33,6 +33,7 @@ import {
 import { SubtitleCue } from "../types";
 import { formatSecondsToClock } from "../utils/subtitleParser";
 import { speakClient } from "./Modals";
+import { AudioDiagnosticModal } from "./AudioDiagnosticModal";
 
 export const SUPPORTED_SPEECH_LANGS = [
   { code: "de-DE", label: "الألمانية (Deutsch)", flag: "🇩🇪" },

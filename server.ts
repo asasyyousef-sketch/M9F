@@ -1583,7 +1583,7 @@ Transcribe ONLY what you hear in the audio. If the user spoke words, output thos
 Do not output quotes, explanations, markdown, or timestamps. If the audio is silent or unintelligible noise, output empty string.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+        model: "gemini-3.6-flash",
         contents: [
           {
             role: "user",
