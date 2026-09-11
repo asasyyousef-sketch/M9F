@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   Mic,
   MicOff,
   Play,
   Pause,
+  RotateCcw,
   Volume2,
   ChevronRight,
   ChevronLeft,
@@ -12,7 +13,8 @@ import {
   AlertCircle,
   Clock,
   Headphones,
-  Award
+  Award,
+  Waves
 } from "lucide-react";
 import { SubtitleCue } from "../types";
 import { formatSecondsToClock } from "../utils/subtitleParser";
@@ -68,6 +70,25 @@ function levenshteinDistance(a: string, b: string): number {
   return matrix[b.length][a.length];
 }
 
+// Helper to generate natural pseudo-waveform for sentence audio
+function generateSentenceWaveform(sentence: string, count = 44): number[] {
+  let hash = 0;
+  for (let i = 0; i < sentence.length; i++) {
+    hash = (hash << 5) - hash + sentence.charCodeAt(i);
+    hash |= 0;
+  }
+  const bars: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const fraction = i / count;
+    const envelope = Math.sin(fraction * Math.PI);
+    const pseudoRandom = Math.abs(Math.sin((i + 1) * 12.9898 + hash));
+    const harmonic = Math.sin(fraction * 16) * 0.22;
+    const val = Math.max(0.18, Math.min(0.95, envelope * 0.72 + pseudoRandom * 0.32 + harmonic));
+    bars.push(parseFloat(val.toFixed(2)));
+  }
+  return bars;
+}
+
 // Helper to determine text direction
 function detectDirection(text: string): "rtl" | "ltr" {
   if (!text) return "ltr";
@@ -101,6 +122,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   const [userAudioProgress, setUserAudioProgress] = useState<number>(0);
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
   const [micVolume, setMicVolume] = useState<number>(0);
+  const [userWaveform, setUserWaveform] = useState<number[]>([]);
 
   // Speech Recognition & Scoring States
   const [recognizedText, setRecognizedText] = useState<string>("");
@@ -118,6 +140,8 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   const micStreamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const loopTimerRef = useRef<number | null>(null);
+  const userWaveformSamplesRef = useRef<number[]>([]);
+  const lastSampleTimeRef = useRef<number>(0);
 
   // Reset state when cue changes
   useEffect(() => {
@@ -129,6 +153,8 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     setSimilarityScore(null);
     setSpeechError(null);
     setIsLoopingSegment(false);
+    setUserWaveform([]);
+    userWaveformSamplesRef.current = [];
   }, [cue.id]);
 
   // Clean up on unmount
@@ -275,6 +301,9 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     setRecognizedText("");
     setSimilarityScore(null);
     stopUserAudio();
+    userWaveformSamplesRef.current = [];
+    setUserWaveform([]);
+    lastSampleTimeRef.current = Date.now();
 
     // If simultaneous shadowing mode is on, play original audio at the exact same moment!
     if (shadowingMode === "simultaneous") {
@@ -312,7 +341,29 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
                 sum += dataArray[i];
               }
               const avg = sum / dataArray.length;
-              setMicVolume(Math.min(100, Math.round((avg / 128) * 100)));
+              const vol = Math.min(100, Math.round((avg / 128) * 100));
+              setMicVolume(vol);
+
+              // Sample waveform peaks for live animated track
+              const now = Date.now();
+              if (now - lastSampleTimeRef.current >= 80) {
+                lastSampleTimeRef.current = now;
+                const norm = Math.max(0.18, Math.min(0.95, avg / 90));
+                if (userWaveformSamplesRef.current.length < 44) {
+                  userWaveformSamplesRef.current.push(parseFloat(norm.toFixed(2)));
+                  setUserWaveform([...userWaveformSamplesRef.current]);
+                } else {
+                  userWaveformSamplesRef.current.push(parseFloat(norm.toFixed(2)));
+                  const step = userWaveformSamplesRef.current.length / 44;
+                  const resampled: number[] = [];
+                  for (let b = 0; b < 44; b++) {
+                    const idx = Math.floor(b * step);
+                    resampled.push(userWaveformSamplesRef.current[idx] || 0.18);
+                  }
+                  setUserWaveform(resampled);
+                }
+              }
+
               animationFrameRef.current = requestAnimationFrame(updateMicVisual);
             }
           };
@@ -432,12 +483,46 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     setIsRecording(false);
     setMicVolume(0);
 
+    // If recorded samples are few, synthesize realistic user wave from recording
+    if (userWaveformSamplesRef.current.length < 6) {
+      const fallbackWave = Array.from({ length: 44 }, (_, i) => {
+        const frac = i / 44;
+        const env = Math.sin(frac * Math.PI);
+        return Math.max(0.18, Math.min(0.85, env * 0.6 + Math.random() * 0.25));
+      });
+      setUserWaveform(fallbackWave);
+    }
+
     // Final evaluation if recognizedText exists
     if (recognizedText) {
       const finalScore = evaluatePronunciation(recognizedText, cue.text);
       setSimilarityScore(finalScore);
     }
   };
+
+  // Waveform Memos
+  const originalWaveform = useMemo(() => {
+    return generateSentenceWaveform(cue.text, 44);
+  }, [cue.text]);
+
+  const displayUserWaveform = useMemo(() => {
+    if (isRecording) {
+      const bars = [...userWaveform];
+      while (bars.length < 44) {
+        bars.push(0.14);
+      }
+      return bars.slice(0, 44);
+    }
+    if (userWaveform.length > 0) {
+      if (userWaveform.length === 44) return userWaveform;
+      const step = userWaveform.length / 44;
+      return Array.from({ length: 44 }, (_, i) => {
+        const idx = Math.floor(i * step);
+        return userWaveform[idx] || 0.18;
+      });
+    }
+    return Array.from({ length: 44 }, () => 0.14);
+  }, [isRecording, userWaveform]);
 
   // Word-level Visualizer Tokens
   const targetWords = cue.text.split(/\s+/).filter(Boolean);
@@ -597,123 +682,252 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
           )}
         </div>
 
-        {/* Audio Action Hub (Original Player & Mic Recording Side-by-Side) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {/* Card 1: Original Audio Model */}
-          <div className="p-4 rounded-2xl bg-slate-800/70 border border-slate-700/70 flex flex-col justify-between gap-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                <Volume2 className="w-4 h-4 text-indigo-400" />
-                <span>صوت المتحدث الأصلي</span>
+        {/* Interactive Audio Waveform Hub */}
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-3 shadow-inner">
+          {/* Track 1: Original Speaker Waveform */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-slate-300 flex items-center gap-1.5">
+                <Headphones className="w-3.5 h-3.5 text-indigo-400" />
+                <span>صوت المتحدث الأصلي (Reference)</span>
               </span>
+              <span className="text-[11px] font-mono text-indigo-300/90">
+                {isPlayingOriginal ? "جارٍ التشغيل..." : "اضغط على الموجة للاستماع من أي موضع"}
+              </span>
+            </div>
+
+            {/* Waveform Track with Seeking */}
+            <div
+              dir="ltr"
+              className="h-11 sm:h-12 bg-slate-900/90 rounded-xl px-2.5 py-1.5 flex items-center justify-between gap-0.5 sm:gap-1 border border-slate-800 hover:border-indigo-500/50 cursor-pointer transition-colors relative overflow-hidden group select-none"
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const frac = Math.max(0, Math.min(1, clickX / rect.width));
+                const seekTime = cue.startTime + frac * segmentDuration;
+                onPlayOriginalSegment(seekTime, cue.endTime);
+              }}
+              title="اضغط على أي موضع في الموجة للاستماع من عنده"
+            >
+              {/* Active Playhead Line */}
               {isPlayingOriginal && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-400 animate-pulse">
-                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
-                  جارٍ التشغيل...
-                </span>
+                <div
+                  className="absolute top-0 bottom-0 w-0.5 bg-indigo-400 z-10 shadow-[0_0_8px_rgba(129,140,248,0.9)] transition-all duration-75 pointer-events-none"
+                  style={{ left: `${segmentProgress}%` }}
+                />
               )}
+
+              {originalWaveform.map((val, idx) => {
+                const barFrac = (idx / originalWaveform.length) * 100;
+                const isPassed = isPlayingOriginal && barFrac <= segmentProgress;
+                const heightPercent = Math.max(18, Math.round(val * 100));
+
+                return (
+                  <div
+                    key={idx}
+                    className="flex-1 flex items-center justify-center h-full"
+                  >
+                    <div
+                      className={`w-full max-w-[4px] rounded-full transition-all duration-100 ${
+                        isPassed
+                          ? "bg-indigo-400 shadow-[0_0_6px_rgba(129,140,248,0.7)]"
+                          : isPlayingOriginal
+                          ? "bg-indigo-950/80 group-hover:bg-indigo-900/80"
+                          : "bg-slate-700/80 group-hover:bg-slate-600"
+                      }`}
+                      style={{ height: `${heightPercent}%` }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Track 2: User Voice Waveform */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-slate-300 flex items-center gap-1.5">
+                <Mic className="w-3.5 h-3.5 text-purple-400" />
+                <span>صوتك ومحاكاتك (Your Recording)</span>
+              </span>
+              <span className="text-[11px] font-mono text-purple-300/90">
+                {isRecording ? (
+                  <span className="text-rose-400 font-bold animate-pulse">
+                    🔴 جارٍ التسجيل والمحاكاة ({recordingSeconds} ث)
+                  </span>
+                ) : recordedAudioUrl ? (
+                  isPlayingUserAudio ? (
+                    "جارٍ تشغيل تسجيلك..."
+                  ) : (
+                    "جاهز للمقارنة والاستماع"
+                  )
+                ) : (
+                  "في انتظار تسجيلك"
+                )}
+              </span>
             </div>
 
-            {/* Original Progress Timeline */}
-            <div className="w-full bg-slate-950/80 rounded-full h-1.5 overflow-hidden">
-              <div
-                className="bg-indigo-500 h-full transition-all duration-100 ease-linear rounded-full"
-                style={{ width: `${isPlayingOriginal ? segmentProgress : 0}%` }}
-              />
-            </div>
+            {/* User Waveform Track with Seeking */}
+            <div
+              dir="ltr"
+              className={`h-11 sm:h-12 bg-slate-900/90 rounded-xl px-2.5 py-1.5 flex items-center justify-between gap-0.5 sm:gap-1 border transition-colors relative overflow-hidden group select-none ${
+                isRecording
+                  ? "border-rose-500/60 bg-rose-950/20"
+                  : recordedAudioUrl
+                  ? "border-slate-800 hover:border-emerald-500/50 cursor-pointer"
+                  : "border-slate-800/60 opacity-60 cursor-default"
+              }`}
+              onClick={(e) => {
+                if (!recordedAudioUrl || isRecording) return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const frac = Math.max(0, Math.min(1, clickX / rect.width));
+                if (userAudioElementRef.current && userAudioElementRef.current.duration) {
+                  userAudioElementRef.current.currentTime = frac * userAudioElementRef.current.duration;
+                  if (!isPlayingUserAudio) {
+                    handlePlayUserAudio();
+                  }
+                }
+              }}
+              title={recordedAudioUrl ? "اضغط للتنقل داخل تسجيلك الصوتي" : ""}
+            >
+              {/* Active Playhead Line for User Audio */}
+              {isPlayingUserAudio && (
+                <div
+                  className="absolute top-0 bottom-0 w-0.5 bg-emerald-400 z-10 shadow-[0_0_8px_rgba(52,211,153,0.9)] transition-all duration-75 pointer-events-none"
+                  style={{ left: `${userAudioProgress}%` }}
+                />
+              )}
 
+              {displayUserWaveform.map((val, idx) => {
+                const barFrac = (idx / displayUserWaveform.length) * 100;
+                const isPassed = isPlayingUserAudio && barFrac <= userAudioProgress;
+                const heightPercent = Math.max(16, Math.round(val * 100));
+
+                return (
+                  <div
+                    key={idx}
+                    className="flex-1 flex items-center justify-center h-full"
+                  >
+                    <div
+                      className={`w-full max-w-[4px] rounded-full transition-all duration-75 ${
+                        isRecording
+                          ? idx >= displayUserWaveform.length - 4
+                            ? "bg-rose-400 shadow-[0_0_6px_rgba(251,113,133,0.8)]"
+                            : "bg-purple-500"
+                          : isPassed
+                          ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]"
+                          : recordedAudioUrl
+                          ? "bg-purple-950/80 group-hover:bg-purple-900/80"
+                          : "bg-slate-800"
+                      }`}
+                      style={{ height: `${heightPercent}%` }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* All-in-One Compact Floating Control Bar */}
+        <div className="p-2 sm:p-2.5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800/95 to-slate-900 border border-slate-700/80 shadow-xl flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5">
+          {/* Original Audio Controls */}
+          <div className="flex items-center gap-1.5 flex-1 sm:flex-initial">
             <button
               type="button"
               onClick={handlePlayOriginal}
-              className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer ${
+              className={`px-3.5 py-2 rounded-xl font-bold text-xs transition-all flex items-center gap-2 cursor-pointer ${
                 isPlayingOriginal
-                  ? "bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/30"
-                  : "bg-slate-700 hover:bg-slate-600 text-white"
+                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                  : "bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white border border-indigo-500/30"
+              }`}
+              title="استماع للمتحدث الأصلي"
+            >
+              {isPlayingOriginal ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+              <span className="whitespace-nowrap">
+                {isPlayingOriginal ? "إيقاف الأصلي" : "صوت المتحدث"}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePlayTtsFallback}
+              className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-purple-300 border border-slate-700 transition-colors cursor-pointer"
+              title="نطق نقي عبر TTS"
+            >
+              <Volume2 className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Hero Recording Button */}
+          <div className="flex items-center justify-center">
+            <button
+              type="button"
+              onClick={isRecording ? stopRecording : startRecording}
+              className={`px-5 py-2.5 rounded-2xl font-bold text-xs transition-all flex items-center gap-2.5 cursor-pointer shadow-lg select-none ${
+                isRecording
+                  ? "bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/40 ring-4 ring-rose-500/30 animate-pulse"
+                  : recordedAudioUrl
+                  ? "bg-purple-600 hover:bg-purple-500 text-white shadow-purple-600/30 ring-2 ring-purple-400/20"
+                  : "bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-purple-600/30"
               }`}
             >
-              {isPlayingOriginal ? (
+              {isRecording ? (
                 <>
-                  <Pause className="w-4 h-4" />
-                  <span>إيقاف المقطع الأصلي</span>
+                  <span className="w-2 h-2 rounded-full bg-white animate-ping"></span>
+                  <MicOff className="w-4 h-4" />
+                  <span>إنهاء التسجيل ({recordingSeconds}ث)</span>
                 </>
               ) : (
                 <>
-                  <Play className="w-4 h-4" />
-                  <span>استماع للمتحدث الأصلي</span>
+                  <Mic className="w-4 h-4" />
+                  <span>{recordedAudioUrl ? "إعادة التسجيل" : "تسجيل صوتك"}</span>
                 </>
               )}
             </button>
           </div>
 
-          {/* Card 2: Voice Recording & User Mic */}
-          <div className="p-4 rounded-2xl bg-slate-800/70 border border-slate-700/70 flex flex-col justify-between gap-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                <Mic className="w-4 h-4 text-purple-400" />
-                <span>تسجيل صوتك ومحاكاتك</span>
-              </span>
-              {isRecording ? (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-400 animate-pulse">
-                  <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-                  جارٍ التسجيل ({recordingSeconds} ث)
-                </span>
-              ) : recordedAudioUrl ? (
-                <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" />
-                  تم التسجيل بنجاح
-                </span>
-              ) : null}
-            </div>
-
-            {/* Mic Live Volume Level Bar */}
-            <div className="w-full bg-slate-950/80 rounded-full h-1.5 overflow-hidden">
-              <div
-                className={`h-full transition-all duration-75 rounded-full ${
-                  isRecording ? "bg-purple-500" : "bg-transparent"
-                }`}
-                style={{ width: `${isRecording ? Math.max(5, micVolume) : 0}%` }}
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={isRecording ? stopRecording : startRecording}
-                className={`flex-1 py-2.5 px-4 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer ${
-                  isRecording
-                    ? "bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/30 animate-pulse"
-                    : "bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-600/25"
-                }`}
-              >
-                {isRecording ? (
-                  <>
-                    <MicOff className="w-4 h-4" />
-                    <span>إنهاء التسجيل</span>
-                  </>
-                ) : (
-                  <>
-                    <Mic className="w-4 h-4" />
-                    <span>{recordedAudioUrl ? "إعادة التسجيل" : "ابدأ التسجيل والمحاكاة"}</span>
-                  </>
-                )}
-              </button>
-
-              {/* Play Recorded Voice Button */}
-              {recordedAudioUrl && !isRecording && (
+          {/* User Playback & Reset */}
+          <div className="flex items-center gap-1.5 flex-1 sm:flex-initial justify-end">
+            {recordedAudioUrl ? (
+              <>
                 <button
                   type="button"
                   onClick={handlePlayUserAudio}
-                  className={`p-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center justify-center ${
+                  className={`px-3.5 py-2 rounded-xl font-bold text-xs transition-all flex items-center gap-2 cursor-pointer ${
                     isPlayingUserAudio
                       ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/30"
-                      : "bg-slate-700 hover:bg-slate-600 text-emerald-300"
+                      : "bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/40"
                   }`}
                   title="الاستماع لتسجيلك الصوتي ومقارنته"
                 >
                   {isPlayingUserAudio ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                  <span className="whitespace-nowrap">
+                    {isPlayingUserAudio ? "إيقاف صوتي" : "استمع لتسجيلك"}
+                  </span>
                 </button>
-              )}
-            </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopUserAudio();
+                    setRecordedAudioUrl(null);
+                    setRecognizedText("");
+                    setSimilarityScore(null);
+                    setUserWaveform([]);
+                  }}
+                  className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-rose-300 border border-slate-700 transition-colors cursor-pointer"
+                  title="حذف التسجيل وإعادة البدء"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </button>
+              </>
+            ) : (
+              <span className="text-[11px] text-slate-400 hidden sm:inline-block px-1">
+                اضغط لتسجيل محاكاتك
+              </span>
+            )}
           </div>
         </div>
 
