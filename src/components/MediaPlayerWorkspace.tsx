@@ -6896,6 +6896,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           onStopOriginalSegment={handleStopShadowingSegment}
           isPlayingOriginal={isPlaying}
           currentTime={currentTime}
+          getCurrentTime={() => getMediaElement()?.currentTime ?? 0}
+          mediaUrl={currentFile?.url}
         />
       )}
 
