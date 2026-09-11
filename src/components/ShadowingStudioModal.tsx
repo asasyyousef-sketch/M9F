@@ -293,6 +293,27 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     };
   }, []);
 
+  // Keyboard Navigation between cues (ArrowLeft for previous, ArrowRight for next)
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyNav = (e: KeyboardEvent) => {
+      if (["INPUT", "TEXTAREA"].includes((e.target as HTMLElement)?.tagName)) return;
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        if (currentCueIndex > 0) {
+          onSelectCue(allCues[currentCueIndex - 1]);
+        }
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        if (currentCueIndex < allCues.length - 1) {
+          onSelectCue(allCues[currentCueIndex + 1]);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyNav);
+    return () => window.removeEventListener("keydown", handleKeyNav);
+  }, [isOpen, currentCueIndex, allCues, onSelectCue]);
+
   // Handle loop mode playback logic
   useEffect(() => {
     if (!isLoopingSegment) {
@@ -753,8 +774,8 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Sentence Index & Navigation */}
-            <div className="flex items-center bg-slate-800/90 rounded-xl p-1 border border-slate-700">
+            {/* Sentence Index & Navigation - Natural LTR timeline (Left: Previous, Right: Next) */}
+            <div className="flex items-center bg-slate-800/90 rounded-xl p-1 border border-slate-700/80" dir="ltr">
               <button
                 type="button"
                 disabled={currentCueIndex <= 0}
@@ -763,12 +784,12 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
                     onSelectCue(allCues[currentCueIndex - 1]);
                   }
                 }}
-                className="p-1 rounded-lg hover:bg-slate-700 text-slate-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                title="الجملة السابقة (السهم الأيمن)"
+                className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-300 hover:text-white disabled:opacity-25 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                title="الجملة السابقة (←)"
               >
-                <ChevronRight className="w-4 h-4" />
+                <ChevronLeft className="w-4 h-4" />
               </button>
-              <span className="text-[11px] font-mono font-bold px-2 text-purple-300">
+              <span className="text-xs font-mono font-bold px-2.5 text-slate-300 select-none">
                 {currentCueIndex + 1} / {allCues.length}
               </span>
               <button
@@ -779,10 +800,10 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
                     onSelectCue(allCues[currentCueIndex + 1]);
                   }
                 }}
-                className="p-1 rounded-lg hover:bg-slate-700 text-slate-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                title="الجملة التالية (السهم الأيسر)"
+                className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-300 hover:text-white disabled:opacity-25 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                title="الجملة التالية (→)"
               >
-                <ChevronLeft className="w-4 h-4" />
+                <ChevronRight className="w-4 h-4" />
               </button>
             </div>
 
@@ -790,81 +811,86 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
               type="button"
               onClick={onClose}
               className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+              title="إغلاق"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Target Sentence Card */}
-        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-b from-slate-800/80 to-slate-900 border border-slate-700/80 relative overflow-hidden space-y-3">
+        {/* Target Sentence Card - Clean, eye-comfortable presentation without clutter or heavy boxed chips */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/40 border border-slate-800/80 relative space-y-3">
           {/* Timestamp and Duration Tag */}
-          <div className="flex items-center justify-between text-[11px] text-slate-400">
-            <div className="flex items-center gap-1.5 font-mono">
-              <Clock className="w-3.5 h-3.5 text-purple-400" />
+          <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono select-none">
+            <div className="flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-sky-400" />
               <span>
                 {formatSecondsToClock(cue.startTime)} ➔ {formatSecondsToClock(cue.endTime)}
               </span>
-              <span className="text-slate-500">
-                ({(cue.endTime - cue.startTime).toFixed(1)} ثانية)
+              <span className="text-slate-400">
+                ({(cue.endTime - cue.startTime).toFixed(1)}ث)
               </span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handlePlayTtsFallback}
-                className="text-[11px] font-bold text-slate-400 hover:text-purple-300 flex items-center gap-1 hover:bg-slate-700/60 px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
-                title="نطق نقي عبر محرك الأصوات الاصطناعية"
-              >
-                <Volume2 className="w-3 h-3 text-purple-400" />
-                <span>نطق TTS</span>
-              </button>
             </div>
           </div>
 
-          {/* Primary Sentence Text (Word Tokens) */}
+          {/* Primary Sentence Text (Clean flowing words, no exhausting boxed borders) */}
           <div
-            className="text-base sm:text-lg font-semibold text-white leading-relaxed select-text"
+            className="text-lg sm:text-xl font-medium text-slate-100 leading-relaxed select-text"
             dir={detectDirection(cue.text)}
           >
-            <div className="flex flex-wrap gap-1.5">
+            <p className="flex flex-wrap gap-x-2 gap-y-1.5 items-baseline">
               {targetWords.map((word, idx) => {
                 const status = getWordMatchStatus(word);
-                let badgeStyle = "text-slate-100 bg-slate-800/60 border-slate-700/60";
                 if (status === "correct") {
-                  badgeStyle = "text-emerald-300 bg-emerald-950/80 border-emerald-500/80 font-bold shadow-xs";
-                } else if (status === "close") {
-                  badgeStyle = "text-amber-300 bg-amber-950/80 border-amber-500/80 font-bold";
-                } else if (status === "missing") {
-                  badgeStyle = "text-rose-300 bg-rose-950/70 border-rose-500/70";
+                  return (
+                    <span
+                      key={idx}
+                      className="text-emerald-400 font-bold underline decoration-emerald-400/50 underline-offset-4"
+                    >
+                      {word}
+                    </span>
+                  );
                 }
-
+                if (status === "close") {
+                  return (
+                    <span
+                      key={idx}
+                      className="text-amber-300 font-semibold underline decoration-amber-400/50 underline-offset-4"
+                    >
+                      {word}
+                    </span>
+                  );
+                }
+                if (status === "missing") {
+                  return (
+                    <span
+                      key={idx}
+                      className="text-rose-400/90 line-through decoration-rose-400/50"
+                    >
+                      {word}
+                    </span>
+                  );
+                }
                 return (
                   <span
                     key={idx}
-                    className={`inline-block px-1.5 py-0.5 rounded-md border text-sm sm:text-base transition-all ${badgeStyle}`}
+                    className="text-slate-100 hover:text-sky-300 transition-colors"
                   >
                     {word}
                   </span>
                 );
               })}
-            </div>
+            </p>
           </div>
 
           {/* Secondary Translation Subtitle */}
           {cue.secondaryText && (
-            <div
-              className="pt-2.5 border-t border-slate-700/60 flex items-start gap-2"
+            <p
+              className="text-sm sm:text-base text-slate-400 font-normal leading-relaxed pt-2.5 border-t border-slate-800/60"
               dir={detectDirection(cue.secondaryText)}
             >
-              <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
-                الترجمة
-              </span>
-              <p className="text-xs sm:text-sm text-emerald-200 font-medium leading-relaxed">
-                {cue.secondaryText}
-              </p>
-            </div>
+              {cue.secondaryText}
+            </p>
           )}
         </div>
 
