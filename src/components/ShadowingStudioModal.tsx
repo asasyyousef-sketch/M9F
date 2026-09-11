@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Mic,
   MicOff,
@@ -20,12 +20,7 @@ import {
   Loader2,
   Lightbulb,
   Radio,
-  VolumeX,
-  Languages,
-  Copy,
-  Check,
-  ZoomIn,
-  ZoomOut
+  VolumeX
 } from "lucide-react";
 import { SubtitleCue } from "../types";
 import { formatSecondsToClock } from "../utils/subtitleParser";
@@ -45,30 +40,6 @@ export interface ShadowingStudioModalProps {
   isPlayingOriginal: boolean;
   currentTime: number;
 }
-
-export const CONTINUOUS_LANGUAGES = [
-  { code: "de-DE", label: "ألماني", flag: "🇩🇪" },
-  { code: "en-US", label: "إنجليزي", flag: "🇺🇸" },
-  { code: "fr-FR", label: "فرنسي", flag: "🇫🇷" },
-  { code: "es-ES", label: "إسباني", flag: "🇪🇸" },
-  { code: "it-IT", label: "إيطالي", flag: "🇮🇹" },
-  { code: "tr-TR", label: "تركي", flag: "🇹🇷" },
-  { code: "ar-SA", label: "عربي", flag: "🇸🇦" },
-];
-
-const getInitialContinuousLang = (primaryLang?: string): string => {
-  if (!primaryLang) return "de-DE";
-  const map: Record<string, string> = {
-    de: "de-DE",
-    en: "en-US",
-    fr: "fr-FR",
-    es: "es-ES",
-    it: "it-IT",
-    tr: "tr-TR",
-    ar: "ar-SA"
-  };
-  return map[primaryLang.toLowerCase()] || "de-DE";
-};
 
 // Clean string for fuzzy comparison
 function cleanWord(str: string): string {
@@ -131,21 +102,6 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [isLoopingSegment, setIsLoopingSegment] = useState<boolean>(false);
 
-  // Active View Tab: "simple" (الاستماع المستمر - مثل التصميم البسيط المطلوب) or "studio" (الاستوديو المتقدم)
-  const [viewTab, setViewTab] = useState<"simple" | "studio">("simple");
-
-  // Simple Continuous Speech Recognition State (نظام الاستماع المستمر المباشر)
-  const [simpleListening, setSimpleListening] = useState<boolean>(false);
-  const [simpleFinalTranscript, setSimpleFinalTranscript] = useState<string>("");
-  const [simpleInterimTranscript, setSimpleInterimTranscript] = useState<string>("");
-  const [simpleLog, setSimpleLog] = useState<string>("");
-  const [simpleFontSize, setSimpleFontSize] = useState<number>(20);
-  const [simpleLang, setSimpleLang] = useState<string>(() => getInitialContinuousLang(primaryLanguage));
-  const [copiedSimpleTranscript, setCopiedSimpleTranscript] = useState<boolean>(false);
-
-  const simpleRecognitionRef = useRef<any>(null);
-  const manuallyStoppedRef = useRef<boolean>(true);
-
   // Audio Recording States
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
@@ -176,148 +132,6 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   const animationFrameRef = useRef<number | null>(null);
   const loopTimerRef = useRef<number | null>(null);
 
-  // Start Continuous Speech Recognition (exact behavior, auto-reconnect and interim results from snippet)
-  const startSimpleListening = useCallback(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setSimpleLog("متصفحك لا يدعم Web Speech API. جرّب Chrome أو Edge.");
-      return;
-    }
-
-    manuallyStoppedRef.current = false;
-    setSimpleLog("");
-
-    if (simpleRecognitionRef.current) {
-      try {
-        simpleRecognitionRef.current.abort();
-      } catch (e) {}
-      simpleRecognitionRef.current = null;
-    }
-
-    function createRecognition() {
-      if (manuallyStoppedRef.current) return null;
-      const r = new SpeechRecognition();
-      r.lang = simpleLang;
-      r.continuous = true;
-      r.interimResults = true;
-
-      r.onstart = () => {
-        setSimpleListening(true);
-      };
-
-      r.onresult = (event: any) => {
-        let interim = "";
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const transcript = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            setSimpleFinalTranscript((prev) => prev + transcript + " ");
-          } else {
-            interim += transcript;
-          }
-        }
-        setSimpleInterimTranscript(interim);
-      };
-
-      r.onerror = (event: any) => {
-        console.warn("Continuous SpeechRecognition error:", event.error);
-        if (event.error !== "no-speech") {
-          setSimpleLog("خطأ: " + event.error + (event.error === "not-allowed" ? " (يرجى السماح بالوصول للميكروفون)" : ""));
-        }
-      };
-
-      // Chrome يوقف الجلسة تلقائيًا بعد سكوت طويل حتى مع continuous=true
-      // هذا يعيد تشغيلها تلقائيًا بدون فقدان النص
-      r.onend = () => {
-        if (!manuallyStoppedRef.current) {
-          const nextR = createRecognition();
-          if (nextR) {
-            simpleRecognitionRef.current = nextR;
-            try {
-              nextR.start();
-            } catch (e) {
-              setSimpleListening(false);
-            }
-          }
-        } else {
-          setSimpleListening(false);
-        }
-      };
-
-      return r;
-    }
-
-    const rec = createRecognition();
-    if (rec) {
-      simpleRecognitionRef.current = rec;
-      try {
-        rec.start();
-      } catch (e) {
-        console.warn("Failed to start speech recognition:", e);
-        setSimpleListening(false);
-      }
-    }
-  }, [simpleLang]);
-
-  // Stop Continuous Speech Recognition
-  const stopSimpleListening = useCallback(() => {
-    manuallyStoppedRef.current = true;
-    if (simpleRecognitionRef.current) {
-      try {
-        simpleRecognitionRef.current.stop();
-      } catch (e) {}
-      simpleRecognitionRef.current = null;
-    }
-    setSimpleListening(false);
-    setSimpleInterimTranscript("");
-  }, []);
-
-  // Clear Simple Transcript
-  const clearSimpleTranscript = useCallback(() => {
-    setSimpleFinalTranscript("");
-    setSimpleInterimTranscript("");
-    setSimpleLog("");
-  }, []);
-
-  // Copy recognized text
-  const handleCopySimpleTranscript = () => {
-    const textToCopy = (simpleFinalTranscript + " " + simpleInterimTranscript).trim();
-    if (!textToCopy) return;
-    navigator.clipboard.writeText(textToCopy).then(() => {
-      setCopiedSimpleTranscript(true);
-      setTimeout(() => setCopiedSimpleTranscript(false), 2000);
-    });
-  };
-
-  // Change Language in Simple Continuous Mode
-  const handleSelectSimpleLanguage = (langCode: string) => {
-    setSimpleLang(langCode);
-    if (simpleListening) {
-      stopSimpleListening();
-      setTimeout(() => {
-        startSimpleListening();
-      }, 200);
-    }
-  };
-
-  // Target sentence word tokens
-  const targetWords = useMemo(() => cue.text.split(/\s+/).filter(Boolean), [cue.text]);
-
-  // Check if target word is heard in simple transcript
-  const isWordInSimpleTranscript = useCallback((targetWord: string) => {
-    if (!simpleFinalTranscript) return false;
-    const cleanedTarget = cleanWord(targetWord);
-    if (!cleanedTarget) return false;
-    const spokenWords = simpleFinalTranscript.split(/\s+/).map(cleanWord).filter(Boolean);
-    if (spokenWords.includes(cleanedTarget)) return true;
-    return spokenWords.some(
-      (sw) => levenshteinDistance(sw, cleanedTarget) <= 1 || (cleanedTarget.length > 5 && levenshteinDistance(sw, cleanedTarget) <= 2)
-    );
-  }, [simpleFinalTranscript]);
-
-  const matchedTargetWordCount = useMemo(() => {
-    return targetWords.filter((w) => isWordInSimpleTranscript(w)).length;
-  }, [targetWords, isWordInSimpleTranscript]);
-
   // Reset state when cue changes
   useEffect(() => {
     stopRecording();
@@ -335,7 +149,6 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   // Clean up on unmount
   useEffect(() => {
     return () => {
-      stopSimpleListening();
       stopRecording();
       stopUserAudio();
       onStopOriginalSegment();
@@ -347,7 +160,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
         userAudioElementRef.current = null;
       }
     };
-  }, [stopSimpleListening]);
+  }, []);
 
   // Handle loop mode playback logic
   useEffect(() => {
@@ -696,6 +509,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   };
 
   // Word-level Visualizer Tokens
+  const targetWords = cue.text.split(/\s+/).filter(Boolean);
   const recognizedCleanWords = recognizedText.split(/\s+/).map(cleanWord).filter(Boolean);
 
   const getWordMatchStatus = (word: string): "correct" | "close" | "missing" | "untested" => {
@@ -721,7 +535,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="bg-[#1e1e2e] border border-slate-700/90 rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl text-[#eee] flex flex-col gap-4 max-h-[92vh] overflow-y-auto animate-scaleUp text-right font-sans"
+        className="bg-slate-900 border border-slate-700/90 rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl text-slate-100 flex flex-col gap-4 max-h-[92vh] overflow-y-auto animate-scaleUp text-right"
         onClick={(e) => e.stopPropagation()}
         dir="rtl"
       >
@@ -790,310 +604,32 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
           </div>
         </div>
 
-        {/* Mode Selector Tabs */}
-        <div className="flex items-center gap-1.5 p-1 bg-slate-950/70 rounded-2xl border border-slate-800">
-          <button
-            type="button"
-            onClick={() => {
-              stopRecording();
-              setViewTab("simple");
-            }}
-            className={`flex-1 py-2 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
-              viewTab === "simple"
-                ? "bg-[#3498db] text-white shadow-md shadow-blue-500/25"
-                : "text-slate-400 hover:text-white hover:bg-slate-800/60"
-            }`}
-          >
-            <Mic className="w-4 h-4" />
-            <span>الوضع البسيط (الاستماع المستمر)</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              stopSimpleListening();
-              setViewTab("studio");
-            }}
-            className={`flex-1 py-2 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
-              viewTab === "studio"
-                ? "bg-purple-600 text-white shadow-md shadow-purple-500/25"
-                : "text-slate-400 hover:text-white hover:bg-slate-800/60"
-            }`}
-          >
-            <Sliders className="w-4 h-4" />
-            <span>استوديو التحليل والتقييم المتقدم</span>
-          </button>
-        </div>
-
-        {viewTab === "simple" ? (
-          /* ========================================================================= */
-          /* Simple Continuous Speech Recognition Mode (مطابق تماماً للشكل المطلوب)    */
-          /* ========================================================================= */
-          <div className="space-y-4 animate-fadeIn">
-            {/* Header Title & Language Selector */}
-            <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1">
-              <h1 className="text-base sm:text-[20px] font-bold text-white flex items-center gap-2">
-                <span>🎤</span>
-                <span>
-                  تجربة الاستماع المستمر ({CONTINUOUS_LANGUAGES.find((l) => l.code === simpleLang)?.label || "ألماني"})
-                </span>
-              </h1>
-
-              {/* Language Selector */}
-              <div className="flex items-center gap-1 bg-[#2a2a3d] p-1 rounded-xl border border-slate-700/60">
-                <Languages className="w-3.5 h-3.5 text-slate-400 ml-1 mr-1 shrink-0" />
-                {CONTINUOUS_LANGUAGES.map((opt) => (
-                  <button
-                    key={opt.code}
-                    type="button"
-                    onClick={() => handleSelectSimpleLanguage(opt.code)}
-                    className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                      simpleLang === opt.code
-                        ? "bg-[#3498db] text-white shadow-xs"
-                        : "text-slate-300 hover:text-white hover:bg-slate-700/60"
-                    }`}
-                    title={opt.label}
-                  >
-                    <span>{opt.flag}</span>
-                    <span className="mr-1">{opt.label}</span>
-                  </button>
-                ))}
-              </div>
+        {/* Target Sentence Card */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-b from-slate-800/80 to-slate-900 border border-slate-700/80 relative overflow-hidden space-y-3">
+          {/* Timestamp and Duration Tag */}
+          <div className="flex items-center justify-between text-[11px] text-slate-400">
+            <div className="flex items-center gap-1.5 font-mono">
+              <Clock className="w-3.5 h-3.5 text-purple-400" />
+              <span>
+                {formatSecondsToClock(cue.startTime)} ➔ {formatSecondsToClock(cue.endTime)}
+              </span>
+              <span className="text-slate-500">
+                ({(cue.endTime - cue.startTime).toFixed(1)} ثانية)
+              </span>
             </div>
 
-            {/* Status & Stats */}
-            <div className="flex items-center justify-between">
-              <div>
-                <span
-                  id="status"
-                  className={`inline-block px-3.5 py-1.5 rounded-full text-sm font-medium transition-all ${
-                    simpleListening
-                      ? "bg-[#2ecc71] text-black font-bold animate-pulse shadow-md shadow-emerald-500/20"
-                      : "bg-[#444] text-[#ccc]"
-                  }`}
-                >
-                  {simpleListening ? "يستمع الآن..." : "متوقف"}
-                </span>
-              </div>
-
-              {/* Word Count / Matched counter */}
-              <div className="text-xs text-slate-400 flex items-center gap-2 font-mono">
-                <span>
-                  الكلمات الملتقطة:{" "}
-                  <strong className="text-blue-300">
-                    {simpleFinalTranscript.trim() ? simpleFinalTranscript.trim().split(/\s+/).length : 0}
-                  </strong>
-                </span>
-                {simpleFinalTranscript.trim() && (
-                  <span className="text-emerald-400 font-bold mr-2">
-                    ({matchedTargetWordCount} / {targetWords.length} من الجملة)
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Action Buttons (ابدأ الاستماع / إيقاف / مسح) */}
-            <div className="flex flex-wrap items-center gap-2.5">
+            <div className="flex items-center gap-2">
               <button
-                id="startBtn"
                 type="button"
-                onClick={startSimpleListening}
-                className="text-[16px] px-7 py-3 rounded-lg font-medium cursor-pointer transition-colors bg-[#3498db] hover:bg-[#2980b9] text-white shadow-md active:scale-95 flex items-center gap-2"
+                onClick={handlePlayTtsFallback}
+                className="text-[11px] font-bold text-slate-400 hover:text-purple-300 flex items-center gap-1 hover:bg-slate-700/60 px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
+                title="نطق نقي عبر محرك الأصوات الاصطناعية"
               >
-                <Play className="w-4 h-4 fill-white" />
-                <span>ابدأ الاستماع</span>
+                <Volume2 className="w-3 h-3 text-purple-400" />
+                <span>نطق TTS</span>
               </button>
-
-              <button
-                id="stopBtn"
-                type="button"
-                onClick={stopSimpleListening}
-                className="text-[16px] px-7 py-3 rounded-lg font-medium cursor-pointer transition-colors bg-[#e74c3c] hover:bg-[#c0392b] text-white shadow-md active:scale-95 flex items-center gap-2"
-              >
-                <Pause className="w-4 h-4 fill-white" />
-                <span>إيقاف</span>
-              </button>
-
-              <button
-                id="clearBtn"
-                type="button"
-                onClick={clearSimpleTranscript}
-                className="text-[16px] px-7 py-3 rounded-lg font-medium cursor-pointer transition-colors bg-slate-700 hover:bg-slate-600 text-white shadow-md active:scale-95 flex items-center gap-2"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>مسح</span>
-              </button>
-
-              {/* Font Size Zoom Controller */}
-              <div className="mr-auto flex items-center gap-1.5 bg-[#2a2a3d] p-1 rounded-xl border border-slate-700/60 text-xs">
-                <span className="text-[11px] text-slate-400 px-1 font-mono">حجم الكلمات:</span>
-                <button
-                  type="button"
-                  onClick={() => setSimpleFontSize((prev) => Math.max(16, prev - 2))}
-                  className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
-                  title="تصغير الخط"
-                >
-                  <ZoomOut className="w-3.5 h-3.5" />
-                </button>
-                <span className="text-xs font-mono font-bold text-blue-300 px-1">{simpleFontSize}px</span>
-                <button
-                  type="button"
-                  onClick={() => setSimpleFontSize((prev) => Math.min(32, prev + 2))}
-                  className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
-                  title="تكبير الخط"
-                >
-                  <ZoomIn className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Target Sentence Card for Shadowing Practice (بما يناسب لكي ارى الكلمات) */}
-            <div className="p-4 rounded-2xl bg-[#2a2a3d]/80 border border-slate-700/80 space-y-3">
-              <div className="flex items-center justify-between text-xs text-slate-400 pb-2 border-b border-slate-700/60">
-                <div className="flex items-center gap-2 font-mono">
-                  <span className="font-bold text-slate-200">الجملة للمحاكاة والشادوينج:</span>
-                  <span className="text-[11px] text-purple-300">
-                    ({formatSecondsToClock(cue.startTime)} ➔ {formatSecondsToClock(cue.endTime)})
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handlePlayOriginal}
-                    className={`text-xs px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
-                      isPlayingOriginal
-                        ? "bg-indigo-600 text-white shadow-sm animate-pulse"
-                        : "bg-slate-700/80 hover:bg-slate-700 text-slate-200"
-                    }`}
-                  >
-                    {isPlayingOriginal ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                    <span>{isPlayingOriginal ? "إيقاف الأصلي" : "استماع للأصلي"}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handlePlayTtsFallback}
-                    className="text-xs px-3 py-1.5 rounded-xl font-bold bg-slate-700/80 hover:bg-slate-700 text-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer"
-                    title="نطق نقي عبر محرك الأصوات"
-                  >
-                    <Volume2 className="w-3.5 h-3.5 text-purple-400" />
-                    <span>نطق TTS</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Target Words with Real-time Detection Glow */}
-              <div
-                className="text-base sm:text-lg font-semibold text-white leading-relaxed select-text"
-                dir={detectDirection(cue.text)}
-              >
-                <div className="flex flex-wrap gap-1.5">
-                  {targetWords.map((word, idx) => {
-                    const isMatched = isWordInSimpleTranscript(word);
-                    return (
-                      <span
-                        key={idx}
-                        className={`inline-block px-2.5 py-1 rounded-lg border text-base sm:text-lg transition-all ${
-                          isMatched
-                            ? "text-emerald-300 bg-emerald-950/90 border-emerald-500 font-bold shadow-md shadow-emerald-900/30 scale-105"
-                            : "text-slate-200 bg-slate-800/80 border-slate-700"
-                        }`}
-                      >
-                        {word}
-                      </span>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {cue.secondaryText && (
-                <div
-                  className="pt-1 text-xs sm:text-sm text-emerald-300 font-medium leading-relaxed"
-                  dir={detectDirection(cue.secondaryText)}
-                >
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 ml-2">
-                    الترجمة
-                  </span>
-                  {cue.secondaryText}
-                </div>
-              )}
-            </div>
-
-            {/* Live Output Box (#output) */}
-            <div>
-              <div className="flex items-center justify-between pb-1.5 text-xs text-slate-400">
-                <span className="font-bold flex items-center gap-1.5 text-slate-300">
-                  <span>النص المكتشف عبر الميكروفون المباشر:</span>
-                </span>
-                {simpleFinalTranscript && (
-                  <button
-                    type="button"
-                    onClick={handleCopySimpleTranscript}
-                    className="flex items-center gap-1 text-[11px] text-slate-300 hover:text-white px-2 py-0.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-                  >
-                    {copiedSimpleTranscript ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                    <span>{copiedSimpleTranscript ? "تم النسخ" : "نسخ النص"}</span>
-                  </button>
-                )}
-              </div>
-
-              <div
-                id="output"
-                className="p-5 min-h-[150px] bg-[#2a2a3d] rounded-[10px] leading-[1.8] text-left select-text border border-slate-700/60 overflow-y-auto max-h-[350px]"
-                dir="ltr"
-                style={{ fontSize: `${simpleFontSize}px` }}
-              >
-                {simpleFinalTranscript || simpleInterimTranscript ? (
-                  <>
-                    <span className="text-[#eee] font-medium whitespace-pre-wrap">{simpleFinalTranscript}</span>
-                    {simpleInterimTranscript && (
-                      <span className="interim text-[#888] italic ml-1.5 whitespace-pre-wrap">
-                        {simpleInterimTranscript}
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  <span className="text-[#666] italic select-none">النص هيظهر هنا...</span>
-                )}
-              </div>
-            </div>
-
-            {/* Diagnostic Log Box (#log) */}
-            <div id="log" className="text-[12px] text-[#888] mt-3 whitespace-pre-wrap font-mono min-h-[18px]">
-              {simpleLog}
             </div>
           </div>
-        ) : (
-          /* ========================================================================= */
-          /* Advanced Studio Mode                                                      */
-          /* ========================================================================= */
-          <>
-            {/* Target Sentence Card */}
-            <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-b from-slate-800/80 to-slate-900 border border-slate-700/80 relative overflow-hidden space-y-3">
-              {/* Timestamp and Duration Tag */}
-              <div className="flex items-center justify-between text-[11px] text-slate-400">
-                <div className="flex items-center gap-1.5 font-mono">
-                  <Clock className="w-3.5 h-3.5 text-purple-400" />
-                  <span>
-                    {formatSecondsToClock(cue.startTime)} ➔ {formatSecondsToClock(cue.endTime)}
-                  </span>
-                  <span className="text-slate-500">
-                    ({(cue.endTime - cue.startTime).toFixed(1)} ثانية)
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handlePlayTtsFallback}
-                    className="text-[11px] font-bold text-slate-400 hover:text-purple-300 flex items-center gap-1 hover:bg-slate-700/60 px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
-                    title="نطق نقي عبر محرك الأصوات الاصطناعية"
-                  >
-                    <Volume2 className="w-3 h-3 text-purple-400" />
-                    <span>نطق TTS</span>
-                  </button>
-                </div>
-              </div>
 
           {/* Primary Sentence Text (Word Tokens) */}
           <div
@@ -1422,32 +958,23 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
             </div>
           )}
         </div>
-        </>
-      )}
 
         {/* Modal Footer */}
         <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-[11px] text-slate-400">
-          {viewTab === "simple" ? (
-            <div className="flex items-center gap-2 text-slate-400">
-              <span className="w-2 h-2 rounded-full bg-blue-400 inline-block animate-pulse"></span>
-              <span>نظام Web Speech API للاستماع المستمر والتعرف التلقائي مع تتبع الكلمات</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
-                أخضر = سليم
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
-                أصفر = تقريبي
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-rose-400 inline-block"></span>
-                أحمر = مفقود
-              </span>
-            </div>
-          )}
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
+              أخضر = سليم
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
+              أصفر = تقريبي
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-rose-400 inline-block"></span>
+              أحمر = مفقود
+            </span>
+          </div>
 
           <button
             type="button"
