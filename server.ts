@@ -12,6 +12,7 @@ import { initialFolders, initialCards } from "./src/data/seed";
 import { getSupabase, SUPABASE_SQL_SCHEMA } from "./src/supabaseClient";
 import { formatSubtitleTrackProtocol } from "./src/utils/subtitleNaming";
 import { GoogleGenAI, Type } from "@google/genai";
+import { authMiddleware, registerAuthRoutes, loadUsers, syncUsersWithSupabase } from "./serverAuth";
 
 // ─── Crash & Unhandled Rejection Immunity ───────────────────────────────────────
 // Prevents server crashes from remote sockets (e.g. Gradio / Python / Whisper server disconnecting mid-stream)
@@ -245,6 +246,25 @@ async function startServer() {
   const DB_PATH = path.join(process.cwd(), "db.json");
   const OLD_DB_PATH = path.join(process.cwd(), "src", "data", "db.json");
 
+  // Mount Auth Middleware & Register Auth Routes
+  app.use(authMiddleware);
+  registerAuthRoutes(app, DB_PATH, (adminId: string) => {
+    // Crucial rule: First account always inherits and links all current original data
+    try {
+      if (fs.existsSync(DB_PATH)) {
+        const fileContent = fs.readFileSync(DB_PATH, "utf-8");
+        const parsed = JSON.parse(fileContent);
+        parsed.folders = (parsed.folders || []).map((f: any) => ({ ...f, userId: adminId }));
+        parsed.cards = (parsed.cards || []).map((c: any) => ({ ...c, userId: adminId }));
+        parsed.transcripts = (parsed.transcripts || []).map((t: any) => ({ ...t, userId: adminId }));
+        fs.writeFileSync(DB_PATH, JSON.stringify(parsed, null, 2), "utf-8");
+        console.log(`⚡ [Auth Setup] Successfully linked ${parsed.folders.length} folders and ${parsed.cards.length} cards to primary admin (${adminId})`);
+      }
+    } catch (e) {
+      console.error("Failed to link existing data to primary admin:", e);
+    }
+  });
+
   // Migrate old db.json if it exists
   if (!fs.existsSync(DB_PATH) && fs.existsSync(OLD_DB_PATH)) {
     try {
@@ -260,6 +280,11 @@ async function startServer() {
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
   }
+
+  // Attempt background sync of users from Supabase on startup
+  syncUsersWithSupabase(DB_PATH).catch((e) => {
+    console.warn("[Server Startup] Background Supabase user sync notice:", e.message || e);
+  });
 
   // Initialize DB with seed data if empty
   if (!fs.existsSync(DB_PATH)) {
@@ -2356,6 +2381,15 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       error: null as string | null
     };
 
+    const users = loadUsers(DB_PATH);
+    const currentUser = (req as any).user;
+    const currentUserId = currentUser ? currentUser.userId : null;
+    const isAdmin = currentUser ? currentUser.role === "admin" : (users.length === 0);
+
+    if (users.length > 0 && !currentUser) {
+      return res.status(401).json({ folders: [], cards: [], transcripts: [], dbStatus, error: "يجب تسجيل الدخول" });
+    }
+
     try {
       const supabase = getSupabase();
       if (supabase) {
@@ -2546,7 +2580,38 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
           } catch (e) {
             console.error("Failed to load transcripts in Supabase success path:", e);
           }
-          return res.json({ folders: mappedFolders, cards: mappedCards, transcripts, dbStatus });
+
+          // Strict user data isolation for both Admin and Regular users
+          let sourceFolders = mappedFolders;
+          let sourceCards = mappedCards;
+          if (fs.existsSync(DB_PATH)) {
+            try {
+              const parsed = JSON.parse(fs.readFileSync(DB_PATH, "utf-8"));
+              if (Array.isArray(parsed.folders) && parsed.folders.length > 0) {
+                sourceFolders = parsed.folders;
+              }
+              if (Array.isArray(parsed.cards) && parsed.cards.length > 0) {
+                sourceCards = parsed.cards;
+              }
+            } catch (e) {}
+          }
+
+          const userFolders = sourceFolders.filter((f: any) => {
+            if (f.userId) return f.userId === currentUserId;
+            return isAdmin; // Legacy unassigned items belong exclusively to admin
+          });
+          const userFolderIds = new Set(userFolders.map((f: any) => f.id));
+          const userCards = sourceCards.filter((c: any) => {
+            if (c.userId) return c.userId === currentUserId;
+            if (c.folderId && userFolderIds.has(c.folderId)) return true;
+            return !c.userId && isAdmin;
+          });
+          const userTranscripts = transcripts.filter((t: any) => {
+            if (t.userId) return t.userId === currentUserId;
+            return !t.userId && isAdmin;
+          });
+
+          return res.json({ folders: userFolders, cards: userCards, transcripts: userTranscripts, dbStatus });
         }
       } else {
         dbStatus.error = "Supabase not configured in .env";
@@ -2561,7 +2626,26 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       if (fs.existsSync(DB_PATH)) {
         const fileContent = fs.readFileSync(DB_PATH, "utf-8");
         const parsed = JSON.parse(fileContent);
-        res.json({ folders: parsed.folders, cards: parsed.cards, transcripts: parsed.transcripts || [], dbStatus });
+        const rawFolders = parsed.folders || [];
+        const rawCards = parsed.cards || [];
+        const rawTranscripts = parsed.transcripts || [];
+
+        const userFolders = rawFolders.filter((f: any) => {
+          if (f.userId) return f.userId === currentUserId;
+          return isAdmin;
+        });
+        const userFolderIds = new Set(userFolders.map((f: any) => f.id));
+        const userCards = rawCards.filter((c: any) => {
+          if (c.userId) return c.userId === currentUserId;
+          if (c.folderId && userFolderIds.has(c.folderId)) return true;
+          return !c.userId && isAdmin;
+        });
+        const userTranscripts = rawTranscripts.filter((t: any) => {
+          if (t.userId) return t.userId === currentUserId;
+          return !t.userId && isAdmin;
+        });
+
+        return res.json({ folders: userFolders, cards: userCards, transcripts: userTranscripts, dbStatus });
       } else {
         res.json({ folders: initialFolders, cards: initialCards, transcripts: [], dbStatus });
       }
@@ -2573,6 +2657,14 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
 
   // API Route - Save Flashcard Data
   app.post("/api/data", async (req, res) => {
+    const users = loadUsers(DB_PATH);
+    const currentUser = (req as any).user;
+    if (users.length > 0 && !currentUser) {
+      return res.status(401).json({ error: "غير مصرح لك بالحفظ. يرجى تسجيل الدخول أولاً." });
+    }
+    const currentUserId = currentUser ? currentUser.userId : "admin";
+    const isAdmin = currentUser ? currentUser.role === "admin" : true;
+
     const folders = req.body.folders || [];
     const cards = req.body.cards || [];
     const transcripts = req.body.transcripts || [];
@@ -2583,10 +2675,41 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       error: null as string | null
     };
 
-    // Always save locally as a backup/mirror immediately
+    // Always save locally with user isolation
     try {
-      fs.writeFileSync(DB_PATH, JSON.stringify({ folders, cards, transcripts }, null, 2), "utf-8");
-      console.log("[Local DB] Saved to local db.json mirroring file with transcripts.");
+      let parsed: any = { folders: [], cards: [], transcripts: [], users };
+      if (fs.existsSync(DB_PATH)) {
+        try {
+          parsed = JSON.parse(fs.readFileSync(DB_PATH, "utf-8"));
+        } catch (pe) {}
+      }
+      const primaryAdmin = users.find(u => u.role === "admin");
+      const defaultAdminId = primaryAdmin ? primaryAdmin.id : "admin";
+
+      const otherFolders = (parsed.folders || []).filter((f: any) => {
+        const itemUserId = f.userId || defaultAdminId;
+        return itemUserId !== currentUserId;
+      });
+      const otherCards = (parsed.cards || []).filter((c: any) => {
+        const itemUserId = c.userId || defaultAdminId;
+        return itemUserId !== currentUserId;
+      });
+      const otherTranscripts = (parsed.transcripts || []).filter((t: any) => {
+        const itemUserId = t.userId || defaultAdminId;
+        return itemUserId !== currentUserId;
+      });
+
+      const userFolders = folders.map((f: any) => ({ ...f, userId: currentUserId }));
+      const userCards = cards.map((c: any) => ({ ...c, userId: currentUserId }));
+      const userTranscripts = transcripts.map((t: any) => ({ ...t, userId: currentUserId }));
+
+      parsed.folders = [...otherFolders, ...userFolders];
+      parsed.cards = [...otherCards, ...userCards];
+      parsed.transcripts = [...otherTranscripts, ...userTranscripts];
+      parsed.users = users;
+
+      fs.writeFileSync(DB_PATH, JSON.stringify(parsed, null, 2), "utf-8");
+      console.log(`[Local DB] Saved ${userFolders.length} folders & ${userCards.length} cards for user (${currentUserId}).`);
     } catch (err) {
       console.error("Failed to save local DB backup", err);
     }
@@ -2636,7 +2759,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
             const activeDeckIds = new Set(folders.map((f: any) => f.id));
             const activeCardIds = new Set(cards.map((c: any) => c.id));
 
-            if (allDbCards.length > 0 && activeCardIds.size > 0) {
+            if (isAdmin && allDbCards.length > 0 && activeCardIds.size > 0) {
               const cardsToDelete = allDbCards.filter((c: any) => !activeCardIds.has(c.id)).map((c: any) => c.id);
               if (cardsToDelete.length > 0) {
                 console.log(`[Supabase Background Sync] Deleting ${cardsToDelete.length} obsolete cards in batches...`);
@@ -2646,7 +2769,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
               }
             }
 
-            if (allDbDecks.length > 0 && activeDeckIds.size > 0) {
+            if (isAdmin && allDbDecks.length > 0 && activeDeckIds.size > 0) {
               const decksToDelete = allDbDecks.filter((d: any) => !activeDeckIds.has(d.id)).map((d: any) => d.id);
               if (decksToDelete.length > 0) {
                 console.log(`[Supabase Background Sync] Deleting ${decksToDelete.length} obsolete decks in batches...`);
@@ -2755,6 +2878,12 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
   // API Route - Force Push Local data to Supabase Cloud
   app.post("/api/sync/push", async (req, res) => {
     try {
+      const users = loadUsers(DB_PATH);
+      const currentUser = (req as any).user;
+      if (users.length > 0 && (!currentUser || currentUser.role !== "admin")) {
+        return res.status(403).json({ error: "هذه الميزة متاحة فقط لحساب المشرف (Admin)." });
+      }
+
       const supabase = getSupabase();
       if (!supabase) {
         return res.status(400).json({ error: "اتصال قاعدة البيانات Supabase غير نشط حالياً." });
@@ -2894,9 +3023,24 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         }
       }
 
+      // Also push user accounts to Supabase app_users table
+      const usersToPush = parsed.users || [];
+      if (usersToPush.length > 0) {
+        try {
+          const { error: uErr } = await supabase.from('app_users').upsert(usersToPush);
+          if (uErr) {
+            console.warn("[Manual Sync Push] app_users upsert note:", uErr.message);
+          } else {
+            console.log(`[Manual Sync Push] Successfully pushed ${usersToPush.length} user accounts to Supabase app_users table`);
+          }
+        } catch (uErr: any) {
+          console.warn("[Manual Sync Push] app_users sync notice:", uErr.message || uErr);
+        }
+      }
+
       res.json({
         status: "success",
-        message: `تمت مزامنة ورفع ${folders.length} مجلدات و ${cards.length} بطاقات بنجاح إلى قاعدة بيانات السحابة!`
+        message: `تمت مزامنة ورفع ${folders.length} مجلدات و ${cards.length} بطاقات و ${usersToPush.length} حسابات مستخدمين بنجاح إلى قاعدة بيانات السحابة!`
       });
     } catch (err: any) {
       console.error("[Manual Sync Push Error]", err);
@@ -2909,6 +3053,12 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
   // API Route - Force Pull Cloud data from Supabase to Local file db.json
   app.post("/api/sync/pull", async (req, res) => {
     try {
+      const users = loadUsers(DB_PATH);
+      const currentUser = (req as any).user;
+      if (users.length > 0 && (!currentUser || currentUser.role !== "admin")) {
+        return res.status(403).json({ error: "هذه الميزة متاحة فقط لحساب المشرف (Admin)." });
+      }
+
       const supabase = getSupabase();
       if (!supabase) {
         return res.status(400).json({ error: "اتصال قاعدة البيانات Supabase غير نشط حالياً." });
@@ -2989,12 +3139,31 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         createdAt: c.createdAt
       }));
 
-      // Update local storage
-      fs.writeFileSync(DB_PATH, JSON.stringify({ folders: mappedFolders, cards: mappedCards }, null, 2), "utf-8");
+      // Preserve existing users and transcripts when pulling
+      let existingUsers = loadUsers(DB_PATH);
+      let existingTranscripts: any[] = [];
+      if (fs.existsSync(DB_PATH)) {
+        try {
+          const current = JSON.parse(fs.readFileSync(DB_PATH, "utf-8"));
+          existingTranscripts = current.transcripts || [];
+        } catch (e) {}
+      }
+
+      // Sync users with Supabase app_users table if available
+      try {
+        existingUsers = await syncUsersWithSupabase(DB_PATH);
+      } catch (e) {}
+
+      // Update local storage preserving users and transcripts
+      fs.writeFileSync(
+        DB_PATH,
+        JSON.stringify({ folders: mappedFolders, cards: mappedCards, transcripts: existingTranscripts, users: existingUsers }, null, 2),
+        "utf-8"
+      );
 
       res.json({
         status: "success",
-        message: `تم سحب ${mappedFolders.length} مجلدات و ${mappedCards.length} بطاقات من السحابة بنجاح واستبدال البيانات المحلية بها!`,
+        message: `تم سحب ${mappedFolders.length} مجلدات و ${mappedCards.length} بطاقات و ${existingUsers.length} حسابات من السحابة بنجاح!`,
         folders: mappedFolders,
         cards: mappedCards
       });

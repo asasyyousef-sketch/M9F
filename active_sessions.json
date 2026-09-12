@@ -1,0 +1,74 @@
+[
+  {
+    "token": "f42be688dbf9580a0fa399eed94f1b3a4c202679c3ae06cd3aeba15189808630",
+    "userId": "usr_1789213962047",
+    "username": "admin",
+    "name": "المدير العام",
+    "role": "admin",
+    "createdAt": 1789213962054,
+    "expiresAt": 1791805962054
+  },
+  {
+    "token": "ec0b3881dc8089d004db1947f1f899462b434dcc86dc1caf91d70573bb7489d1",
+    "userId": "usr_1789214010231",
+    "username": "student1",
+    "name": "طالب تجريبي",
+    "role": "user",
+    "createdAt": 1789214011979,
+    "expiresAt": 1791806011979
+  },
+  {
+    "token": "5d54d915db87ad502b00da89953e631a0e3f275dcdd7392ec1a8221ffd09b6f0",
+    "userId": "usr_1789213962047",
+    "username": "admin",
+    "name": "المدير العام",
+    "role": "admin",
+    "createdAt": 1789214175796,
+    "expiresAt": 1791806175796
+  },
+  {
+    "token": "a09ec594936e488701a8401b4c37d9726c6b5e412b232ff49183110fcde3da92",
+    "userId": "usr_1789214010231",
+    "username": "student1",
+    "name": "طالب تجريبي",
+    "role": "user",
+    "createdAt": 1789214175813,
+    "expiresAt": 1791806175813
+  },
+  {
+    "token": "50a0306d3401f591ef68d2ea2ff6c84240b96afb1857b161ee892485ae72f9b4",
+    "userId": "usr_1789213962047",
+    "username": "admin",
+    "name": "المدير العام",
+    "role": "admin",
+    "createdAt": 1789214645747,
+    "expiresAt": 1791806645747
+  },
+  {
+    "token": "9a844fb436aa5aca05ba78fb1730841dac50475adcbeedc1ee40ab79941d94d8",
+    "userId": "usr_1789213962047",
+    "username": "admin",
+    "name": "المدير العام",
+    "role": "admin",
+    "createdAt": 1789215239193,
+    "expiresAt": 1791807239193
+  },
+  {
+    "token": "caa7feb1af6f30aea1830fda8020015f8abe254893c45e3925e22e5f3a725c5a",
+    "userId": "usr_1789213962047",
+    "username": "admin",
+    "name": "المدير العام",
+    "role": "admin",
+    "createdAt": 1789215942655,
+    "expiresAt": 1791807942655
+  },
+  {
+    "token": "662d429c6c4f5045b6faaf4d61fd1278819f20bdb8dd860d120589bca3dbdb7c",
+    "userId": "usr_1789213962047",
+    "username": "admin",
+    "name": "المدير العام",
+    "role": "admin",
+    "createdAt": 1789216005274,
+    "expiresAt": 1791808005274
+  }
+]

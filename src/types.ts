@@ -2,6 +2,7 @@ import React from "react";
 
 export interface Folder {
   id: string;
+  userId?: string;
   parentId?: string; // Optional field for nested subfolders
   name: string;
   description?: string;
@@ -16,6 +17,7 @@ export interface Folder {
 
 export interface Flashcard {
   id: string;
+  userId?: string;
   folderId: string;
   frontText: string;
   frontLang: string;
@@ -355,4 +357,14 @@ export interface NoteCategory {
   id: string;
   name: string;
   color: string;
+}
+
+export type UserRole = "admin" | "user";
+
+export interface AppUser {
+  id: string;
+  username: string;
+  name: string;
+  role: UserRole;
+  createdAt?: string;
 }

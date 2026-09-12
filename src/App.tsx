@@ -18,11 +18,15 @@ import {
 } from "./components/Modals";
 import { ReviewSession } from "./components/ReviewSession";
 import { Folder, Flashcard, ReviewMethod, DbStatus, TranscriptDocument } from "./types";
+import { AuthProvider, useAuth } from "./context/AuthContext";
+import { AuthScreen } from "./components/AuthScreen";
 
-export default function App() {
+function MainStudyApp() {
+  const { currentUser, isLoading: isAuthLoading, authFetch } = useAuth();
   const [folders, setFolders] = useState<Folder[]>(() => {
     try {
-      const cached = localStorage.getItem("cached_folders");
+      const uId = currentUser?.id;
+      const cached = uId ? localStorage.getItem(`cached_folders_${uId}`) : null;
       return cached ? JSON.parse(cached) : [];
     } catch {
       return [];
@@ -30,28 +34,29 @@ export default function App() {
   });
   const [cards, setCards] = useState<Flashcard[]>(() => {
     try {
-      const cached = localStorage.getItem("cached_cards");
+      const uId = currentUser?.id;
+      const cached = uId ? localStorage.getItem(`cached_cards_${uId}`) : null;
       return cached ? JSON.parse(cached) : [];
     } catch {
       return [];
     }
   });
-  const [activeFolderId, setActiveFolderId] = useState<string>(() => {
-    try {
-      return localStorage.getItem("active_folder_id") || "";
-    } catch {
-      return "";
-    }
-  });
+  const [activeFolderId, setActiveFolderId] = useState<string>("");
 
-  // Track and save activeFolderId to localStorage for seamless refresh persistence
+  // Track and save activeFolderId to user-specific key for seamless refresh persistence
   useEffect(() => {
     try {
-      localStorage.setItem("active_folder_id", activeFolderId);
+      if (currentUser?.id) {
+        if (activeFolderId) {
+          localStorage.setItem(`active_folder_id_${currentUser.id}`, activeFolderId);
+        } else {
+          localStorage.removeItem(`active_folder_id_${currentUser.id}`);
+        }
+      }
     } catch (e) {
       console.error("Failed to save active_folder_id to localStorage:", e);
     }
-  }, [activeFolderId]);
+  }, [activeFolderId, currentUser?.id]);
 
   const [hasFetched, setHasFetched] = useState(false);
 
@@ -185,56 +190,81 @@ export default function App() {
 
   // Fetch initial database items from Express Node backend
   useEffect(() => {
-    fetch("/api/data")
+    if (!currentUser) {
+      setFolders([]);
+      setCards([]);
+      setTranscripts([]);
+      setActiveFolderId("");
+      setHasFetched(false);
+      return;
+    }
+
+    // Load any user-specific cached data for instant display while fetching
+    try {
+      const uF = localStorage.getItem(`cached_folders_${currentUser.id}`);
+      const uC = localStorage.getItem(`cached_cards_${currentUser.id}`);
+      if (uF) setFolders(JSON.parse(uF));
+      else setFolders([]);
+      if (uC) setCards(JSON.parse(uC));
+      else setCards([]);
+
+      const savedFolder = localStorage.getItem(`active_folder_id_${currentUser.id}`);
+      if (savedFolder) setActiveFolderId(savedFolder);
+      else setActiveFolderId("");
+    } catch (e) {}
+
+    authFetch("/api/data")
       .then((res) => {
         if (!res.ok) throw new Error("Server database error");
         return res.json();
       })
       .then((data) => {
-        if (data.folders) {
-          setFolders(data.folders);
-          try {
-            localStorage.setItem("cached_folders", JSON.stringify(data.folders));
-          } catch (e) {
-            console.error(e);
-          }
+        const loadedFolders = data.folders || [];
+        const loadedCards = data.cards || [];
+        const loadedTranscripts = data.transcripts || [];
+
+        setFolders(loadedFolders);
+        setCards(loadedCards);
+        setTranscripts(loadedTranscripts);
+
+        try {
+          localStorage.setItem(`cached_folders_${currentUser.id}`, JSON.stringify(loadedFolders));
+          localStorage.setItem(`cached_cards_${currentUser.id}`, JSON.stringify(loadedCards));
+          localStorage.setItem(`cached_transcripts_${currentUser.id}`, JSON.stringify(loadedTranscripts));
+        } catch (e) {
+          console.error(e);
         }
-        if (data.cards) {
-          setCards(data.cards);
-          try {
-            localStorage.setItem("cached_cards", JSON.stringify(data.cards));
-          } catch (e) {
-            console.error(e);
+
+        // Verify that activeFolderId belongs to the current user's loaded folders
+        setActiveFolderId((prev) => {
+          if (prev && loadedFolders.some((f: any) => f.id === prev)) {
+            return prev;
           }
-        }
-        if (data.transcripts) {
-          setTranscripts(data.transcripts);
-          try {
-            localStorage.setItem("cached_transcripts", JSON.stringify(data.transcripts));
-          } catch (e) {
-            console.error(e);
-          }
-        }
+          return "";
+        });
+
         if (data.dbStatus) setDbStatus(data.dbStatus);
         setHasFetched(true);
       })
       .catch((err) => {
-        console.error("Failed to load initial workspace data. Running with seeded memory database.", err);
+        console.error("Failed to load user workspace data:", err);
         setHasFetched(true);
       });
-  }, []);
+  }, [currentUser?.id, authFetch]);
 
   // Sync state modifications directly to disk
   const persistDB = (updatedFolders: Folder[], updatedCards: Flashcard[]) => {
     // Save to local cache immediately to ensure zero-latency interface updates
     try {
-      localStorage.setItem("cached_folders", JSON.stringify(updatedFolders));
-      localStorage.setItem("cached_cards", JSON.stringify(updatedCards));
+      if (currentUser) {
+        localStorage.setItem(`cached_folders_${currentUser.id}`, JSON.stringify(updatedFolders));
+        localStorage.setItem(`cached_cards_${currentUser.id}`, JSON.stringify(updatedCards));
+      }
     } catch (e) {
       console.error("Failed to write local cache:", e);
     }
 
-    fetch("/api/data", {
+    authFetch("/api/data", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ folders: updatedFolders, cards: updatedCards, transcripts })
@@ -254,12 +284,14 @@ export default function App() {
   // Helper to persist only transcripts
   const persistTranscripts = (updatedTranscripts: TranscriptDocument[]) => {
     try {
-      localStorage.setItem("cached_transcripts", JSON.stringify(updatedTranscripts));
+      if (currentUser) {
+        localStorage.setItem(`cached_transcripts_${currentUser.id}`, JSON.stringify(updatedTranscripts));
+      }
     } catch (e) {
       console.error("Failed to write local transcripts cache:", e);
     }
 
-    fetch("/api/data", {
+    authFetch("/api/data", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ folders, cards, transcripts: updatedTranscripts })
@@ -1006,6 +1038,21 @@ export default function App() {
     } : undefined);
   }, [folders, activeFolderId, isReviewSetupOpen]);
 
+  if (isAuthLoading) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-900 text-white" dir="rtl">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm font-bold text-slate-300">جاري التحقق من الحساب...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <AuthScreen />;
+  }
+
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-surface text-on-surface" dir="rtl">
       {/* 1. Main Body Split Workspace */}
@@ -1212,5 +1259,13 @@ export default function App() {
         onOpen={() => setIsSettingsOpen(true)}
       />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <MainStudyApp />
+    </AuthProvider>
   );
 }

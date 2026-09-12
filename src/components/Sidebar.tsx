@@ -16,9 +16,11 @@ import {
   Film,
   PanelRightClose,
   PanelRightOpen,
-  BookOpen
+  BookOpen,
+  LogOut
 } from "lucide-react";
 import { Folder as FolderType, DbStatus } from "../types";
+import { useAuth } from "../context/AuthContext";
 
 interface SidebarProps {
   folders: FolderType[];
@@ -86,6 +88,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   // Mini rail quick folder popover
   const [isMiniFolderMenuOpen, setIsMiniFolderMenuOpen] = useState(false);
 
+  const { currentUser, authFetch, logout } = useAuth();
   const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -97,7 +100,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
     setSyncLoading(true);
     setSyncMessage(null);
     try {
-      const res = await fetch("/api/sync/push", { method: "POST" });
+      const res = await authFetch("/api/sync/push", { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "حدث خطأ أثناء رفع الملفات");
       setSyncMessage({ text: data.message || "تم الرفع والمزامنة بنجاح!", isError: false });
@@ -115,7 +118,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
     setSyncLoading(true);
     setSyncMessage(null);
     try {
-      const res = await fetch("/api/sync/pull", { method: "POST" });
+      const res = await authFetch("/api/sync/pull", { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "حدث خطأ أثناء جلب البيانات");
       if (onDataReloaded && data.folders && data.cards) {
@@ -670,6 +673,24 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
             <Settings className="w-4 h-4 text-slate-500 shrink-0" />
             {!isCollapsed && <span>إعدادات النظام</span>}
           </button>
+
+          {/* Logout Button */}
+          {currentUser && (
+            <button
+              type="button"
+              onClick={() => {
+                logout();
+                onClose?.();
+              }}
+              title="تسجيل الخروج"
+              className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right text-rose-600 hover:text-rose-700 hover:bg-rose-50 transition-colors font-semibold text-xs cursor-pointer ${
+                isCollapsed ? "justify-center px-0 w-9 h-9 mx-auto" : ""
+              }`}
+            >
+              <LogOut className="w-4 h-4 text-rose-500 shrink-0" />
+              {!isCollapsed && <span>تسجيل الخروج</span>}
+            </button>
+          )}
         </div>
       </aside>
 

@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { X, Search, Image as ImageIcon, Volume2, Link as LinkIcon, Plus, Check, ChevronLeft, ChevronRight, ChevronDown, FolderOpen, HelpCircle, Trash2, Settings, AlertCircle, Play, Folder as LucideFolder, FileText, Eye, Pencil, Headphones, BookOpen, Layers, Copy, Shuffle, Move, Key, Timer, History, Download, RefreshCw, DownloadCloud, HardDrive, Sparkles, Cpu, Star, Square, VolumeX, Radio, Activity, Laptop, Server, Zap, CheckCircle2, Minimize2, Maximize2, Loader2, ExternalLink, Link2 } from "lucide-react";
+import { X, Search, Image as ImageIcon, Volume2, Link as LinkIcon, Plus, Check, ChevronLeft, ChevronRight, ChevronDown, FolderOpen, HelpCircle, Trash2, Settings, AlertCircle, Play, Folder as LucideFolder, FileText, Eye, Pencil, Headphones, BookOpen, Layers, Copy, Shuffle, Move, Key, Timer, History, Download, RefreshCw, DownloadCloud, HardDrive, Sparkles, Cpu, Star, Square, VolumeX, Radio, Activity, Laptop, Server, Zap, CheckCircle2, Minimize2, Maximize2, Loader2, ExternalLink, Link2, Users } from "lucide-react";
 import { Folder, Flashcard, ReviewMethod, getSafeImageStyle, DEFAULT_GRADIO_VOICES, GRADIO_LANGUAGES, GradioVoice } from "../types";
 import { LivePiperSandboxModal } from "./LivePiperSandboxModal";
+import { AccountsSettingsTab } from "./AccountsSettingsTab";
+import { useAuth } from "../context/AuthContext";
 
 export { LivePiperSandboxModal };
 
@@ -4517,6 +4519,7 @@ interface SettingsModalProps {
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onOpen }) => {
+  const { currentUser } = useAuth();
   const [audioApi, setAudioApi] = useState("google_proxy");
   const [customTtsUrl, setCustomTtsUrl] = useState("");
   const [imageApi, setImageApi] = useState("duckduckgo");
@@ -4540,7 +4543,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   const [isCalculatingCache, setIsCalculatingCache] = useState(false);
 
   // Active Settings Tab
-  const [activeTab, setActiveTab] = useState<"audio" | "ai" | "images" | "storage" | "animations" | "diagnostics">("audio");
+  const [activeTab, setActiveTab] = useState<"audio" | "ai" | "images" | "storage" | "animations" | "diagnostics" | "accounts">("audio");
 
   // Animation settings states
   const [enableChatAnimations, setEnableChatAnimations] = useState<boolean>(
@@ -6304,6 +6307,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               <Activity className="w-4 h-4 text-blue-500" />
               <span>🔍 تشخيص وسجل الأسباب</span>
             </button>
+
+            {currentUser?.role === "admin" && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("accounts")}
+                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  activeTab === "accounts"
+                    ? "bg-purple-600 text-white shadow-sm"
+                    : "text-on-surface-variant hover:text-on-surface hover:bg-surface-container"
+                }`}
+              >
+                <Users className="w-4 h-4 text-purple-400" />
+                <span>الحسابات</span>
+              </button>
+            )}
           </div>
           {activeTab === "audio" && (
             <div className="space-y-6 animate-fade-in">
@@ -9270,6 +9288,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 </div>
               </div>
             </div>
+          )}
+
+          {activeTab === "accounts" && (
+            <AccountsSettingsTab />
           )}
 
         </div>

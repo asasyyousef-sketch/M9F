@@ -63,9 +63,13 @@ CREATE TABLE IF NOT EXISTS public.decks (
   "frontLang" TEXT NOT NULL,
   "backLang" TEXT NOT NULL,
   "position" INTEGER DEFAULT 0,
+  "userId" TEXT,
   "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Add userId column if table already exists
+ALTER TABLE public.decks ADD COLUMN IF NOT EXISTS "userId" TEXT;
 
 -- Enable Row Level Security (RLS) or grant permissions
 ALTER TABLE public.decks ENABLE ROW LEVEL SECURITY;
@@ -95,11 +99,31 @@ CREATE TABLE IF NOT EXISTS public.cards (
   streak INTEGER DEFAULT 0 NOT NULL,
   difficulty TEXT DEFAULT 'medium',
   "position" INTEGER DEFAULT 0,
+  "userId" TEXT,
   "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Add userId column if table already exists
+ALTER TABLE public.cards ADD COLUMN IF NOT EXISTS "userId" TEXT;
 
 -- Enable Row Level Security (RLS) or grant permissions for cards
 ALTER TABLE public.cards ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow public read access" ON public.cards FOR SELECT USING (true);
 CREATE POLICY "Allow public write access" ON public.cards FOR ALL USING (true);
+
+-- Create app_users table (stores user accounts and credentials)
+CREATE TABLE IF NOT EXISTS public.app_users (
+  id TEXT PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'user',
+  salt TEXT NOT NULL,
+  "passwordHash" TEXT NOT NULL,
+  "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Enable Row Level Security (RLS) or grant permissions for app_users
+ALTER TABLE public.app_users ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public read access" ON public.app_users FOR SELECT USING (true);
+CREATE POLICY "Allow public write access" ON public.app_users FOR ALL USING (true);
 `;
