@@ -2428,7 +2428,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
   const [isAudioPreloadEnabled, setIsAudioPreloadEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem("settings_preload_audio_review");
-    return saved !== "false";
+    return saved === "true";
   });
 
   useEffect(() => {
@@ -2437,7 +2437,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
   useEffect(() => {
     const handleSyncPreload = () => {
-      setIsAudioPreloadEnabled(localStorage.getItem("settings_preload_audio_review") !== "false");
+      setIsAudioPreloadEnabled(localStorage.getItem("settings_preload_audio_review") === "true");
     };
     window.addEventListener("focus", handleSyncPreload);
     window.addEventListener("storage", handleSyncPreload);
@@ -3235,7 +3235,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
       return;
     }
 
-    const ttsExecutionMode = localStorage.getItem("settings_tts_execution_mode") || "local";
+    const ttsExecutionMode = localStorage.getItem("settings_tts_execution_mode") || "server";
     if (ttsExecutionMode === "local" || effectiveVoice === "webspeech" || effectiveVoice === "browser_speech" || effectiveVoice === "local") {
       if (effectiveVoice === "webspeech" || effectiveVoice === "browser_speech") {
         if (typeof window !== "undefined" && "speechSynthesis" in window) {

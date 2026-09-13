@@ -557,7 +557,7 @@ export const preloadTTS = async (text: string, lang: string, voice?: string): Pr
     return "";
   }
 
-  const ttsExecutionMode = localStorage.getItem("settings_tts_execution_mode") || "local";
+  const ttsExecutionMode = localStorage.getItem("settings_tts_execution_mode") || "server";
   if (!isGradioVoice && ttsExecutionMode === "local") {
     return "";
   }
@@ -1217,8 +1217,8 @@ export const speakClient = async (text: string, lang: string, voice?: string) =>
     return;
   }
 
-  // 4. Retrieve TTS execution mode (default: "local" for client-side hardware generation)
-  const ttsExecutionMode = localStorage.getItem("settings_tts_execution_mode") || "local";
+  // 4. Retrieve TTS execution mode (default: "server" for fast server-side neural synthesis)
+  const ttsExecutionMode = localStorage.getItem("settings_tts_execution_mode") || "server";
 
   // Handle local client-side Piper synthesis directly in browser
   if (ttsExecutionMode === "local" || effectiveVoice === "webspeech" || effectiveVoice === "browser_speech" || effectiveVoice === "local") {
@@ -4609,7 +4609,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     () => localStorage.getItem("settings_enable_secondary_audio_review") === "true"
   );
   const [enableAudioPreloadReview, setEnableAudioPreloadReview] = useState<boolean>(
-    () => localStorage.getItem("settings_preload_audio_review") !== "false"
+    () => localStorage.getItem("settings_preload_audio_review") === "true"
   );
   const [secondaryModelDe, setSecondaryModelDe] = useState<string>(
     () => localStorage.getItem("settings_secondary_piper_model_de") || "google"
@@ -4733,7 +4733,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
 
   // Sandbox & Voice Management states
   const [ttsExecutionMode, setTtsExecutionMode] = useState<"local" | "server">(
-    () => (localStorage.getItem("settings_tts_execution_mode") as "local" | "server") || "local"
+    () => (localStorage.getItem("settings_tts_execution_mode") as "local" | "server") || "server"
   );
   const [isPreloadingLocal, setIsPreloadingLocal] = useState(false);
   const [localPreloadedMsg, setLocalPreloadedMsg] = useState<string | null>(null);
@@ -5567,7 +5567,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       setGroqApiKey(localStorage.getItem("settings_groq_api_key") || "");
       setAiProvider(localStorage.getItem("settings_ai_provider") || "gemini");
       setEnableInlinePersonaCorrection(localStorage.getItem("settings_enable_persona_correction") !== "false");
-      setTtsExecutionMode((localStorage.getItem("settings_tts_execution_mode") as "local" | "server") || "local");
+      setTtsExecutionMode((localStorage.getItem("settings_tts_execution_mode") as "local" | "server") || "server");
       
       setPrimaryModelDe(localStorage.getItem("settings_primary_piper_model_de") || "de_DE-thorsten-medium");
       setPrimaryModelAr(localStorage.getItem("settings_primary_piper_model_ar") || "ar_JO-kareem-medium");

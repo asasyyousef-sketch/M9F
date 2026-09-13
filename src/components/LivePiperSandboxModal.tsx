@@ -220,7 +220,7 @@ export const LivePiperSandboxModal: React.FC<LivePiperSandboxModalProps> = ({
   const [selectedModel, setSelectedModel] = useState<string>(initialModelId);
   const [speechRate, setSpeechRate] = useState<number>(1.0);
   const [ttsExecutionMode, setTtsExecutionMode] = useState<"local" | "server">(
-    () => (localStorage.getItem("settings_tts_execution_mode") as "local" | "server") || "local"
+    () => (localStorage.getItem("settings_tts_execution_mode") as "local" | "server") || "server"
   );
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
