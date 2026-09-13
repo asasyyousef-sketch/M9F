@@ -201,8 +201,15 @@ export function registerAuthRoutes(
   onAdminSetup?: (adminId: string) => void
 ) {
   // Check auth status
-  app.get("/api/auth/status", (req: any, res: any) => {
-    const users = loadUsers(dbPath);
+  app.get("/api/auth/status", async (req: any, res: any) => {
+    let users = loadUsers(dbPath);
+    if (users.length === 0) {
+      try {
+        users = await syncUsersWithSupabase(dbPath);
+      } catch (e) {
+        // non-blocking fallback
+      }
+    }
     const hasAdmin = users.some((u) => u.role === "admin");
     res.json({
       hasAdmin,
@@ -283,14 +290,24 @@ export function registerAuthRoutes(
   });
 
   // User Login
-  app.post("/api/auth/login", (req: any, res: any) => {
+  app.post("/api/auth/login", async (req: any, res: any) => {
     const { username, password } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ error: "يرجى كتابة اسم المستخدم وكلمة المرور." });
     }
 
-    const users = loadUsers(dbPath);
-    const user = users.find((u) => u.username.toLowerCase() === username.trim().toLowerCase());
+    let users = loadUsers(dbPath);
+    let user = users.find((u) => u.username.toLowerCase() === username.trim().toLowerCase());
+
+    // If user not found locally, try syncing from Supabase
+    if (!user) {
+      try {
+        users = await syncUsersWithSupabase(dbPath);
+        user = users.find((u) => u.username.toLowerCase() === username.trim().toLowerCase());
+      } catch (e) {
+        // non-blocking fallback
+      }
+    }
 
     if (!user || !verifyPassword(password, user.salt, user.passwordHash)) {
       return res.status(401).json({ error: "اسم المستخدم أو كلمة المرور غير صحيحة." });
