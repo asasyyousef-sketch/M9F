@@ -2383,7 +2383,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
 
     const users = loadUsers(DB_PATH);
     const currentUser = (req as any).user;
-    const currentUserId = currentUser ? currentUser.userId : null;
+    const currentUserId = currentUser ? (currentUser.userId || currentUser.id) : null;
     const isAdmin = currentUser ? currentUser.role === "admin" : (users.length === 0);
 
     if (users.length > 0 && !currentUser) {
@@ -2394,20 +2394,25 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       const supabase = getSupabase();
       if (supabase) {
         dbStatus.supabaseActive = true;
-        console.log("[Supabase] Attempting to load data from Supabase with chunked pagination (no 1000 limit)...");
+        console.log(`[Supabase] Loading data strictly for user (${currentUserId || "all"})...`);
         
-        // Fetch all decks using chunked pagination (bypasses default 1000 row limit)
+        // Fetch decks using chunked pagination conditioned on current user
         let allDecks: any[] = [];
         let deckFrom = 0;
         const deckStep = 1000;
         let decksErr: any = null;
 
         while (true) {
-          const { data: chunk, error } = await supabase
+          let deckQuery = supabase
             .from('decks')
             .select('*')
-            .order('position', { ascending: true })
-            .range(deckFrom, deckFrom + deckStep - 1);
+            .order('position', { ascending: true });
+
+          if (currentUserId) {
+            deckQuery = deckQuery.eq('userId', currentUserId);
+          }
+
+          const { data: chunk, error } = await deckQuery.range(deckFrom, deckFrom + deckStep - 1);
 
           if (error) {
             decksErr = error;
@@ -2419,18 +2424,23 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
           deckFrom += deckStep;
         }
 
-        // Fetch all cards using chunked pagination (bypasses default 1000 row limit)
+        // Fetch cards using chunked pagination conditioned on current user
         let allCards: any[] = [];
         let cardFrom = 0;
         const cardStep = 1000;
         let cardsErr: any = null;
 
         while (true) {
-          const { data: chunk, error } = await supabase
+          let cardQuery = supabase
             .from('cards')
             .select('*')
-            .order('position', { ascending: true })
-            .range(cardFrom, cardFrom + cardStep - 1);
+            .order('position', { ascending: true });
+
+          if (currentUserId) {
+            cardQuery = cardQuery.eq('userId', currentUserId);
+          }
+
+          const { data: chunk, error } = await cardQuery.range(cardFrom, cardFrom + cardStep - 1);
 
           if (error) {
             cardsErr = error;
@@ -2542,7 +2552,8 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
             frontLang: d.frontLang,
             backLang: d.backLang,
             createdAt: d.createdAt,
-            updatedAt: d.updatedAt
+            updatedAt: d.updatedAt,
+            userId: d.userId ? d.userId.trim() : undefined
           }));
 
           const mappedCards = cards.map((c: any) => ({
@@ -2566,7 +2577,8 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
             translationHint: c.translationHint || undefined,
             streak: c.streak || 0,
             difficulty: c.difficulty || undefined,
-            createdAt: c.createdAt
+            createdAt: c.createdAt,
+            userId: c.userId ? c.userId.trim() : undefined
           }));
 
           console.log(`[Supabase] Loaded ${mappedFolders.length} folders and ${mappedCards.length} cards (Full database read).`);
@@ -2581,34 +2593,45 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
             console.error("Failed to load transcripts in Supabase success path:", e);
           }
 
-          // Strict user data isolation for both Admin and Regular users
-          let sourceFolders = mappedFolders;
-          let sourceCards = mappedCards;
+          // Use Supabase cloud as authoritative primary source when available,
+          // merging any local-only user records
+          let sourceFolders = [...mappedFolders];
+          let sourceCards = [...mappedCards];
           if (fs.existsSync(DB_PATH)) {
             try {
               const parsed = JSON.parse(fs.readFileSync(DB_PATH, "utf-8"));
-              if (Array.isArray(parsed.folders) && parsed.folders.length > 0) {
-                sourceFolders = parsed.folders;
+              const cloudFolderIds = new Set(mappedFolders.map((f: any) => f.id));
+              const cloudCardIds = new Set(mappedCards.map((c: any) => c.id));
+              
+              if (Array.isArray(parsed.folders)) {
+                for (const lf of parsed.folders) {
+                  if (!cloudFolderIds.has(lf.id)) {
+                    sourceFolders.push(lf);
+                  }
+                }
               }
-              if (Array.isArray(parsed.cards) && parsed.cards.length > 0) {
-                sourceCards = parsed.cards;
+              if (Array.isArray(parsed.cards)) {
+                for (const lc of parsed.cards) {
+                  if (!cloudCardIds.has(lc.id)) {
+                    sourceCards.push(lc);
+                  }
+                }
               }
             } catch (e) {}
           }
 
           const userFolders = sourceFolders.filter((f: any) => {
-            if (f.userId) return f.userId === currentUserId;
-            return isAdmin; // Legacy unassigned items belong exclusively to admin
+            const itemUserId = f.userId ? f.userId.trim() : null;
+            return itemUserId === currentUserId;
           });
           const userFolderIds = new Set(userFolders.map((f: any) => f.id));
           const userCards = sourceCards.filter((c: any) => {
-            if (c.userId) return c.userId === currentUserId;
-            if (c.folderId && userFolderIds.has(c.folderId)) return true;
-            return !c.userId && isAdmin;
+            const itemUserId = c.userId ? c.userId.trim() : null;
+            return itemUserId === currentUserId || (c.folderId && userFolderIds.has(c.folderId));
           });
           const userTranscripts = transcripts.filter((t: any) => {
-            if (t.userId) return t.userId === currentUserId;
-            return !t.userId && isAdmin;
+            const itemUserId = t.userId ? t.userId.trim() : null;
+            return itemUserId === currentUserId;
           });
 
           return res.json({ folders: userFolders, cards: userCards, transcripts: userTranscripts, dbStatus });
@@ -2631,18 +2654,17 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         const rawTranscripts = parsed.transcripts || [];
 
         const userFolders = rawFolders.filter((f: any) => {
-          if (f.userId) return f.userId === currentUserId;
-          return isAdmin;
+          const itemUserId = f.userId ? f.userId.trim() : null;
+          return itemUserId === currentUserId;
         });
         const userFolderIds = new Set(userFolders.map((f: any) => f.id));
         const userCards = rawCards.filter((c: any) => {
-          if (c.userId) return c.userId === currentUserId;
-          if (c.folderId && userFolderIds.has(c.folderId)) return true;
-          return !c.userId && isAdmin;
+          const itemUserId = c.userId ? c.userId.trim() : null;
+          return itemUserId === currentUserId || (c.folderId && userFolderIds.has(c.folderId));
         });
         const userTranscripts = rawTranscripts.filter((t: any) => {
-          if (t.userId) return t.userId === currentUserId;
-          return !t.userId && isAdmin;
+          const itemUserId = t.userId ? t.userId.trim() : null;
+          return itemUserId === currentUserId;
         });
 
         return res.json({ folders: userFolders, cards: userCards, transcripts: userTranscripts, dbStatus });
@@ -2662,7 +2684,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
     if (users.length > 0 && !currentUser) {
       return res.status(401).json({ error: "غير مصرح لك بالحفظ. يرجى تسجيل الدخول أولاً." });
     }
-    const currentUserId = currentUser ? currentUser.userId : "admin";
+    const currentUserId = currentUser ? (currentUser.userId || currentUser.id) : "admin";
     const isAdmin = currentUser ? currentUser.role === "admin" : true;
 
     const folders = req.body.folders || [];
@@ -2723,7 +2745,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         // Kick off Supabase sync in the background without blocking the HTTP response
         (async () => {
           try {
-            console.log("[Supabase Background Sync] Starting background synchronization...");
+            console.log(`[Supabase Background Sync] Starting background synchronization for user (${currentUserId})...`);
 
             // 1. Check if tables actually exist before trying to read/write
             const { data: testDecks, error: dbDecksErr } = await supabase.from('decks').select('id').limit(1);
@@ -2735,11 +2757,13 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
               return;
             }
 
-            // Fetch all IDs to identify which records were deleted (using chunked fetch)
+            // Fetch user's existing records to identify which records were deleted (using chunked fetch)
             let allDbDecks: any[] = [];
             let dFrom = 0;
             while (true) {
-              const { data: chunk } = await supabase.from('decks').select('id').range(dFrom, dFrom + 999);
+              let dQuery = supabase.from('decks').select('id');
+              if (currentUserId) dQuery = dQuery.eq('userId', currentUserId);
+              const { data: chunk } = await dQuery.range(dFrom, dFrom + 999);
               if (!chunk || chunk.length === 0) break;
               allDbDecks.push(...chunk);
               if (chunk.length < 1000) break;
@@ -2749,7 +2773,9 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
             let allDbCards: any[] = [];
             let cFrom = 0;
             while (true) {
-              const { data: chunk } = await supabase.from('cards').select('id').range(cFrom, cFrom + 999);
+              let cQuery = supabase.from('cards').select('id');
+              if (currentUserId) cQuery = cQuery.eq('userId', currentUserId);
+              const { data: chunk } = await cQuery.range(cFrom, cFrom + 999);
               if (!chunk || chunk.length === 0) break;
               allDbCards.push(...chunk);
               if (chunk.length < 1000) break;
@@ -2759,20 +2785,20 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
             const activeDeckIds = new Set(folders.map((f: any) => f.id));
             const activeCardIds = new Set(cards.map((c: any) => c.id));
 
-            if (isAdmin && allDbCards.length > 0 && activeCardIds.size > 0) {
+            if (allDbCards.length > 0 && activeCardIds.size > 0) {
               const cardsToDelete = allDbCards.filter((c: any) => !activeCardIds.has(c.id)).map((c: any) => c.id);
               if (cardsToDelete.length > 0) {
-                console.log(`[Supabase Background Sync] Deleting ${cardsToDelete.length} obsolete cards in batches...`);
+                console.log(`[Supabase Background Sync] Deleting ${cardsToDelete.length} obsolete cards for user (${currentUserId})...`);
                 for (let i = 0; i < cardsToDelete.length; i += 500) {
                   await supabase.from('cards').delete().in('id', cardsToDelete.slice(i, i + 500));
                 }
               }
             }
 
-            if (isAdmin && allDbDecks.length > 0 && activeDeckIds.size > 0) {
+            if (allDbDecks.length > 0 && activeDeckIds.size > 0) {
               const decksToDelete = allDbDecks.filter((d: any) => !activeDeckIds.has(d.id)).map((d: any) => d.id);
               if (decksToDelete.length > 0) {
-                console.log(`[Supabase Background Sync] Deleting ${decksToDelete.length} obsolete decks in batches...`);
+                console.log(`[Supabase Background Sync] Deleting ${decksToDelete.length} obsolete decks for user (${currentUserId})...`);
                 for (let i = 0; i < decksToDelete.length; i += 500) {
                   const chunk = decksToDelete.slice(i, i + 500);
                   await supabase.from('decks').update({ parentId: null }).in('id', chunk);
@@ -2794,7 +2820,8 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
               backLang: f.backLang,
               position: index,
               createdAt: f.createdAt || new Date().toISOString(),
-              updatedAt: f.updatedAt || new Date().toISOString()
+              updatedAt: f.updatedAt || new Date().toISOString(),
+              userId: f.userId || currentUserId
             }));
             
             if (decksNoParent.length > 0) {
@@ -2817,7 +2844,8 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
               backLang: f.backLang,
               position: index,
               createdAt: f.createdAt || new Date().toISOString(),
-              updatedAt: f.updatedAt || new Date().toISOString()
+              updatedAt: f.updatedAt || new Date().toISOString(),
+              userId: f.userId || currentUserId
             }));
 
             if (decksWithParent.length > 0) {
@@ -2850,7 +2878,8 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
               streak: c.streak || 0,
               difficulty: c.difficulty || 'medium',
               position: index,
-              createdAt: c.createdAt || new Date().toISOString()
+              createdAt: c.createdAt || new Date().toISOString(),
+              userId: c.userId || currentUserId
             }));
 
             if (cardsToInsert.length > 0) {
@@ -2957,7 +2986,8 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         backLang: f.backLang,
         position: index,
         createdAt: f.createdAt || new Date().toISOString(),
-        updatedAt: f.updatedAt || new Date().toISOString()
+        updatedAt: f.updatedAt || new Date().toISOString(),
+        userId: f.userId || currentUser?.userId || currentUser?.id
       }));
 
       if (decksNoParent.length > 0) {
@@ -2980,7 +3010,8 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         backLang: f.backLang,
         position: index,
         createdAt: f.createdAt || new Date().toISOString(),
-        updatedAt: f.updatedAt || new Date().toISOString()
+        updatedAt: f.updatedAt || new Date().toISOString(),
+        userId: f.userId || currentUser?.userId || currentUser?.id
       }));
 
       if (decksWithParent.length > 0) {
@@ -3013,7 +3044,8 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         streak: c.streak || 0,
         difficulty: c.difficulty || 'medium',
         position: index,
-        createdAt: c.createdAt || new Date().toISOString()
+        createdAt: c.createdAt || new Date().toISOString(),
+        userId: c.userId || currentUser?.userId || currentUser?.id
       }));
 
       if (cardsToInsert.length > 0) {
@@ -3112,7 +3144,8 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         frontLang: d.frontLang,
         backLang: d.backLang,
         createdAt: d.createdAt,
-        updatedAt: d.updatedAt
+        updatedAt: d.updatedAt,
+        userId: d.userId ? d.userId.trim() : undefined
       }));
 
       const mappedCards = (cards || []).map((c: any) => ({
@@ -3136,7 +3169,8 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         translationHint: c.translationHint || undefined,
         streak: c.streak || 0,
         difficulty: c.difficulty || undefined,
-        createdAt: c.createdAt
+        createdAt: c.createdAt,
+        userId: c.userId ? c.userId.trim() : undefined
       }));
 
       // Preserve existing users and transcripts when pulling
