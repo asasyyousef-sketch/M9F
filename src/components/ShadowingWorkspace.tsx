@@ -551,8 +551,7 @@ export function ShadowingWorkspace({
 
           if (!blob) {
             try {
-              const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-              const apiBase = isLocalhost ? "http://localhost:3000/api/tts" : "/api/tts";
+              const apiBase = "/api/tts";
               const fallbackRes = await fetch(
                 `${apiBase}?text=${encodeURIComponent(text)}&lang=${encodeURIComponent(language)}&voice=${encodeURIComponent(`gradio:${cleanVoice}`)}&gradioUrl=${encodeURIComponent(effectiveGradioUrl)}&_t=${Date.now()}`
               );
@@ -625,8 +624,7 @@ export function ShadowingWorkspace({
 
       setIsTranslatingWithAi(true);
       try {
-        const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-        const apiBase = isLocalhost ? "http://localhost:3000/api/shadowing/translate-sentences" : "/api/shadowing/translate-sentences";
+        const apiBase = "/api/shadowing/translate-sentences";
 
         const res = await fetch(apiBase, {
           method: "POST",
@@ -679,8 +677,7 @@ export function ShadowingWorkspace({
 
       setIsTranslatingWithAi(true);
       try {
-        const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-        const apiBase = isLocalhost ? "http://localhost:3000/api/shadowing/translate-sentences" : "/api/shadowing/translate-sentences";
+        const apiBase = "/api/shadowing/translate-sentences";
 
         const res = await fetch(apiBase, {
           method: "POST",
