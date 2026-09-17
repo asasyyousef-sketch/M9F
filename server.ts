@@ -1478,15 +1478,13 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
 ]
 `;
 
-      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
+      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-2.5-flash";
       const candidateModels = Array.from(new Set([
         primaryModel,
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.7-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-3.1-flash-lite"
-      ])).filter(m => !m.includes("groq") && m !== "gemini-2.5-flash");
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-1.5-flash"
+      ])).map(m => (m.includes("3.") || m.includes("groq") || m.includes("grok")) ? "gemini-2.5-flash" : m);
 
       let rawJson = "[]";
       let usedModel = primaryModel;
@@ -1626,15 +1624,13 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
   }
 ]`;
 
-      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
+      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-2.5-flash";
       const candidateModels = Array.from(new Set([
         primaryModel,
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.7-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-3.1-flash-lite"
-      ])).filter(m => !m.includes("groq") && m !== "gemini-2.5-flash");
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-1.5-flash"
+      ])).map(m => (m.includes("3.") || m.includes("groq") || m.includes("grok")) ? "gemini-2.5-flash" : m);
 
       let rawJson = "[]";
       let usedModel = primaryModel;
@@ -1779,15 +1775,13 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
   }
 ]`;
 
-      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.8-flash";
+      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-2.5-flash";
       const candidateModels = Array.from(new Set([
         primaryModel,
-        "gemini-3.8-flash",
-        "gemini-3.7-flash",
-        "gemini-3.5-flash",
-        "gemini-3.1-flash-lite",
-        "gemini-3.1-pro-preview"
-      ])).filter(m => !m.includes("groq") && m !== "gemini-2.5-flash" && m !== "gemini-1.5-flash");
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-1.5-flash"
+      ])).map(m => (m.includes("3.") || m.includes("groq") || m.includes("grok")) ? "gemini-2.5-flash" : m);
 
       let rawJson = "[]";
       let usedModel = primaryModel;

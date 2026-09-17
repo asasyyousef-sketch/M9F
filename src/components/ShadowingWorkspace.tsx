@@ -640,7 +640,14 @@ export function ShadowingWorkspace({
           }),
         });
 
-        const data = await res.json();
+        const resText = await res.text();
+        let data: any = {};
+        try {
+          data = resText ? JSON.parse(resText) : {};
+        } catch (jsonErr) {
+          throw new Error(`تعذر قراءة استجابة السيرفر (${res.status})`);
+        }
+
         if (!res.ok || !data.success) {
           throw new Error(data.error || "تعذر إتمام الترجمة عبر الذكاء الاصطناعي");
         }
@@ -686,7 +693,14 @@ export function ShadowingWorkspace({
           }),
         });
 
-        const data = await res.json();
+        const resText = await res.text();
+        let data: any = {};
+        try {
+          data = resText ? JSON.parse(resText) : {};
+        } catch (jsonErr) {
+          throw new Error(`تعذر قراءة استجابة السيرفر (${res.status})`);
+        }
+
         if (!res.ok || !data.success) {
           throw new Error(data.error || "تعذر ترجمة الجملة");
         }
