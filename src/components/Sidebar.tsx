@@ -577,14 +577,14 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
               )}
             </button>
 
-            {/* Shadowing Studio (شادوينج) */}
+            {/* Shadowing Studio (استوديو الشادوينج) */}
             <button
               type="button"
               onClick={() => {
                 onSelectShadowing?.();
                 onClose?.();
               }}
-              title="شادوينج"
+              title="استوديو الشادوينج"
               className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
                 isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
               } ${
@@ -601,7 +601,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                 <Headphones className="w-3.5 h-3.5" />
               </div>
               {!isCollapsed && (
-                <span className="truncate">شادوينج</span>
+                <span className="truncate">استوديو الشادوينج</span>
               )}
             </button>
           </div>

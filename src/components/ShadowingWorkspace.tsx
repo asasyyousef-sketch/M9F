@@ -29,12 +29,18 @@ import {
   Sliders,
   Sparkles,
   ArrowRight,
-  Settings
+  Settings,
+  Edit3,
+  Bookmark
 } from "lucide-react";
 import { Folder, Flashcard, DEFAULT_GRADIO_VOICES } from "../types";
 import { fetchGradioAudioBlob, speakClient } from "./Modals";
+import {
+  ShadowingVoiceSettingsModal,
+  ShadowingVoiceProvider,
+} from "./ShadowingVoiceSettingsModal";
 
-export type ShadowingProvider = "google" | "piper" | "external";
+export type ShadowingProvider = ShadowingVoiceProvider;
 
 export interface ShadowingSentence {
   id: string;
@@ -222,26 +228,37 @@ export function ShadowingWorkspace({
   onBackToLibrary,
   onImportCard
 }: ShadowingWorkspaceProps) {
-  // Navigation tabs: "practice" (Studio), "text-editor" (Texts), "saved" (Saved Sessions)
-  const [activeTab, setActiveTab] = useState<"practice" | "text-editor" | "saved">("practice");
-  const [showSettingsDrawer, setShowSettingsDrawer] = useState(false);
+  // Navigation tabs & Modals
+  const [activeTab, setActiveTab] = useState<"practice" | "saved">("practice");
+  const [showVoiceSettingsModal, setShowVoiceSettingsModal] = useState(false);
+  const [showTextEditorModal, setShowTextEditorModal] = useState(false);
+  const [showSavedModal, setShowSavedModal] = useState(false);
 
   // Practice Script State
   const [scriptTitle, setScriptTitle] = useState<string>("🇩🇪 محادثة في المقهى (Im Café - A1/A2)");
-  const [language, setLanguage] = useState<string>("de");
+  const [language, setLanguage] = useState<string>(() => {
+    return localStorage.getItem("shadowing_language") || "de";
+  });
   const [rawText, setRawText] = useState<string>(PRESET_SCRIPTS[0].text);
   const [sentences, setSentences] = useState<ShadowingSentence[]>([]);
   const [currentSentenceIndex, setCurrentSentenceIndex] = useState<number>(0);
 
   // Provider & Voice Selection
-  const [provider, setProvider] = useState<ShadowingProvider>("google");
-  const [selectedVoiceId, setSelectedVoiceId] = useState<string>("google");
+  const [provider, setProvider] = useState<ShadowingProvider>(() => {
+    return (localStorage.getItem("shadowing_voice_provider") as ShadowingProvider) || "google";
+  });
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string>(() => {
+    return localStorage.getItem("shadowing_voice_id") || "google";
+  });
   const [gradioUrl, setGradioUrl] = useState<string>(() => {
     return localStorage.getItem("gradio_api_url") || "https://media.smart-cards.online";
   });
 
   // Controls
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(() => {
+    const saved = localStorage.getItem("shadowing_playback_speed");
+    return saved ? parseFloat(saved) : 1.0;
+  });
   const [isLoopingModel, setIsLoopingModel] = useState<boolean>(false);
   const [autoAdvance, setAutoAdvance] = useState<boolean>(false);
 
@@ -541,15 +558,54 @@ export function ShadowingWorkspace({
       }
 
       stopAllAudio();
-      const audioData = await getReferenceAudioUrl(currentSentence.text);
 
-      if (!audioData) {
-        // Fallback WebSpeech
-        if ("speechSynthesis" in window) {
+      if (provider === "webspeech") {
+        if (typeof window !== "undefined" && "speechSynthesis" in window) {
           window.speechSynthesis.cancel();
           const utterance = new SpeechSynthesisUtterance(currentSentence.text);
           utterance.lang = language === "de" ? "de-DE" : language === "ar" ? "ar-SA" : "en-US";
           utterance.rate = playbackSpeed;
+
+          const targetVoice = browserVoices.find(
+            (v) => v.name === selectedVoiceId || v.voiceURI === selectedVoiceId
+          );
+          if (targetVoice) {
+            utterance.voice = targetVoice;
+          }
+
+          utterance.onstart = () => setIsPlayingModel(true);
+          utterance.onend = () => {
+            setIsPlayingModel(false);
+            setModelAudioProgress(100);
+            if (isLoopingModel) {
+              loopTimerRef.current = window.setTimeout(() => handlePlayModel(), 750);
+            } else if (autoAdvance && currentSentenceIndex < sentences.length - 1) {
+              setCurrentSentenceIndex((prev) => prev + 1);
+            }
+          };
+          utterance.onerror = () => setIsPlayingModel(false);
+
+          window.speechSynthesis.speak(utterance);
+        }
+        return;
+      }
+
+      const audioData = await getReferenceAudioUrl(currentSentence.text);
+
+      if (!audioData) {
+        // Fallback WebSpeech
+        if (typeof window !== "undefined" && "speechSynthesis" in window) {
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(currentSentence.text);
+          utterance.lang = language === "de" ? "de-DE" : language === "ar" ? "ar-SA" : "en-US";
+          utterance.rate = playbackSpeed;
+
+          const targetVoice = browserVoices.find(
+            (v) => v.name === selectedVoiceId || v.voiceURI === selectedVoiceId
+          );
+          if (targetVoice) {
+            utterance.voice = targetVoice;
+          }
 
           utterance.onstart = () => setIsPlayingModel(true);
           utterance.onend = () => {
@@ -1089,65 +1145,13 @@ export function ShadowingWorkspace({
               <Headphones className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-white leading-tight">استوديو الشادوينج والمحاكاة</h2>
-              <p className="text-[10px] text-slate-400">تدريب سمعي نُطقي متطابق لمشغل الفيديو</p>
+              <h2 className="text-sm font-bold text-white leading-tight">استوديو الشادوينج</h2>
             </div>
           </div>
         </div>
 
-        {/* Studio View Navigation Tabs */}
-        <div className="flex items-center bg-slate-800/90 p-1 rounded-xl border border-slate-700/80 gap-1">
-          <button
-            type="button"
-            onClick={() => setActiveTab("practice")}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              activeTab === "practice"
-                ? "bg-indigo-600 text-white shadow-sm"
-                : "text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            الاستوديو
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("text-editor")}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              activeTab === "text-editor"
-                ? "bg-indigo-600 text-white shadow-sm"
-                : "text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            محرر النصوص
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("saved")}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              activeTab === "saved"
-                ? "bg-indigo-600 text-white shadow-sm"
-                : "text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            المحفوظات ({savedSessions.length})
-          </button>
-        </div>
-
-        {/* Action Controls & Settings Toggle */}
+        {/* Action Controls */}
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowSettingsDrawer(!showSettingsDrawer)}
-            className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
-              showSettingsDrawer
-                ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
-                : "bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700"
-            }`}
-            title="إعدادات الصوت والمزود"
-          >
-            <Sliders className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">إعدادات الصوت</span>
-          </button>
-
           {onBackToLibrary && (
             <button
               type="button"
@@ -1173,119 +1177,14 @@ export function ShadowingWorkspace({
       {/* MAIN CONTENT AREA */}
       {/* ========================================================================= */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col items-center justify-start">
-        {/* Settings Drawer (Collapsible) */}
-        {showSettingsDrawer && (
-          <div className="w-full max-w-3xl mb-4 bg-slate-900/95 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-              <span className="text-xs font-bold text-slate-200 flex items-center gap-2">
-                <Settings className="w-4 h-4 text-indigo-400" />
-                خيارات مزود الصوت الأساسي (TTS Model):
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowSettingsDrawer(false)}
-                className="text-slate-400 hover:text-white text-xs cursor-pointer"
-              >
-                إغلاق
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setProvider("google");
-                  setSelectedVoiceId("google");
-                }}
-                className={`p-2.5 rounded-xl border text-right transition-all flex flex-col gap-1 cursor-pointer ${
-                  provider === "google"
-                    ? "bg-blue-600/20 border-blue-500 text-white shadow-xs"
-                    : "bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800"
-                }`}
-              >
-                <div className="flex items-center justify-between w-full">
-                  <span className="text-xs font-bold flex items-center gap-1.5">
-                    <Globe className="w-3.5 h-3.5 text-blue-400" />
-                    جوجل (Google TTS)
-                  </span>
-                  {provider === "google" && <Check className="w-3.5 h-3.5 text-blue-400" />}
-                </div>
-                <p className="text-[10px] text-slate-400">سحابي قياسي + أصوات المتصفح</p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setProvider("piper");
-                  setSelectedVoiceId(language === "de" ? "de_DE-thorsten-medium" : language === "ar" ? "ar_JO-kareem-medium" : "en_US-lessac-medium");
-                }}
-                className={`p-2.5 rounded-xl border text-right transition-all flex flex-col gap-1 cursor-pointer ${
-                  provider === "piper"
-                    ? "bg-indigo-600/20 border-indigo-500 text-white shadow-xs"
-                    : "bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800"
-                }`}
-              >
-                <div className="flex items-center justify-between w-full">
-                  <span className="text-xs font-bold flex items-center gap-1.5">
-                    <Zap className="w-3.5 h-3.5 text-indigo-400" />
-                    بايبر العصبي (Piper Neural)
-                  </span>
-                  {provider === "piper" && <Check className="w-3.5 h-3.5 text-indigo-400" />}
-                </div>
-                <p className="text-[10px] text-slate-400">سيرفر محلي نقي فائق السرعة</p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setProvider("external");
-                  setSelectedVoiceId("ryan");
-                }}
-                className={`p-2.5 rounded-xl border text-right transition-all flex flex-col gap-1 cursor-pointer ${
-                  provider === "external"
-                    ? "bg-purple-600/20 border-purple-500 text-white shadow-xs"
-                    : "bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800"
-                }`}
-              >
-                <div className="flex items-center justify-between w-full">
-                  <span className="text-xs font-bold flex items-center gap-1.5">
-                    <Server className="w-3.5 h-3.5 text-purple-400" />
-                    خارجي (Gradio Server)
-                  </span>
-                  {provider === "external" && <Check className="w-3.5 h-3.5 text-purple-400" />}
-                </div>
-                <p className="text-[10px] text-slate-400">أصوات Ryan, Serena الواقعية</p>
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* ========================================================================= */}
         {/* VIEW 1: PRACTICE STUDIO (Exact visual parity with Video Shadowing Modal) */}
         {/* ========================================================================= */}
         {activeTab === "practice" && (
           <div className="w-full max-w-2xl flex flex-col gap-3.5 sm:gap-4 select-none">
-            {/* Presets Quick Strip */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-              <span className="text-xs font-bold text-slate-400 shrink-0 flex items-center gap-1">
-                <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
-                نماذج جاهزة:
-              </span>
-              {PRESET_SCRIPTS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => handleLoadPreset(preset)}
-                  className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white shrink-0 transition-colors cursor-pointer"
-                >
-                  {preset.title}
-                </button>
-              ))}
-            </div>
-
             {/* Container Card Styled identically to Video Modal (Slate-900 / Slate-950) */}
             <div className="bg-slate-900 border border-slate-700/90 rounded-3xl p-4 sm:p-6 shadow-2xl text-slate-100 flex flex-col justify-between gap-3 sm:gap-4 text-right">
-              {/* Card Header with sentence index & LTR arrow buttons */}
+              {/* Card Header with sentence index, editor icon & LTR arrow buttons */}
               <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-purple-600/30">
@@ -1293,12 +1192,54 @@ export function ShadowingWorkspace({
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-white">
-                      شادوينج
+                      استوديو الشادوينج
                     </h3>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  {/* Saved Sessions Icon Button */}
+                  <button
+                    type="button"
+                    onClick={() => setShowSavedModal(true)}
+                    className="p-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-700/80 text-slate-300 hover:text-white transition-colors cursor-pointer flex items-center justify-center relative"
+                    title={`المحفوظات (${savedSessions.length})`}
+                    aria-label={`المحفوظات (${savedSessions.length})`}
+                  >
+                    <Bookmark className="w-4 h-4 text-amber-400" />
+                    {savedSessions.length > 0 && (
+                      <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 text-slate-950 font-bold text-[10px] rounded-full flex items-center justify-center">
+                        {savedSessions.length}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Text Editor Icon Button next to sentence navigation */}
+                  <button
+                    type="button"
+                    onClick={() => setShowTextEditorModal(true)}
+                    className="p-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-700/80 text-slate-300 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
+                    title="تحرير النص أو التقسيم"
+                    aria-label="تحرير النص أو التقسيم"
+                  >
+                    <Edit3 className="w-4 h-4 text-indigo-400" />
+                  </button>
+
+                  {/* Audio Settings Icon Button next to sentence navigation */}
+                  <button
+                    type="button"
+                    onClick={() => setShowVoiceSettingsModal(true)}
+                    className={`p-2 rounded-xl border transition-colors cursor-pointer flex items-center justify-center ${
+                      showVoiceSettingsModal
+                        ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
+                        : "bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700/80"
+                    }`}
+                    title="تخصيص وإعدادات الصوت والموديل"
+                    aria-label="تخصيص وإعدادات الصوت والموديل"
+                  >
+                    <Sliders className="w-4 h-4 text-slate-300" />
+                  </button>
+
                   {/* Sentence Navigation - Natural timeline LTR */}
                   <div className="flex items-center bg-slate-800/90 rounded-xl p-1 border border-slate-700/80" dir="ltr">
                     <button
@@ -1787,9 +1728,19 @@ export function ShadowingWorkspace({
             {sentences.length > 0 && (
               <div className="bg-slate-900 border border-slate-800/90 rounded-2xl p-4 shadow-xl space-y-2.5 text-right">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <span className="text-xs font-bold text-slate-300">
-                    قائمة الجمل المجدولة للشادوينج ({sentences.length}):
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-300">
+                      قائمة الجمل المجدولة للشادوينج ({sentences.length}):
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowTextEditorModal(true)}
+                      className="p-1 rounded-lg hover:bg-slate-800 text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer"
+                      title="تحرير النص أو التقسيم"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                   <span className="text-[11px] text-slate-400">انقر على أي جملة للانتقال إليها مباشرة</span>
                 </div>
 
@@ -1844,73 +1795,210 @@ export function ShadowingWorkspace({
           </div>
         )}
 
-        {/* ========================================================================= */}
-        {/* VIEW 2: TEXT EDITOR & SEGMENTATION */}
-        {/* ========================================================================= */}
-        {activeTab === "text-editor" && (
-          <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 text-right">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div>
-                <h3 className="text-sm font-bold text-white">محرر نصوص الشادوينج</h3>
-                <p className="text-xs text-slate-400">الصق أي محادثة أو نص وسيتم تقسيمه تلقائياً إلى جمل للمحاكاة</p>
+        {/* Text Editor & Segmentation Modal */}
+        {showTextEditorModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+            <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 text-right">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center">
+                    <Edit3 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">محرر نصوص الشادوينج</h3>
+                    <p className="text-xs text-slate-400">الصق أي محادثة أو نص وسيتم تقسيمه تلقائياً إلى جمل للمحاكاة</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={scriptTitle}
+                    onChange={(e) => setScriptTitle(e.target.value)}
+                    placeholder="عنوان النص"
+                    className="text-xs font-semibold bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 w-44 sm:w-60 text-slate-100 focus:outline-hidden focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowTextEditorModal(false)}
+                    className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                    title="إغلاق"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
 
-              <input
-                type="text"
-                value={scriptTitle}
-                onChange={(e) => setScriptTitle(e.target.value)}
-                placeholder="عنوان النص"
-                className="text-xs font-semibold bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 w-60 text-slate-100 focus:outline-hidden focus:border-indigo-500"
+              <textarea
+                rows={10}
+                value={rawText}
+                onChange={(e) => setRawText(e.target.value)}
+                placeholder="اكتب أو الصق النص هنا..."
+                className="w-full text-sm font-mono p-4 rounded-xl border border-slate-800 bg-slate-950 text-slate-100 focus:outline-hidden focus:border-indigo-500 leading-relaxed"
+                dir="ltr"
               />
-            </div>
 
-            <textarea
-              rows={12}
-              value={rawText}
-              onChange={(e) => setRawText(e.target.value)}
-              placeholder="اكتب أو الصق النص هنا..."
-              className="w-full text-sm font-mono p-4 rounded-xl border border-slate-800 bg-slate-950 text-slate-100 focus:outline-hidden focus:border-indigo-500 leading-relaxed"
-              dir="ltr"
-            />
+              <div className="flex items-center justify-between pt-2">
+                <span className="text-xs text-slate-400">
+                  الحروف: {rawText.length} | الكلمات: {rawText.trim().split(/\s+/).filter(Boolean).length}
+                </span>
 
-            <div className="flex items-center justify-between pt-2">
-              <span className="text-xs text-slate-400">
-                الحروف: {rawText.length} | الكلمات: {rawText.trim().split(/\s+/).filter(Boolean).length}
-              </span>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setRawText("")}
-                  className="px-3 py-2 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 text-xs font-bold transition-colors cursor-pointer"
-                >
-                  مسح
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    parseSentences(rawText);
-                    setActiveTab("practice");
-                    showToast("تم تقسيم النص وبدء التدريب! 🚀");
-                  }}
-                  disabled={!rawText.trim()}
-                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-sm transition-colors disabled:opacity-40 cursor-pointer"
-                >
-                  تقسيم النص وبدء التدريب
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRawText("")}
+                    className="px-3 py-2 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    مسح
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      parseSentences(rawText);
+                      setShowTextEditorModal(false);
+                      setActiveTab("practice");
+                      showToast("تم تقسيم النص وبدء التدريب! 🚀");
+                    }}
+                    disabled={!rawText.trim()}
+                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-sm transition-colors disabled:opacity-40 cursor-pointer"
+                  >
+                    تقسيم النص وبدء التدريب
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* ========================================================================= */}
-        {/* VIEW 3: SAVED SESSIONS */}
-        {/* ========================================================================= */}
+        {/* Saved Sessions Modal */}
+        {showSavedModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+            <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 text-right max-h-[85vh] flex flex-col">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3 shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center">
+                    <Bookmark className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">جلسات الشادوينج المحفوظة</h3>
+                    <p className="text-xs text-slate-400">إجمالي الجلسات: {savedSessions.length}</p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowSavedModal(false)}
+                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                  title="إغلاق"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="overflow-y-auto pr-1 flex-1">
+                {savedSessions.length === 0 ? (
+                  <div className="border border-slate-800/80 rounded-2xl p-10 text-center space-y-3 bg-slate-950/40">
+                    <FileText className="w-10 h-10 text-slate-600 mx-auto" />
+                    <h4 className="text-sm font-bold text-slate-300">لا توجد جلسات محفوظة بعد</h4>
+                    <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                      أثناء التدريب في استوديو الشادوينج، اضغط على زر "حفظ الجلسة" لتتمكن من الرجوع إليها وممارسة نطقها في أي وقت.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {savedSessions.map((session) => (
+                      <div
+                        key={session.id}
+                        onClick={() => {
+                          handleLoadSession(session);
+                          setShowSavedModal(false);
+                        }}
+                        className="bg-slate-950/60 border border-slate-800/90 rounded-2xl p-4 hover:border-indigo-500/80 transition-all cursor-pointer space-y-2.5 group"
+                      >
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-bold text-slate-200 group-hover:text-indigo-400 transition-colors">
+                            {session.title}
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteSession(session.id, e)}
+                            className="p-1 rounded-md text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+                            title="حذف الجلسة"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        <p className="text-xs text-slate-400 line-clamp-2 select-text" dir="ltr">
+                          {session.rawText}
+                        </p>
+
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-800/80">
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 rounded-md bg-slate-800 font-bold text-slate-300">
+                              {session.language.toUpperCase()}
+                            </span>
+                            <span>{session.sentences?.length || 0} جمل</span>
+                          </div>
+                          <span className="font-mono">
+                            {new Date(session.updatedAt).toLocaleDateString("ar-EG")}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* VOICE & TTS MODEL SETTINGS MODAL */}
+        <ShadowingVoiceSettingsModal
+          isOpen={showVoiceSettingsModal}
+          onClose={() => setShowVoiceSettingsModal(false)}
+          provider={provider}
+          selectedVoiceId={selectedVoiceId}
+          language={language}
+          playbackSpeed={playbackSpeed}
+          gradioUrl={gradioUrl}
+          currentSentenceText={currentSentence?.text || ""}
+          onSaveSettings={(newSettings) => {
+            setProvider(newSettings.provider);
+            setSelectedVoiceId(newSettings.selectedVoiceId);
+            setLanguage(newSettings.language);
+            setPlaybackSpeed(newSettings.playbackSpeed);
+            setGradioUrl(newSettings.gradioUrl);
+
+            // Persist preferences
+            localStorage.setItem("shadowing_voice_provider", newSettings.provider);
+            localStorage.setItem("shadowing_voice_id", newSettings.selectedVoiceId);
+            localStorage.setItem("shadowing_language", newSettings.language);
+            localStorage.setItem("shadowing_playback_speed", newSettings.playbackSpeed.toString());
+            localStorage.setItem("gradio_api_url", newSettings.gradioUrl);
+
+            // Invalidate audio cache
+            audioCacheRef.current.clear();
+            stopAllAudio();
+            showToast(`تم تطبيق الصوت والموديل: ${newSettings.selectedVoiceId} 🎧`);
+          }}
+        />
+
+        {/* VIEW: SAVED SESSIONS (Also kept for direct tab if triggered) */}
         {activeTab === "saved" && (
           <div className="w-full max-w-2xl space-y-4 text-right">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-white">جلسات الشادوينج المحفوظة:</h3>
-              <span className="text-xs text-slate-400">إجمالي الجلسات: {savedSessions.length}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">إجمالي الجلسات: {savedSessions.length}</span>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("practice")}
+                  className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                >
+                  العودة للاستوديو
+                </button>
+              </div>
             </div>
 
             {savedSessions.length === 0 ? (

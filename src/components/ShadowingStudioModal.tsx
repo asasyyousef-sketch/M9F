@@ -16,11 +16,16 @@ import {
   Award,
   Waves,
   RefreshCw,
-  Repeat
+  Repeat,
+  Sliders
 } from "lucide-react";
 import { SubtitleCue } from "../types";
 import { formatSecondsToClock } from "../utils/subtitleParser";
-import { speakClient } from "./Modals";
+import { fetchGradioAudioBlob, speakClient } from "./Modals";
+import {
+  ShadowingVoiceSettingsModal,
+  ShadowingVoiceProvider
+} from "./ShadowingVoiceSettingsModal";
 
 export interface ShadowingStudioModalProps {
   isOpen: boolean;
@@ -213,6 +218,18 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   const [shadowingMode, setShadowingMode] = useState<"listen-repeat" | "simultaneous" | "loop">("listen-repeat");
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [isLoopingSegment, setIsLoopingSegment] = useState<boolean>(false);
+  const [showVoiceSettingsModal, setShowVoiceSettingsModal] = useState<boolean>(false);
+
+  // Voice selection states
+  const [voiceProvider, setVoiceProvider] = useState<ShadowingVoiceProvider>(() => {
+    return (localStorage.getItem("shadowing_voice_provider") as ShadowingVoiceProvider) || "google";
+  });
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string>(() => {
+    return localStorage.getItem("shadowing_voice_id") || "google";
+  });
+  const [gradioUrl, setGradioUrl] = useState<string>(() => {
+    return localStorage.getItem("gradio_api_url") || "https://media.smart-cards.online";
+  });
 
   // Audio Recording States
   const [isRecording, setIsRecording] = useState<boolean>(false);
@@ -426,8 +443,34 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   };
 
   // Playback with TTS Fallback (if user wants clear studio voice)
-  const handlePlayTtsFallback = () => {
-    speakClient(cue.text, primaryLanguage || "de");
+  const handlePlayTtsFallback = async () => {
+    const lang = primaryLanguage || "de";
+    try {
+      if (voiceProvider === "external") {
+        const cleanVoice = selectedVoiceId.replace(/^gradio[:_]/i, "").trim() || "ryan";
+        const blob = await fetchGradioAudioBlob(cue.text, cleanVoice, lang, gradioUrl, false);
+        if (blob) {
+          const audio = new Audio(URL.createObjectURL(blob));
+          audio.playbackRate = playbackSpeed;
+          audio.play();
+          return;
+        }
+      } else if (voiceProvider === "piper") {
+        const voiceParam = `&voice=${encodeURIComponent(selectedVoiceId)}`;
+        const url = `/api/tts?text=${encodeURIComponent(cue.text)}&lang=${lang}${voiceParam}`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const blob = await res.blob();
+          const audio = new Audio(URL.createObjectURL(blob));
+          audio.playbackRate = playbackSpeed;
+          audio.play();
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("TTS fetch error, using fallback speech:", e);
+    }
+    speakClient(cue.text, lang);
   };
 
   // Calculate Speech Similarity & Word Analysis
@@ -769,11 +812,26 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
               <Headphones className="w-4 h-4" />
             </div>
             <h3 className="text-base font-bold text-white">
-              شادوينج
+              استوديو الشادوينج
             </h3>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Voice Settings Icon Button */}
+            <button
+              type="button"
+              onClick={() => setShowVoiceSettingsModal(true)}
+              className={`p-2 rounded-xl border transition-colors cursor-pointer flex items-center justify-center ${
+                showVoiceSettingsModal
+                  ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
+                  : "bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700/80"
+              }`}
+              title="تخصيص وإعدادات الصوت والموديل"
+              aria-label="تخصيص وإعدادات الصوت والموديل"
+            >
+              <Sliders className="w-4 h-4 text-slate-300" />
+            </button>
+
             {/* Sentence Index & Navigation - Natural LTR timeline (Left: Previous, Right: Next) */}
             <div className="flex items-center bg-slate-800/90 rounded-xl p-1 border border-slate-700/80" dir="ltr">
               <button
@@ -1223,6 +1281,30 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
             إغلاق
           </button>
         </div>
+
+        {/* VOICE & TTS MODEL SETTINGS MODAL */}
+        <ShadowingVoiceSettingsModal
+          isOpen={showVoiceSettingsModal}
+          onClose={() => setShowVoiceSettingsModal(false)}
+          provider={voiceProvider}
+          selectedVoiceId={selectedVoiceId}
+          language={primaryLanguage || "de"}
+          playbackSpeed={playbackSpeed}
+          gradioUrl={gradioUrl}
+          currentSentenceText={cue.text || ""}
+          onSaveSettings={(newSettings) => {
+            setVoiceProvider(newSettings.provider);
+            setSelectedVoiceId(newSettings.selectedVoiceId);
+            setPlaybackSpeed(newSettings.playbackSpeed);
+            setGradioUrl(newSettings.gradioUrl);
+
+            // Persist preferences
+            localStorage.setItem("shadowing_voice_provider", newSettings.provider);
+            localStorage.setItem("shadowing_voice_id", newSettings.selectedVoiceId);
+            localStorage.setItem("shadowing_playback_speed", newSettings.playbackSpeed.toString());
+            localStorage.setItem("gradio_api_url", newSettings.gradioUrl);
+          }}
+        />
       </div>
     </div>
   );
