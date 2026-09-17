@@ -48,6 +48,7 @@ const PersonaAvatarDisplay: React.FC<{
   );
 };
 import { CorrectorSession, CorrectorMessage, CorrectorAnalysis, Folder, Flashcard, Persona, PersonaReply, ExercisePersona, ExerciseChecklistItem } from "../types";
+import { ReviewChatModal } from "./ReviewChatModal";
 
 interface AICorrectorWorkspaceProps {
   onToggleSidebar?: () => void;
@@ -684,7 +685,8 @@ const QuotedTextInteractiveSpan: React.FC<{
   onSpeak?: (text: string) => void;
   onCopy?: (text: string) => void;
   onCreateCard?: (text: string) => Promise<void> | void;
-}> = ({ quotedText, onSpeak, onCopy, onCreateCard }) => {
+  onOpenChat?: (text: string) => void;
+}> = ({ quotedText, onSpeak, onCopy, onCreateCard, onOpenChat }) => {
   const [showTooltip, setShowTooltip] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isCreatingCard, setIsCreatingCard] = useState(false);
@@ -849,6 +851,23 @@ const QuotedTextInteractiveSpan: React.FC<{
                 <span>بطاقة</span>
               </button>
             )}
+
+            {/* Chat & AI Ask Button */}
+            {onOpenChat && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setShowTooltip(false);
+                  onOpenChat(quotedText);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl font-bold transition-all active:scale-95 cursor-pointer shadow-xs border border-purple-500/80"
+              >
+                <MessageSquare className="w-3.5 h-3.5 text-purple-200" />
+                <span>شات للجملة</span>
+              </button>
+            )}
           </div>
         </>
       )}
@@ -861,7 +880,8 @@ const parseInlineContent = (
   lineText: string,
   onSpeak?: (text: string) => void,
   onCopy?: (text: string) => void,
-  onCreateCard?: (text: string) => Promise<void> | void
+  onCreateCard?: (text: string) => Promise<void> | void,
+  onOpenChat?: (text: string) => void
 ): React.ReactNode => {
   const regex = /(""(.*?)""|"([^"\n]+)"|«([^»]+)»|„([^“]+)“|“([^”]+)”|`([^`]+)`|\*\*(.*?)\*\*)/g;
   const parts: React.ReactNode[] = [];
@@ -911,6 +931,7 @@ const parseInlineContent = (
           onSpeak={onSpeak}
           onCopy={onCopy}
           onCreateCard={onCreateCard}
+          onOpenChat={onOpenChat}
         />
       );
     } else {
@@ -1055,7 +1076,8 @@ const FormattedText: React.FC<{
   onSpeak?: (text: string) => void;
   onCopy?: (text: string) => void;
   onCreateCard?: (text: string) => Promise<void> | void;
-}> = ({ text, className = "", onSpeak, onCopy, onCreateCard }) => {
+  onOpenChat?: (text: string) => void;
+}> = ({ text, className = "", onSpeak, onCopy, onCreateCard, onOpenChat }) => {
   if (!text) return null;
 
   // Normalize HTML <br> tags into standard line breaks (\n)
@@ -1095,7 +1117,7 @@ const FormattedText: React.FC<{
                               : "text-start"
                           }`}
                         >
-                          {parseInlineContent(h, onSpeak, onCopy, onCreateCard)}
+                          {parseInlineContent(h, onSpeak, onCopy, onCreateCard, onOpenChat)}
                         </th>
                       );
                     })}
@@ -1123,7 +1145,7 @@ const FormattedText: React.FC<{
                                 : "text-start"
                             }`}
                           >
-                            {parseInlineContent(cell, onSpeak, onCopy, onCreateCard)}
+                            {parseInlineContent(cell, onSpeak, onCopy, onCreateCard, onOpenChat)}
                           </td>
                         );
                       })}
@@ -1149,7 +1171,7 @@ const FormattedText: React.FC<{
           return (
             <div key={bIdx} dir="auto" className="flex items-start gap-2 my-1 pr-4 pl-1 text-slate-950 text-start">
               <span className="text-[#0056f6] font-bold shrink-0 mt-0.5">•</span>
-              <div className="flex-1">{parseInlineContent(bulletMatch[2], onSpeak, onCopy, onCreateCard)}</div>
+              <div className="flex-1">{parseInlineContent(bulletMatch[2], onSpeak, onCopy, onCreateCard, onOpenChat)}</div>
             </div>
           );
         }
@@ -1160,7 +1182,7 @@ const FormattedText: React.FC<{
           return (
             <div key={bIdx} dir="auto" className="flex items-start gap-2 my-1 pr-4 pl-1 text-slate-950 text-start">
               <span className="text-[#0056f6] font-extrabold shrink-0 text-xs mt-0.5 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">{numMatch[1]}</span>
-              <div className="flex-1">{parseInlineContent(numMatch[2], onSpeak, onCopy, onCreateCard)}</div>
+              <div className="flex-1">{parseInlineContent(numMatch[2], onSpeak, onCopy, onCreateCard, onOpenChat)}</div>
             </div>
           );
         }
@@ -1170,7 +1192,7 @@ const FormattedText: React.FC<{
         if (headingMatch) {
           return (
             <div key={bIdx} dir="auto" className="font-extrabold text-slate-950 mt-2 mb-1 text-base sm:text-lg border-r-3 border-[#0056f6] pr-2.5 text-start">
-              {parseInlineContent(headingMatch[2], onSpeak, onCopy, onCreateCard)}
+              {parseInlineContent(headingMatch[2], onSpeak, onCopy, onCreateCard, onOpenChat)}
             </div>
           );
         }
@@ -1183,7 +1205,7 @@ const FormattedText: React.FC<{
         // 6. Regular text line
         return (
           <div key={bIdx} dir="auto" className="min-h-[1.2em] text-start">
-            {parseInlineContent(line, onSpeak, onCopy, onCreateCard)}
+            {parseInlineContent(line, onSpeak, onCopy, onCreateCard, onOpenChat)}
           </div>
         );
       })}
@@ -1771,6 +1793,26 @@ export const AICorrectorWorkspace: React.FC<AICorrectorWorkspaceProps> = ({
   const [showFolderPickerForMsg, setShowFolderPickerForMsg] = useState<string | null>(null);
   const [selectedTargetFolderId, setSelectedTargetFolderId] = useState<string>("");
   const [cardToastMessage, setCardToastMessage] = useState<string | null>(null);
+
+  // Interactive AI Sentence Chat Modal State
+  const [activeChatSentenceCard, setActiveChatSentenceCard] = useState<any>(null);
+
+  const handleOpenSentenceChat = (text: string, translation?: string) => {
+    if (!text || !text.trim()) return;
+    setActiveChatSentenceCard({
+      id: "corrector_sentence_" + Date.now(),
+      frontText: text.trim(),
+      backText: translation || "",
+      germanText: text.trim(),
+      primaryText: text.trim(),
+      text: text.trim(),
+      arabicText: translation || "",
+      translation: translation || "",
+      folderId: "",
+      createdAt: new Date().toISOString(),
+      streak: 0
+    });
+  };
 
   // Personas State & Management
   const [personas, setPersonas] = useState<Persona[]>(() => {
@@ -3853,7 +3895,7 @@ ${personaInstruction}
                         </div>
                       </div>
                       <div dir="auto" className="text-slate-950 font-medium text-base sm:text-lg leading-relaxed text-start bg-slate-50/90 p-4 rounded-2xl border border-slate-200/80">
-                        <FormattedText text={msg.chatReply.replyText} onSpeak={(t) => handleSpeakText(t, msg.targetLanguage)} onCopy={(t) => handleCopyText(t, msg.id)} onCreateCard={handleMakeCardFromQuotedText} />
+                        <FormattedText text={msg.chatReply.replyText} onSpeak={(t) => handleSpeakText(t, msg.targetLanguage)} onCopy={(t) => handleCopyText(t, msg.id)} onCreateCard={handleMakeCardFromQuotedText} onOpenChat={handleOpenSentenceChat} />
                       </div>
                     </div>
                   )}
@@ -3861,7 +3903,7 @@ ${personaInstruction}
                   {/* If simple message without analysis, chatReply, or personaReply */}
                   {!hasAnalysis && !msg.chatReply && !msg.personaReply && (
                     <div dir="auto" className="text-slate-950 text-base sm:text-lg leading-relaxed font-medium text-start">
-                      <FormattedText text={msg.text} onSpeak={(t) => handleSpeakText(t, msg.targetLanguage)} onCopy={(t) => handleCopyText(t, msg.id)} onCreateCard={handleMakeCardFromQuotedText} />
+                      <FormattedText text={msg.text} onSpeak={(t) => handleSpeakText(t, msg.targetLanguage)} onCopy={(t) => handleCopyText(t, msg.id)} onCreateCard={handleMakeCardFromQuotedText} onOpenChat={handleOpenSentenceChat} />
                     </div>
                   )}
 
@@ -3895,15 +3937,27 @@ ${personaInstruction}
                           </div>
                         </div>
 
-                        {/* Speech Synth Button */}
-                        <button
-                          onClick={() => handleSpeakText(msg.analysis!.correctedText, msg.targetLanguage)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-200/80 text-slate-700 font-bold text-xs rounded-xl shadow-2xs transition-colors cursor-pointer"
-                          title="استماع للنص المصحح"
-                        >
-                          <Volume2 className="w-4 h-4 text-[#0056f6]" />
-                          <span className="hidden sm:inline">نطق النص</span>
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {/* Speech Synth Button */}
+                          <button
+                            onClick={() => handleSpeakText(msg.analysis!.correctedText, msg.targetLanguage)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-200/80 text-slate-700 font-bold text-xs rounded-xl shadow-2xs transition-colors cursor-pointer"
+                            title="استماع للنص المصحح"
+                          >
+                            <Volume2 className="w-4 h-4 text-[#0056f6]" />
+                            <span className="hidden sm:inline">نطق النص</span>
+                          </button>
+
+                          {/* Sentence Chat Button */}
+                          <button
+                            onClick={() => handleOpenSentenceChat(msg.analysis!.correctedText || msg.text, msg.analysis?.explanationAr || msg.analysis?.grammarSummaryAr)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl shadow-2xs transition-all active:scale-95 cursor-pointer shadow-xs"
+                            title="فتح شات تفاعلي ومناقشة هذه الجملة مع الذكاء الاصطناعي"
+                          >
+                            <MessageSquare className="w-4 h-4 text-purple-100" />
+                            <span>💬 شات للجملة</span>
+                          </button>
+                        </div>
                       </div>
 
                       {/* Clean Corrected Text (النص المصحح الخالي من الأخطاء) */}
@@ -4047,6 +4101,14 @@ ${personaInstruction}
                                     <span className="hidden sm:inline">نسخ</span>
                                   </>
                                 )}
+                              </button>
+                              <button
+                                onClick={() => handleOpenSentenceChat(msg.analysis!.improvedExpressionText!, msg.analysis?.improvedExpressionExplanationAr)}
+                                className="p-1 px-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors cursor-pointer text-[11px] font-bold flex items-center gap-1 shadow-2xs"
+                                title="فتح شات تفاعلي ومناقشة هذه الجملة المحسنة مع الذكاء الاصطناعي"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5 text-indigo-100" />
+                                <span>شات للجملة</span>
                               </button>
                             </div>
                           </div>
@@ -5942,6 +6004,32 @@ ${personaInstruction}
                   </div>
                 </div>
 
+                {/* Dropdown Select List */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 block">اختر من القائمة المنسدلة (Model Select List):</label>
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 font-extrabold text-xs text-slate-900 p-3 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#0056f6]/30 cursor-pointer shadow-xs"
+                  >
+                    <optgroup label="🔥 الموديلات ذات الطلبات الكثيرة (500 RPD)">
+                      <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite ⚡ (500 RPD)</option>
+                      <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite ⚡ (500 RPD)</option>
+                      <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite ⚡ (10 RPM)</option>
+                    </optgroup>
+                    <optgroup label="✨ النماذج العامة والمتقدمة">
+                      <option value="gemini-3.6-flash">Gemini 3.6 Flash ⚡ (أحدث معالجة - موصى به)</option>
+                      <option value="gemini-3.5-flash">Gemini 3.5 Flash ⚡ (مستقر)</option>
+                      <option value="gemini-3.7-flash">Gemini 3.7 Flash ⚡ (تفكير متقدم)</option>
+                      <option value="groq-llama-3.3-70b">Groq Llama 3.3 70B 🚀 (فائق السرعة)</option>
+                      <option value="grok-2">Grok 2 🤖 (تفاعلي)</option>
+                      <option value="gemini-2.5-flash">Gemini 2.5 Flash ⚡ (خفيف وسريع)</option>
+                      <option value="gemini-2.5-pro">Gemini 2.5 Pro 💎 (تحليل عميق)</option>
+                      <option value="gemini-1.5-pro">Gemini 1.5 Pro 💎 (تحليل أكاديمي)</option>
+                    </optgroup>
+                  </select>
+                </div>
+
                 {/* Group A: الموديلات ذات الطلبات الكثيرة */}
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5 px-1">
@@ -7337,6 +7425,15 @@ ${personaInstruction}
           </div>
         );
       })()}
+
+      {/* Interactive AI Sentence Chat Modal */}
+      {activeChatSentenceCard && (
+        <ReviewChatModal
+          isOpen={!!activeChatSentenceCard}
+          onClose={() => setActiveChatSentenceCard(null)}
+          card={activeChatSentenceCard}
+        />
+      )}
     </div>
   );
 };

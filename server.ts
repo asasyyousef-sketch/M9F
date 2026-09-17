@@ -1709,6 +1709,144 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
     }
   });
 
+  // API Route - Translate Shadowing Sentences using Gemini AI
+  app.post("/api/shadowing/translate-sentences", async (req, res) => {
+    try {
+      const {
+        sentences = [],
+        rawText = "",
+        sourceLanguage = "de",
+        targetLanguage = "ar",
+        selectedModel = "gemini-3.8-flash",
+        customApiKey = ""
+      } = req.body;
+
+      if (!Array.isArray(sentences) || sentences.length === 0) {
+        return res.status(400).json({ error: "قائمة الجمل فارغة أو غير صحيحة" });
+      }
+
+      const headerAuth = (req.headers.authorization || "").replace("Bearer ", "").trim();
+      const headerKey = (req.headers["x-gemini-key"] as string) || "";
+      const effectiveGeminiKey =
+        (customApiKey && customApiKey.trim()) ||
+        (req.body.userApiKey && req.body.userApiKey.trim()) ||
+        (req.body.apiKey && req.body.apiKey.trim()) ||
+        headerKey.trim() ||
+        headerAuth ||
+        process.env.GEMINI_API_KEY ||
+        "";
+
+      if (!effectiveGeminiKey) {
+        return res.status(500).json({
+          error: "مفتاح GEMINI_API_KEY غير متوفر. يرجى ضبط مفتاح Gemini في الإعدادات."
+        });
+      }
+
+      const aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
+
+      const langNameMap: Record<string, string> = {
+        ar: "العربية",
+        en: "الإنجليزية (English)",
+        de: "الألمانية (Deutsch)",
+        fr: "الفرنسية (Français)",
+        es: "الإسبانية (Español)",
+        tr: "التركية (Türkçe)",
+        it: "الإيطالية (Italiano)",
+        ru: "الروسية (Russian)",
+        zh: "الصينية (Chinese)",
+        ja: "اليابانية (Japanese)",
+        ko: "الكورية (Korean)"
+      };
+
+      const targetLangName = langNameMap[targetLanguage] || targetLanguage || "العربية";
+      const sourceLangName = langNameMap[sourceLanguage] || sourceLanguage || "اللغة الأصلية";
+
+      const prompt = `أنت مترجم لغوي فوري ومحترف لتدريب الشادوينج (Shadowing) والنطق السليم.
+المهمة:
+قم بترجمة الجمل والعبارات التالية بدقة وسلاسة وسياق طبيعي من ${sourceLangName} إلى ${targetLangName}.
+حافظ بدقة على المعرف (id) لكل جملة لربط الترجمة بالجملة الأصلية.
+
+قائمة الجمل الأصلية:
+${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${idx + 1}`, text: s.text || "" })), null, 2)}
+
+الشروط:
+1. حافظ على المعنى السياقي السليم، والصياغة الطبيعية والمفهومة.
+2. أرجع النتيجة حصراً كمصفوفة JSON بالتنسيق التالي بدون أي نصوص إضافية:
+[
+  {
+    "id": "معرف الجملة نفسه",
+    "translation": "الترجمة هنا باللغة ${targetLangName}"
+  }
+]`;
+
+      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.8-flash";
+      const candidateModels = Array.from(new Set([
+        primaryModel,
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-3.1-pro-preview"
+      ])).filter(m => !m.includes("groq") && m !== "gemini-2.5-flash" && m !== "gemini-1.5-flash");
+
+      let rawJson = "[]";
+      let usedModel = primaryModel;
+      let lastErr: any = null;
+
+      for (const modelToTry of candidateModels) {
+        try {
+          const response = await aiClient.models.generateContent({
+            model: modelToTry,
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json"
+            }
+          });
+          if (response.text) {
+            rawJson = response.text;
+            usedModel = modelToTry;
+            break;
+          }
+        } catch (err: any) {
+          console.warn(`Shadowing translation failed on model ${modelToTry}, trying fallback...`, err?.message);
+          lastErr = err;
+        }
+      }
+
+      if (rawJson === "[]" && lastErr) {
+        throw lastErr;
+      }
+
+      let parsedResults: any[] = [];
+      try {
+        parsedResults = JSON.parse(rawJson);
+      } catch (err) {
+        console.error("Failed to parse Gemini Shadowing translation JSON:", err);
+      }
+
+      if (!Array.isArray(parsedResults) || parsedResults.length === 0) {
+        return res.status(500).json({ error: "لم يتمكن الذكاء الاصطناعي من توليد الترجمات المطلوبة" });
+      }
+
+      const translationsMap: Record<string, string> = {};
+      parsedResults.forEach((item: any) => {
+        if (item.id && typeof item.translation === "string") {
+          translationsMap[item.id] = item.translation.trim();
+        }
+      });
+
+      res.json({
+        success: true,
+        usedModel,
+        translations: translationsMap,
+        count: Object.keys(translationsMap).length
+      });
+    } catch (e: any) {
+      console.error("Translate shadowing sentences error:", e);
+      res.status(500).json({ error: e.message || "حدث خطأ أثناء ترجمة جمل الشادوينج" });
+    }
+  });
+
   // API Route - Get Flashcard Data
   app.get("/api/duckduckgo-images", async (req, res) => {
     const query = (req.query.q as string || "avatar portrait").trim();

@@ -31,14 +31,23 @@ import {
   ArrowRight,
   Settings,
   Edit3,
-  Bookmark
+  Bookmark,
+  Download,
+  Languages,
+  FileArchive,
+  CheckCheck,
+  Loader2,
+  Layers
 } from "lucide-react";
+import JSZip from "jszip";
 import { Folder, Flashcard, DEFAULT_GRADIO_VOICES } from "../types";
 import { fetchGradioAudioBlob, speakClient } from "./Modals";
 import {
   ShadowingVoiceSettingsModal,
   ShadowingVoiceProvider,
 } from "./ShadowingVoiceSettingsModal";
+import { ReviewChatModal } from "./ReviewChatModal";
+import { MessageSquare } from "lucide-react";
 
 export type ShadowingProvider = ShadowingVoiceProvider;
 
@@ -233,6 +242,7 @@ export function ShadowingWorkspace({
   const [showVoiceSettingsModal, setShowVoiceSettingsModal] = useState(false);
   const [showTextEditorModal, setShowTextEditorModal] = useState(false);
   const [showSavedModal, setShowSavedModal] = useState(false);
+  const [chatSentenceItem, setChatSentenceItem] = useState<{ text: string; translation?: string } | null>(null);
 
   // Practice Script State
   const [scriptTitle, setScriptTitle] = useState<string>("🇩🇪 محادثة في المقهى (Im Café - A1/A2)");
@@ -324,10 +334,32 @@ export function ShadowingWorkspace({
   const modelAnimRef = useRef<number | null>(null);
   const userAnimRef = useRef<number | null>(null);
 
+  // AI Translation State (Exclusive to Shadowing / Text Studio)
+  const [isTranslatingWithAi, setIsTranslatingWithAi] = useState<boolean>(false);
+  const [aiTranslationModel, setAiTranslationModel] = useState<string>(() => {
+    return localStorage.getItem("shadowing_ai_translation_model") || "gemini-3.8-flash";
+  });
+  const [aiTargetLanguage, setAiTargetLanguage] = useState<string>(() => {
+    return localStorage.getItem("shadowing_ai_target_lang") || "ar";
+  });
+  const [editingTranslationSentenceId, setEditingTranslationSentenceId] = useState<string | null>(null);
+  const [editingTranslationText, setEditingTranslationText] = useState<string>("");
+
+  // Sentence Pre-download & Audio Cache State
+  const [downloadProgress, setDownloadProgress] = useState<{
+    current: number;
+    total: number;
+    isRunning: boolean;
+    currentSentence?: string;
+  } | null>(null);
+  const [isExportingZip, setIsExportingZip] = useState<boolean>(false);
+  const [cachedAudioKeys, setCachedAudioKeys] = useState<Record<string, boolean>>({});
+  const cancelDownloadRef = useRef<boolean>(false);
+
   // Toast Helper
-  const showToast = useCallback((msg: string) => {
+  const showToast = useCallback((msg: string, _type?: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3200);
+    setTimeout(() => setToastMessage(null), 3500);
   }, []);
 
   // Populate browser voices
@@ -539,6 +571,7 @@ export function ShadowingWorkspace({
             const url = URL.createObjectURL(blob);
             const res = { url, blob };
             audioCacheRef.current.set(cacheKey, res);
+            setCachedAudioKeys((prev) => ({ ...prev, [text]: true }));
             return res;
           }
           throw new Error("Failed to generate Gradio audio");
@@ -551,6 +584,7 @@ export function ShadowingWorkspace({
             const objectUrl = URL.createObjectURL(blob);
             const item = { url: objectUrl, blob };
             audioCacheRef.current.set(cacheKey, item);
+            setCachedAudioKeys((prev) => ({ ...prev, [text]: true }));
             return item;
           }
           throw new Error("Piper TTS failed");
@@ -563,6 +597,7 @@ export function ShadowingWorkspace({
             const objectUrl = URL.createObjectURL(blob);
             const item = { url: objectUrl, blob };
             audioCacheRef.current.set(cacheKey, item);
+            setCachedAudioKeys((prev) => ({ ...prev, [text]: true }));
             return item;
           }
           return null; // Will fallback to WebSpeech
@@ -576,6 +611,260 @@ export function ShadowingWorkspace({
     },
     [provider, selectedVoiceId, language, gradioUrl]
   );
+
+  // ---------------------------------------------------------------------------
+  // AI TRANSLATION HANDLERS (FULL SCRIPT / INDIVIDUAL SENTENCES)
+  // ---------------------------------------------------------------------------
+  const handleTranslateAllWithAi = useCallback(
+    async (sentencesList?: ShadowingSentence[]) => {
+      const targetList = sentencesList && sentencesList.length > 0 ? sentencesList : sentences;
+      if (targetList.length === 0) {
+        showToast("لا توجد جمل للترجمة حالياً.");
+        return;
+      }
+
+      setIsTranslatingWithAi(true);
+      try {
+        const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+        const apiBase = isLocalhost ? "http://localhost:3000/api/shadowing/translate-sentences" : "/api/shadowing/translate-sentences";
+
+        const res = await fetch(apiBase, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sentences: targetList.map((s) => ({ id: s.id, text: s.text })),
+            rawText,
+            sourceLanguage: language,
+            targetLanguage: aiTargetLanguage,
+            selectedModel: aiTranslationModel,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "تعذر إتمام الترجمة عبر الذكاء الاصطناعي");
+        }
+
+        const translationsMap = data.translations || {};
+        setSentences((prev) =>
+          prev.map((sent) => ({
+            ...sent,
+            translation: translationsMap[sent.id] || sent.translation || "",
+          }))
+        );
+
+        const count = Object.keys(translationsMap).length;
+        showToast(`تمت ترجمة ${count} جملة بنجاح عبر نموذج ${data.usedModel || aiTranslationModel}! ✨`);
+      } catch (err: any) {
+        console.error("AI translation error:", err);
+        showToast(`فشلت الترجمة بالذكاء الاصطناعي: ${err.message || "خطأ اتصال بالسيرفر"}`, "error");
+      } finally {
+        setIsTranslatingWithAi(false);
+      }
+    },
+    [sentences, rawText, language, aiTargetLanguage, aiTranslationModel, showToast]
+  );
+
+  const handleTranslateSingleSentence = useCallback(
+    async (sentenceId: string) => {
+      const targetSent = sentences.find((s) => s.id === sentenceId);
+      if (!targetSent) return;
+
+      setIsTranslatingWithAi(true);
+      try {
+        const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+        const apiBase = isLocalhost ? "http://localhost:3000/api/shadowing/translate-sentences" : "/api/shadowing/translate-sentences";
+
+        const res = await fetch(apiBase, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sentences: [{ id: targetSent.id, text: targetSent.text }],
+            sourceLanguage: language,
+            targetLanguage: aiTargetLanguage,
+            selectedModel: aiTranslationModel,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "تعذر ترجمة الجملة");
+        }
+
+        const trans = data.translations?.[targetSent.id];
+        if (trans) {
+          setSentences((prev) =>
+            prev.map((s) => (s.id === sentenceId ? { ...s, translation: trans } : s))
+          );
+          showToast("تمت ترجمة الجملة بنجاح! ✨");
+        }
+      } catch (err: any) {
+        showToast(`فشل الترجمة: ${err.message}`, "error");
+      } finally {
+        setIsTranslatingWithAi(false);
+      }
+    },
+    [sentences, language, aiTargetLanguage, aiTranslationModel, showToast]
+  );
+
+  const handleSaveSentenceTranslation = useCallback(
+    (sentenceId: string, newTranslation: string) => {
+      setSentences((prev) =>
+        prev.map((s) => (s.id === sentenceId ? { ...s, translation: newTranslation.trim() } : s))
+      );
+      setEditingTranslationSentenceId(null);
+      setEditingTranslationText("");
+      showToast("تم حفظ الترجمة بنجاح.");
+    },
+    [showToast]
+  );
+
+  // ---------------------------------------------------------------------------
+  // SENTENCE AUDIO PRE-DOWNLOAD & CACHING HANDLERS
+  // ---------------------------------------------------------------------------
+  const handlePreDownloadAllAudio = useCallback(async () => {
+    if (sentences.length === 0) {
+      showToast("لا توجد جمل لتنزيل أصواتها.");
+      return;
+    }
+
+    cancelDownloadRef.current = false;
+    setDownloadProgress({
+      current: 0,
+      total: sentences.length,
+      isRunning: true,
+    });
+
+    let successCount = 0;
+    for (let i = 0; i < sentences.length; i++) {
+      if (cancelDownloadRef.current) {
+        showToast("تم إيقاف عملية التنزيل المسبق.");
+        break;
+      }
+      const s = sentences[i];
+      setDownloadProgress({
+        current: i + 1,
+        total: sentences.length,
+        isRunning: true,
+        currentSentence: s.text,
+      });
+
+      try {
+        const res = await getReferenceAudioUrl(s.text);
+        if (res?.blob || res?.url) {
+          successCount++;
+          setCachedAudioKeys((prev) => ({ ...prev, [s.text]: true }));
+        }
+      } catch (err) {
+        console.warn(`Pre-download failed for sentence ${i + 1}:`, err);
+      }
+
+      // Small throttle interval
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+
+    setDownloadProgress(null);
+    if (!cancelDownloadRef.current) {
+      showToast(`تم تنزيل وتخزين ${successCount} من ${sentences.length} صوتاً محلياً بنجاح! 🎧`);
+    }
+  }, [sentences, getReferenceAudioUrl, showToast]);
+
+  const handleCancelPreDownload = useCallback(() => {
+    cancelDownloadRef.current = true;
+    setDownloadProgress(null);
+    showToast("تم إلغاء التنزيل المسبق.");
+  }, [showToast]);
+
+  const handleDownloadSingleSentenceAudio = useCallback(
+    async (sent: ShadowingSentence, index: number) => {
+      try {
+        showToast("جاري تجهيز المقطع الصوتي للتحميل...");
+        const res = await getReferenceAudioUrl(sent.text);
+        if (!res?.blob) {
+          throw new Error("تعذر الحصول على الملف الصوتي من المزود");
+        }
+        const ext = res.blob.type.includes("wav") ? "wav" : "mp3";
+        const cleanText = sent.text.slice(0, 20).replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, "_");
+        const filename = `shadowing_${(index + 1).toString().padStart(2, "0")}_${cleanText}.${ext}`;
+
+        const url = URL.createObjectURL(res.blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+
+        showToast(`تم تنزيل المقطع الصوتي (${filename}) بنجاح! 📥`);
+      } catch (err: any) {
+        showToast(`فشل تنزيل الصوت: ${err.message}`, "error");
+      }
+    },
+    [getReferenceAudioUrl, showToast]
+  );
+
+  const handleDownloadAllAudioZip = useCallback(async () => {
+    if (sentences.length === 0) {
+      showToast("لا توجد جمل لتحميل حزمتها الصوتية.");
+      return;
+    }
+
+    setIsExportingZip(true);
+    showToast("جاري تجميع وحزم الأصوات والترجمات في ملف ZIP...");
+    try {
+      const zip = new JSZip();
+      const folder = zip.folder("shadowing_audio") || zip;
+
+      let transcriptContent = `=========================================\n` +
+        ` استوديو الشادوينج - حزمة الأصوات والنصوص\n` +
+        `=========================================\n` +
+        `العنوان: ${scriptTitle}\n` +
+        `اللغة: ${language}\n` +
+        `مزود الصوت: ${provider} (${selectedVoiceId})\n` +
+        `موديل الترجمة: ${aiTranslationModel}\n` +
+        `تاريخ التصدير: ${new Date().toLocaleString("ar")}\n\n` +
+        `=========================================\n\n`;
+
+      for (let i = 0; i < sentences.length; i++) {
+        const s = sentences[i];
+        const idxStr = (i + 1).toString().padStart(2, "0");
+        const cleanName = s.text.slice(0, 20).replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, "_");
+
+        transcriptContent += `[${idxStr}] ${s.text}\n`;
+        if (s.translation) {
+          transcriptContent += `الترجمة: ${s.translation}\n`;
+        }
+        transcriptContent += `\n`;
+
+        const res = await getReferenceAudioUrl(s.text);
+        if (res?.blob) {
+          const ext = res.blob.type.includes("wav") ? "wav" : "mp3";
+          folder.file(`${idxStr}_${cleanName}.${ext}`, res.blob);
+        }
+      }
+
+      folder.file("transcript_and_translations.txt", transcriptContent);
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const cleanTitle = scriptTitle.slice(0, 25).replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, "_");
+      const filename = `Shadowing_${cleanTitle || "Audio"}_Package.zip`;
+
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(zipBlob);
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      showToast(`تم تنزيل حزمة الأصوات (${filename}) بنجاح! 📦`);
+    } catch (err: any) {
+      console.error("ZIP export error:", err);
+      showToast(`فشل تصدير حزمة ZIP: ${err.message}`, "error");
+    } finally {
+      setIsExportingZip(false);
+    }
+  }, [sentences, scriptTitle, language, provider, selectedVoiceId, aiTranslationModel, getReferenceAudioUrl, showToast]);
 
   // Play Model Audio Segment
   const handlePlayModel = useCallback(
@@ -1227,7 +1516,7 @@ export function ShadowingWorkspace({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1.5 sm:gap-2">
+                <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end">
                   {/* Saved Sessions Icon Button */}
                   <button
                     type="button"
@@ -1242,6 +1531,67 @@ export function ShadowingWorkspace({
                         {savedSessions.length}
                       </span>
                     )}
+                  </button>
+
+                  {/* Pre-Download All Audio Button (Placed right next to Saved Sessions) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (downloadProgress?.isRunning) {
+                        handleCancelPreDownload();
+                      } else {
+                        handlePreDownloadAllAudio();
+                      }
+                    }}
+                    disabled={sentences.length === 0}
+                    className={`p-2 rounded-xl border transition-colors cursor-pointer flex items-center justify-center disabled:opacity-40 ${
+                      downloadProgress?.isRunning
+                        ? "bg-rose-950/70 border-rose-500/50 text-rose-300 hover:bg-rose-900"
+                        : "bg-slate-800/90 hover:bg-slate-700 border-slate-700/80 text-emerald-400 hover:text-emerald-300"
+                    }`}
+                    title={downloadProgress?.isRunning ? "إيقاف التنزيل المسبق للأصوات" : "تنزيل وتخزين أصوات جميع الجمل مسبقاً"}
+                    aria-label="تنزيل وتخزين أصوات جميع الجمل مسبقاً"
+                  >
+                    {downloadProgress?.isRunning ? (
+                      <Loader2 className="w-4 h-4 text-rose-400 animate-spin" />
+                    ) : (
+                      <Zap className="w-4 h-4 text-emerald-400" />
+                    )}
+                  </button>
+
+                  {/* Single AI Translate All Button */}
+                  <button
+                    type="button"
+                    onClick={() => handleTranslateAllWithAi()}
+                    disabled={isTranslatingWithAi || sentences.length === 0}
+                    className="p-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-700/80 text-purple-400 hover:text-purple-300 transition-colors cursor-pointer flex items-center justify-center disabled:opacity-40"
+                    title={`ترجمة جميع الجمل بالذكاء الاصطناعي (${aiTranslationModel})`}
+                    aria-label={`ترجمة جميع الجمل بالذكاء الاصطناعي (${aiTranslationModel})`}
+                  >
+                    {isTranslatingWithAi ? (
+                      <RefreshCw className="w-4 h-4 text-purple-400 animate-spin" />
+                    ) : (
+                      <Languages className="w-4 h-4 text-purple-400" />
+                    )}
+                  </button>
+
+                  {/* AI Chat Icon Button for Current Sentence */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (currentSentence) {
+                        setChatSentenceItem({
+                          text: currentSentence.text,
+                          translation: currentSentence.translation
+                        });
+                      }
+                    }}
+                    disabled={!currentSentence}
+                    className="p-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-700/80 text-slate-300 hover:text-white transition-colors cursor-pointer flex items-center justify-center disabled:opacity-40"
+                    title="فتح شات ومناقشة الجملة الحالية مع الذكاء الاصطناعي"
+                    aria-label="فتح شات ومناقشة الجملة الحالية مع الذكاء الاصطناعي"
+                  >
+                    <MessageSquare className="w-4 h-4 text-cyan-400" />
                   </button>
 
                   {/* Text Editor Icon Button next to sentence navigation */}
@@ -1264,8 +1614,8 @@ export function ShadowingWorkspace({
                         ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
                         : "bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700/80"
                     }`}
-                    title="تخصيص وإعدادات الصوت والموديل"
-                    aria-label="تخصيص وإعدادات الصوت والموديل"
+                    title="تخصيص وإعدادات الصوت وموديل الترجمة"
+                    aria-label="تخصيص وإعدادات الصوت وموديل الترجمة"
                   >
                     <Sliders className="w-4 h-4 text-slate-300" />
                   </button>
@@ -1305,10 +1655,41 @@ export function ShadowingWorkspace({
                 </div>
               </div>
 
-              {/* Target Sentence Card - Fixed consistent height so navigating between cues never alters size */}
-              <div className="h-32 sm:h-36 shrink-0 p-3.5 sm:p-4 rounded-2xl bg-slate-950/40 border border-slate-800/80 relative flex flex-col justify-between overflow-hidden">
+              {/* Pre-download Active Progress Notification Banner */}
+              {downloadProgress?.isRunning && (
+                <div className="p-3 rounded-2xl bg-emerald-950/70 border border-emerald-500/50 flex items-center justify-between gap-3 text-xs text-emerald-200 animate-fadeIn">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Loader2 className="w-4 h-4 text-emerald-400 animate-spin shrink-0" />
+                    <div className="min-w-0">
+                      <div className="font-bold flex items-center gap-1.5">
+                        <span>جاري تنزيل وتخزين أصوات الجمل مسبقاً:</span>
+                        <span className="font-mono">
+                          {downloadProgress.current} / {downloadProgress.total} (
+                          {Math.round((downloadProgress.current / downloadProgress.total) * 100)}%)
+                        </span>
+                      </div>
+                      {downloadProgress.currentSentence && (
+                        <p className="text-[11px] text-emerald-300/80 truncate" dir="ltr">
+                          {downloadProgress.currentSentence}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleCancelPreDownload}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-900/80 hover:bg-rose-900 text-emerald-200 hover:text-rose-200 text-xs font-bold border border-emerald-600/50 transition-colors cursor-pointer shrink-0"
+                  >
+                    إلغاء
+                  </button>
+                </div>
+              )}
+
+              {/* Target Sentence Card */}
+              <div className="min-h-36 shrink-0 p-3.5 sm:p-4 rounded-2xl bg-slate-950/60 border border-slate-800/90 relative flex flex-col justify-between overflow-hidden gap-2">
                 {/* Timestamp & Info Tag */}
-                <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono select-none shrink-0 pb-1 border-b border-slate-800/40">
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono select-none shrink-0 pb-1.5 border-b border-slate-800/60">
                   <div className="flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5 text-sky-400" />
                     <span>
@@ -1318,11 +1699,10 @@ export function ShadowingWorkspace({
                       ({(modelAudioDuration || 2.5).toFixed(1)}ث)
                     </span>
                   </div>
-                  <span className="text-[10px] text-slate-400 font-sans">{scriptTitle}</span>
                 </div>
 
                 {/* Primary Sentence Text with Word Accuracy Highlights */}
-                <div className="flex-1 overflow-y-auto pr-1 my-1 space-y-1.5 flex flex-col justify-center">
+                <div className="flex-1 my-1 space-y-2 flex flex-col justify-center">
                   <div
                     className="text-base sm:text-lg font-medium text-slate-100 leading-relaxed select-text"
                     dir={detectDirection(currentSentence?.text || "")}
@@ -1372,13 +1752,23 @@ export function ShadowingWorkspace({
                     </p>
                   </div>
 
-                  {currentSentence?.translation && (
-                    <p
-                      className="text-xs sm:text-sm text-slate-400 font-normal leading-relaxed pt-1.5 border-t border-slate-800/60"
-                      dir={detectDirection(currentSentence.translation)}
-                    >
-                      {currentSentence.translation}
-                    </p>
+                  {/* Translation Display */}
+                  {currentSentence?.translation ? (
+                    <div className="pt-1.5 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                      <p
+                        className="text-xs sm:text-sm text-purple-200 font-normal leading-relaxed select-text"
+                        dir={detectDirection(currentSentence.translation)}
+                      >
+                        {currentSentence.translation}
+                      </p>
+                      <span className="text-[10px] text-slate-400 shrink-0 font-mono">
+                        ترجمة
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="pt-1.5 border-t border-slate-800/60 flex items-center justify-between text-[11px] text-slate-400">
+                      <span>لا توجد ترجمة مسجلة لهذه الجملة بعد.</span>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1735,15 +2125,6 @@ export function ShadowingWorkspace({
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={handleExportCard}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl font-bold transition-colors cursor-pointer flex items-center gap-1.5"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>إضافة للبطاقات</span>
-                  </button>
-
-                  <button
-                    type="button"
                     onClick={handleSaveSession}
                     className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm shadow-indigo-600/30"
                   >
@@ -1756,27 +2137,32 @@ export function ShadowingWorkspace({
 
             {/* Sentences Queue List (Dark themed) */}
             {sentences.length > 0 && (
-              <div className="bg-slate-900 border border-slate-800/90 rounded-2xl p-4 shadow-xl space-y-2.5 text-right">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <div className="bg-slate-900 border border-slate-800/90 rounded-2xl p-4 shadow-xl space-y-3 text-right">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-300">
+                    <span className="text-xs font-bold text-slate-200">
                       قائمة الجمل المجدولة للشادوينج ({sentences.length}):
                     </span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    {/* Text Editor Button */}
                     <button
                       type="button"
                       onClick={() => setShowTextEditorModal(true)}
-                      className="p-1 rounded-lg hover:bg-slate-800 text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer"
+                      className="p-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-indigo-400 hover:text-indigo-300 border border-slate-700/80 transition-colors cursor-pointer flex items-center justify-center"
                       title="تحرير النص أو التقسيم"
+                      aria-label="تحرير النص أو التقسيم"
                     >
                       <Edit3 className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  <span className="text-[11px] text-slate-400">انقر على أي جملة للانتقال إليها مباشرة</span>
                 </div>
 
-                <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                   {sentences.map((sent, idx) => {
                     const isSelected = idx === currentSentenceIndex;
+                    const isCached = !!cachedAudioKeys[sent.text];
                     return (
                       <div
                         key={sent.id}
@@ -1784,38 +2170,42 @@ export function ShadowingWorkspace({
                           stopAllAudio();
                           setCurrentSentenceIndex(idx);
                         }}
-                        className={`p-2.5 rounded-xl border transition-colors flex items-center justify-between gap-3 cursor-pointer ${
+                        className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-3 cursor-pointer group ${
                           isSelected
-                            ? "bg-indigo-950/60 border-indigo-500/80 text-white font-bold shadow-xs"
-                            : "bg-slate-950/40 border-slate-800/80 hover:bg-slate-800/60 text-slate-300"
+                            ? "bg-indigo-950/70 border-indigo-500/90 text-white font-medium shadow-sm"
+                            : "bg-slate-950/50 border-slate-800/80 hover:bg-slate-800/70 text-slate-300"
                         }`}
                       >
-                        <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="flex items-start gap-2.5 min-w-0 flex-1">
                           <span
-                            className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs shrink-0 font-bold ${
+                            className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs shrink-0 font-bold mt-0.5 ${
                               isSelected ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-400"
                             }`}
                           >
                             {idx + 1}
                           </span>
-                          <span className="text-xs truncate select-text" dir="ltr">
-                            {sent.text}
-                          </span>
+
+                          <div className="min-w-0 flex-1 space-y-1 text-right">
+                            <p className="text-xs text-slate-100 font-medium truncate select-text" dir="ltr">
+                              {sent.text}
+                            </p>
+                            {sent.translation && (
+                              <p
+                                className="text-[11px] text-purple-300/80 truncate select-text"
+                                dir={detectDirection(sent.translation)}
+                              >
+                                {sent.translation}
+                              </p>
+                            )}
+                          </div>
                         </div>
 
-                        <div className="flex items-center gap-2 shrink-0">
-                          {sent.userAudioUrl && (
-                            <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
-                              <CheckCircle2 className="w-3 h-3" />
-                              مسجل
-                            </span>
-                          )}
-                          {sent.accuracyScore !== undefined && (
-                            <span className="text-[10px] font-mono font-bold text-indigo-400">
-                              {sent.accuracyScore}%
-                            </span>
-                          )}
-                        </div>
+                        {/* User recording score if available */}
+                        {sent.accuracyScore !== undefined && (
+                          <span className="text-[10px] font-mono font-bold text-indigo-400 px-1 shrink-0">
+                            {sent.accuracyScore}%
+                          </span>
+                        )}
                       </div>
                     );
                   })}
@@ -1868,12 +2258,12 @@ export function ShadowingWorkspace({
                 dir="ltr"
               />
 
-              <div className="flex items-center justify-between pt-2">
+              <div className="flex items-center justify-between pt-2 flex-wrap gap-2">
                 <span className="text-xs text-slate-400">
                   الحروف: {rawText.length} | الكلمات: {rawText.trim().split(/\s+/).filter(Boolean).length}
                 </span>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     type="button"
                     onClick={() => setRawText("")}
@@ -1890,9 +2280,27 @@ export function ShadowingWorkspace({
                       showToast("تم تقسيم النص وبدء التدريب! 🚀");
                     }}
                     disabled={!rawText.trim()}
-                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-sm transition-colors disabled:opacity-40 cursor-pointer"
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition-colors disabled:opacity-40 cursor-pointer"
                   >
-                    تقسيم النص وبدء التدريب
+                    تقسيم النص فقط
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      parseSentences(rawText);
+                      setShowTextEditorModal(false);
+                      setActiveTab("practice");
+                      showToast("تم تقسيم النص، جاري بدء الترجمة الذكية... ✨");
+                      // Immediately trigger translation
+                      setTimeout(() => {
+                        handleTranslateAllWithAi();
+                      }, 200);
+                    }}
+                    disabled={!rawText.trim()}
+                    className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-sm transition-colors disabled:opacity-40 cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                    <span>تقسيم وترجمة فورية (AI)</span>
                   </button>
                 </div>
               </div>
@@ -1993,12 +2401,16 @@ export function ShadowingWorkspace({
           playbackSpeed={playbackSpeed}
           gradioUrl={gradioUrl}
           currentSentenceText={currentSentence?.text || ""}
+          aiTranslationModel={aiTranslationModel}
+          aiTargetLanguage={aiTargetLanguage}
           onSaveSettings={(newSettings) => {
             setProvider(newSettings.provider);
             setSelectedVoiceId(newSettings.selectedVoiceId);
             setLanguage(newSettings.language);
             setPlaybackSpeed(newSettings.playbackSpeed);
             setGradioUrl(newSettings.gradioUrl);
+            setAiTranslationModel(newSettings.aiTranslationModel);
+            setAiTargetLanguage(newSettings.aiTargetLanguage);
 
             // Persist preferences
             localStorage.setItem("shadowing_voice_provider", newSettings.provider);
@@ -2007,11 +2419,13 @@ export function ShadowingWorkspace({
             localStorage.setItem("shadowing_playback_speed", newSettings.playbackSpeed.toString());
             localStorage.setItem("settings_gradio_tts_url", newSettings.gradioUrl);
             localStorage.setItem("gradio_api_url", newSettings.gradioUrl);
+            localStorage.setItem("shadowing_ai_translation_model", newSettings.aiTranslationModel);
+            localStorage.setItem("shadowing_ai_target_lang", newSettings.aiTargetLanguage);
 
             // Invalidate audio cache
             audioCacheRef.current.clear();
             stopAllAudio();
-            showToast(`تم تطبيق الصوت والموديل: ${newSettings.selectedVoiceId} 🎧`);
+            showToast(`تم تطبيق إعدادات الصوت والترجمة (${newSettings.aiTranslationModel}) 🎧`);
           }}
         />
 
@@ -2084,6 +2498,29 @@ export function ShadowingWorkspace({
           </div>
         )}
       </div>
+
+      {/* Interactive AI Chat Modal for Selected Sentence */}
+      {chatSentenceItem && (
+        <ReviewChatModal
+          isOpen={!!chatSentenceItem}
+          onClose={() => setChatSentenceItem(null)}
+          card={{
+            id: "shadowing_sentence_" + Date.now(),
+            frontText: chatSentenceItem.text,
+            backText: chatSentenceItem.translation || "",
+            germanText: chatSentenceItem.text,
+            primaryText: chatSentenceItem.text,
+            text: chatSentenceItem.text,
+            arabicText: chatSentenceItem.translation || "",
+            translation: chatSentenceItem.translation || "",
+          }}
+          folderInfo={{
+            targetLanguage: language === "de" ? "German" : language === "en" ? "English" : language === "fr" ? "French" : language === "es" ? "Spanish" : "German",
+            name: "استوديو الشادوينج - مناقشة جملة"
+          }}
+          onPlayPronunciation={(text) => speakClient(text, language || "de")}
+        />
+      )}
     </div>
   );
 }

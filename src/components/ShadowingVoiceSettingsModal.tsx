@@ -25,6 +25,86 @@ import { fetchGradioAudioBlob, speakClient } from "./Modals";
 
 export type ShadowingVoiceProvider = "google" | "piper" | "external" | "webspeech";
 
+export interface ShadowingAiModelOption {
+  id: string;
+  name: string;
+  description: string;
+  badge: string;
+  isRecommended?: boolean;
+}
+
+export const SHADOWING_AI_MODELS: ShadowingAiModelOption[] = [
+  // High Quota Models (500 RPD)
+  {
+    id: "gemini-3.5-flash-lite",
+    name: "Gemini 3.5 Flash Lite ⚡ (500 RPD)",
+    description: "أعلى سعة للطلبات (500 طلب/يومياً) للترجمة والعمل المكثف المستمر دون انقطاع.",
+    badge: "500 RPD",
+  },
+  {
+    id: "gemini-3.1-flash-lite",
+    name: "Gemini 3.1 Flash Lite ⚡ (500 RPD)",
+    description: "نموذج خفيف مستقر واقتصادي (500 طلب/يومياً) للاستجابات السريعة اللحظية.",
+    badge: "500 RPD",
+  },
+  {
+    id: "gemini-2.5-flash-lite",
+    name: "Gemini 2.5 Flash Lite ⚡ (10 RPM)",
+    description: "استجابة خفيفة وسريعة جداً للترجمة المباشرة والمحاذاة.",
+    badge: "10 RPM",
+  },
+  // General & Advanced Models
+  {
+    id: "gemini-3.6-flash",
+    name: "Gemini 3.6 Flash ⚡ (الموصى به)",
+    description: "النموذج الأساسي - أحدث وأسرع معالجة ذكية للترجمة والسياق التعبيري من جوجل.",
+    badge: "موصى به",
+    isRecommended: true,
+  },
+  {
+    id: "gemini-3.5-flash",
+    name: "Gemini 3.5 Flash ⚡",
+    description: "نموذج مستقر وفائق السرعة لترجمة الجمل الفورية والشادوينج.",
+    badge: "مستقر",
+  },
+  {
+    id: "gemini-3.7-flash",
+    name: "Gemini 3.7 Flash ⚡",
+    description: "تفكير متقدم واستنتاج تحليلي للنصوص والجمل المعقدة.",
+    badge: "تفكير متقدم",
+  },
+  {
+    id: "groq-llama-3.3-70b",
+    name: "Groq Llama 3.3 70B 🚀",
+    description: "خوادم Groq الفائقة (أداء عالي وسريع جداً بدون قيود شحن مجاني).",
+    badge: "فائق السرعة",
+  },
+  {
+    id: "grok-2",
+    name: "Grok 2 🤖",
+    description: "نموذج جروك التفاعلي للمحادثة والبلاغة اللغوية والترجمة.",
+    badge: "تفاعلي",
+  },
+  {
+    id: "gemini-2.5-flash",
+    name: "Gemini 2.5 Flash ⚡",
+    description: "نموذج تصحيح وترجمة سريع ومباشر.",
+    badge: "خفيف",
+  },
+  {
+    id: "gemini-2.5-pro",
+    name: "Gemini 2.5 Pro 💎",
+    description: "تحليل لغوي وبلاغي عميق جداً للنصوص المعقدة والإنشاء.",
+    badge: "تحليل عميق",
+  },
+  {
+    id: "gemini-1.5-pro",
+    name: "Gemini 1.5 Pro 💎",
+    description: "تحليل أكاديمي عميق وسياق واسع للجمل والإنشاء.",
+    badge: "احترافي",
+  },
+];
+
 export interface PiperVoiceModelItem {
   id: string;
   name: string;
@@ -231,12 +311,16 @@ export interface ShadowingVoiceSettingsModalProps {
   language: string;
   playbackSpeed: number;
   gradioUrl: string;
+  aiTranslationModel?: string;
+  aiTargetLanguage?: string;
   onSaveSettings: (settings: {
     provider: ShadowingVoiceProvider;
     selectedVoiceId: string;
     language: string;
     playbackSpeed: number;
     gradioUrl: string;
+    aiTranslationModel: string;
+    aiTargetLanguage: string;
   }) => void;
   currentSentenceText?: string;
 }
@@ -249,6 +333,8 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
   language: initialLanguage,
   playbackSpeed: initialPlaybackSpeed,
   gradioUrl: initialGradioUrl,
+  aiTranslationModel: initialAiModel,
+  aiTargetLanguage: initialAiTargetLang,
   onSaveSettings,
   currentSentenceText = "",
 }) => {
@@ -264,6 +350,22 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
   const [language, setLanguage] = useState<string>(initialLanguage);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(initialPlaybackSpeed);
   const [gradioUrl, setGradioUrl] = useState<string>(defaultGradioUrl);
+
+  // AI Translation Model State (Specific to Shadowing Studio)
+  const [aiTranslationModel, setAiTranslationModel] = useState<string>(() => {
+    return (
+      initialAiModel ||
+      localStorage.getItem("shadowing_ai_translation_model") ||
+      "gemini-3.8-flash"
+    );
+  });
+  const [aiTargetLanguage, setAiTargetLanguage] = useState<string>(() => {
+    return (
+      initialAiTargetLang ||
+      localStorage.getItem("shadowing_ai_target_lang") ||
+      "ar"
+    );
+  });
 
   // Dynamic server piper models list
   const [serverModels, setServerModels] = useState<PiperVoiceModelItem[]>([]);
@@ -346,6 +448,16 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
       setLanguage(initialLanguage);
       setPlaybackSpeed(initialPlaybackSpeed);
       setGradioUrl(effectiveUrl);
+      setAiTranslationModel(
+        initialAiModel ||
+        localStorage.getItem("shadowing_ai_translation_model") ||
+        "gemini-3.8-flash"
+      );
+      setAiTargetLanguage(
+        initialAiTargetLang ||
+        localStorage.getItem("shadowing_ai_target_lang") ||
+        "ar"
+      );
       setTestError(null);
       setGradioConnResult(null);
 
@@ -651,6 +763,8 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
 
     localStorage.setItem("settings_gradio_tts_url", resolvedGradioUrl);
     localStorage.setItem("gradio_api_url", resolvedGradioUrl);
+    localStorage.setItem("shadowing_ai_translation_model", aiTranslationModel);
+    localStorage.setItem("shadowing_ai_target_lang", aiTargetLanguage);
 
     onSaveSettings({
       provider,
@@ -658,6 +772,8 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
       language,
       playbackSpeed,
       gradioUrl: resolvedGradioUrl,
+      aiTranslationModel,
+      aiTargetLanguage,
     });
 
     onClose();
@@ -1285,7 +1401,122 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
           </div>
 
           {/* ========================================================================= */}
-          {/* SECTION 4: INSTANT LIVE PREVIEW & AUDIO TESTING */}
+          {/* SECTION 4: AI TRANSLATION MODEL FOR SHADOWING (EXCLUSIVE TO SHADOWING) */}
+          {/* ========================================================================= */}
+          <div className="bg-slate-800/40 border border-slate-700/80 rounded-2xl p-4 sm:p-5 space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-purple-400" />
+                4. تثبيت موديل الذكاء الاصطناعي لترجمة جمل الشادوينج (AI Translation Model):
+              </label>
+              <span className="px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-[10px] font-bold border border-purple-500/30">
+                حصري لاستوديو الشادوينج (Text Shadowing Only)
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              اختر الموديل الافتراضي الذي سيقوم بترجمة نصوص وجمل الشادوينج بالكامل إلى اللغة المستهدفة بسياق لغوي دقيق.
+            </p>
+
+            {/* AI Model Selection Dropdown List */}
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-slate-300 block">
+                قائمة اختيار الموديل (Model Selection List):
+              </label>
+              <select
+                value={aiTranslationModel}
+                onChange={(e) => setAiTranslationModel(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 text-slate-100 font-extrabold text-xs p-3 rounded-xl focus:outline-none focus:border-purple-500 cursor-pointer"
+              >
+                <optgroup label="🔥 الموديلات ذات الطلبات الكثيرة (500 RPD)">
+                  <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite ⚡ (500 RPD)</option>
+                  <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite ⚡ (500 RPD)</option>
+                  <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite ⚡ (10 RPM)</option>
+                </optgroup>
+                <optgroup label="✨ النماذج العامة والمتقدمة">
+                  <option value="gemini-3.6-flash">Gemini 3.6 Flash ⚡ (أحدث معالجة - موصى به)</option>
+                  <option value="gemini-3.5-flash">Gemini 3.5 Flash ⚡ (مستقر)</option>
+                  <option value="gemini-3.7-flash">Gemini 3.7 Flash ⚡ (تفكير متقدم)</option>
+                  <option value="groq-llama-3.3-70b">Groq Llama 3.3 70B 🚀 (فائق السرعة)</option>
+                  <option value="grok-2">Grok 2 🤖 (تفاعلي)</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash ⚡ (خفيف وسريع)</option>
+                  <option value="gemini-2.5-pro">Gemini 2.5 Pro 💎 (تحليل عميق)</option>
+                  <option value="gemini-1.5-pro">Gemini 1.5 Pro 💎 (تحليل أكاديمي)</option>
+                </optgroup>
+              </select>
+
+              {/* AI Model Grid Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                {SHADOWING_AI_MODELS.map((m) => {
+                  const isSelected = aiTranslationModel === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setAiTranslationModel(m.id)}
+                      className={`p-3 rounded-xl border text-right transition-all flex flex-col justify-between gap-1.5 cursor-pointer ${
+                        isSelected
+                          ? "bg-purple-950/60 border-purple-500 text-white shadow-md shadow-purple-950/40 ring-1 ring-purple-500/40"
+                          : "bg-slate-900/60 border-slate-700/80 text-slate-300 hover:bg-slate-800/80 hover:border-slate-600"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="text-xs font-bold flex items-center gap-1.5">
+                          <span className="font-mono text-purple-300">{m.name}</span>
+                        </span>
+                        <span
+                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${
+                            isSelected
+                              ? "bg-purple-500 text-white"
+                              : "bg-slate-800 text-slate-400 border border-slate-700"
+                          }`}
+                        >
+                          {m.badge}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-normal">
+                        {m.description}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Target Language for AI Translation */}
+            <div className="pt-2 border-t border-slate-800 flex items-center justify-between flex-wrap gap-3">
+              <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <Languages className="w-3.5 h-3.5 text-indigo-400" />
+                لغة الترجمة الافتراضية للجمل:
+              </label>
+
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {[
+                  { id: "ar", label: "🇯🇴 العربية (الافتراضية)" },
+                  { id: "en", label: "🇺🇸 الإنجليزية" },
+                  { id: "de", label: "🇩🇪 الألمانية" },
+                  { id: "fr", label: "🇫🇷 الفرنسية" },
+                  { id: "tr", label: "🇹🇷 التركية" },
+                ].map((tLang) => (
+                  <button
+                    key={tLang.id}
+                    type="button"
+                    onClick={() => setAiTargetLanguage(tLang.id)}
+                    className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer ${
+                      aiTargetLanguage === tLang.id
+                        ? "bg-purple-600 border-purple-500 text-white shadow-xs"
+                        : "bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800"
+                    }`}
+                  >
+                    {tLang.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* ========================================================================= */}
+          {/* SECTION 5: INSTANT LIVE PREVIEW & AUDIO TESTING */}
           {/* ========================================================================= */}
           <div className="bg-gradient-to-r from-indigo-950/40 via-purple-950/30 to-slate-900 border border-indigo-900/50 rounded-2xl p-4 sm:p-5 space-y-3">
             <div className="flex items-center justify-between">
