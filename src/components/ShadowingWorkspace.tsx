@@ -337,7 +337,11 @@ export function ShadowingWorkspace({
   // AI Translation State (Exclusive to Shadowing / Text Studio)
   const [isTranslatingWithAi, setIsTranslatingWithAi] = useState<boolean>(false);
   const [aiTranslationModel, setAiTranslationModel] = useState<string>(() => {
-    return localStorage.getItem("shadowing_ai_translation_model") || "gemini-3.8-flash";
+    const saved = localStorage.getItem("shadowing_ai_translation_model");
+    if (saved && (saved.includes("2.5") || saved.includes("1.5"))) {
+      return saved;
+    }
+    return "gemini-2.5-flash";
   });
   const [aiTargetLanguage, setAiTargetLanguage] = useState<string>(() => {
     return localStorage.getItem("shadowing_ai_target_lang") || "ar";
