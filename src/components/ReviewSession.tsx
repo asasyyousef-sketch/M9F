@@ -128,11 +128,15 @@ export const formatTextForArticleMode = (
 
   const trimmedText = text.trim();
 
-  // Article mode is considered active ONLY if card explicitly has isArticleMode === true OR has a non-empty correctArticle
-  const isArticleActive = Boolean(card?.isArticleMode || card?.correctArticle);
+  // Check if the front text is a single noun or a full sentence/phrase
+  const cleanTokens = trimmedText.replace(/\([^)]*\)/g, "").replace(/\s*\/.*$/, "").trim().split(/\s+/);
+  const isSingleNoun = cleanTokens.length === 1 && !/[.!?]$/.test(trimmedText);
 
-  // If article mode is not active for this card, read automatically (raw card text)
-  if (!isArticleActive && (mode === "with" || mode === "indefinite")) {
+  // Article mode is considered active ONLY for single words with isArticleMode === true or correctArticle
+  const isArticleActive = Boolean((card?.isArticleMode || card?.correctArticle) && isSingleNoun);
+
+  // If article mode is not active for this card or it is a sentence, read automatically (raw card text)
+  if (!isArticleActive && (mode === "with" || mode === "indefinite" || mode === "without")) {
     return text;
   }
 
@@ -1737,7 +1741,11 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   // Filter cards for article mode or challenge plural mode or challenge question source plural mode
   const filteredCards = React.useMemo(() => {
     if (method === "article") {
-      const artCards = cards.filter(c => c.isArticleMode || c.correctArticle);
+      const artCards = cards.filter(c => {
+        const textCandidate = (c.frontText || "").trim().replace(/\([^)]*\)/g, "").replace(/\s*\/.*$/, "").trim();
+        const isSingleWord = textCandidate.split(/\s+/).length === 1 && !/[.!?]$/.test(textCandidate);
+        return (c.isArticleMode || c.correctArticle) && isSingleWord;
+      });
       if (artCards.length > 0) return artCards;
     } else if (method === "challenge") {
       if (challengeTarget === "plural" || challengeQuestionSource === "plural") {

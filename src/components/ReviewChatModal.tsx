@@ -1818,8 +1818,17 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
       console.warn("Fallback local card creation:", err);
       // Fallback local card
       const matchArt = tokenText.trim().match(/^(der|die|das)\s+(.+)$/i);
-      const cleanFront = matchArt ? matchArt[2].trim() : tokenText.trim();
-      const articleFound = matchArt ? matchArt[1].toLowerCase() : "";
+      let cleanFront = tokenText.trim();
+      let articleFound = "";
+      if (matchArt) {
+        const noun = matchArt[2].trim();
+        const cleanCandidate = noun.replace(/\([^)]*\)/g, "").replace(/\s*\/.*$/, "").trim();
+        const isSingleNoun = cleanCandidate.split(/\s+/).length === 1 && !/[.!?]$/.test(cleanCandidate);
+        if (isSingleNoun) {
+          cleanFront = noun;
+          articleFound = matchArt[1].toLowerCase();
+        }
+      }
 
       let cachedFolders: Folder[] = [];
       let cachedCards: Flashcard[] = [];

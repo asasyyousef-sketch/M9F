@@ -7,6 +7,7 @@ import { RecycleBin } from "./components/RecycleBin";
 import { YoutubeWorkspace } from "./components/YoutubeWorkspace";
 import { MediaPlayerWorkspace } from "./components/MediaPlayerWorkspace";
 import { NotesWorkspace } from "./components/NotesWorkspace";
+import { ShadowingWorkspace } from "./components/ShadowingWorkspace";
 import {
   CreateFolderModal,
   AddCardModal,
@@ -103,8 +104,8 @@ function MainStudyApp() {
   // Mobile sidebar visibility state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Tab navigation view state: "library" | "ai" | "trash" | "youtube" | "corrector" | "media" | "notes"
-  const [viewMode, setViewMode] = useState<"library" | "ai" | "trash" | "youtube" | "corrector" | "media" | "notes">("library");
+  // Tab navigation view state: "library" | "ai" | "trash" | "youtube" | "corrector" | "media" | "notes" | "shadowing"
+  const [viewMode, setViewMode] = useState<"library" | "ai" | "trash" | "youtube" | "corrector" | "media" | "notes" | "shadowing">("library");
 
   // YouTube transcripts (spT) state
   const [transcripts, setTranscripts] = useState<TranscriptDocument[]>(() => {
@@ -962,6 +963,11 @@ function MainStudyApp() {
     setViewMode("notes");
   }, []);
 
+  const handleSelectShadowing = useCallback(() => {
+    setActiveReview(null);
+    setViewMode("shadowing");
+  }, []);
+
   const handleDataReloaded = useCallback((newFolders: Folder[], newCards: Flashcard[]) => {
     setFolders(newFolders);
     setCards(newCards);
@@ -1074,11 +1080,20 @@ function MainStudyApp() {
           onSelectCorrector={handleSelectCorrector}
           onSelectMedia={handleSelectMedia}
           onSelectNotes={handleSelectNotes}
+          onSelectShadowing={handleSelectShadowing}
           onDataReloaded={handleDataReloaded}
         />
 
         {/* Center Canvas Workspace */}
-        {viewMode === "notes" ? (
+        {viewMode === "shadowing" ? (
+          <ShadowingWorkspace
+            folders={folders}
+            cards={cards}
+            onToggleSidebar={handleToggleSidebar}
+            onBackToLibrary={handleHomeClick}
+            onImportCard={handleImportGenerated ? (newCards) => handleImportGenerated(null, newCards, activeFolderId || null) : undefined}
+          />
+        ) : viewMode === "notes" ? (
           <NotesWorkspace
             onToggleSidebar={handleToggleSidebar}
             onBackToLibrary={handleHomeClick}

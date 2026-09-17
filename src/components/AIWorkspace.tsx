@@ -566,7 +566,7 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
     }
 
     if (germanArticlesMode === "on") {
-      promptText += `- تفعيل أدوات التعريف الألمانية (isArticleMode = true) لكل الأسماء وحدد الأداة المناسبة (der/die/das/die-plural) في correctArticle.\n`;
+      promptText += `- تفعيل أدوات التعريف الألمانية (isArticleMode = true) للأسماء المفردة فقط (Single Nouns وليس الجمل الكاملة) وحدد الأداة المناسبة (der/die/das/die-plural) في correctArticle. أما الجمل فتبقى كاملة بأداتها داخل frontText مع isArticleMode = false.\n`;
     } else if (germanArticlesMode === "off") {
       promptText += `- إيقاف أدوات التعريف (isArticleMode = false) و correctArticle = "".\n`;
     }
@@ -2351,19 +2351,36 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
   };
 
   const adaptAICardToFlashcard = (aiCard: AICard): Flashcard => {
+    let finalFront = (aiCard.frontText || "").trim();
+    const cleanTokens = finalFront.replace(/\([^)]*\)/g, "").replace(/\s*\/.*$/, "").trim().split(/\s+/);
+    const isSingleWord = cleanTokens.length === 1 && !/[.!?]$/.test(finalFront);
+
+    let isArticle = isSingleWord && (aiCard.isArticleMode ?? (activeAiFolder?.germanArticlesMode === "on"));
+    let correctArt = isArticle ? (aiCard.correctArticle || "") : "";
+
+    // If it is a sentence (not a single word) and an article was placed in correctArticle, restore it to the sentence
+    if (!isSingleWord && aiCard.correctArticle && ["der", "die", "das", "die-plural"].includes(aiCard.correctArticle.toLowerCase())) {
+      const art = aiCard.correctArticle.toLowerCase() === "die-plural" ? "die" : aiCard.correctArticle.toLowerCase();
+      if (!finalFront.toLowerCase().startsWith(art + " ")) {
+        finalFront = `${art} ${finalFront}`;
+      }
+      isArticle = false;
+      correctArt = "";
+    }
+
     return {
       id: aiCard.id,
       folderId: aiCard.folderId,
-      frontText: aiCard.frontText,
+      frontText: finalFront,
       frontLang: activeAiFolder?.frontLang || "de",
       frontImage: aiCard.frontImage,
       frontImagePosition: aiCard.frontImagePosition || "50% 50%",
       backText: aiCard.backText,
       backLang: activeAiFolder?.backLang || "ar",
-      isArticleMode: aiCard.isArticleMode ?? (activeAiFolder?.germanArticlesMode === "on"),
-      correctArticle: aiCard.correctArticle || "",
-      isPluralMode: aiCard.isPluralMode ?? (activeAiFolder?.germanPluralMode === "on"),
-      pluralText: aiCard.pluralText || "",
+      isArticleMode: isArticle,
+      correctArticle: correctArt,
+      isPluralMode: isSingleWord ? (aiCard.isPluralMode ?? (activeAiFolder?.germanPluralMode === "on")) : false,
+      pluralText: isSingleWord ? (aiCard.pluralText || "") : "",
       pluralLang: aiCard.pluralLang || "de",
       translationHint: aiCard.translationHint || "",
       createdAt: new Date().toISOString(),
