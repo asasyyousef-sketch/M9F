@@ -1478,13 +1478,15 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
 ]
 `;
 
-      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-2.5-flash";
+      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
       const candidateModels = Array.from(new Set([
         primaryModel,
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-1.5-flash"
-      ])).map(m => (m.includes("3.") || m.includes("groq") || m.includes("grok")) ? "gemini-2.5-flash" : m);
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite"
+      ])).filter(m => !m.includes("groq") && m !== "gemini-2.5-flash");
 
       let rawJson = "[]";
       let usedModel = primaryModel;
@@ -1624,13 +1626,15 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
   }
 ]`;
 
-      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-2.5-flash";
+      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
       const candidateModels = Array.from(new Set([
         primaryModel,
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-1.5-flash"
-      ])).map(m => (m.includes("3.") || m.includes("groq") || m.includes("grok")) ? "gemini-2.5-flash" : m);
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite"
+      ])).filter(m => !m.includes("groq") && m !== "gemini-2.5-flash");
 
       let rawJson = "[]";
       let usedModel = primaryModel;
@@ -1775,13 +1779,17 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
   }
 ]`;
 
-      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-2.5-flash";
+      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
       const candidateModels = Array.from(new Set([
         primaryModel,
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
         "gemini-2.5-flash",
-        "gemini-2.5-pro",
         "gemini-1.5-flash"
-      ])).map(m => (m.includes("3.") || m.includes("groq") || m.includes("grok")) ? "gemini-2.5-flash" : m);
+      ])).filter(m => Boolean(m) && !m.includes("groq"));
 
       let rawJson = "[]";
       let usedModel = primaryModel;
@@ -1807,15 +1815,15 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
         }
       }
 
-      if (rawJson === "[]" && lastErr) {
+      if ((!rawJson || rawJson === "[]") && lastErr) {
         throw lastErr;
       }
 
-      let parsedResults: any[] = [];
-      try {
-        parsedResults = JSON.parse(rawJson);
-      } catch (err) {
-        console.error("Failed to parse Gemini Shadowing translation JSON:", err);
+      let parsedResults: any[] = safeExtractAndParseJSON<any[]>(rawJson, []);
+      if (!Array.isArray(parsedResults) || parsedResults.length === 0) {
+        if (parsedResults && typeof parsedResults === "object" && Array.isArray((parsedResults as any).translations)) {
+          parsedResults = (parsedResults as any).translations;
+        }
       }
 
       if (!Array.isArray(parsedResults) || parsedResults.length === 0) {

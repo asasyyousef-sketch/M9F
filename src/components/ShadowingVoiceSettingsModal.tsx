@@ -34,30 +34,74 @@ export interface ShadowingAiModelOption {
 }
 
 export const SHADOWING_AI_MODELS: ShadowingAiModelOption[] = [
+  // High Quota Models (500 RPD)
   {
-    id: "gemini-2.5-flash",
-    name: "Gemini 2.5 Flash ⚡ (الموصى به)",
-    description: "النموذج الأساسي المعتمد والمستقر - أسرع وأدق معالجة ذكية للترجمة والسياق التعبيري من جوجل.",
+    id: "gemini-3.5-flash-lite",
+    name: "Gemini 3.5 Flash Lite ⚡ (500 RPD)",
+    description: "أعلى سعة للطلبات (500 طلب/يومياً) للترجمة والعمل المكثف المستمر دون انقطاع.",
+    badge: "500 RPD",
+  },
+  {
+    id: "gemini-3.1-flash-lite",
+    name: "Gemini 3.1 Flash Lite ⚡ (500 RPD)",
+    description: "نموذج خفيف مستقر واقتصادي (500 طلب/يومياً) للاستجابات السريعة اللحظية.",
+    badge: "500 RPD",
+  },
+  {
+    id: "gemini-2.5-flash-lite",
+    name: "Gemini 2.5 Flash Lite ⚡ (10 RPM)",
+    description: "استجابة خفيفة وسريعة جداً للترجمة المباشرة والمحاذاة.",
+    badge: "10 RPM",
+  },
+  // General & Advanced Models
+  {
+    id: "gemini-3.6-flash",
+    name: "Gemini 3.6 Flash ⚡ (الموصى به)",
+    description: "النموذج الأساسي - أحدث وأسرع معالجة ذكية للترجمة والسياق التعبيري من جوجل.",
     badge: "موصى به",
     isRecommended: true,
   },
   {
-    id: "gemini-2.5-pro",
-    name: "Gemini 2.5 Pro 💎",
-    description: "نموذج المترجم المتقدم - تحليل عميق وسياق عالي الدقة للجمل المعقدة.",
-    badge: "تحليل احترافي",
+    id: "gemini-3.5-flash",
+    name: "Gemini 3.5 Flash ⚡",
+    description: "نموذج مستقر وفائق السرعة لترجمة الجمل الفورية والشادوينج.",
+    badge: "مستقر",
   },
   {
-    id: "gemini-1.5-flash",
-    name: "Gemini 1.5 Flash ⚡",
-    description: "نموذج مستقر وسريع جداً لترجمة الجمل والعبارات.",
-    badge: "مستقر",
+    id: "gemini-3.7-flash",
+    name: "Gemini 3.7 Flash ⚡",
+    description: "تفكير متقدم واستنتاج تحليلي للنصوص والجمل المعقدة.",
+    badge: "تفكير متقدم",
+  },
+  {
+    id: "groq-llama-3.3-70b",
+    name: "Groq Llama 3.3 70B 🚀",
+    description: "خوادم Groq الفائقة (أداء عالي وسريع جداً بدون قيود شحن مجاني).",
+    badge: "فائق السرعة",
+  },
+  {
+    id: "grok-2",
+    name: "Grok 2 🤖",
+    description: "نموذج جروك التفاعلي للمحادثة والبلاغة اللغوية والترجمة.",
+    badge: "تفاعلي",
+  },
+  {
+    id: "gemini-2.5-flash",
+    name: "Gemini 2.5 Flash ⚡",
+    description: "نموذج تصحيح وترجمة سريع ومباشر.",
+    badge: "خفيف",
+  },
+  {
+    id: "gemini-2.5-pro",
+    name: "Gemini 2.5 Pro 💎",
+    description: "تحليل لغوي وبلاغي عميق جداً للنصوص المعقدة والإنشاء.",
+    badge: "تحليل عميق",
   },
   {
     id: "gemini-1.5-pro",
     name: "Gemini 1.5 Pro 💎",
-    description: "ترجمة أكاديمية احترافية سياقية عالية الجودة.",
-    badge: "أكاديمي",
+    description: "تحليل أكاديمي عميق وسياق واسع للجمل والإنشاء.",
+    badge: "احترافي",
   },
 ];
 
@@ -1384,10 +1428,19 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
                 onChange={(e) => setAiTranslationModel(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 text-slate-100 font-extrabold text-xs p-3 rounded-xl focus:outline-none focus:border-purple-500 cursor-pointer"
               >
-                <optgroup label="✨ النماذج المعتمدة والرسمية">
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash ⚡ (أحدث معالجة - موصى به)</option>
+                <optgroup label="🔥 الموديلات ذات الطلبات الكثيرة (500 RPD)">
+                  <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite ⚡ (500 RPD)</option>
+                  <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite ⚡ (500 RPD)</option>
+                  <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite ⚡ (10 RPM)</option>
+                </optgroup>
+                <optgroup label="✨ النماذج العامة والمتقدمة">
+                  <option value="gemini-3.6-flash">Gemini 3.6 Flash ⚡ (أحدث معالجة - موصى به)</option>
+                  <option value="gemini-3.5-flash">Gemini 3.5 Flash ⚡ (مستقر)</option>
+                  <option value="gemini-3.7-flash">Gemini 3.7 Flash ⚡ (تفكير متقدم)</option>
+                  <option value="groq-llama-3.3-70b">Groq Llama 3.3 70B 🚀 (فائق السرعة)</option>
+                  <option value="grok-2">Grok 2 🤖 (تفاعلي)</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash ⚡ (خفيف وسريع)</option>
                   <option value="gemini-2.5-pro">Gemini 2.5 Pro 💎 (تحليل عميق)</option>
-                  <option value="gemini-1.5-flash">Gemini 1.5 Flash ⚡ (خفيف وسريع)</option>
                   <option value="gemini-1.5-pro">Gemini 1.5 Pro 💎 (تحليل أكاديمي)</option>
                 </optgroup>
               </select>

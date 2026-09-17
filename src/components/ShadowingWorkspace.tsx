@@ -337,11 +337,7 @@ export function ShadowingWorkspace({
   // AI Translation State (Exclusive to Shadowing / Text Studio)
   const [isTranslatingWithAi, setIsTranslatingWithAi] = useState<boolean>(false);
   const [aiTranslationModel, setAiTranslationModel] = useState<string>(() => {
-    const saved = localStorage.getItem("shadowing_ai_translation_model");
-    if (saved && (saved.includes("2.5") || saved.includes("1.5"))) {
-      return saved;
-    }
-    return "gemini-2.5-flash";
+    return localStorage.getItem("shadowing_ai_translation_model") || "gemini-3.8-flash";
   });
   const [aiTargetLanguage, setAiTargetLanguage] = useState<string>(() => {
     return localStorage.getItem("shadowing_ai_target_lang") || "ar";
@@ -555,7 +551,8 @@ export function ShadowingWorkspace({
 
           if (!blob) {
             try {
-              const apiBase = "/api/tts";
+              const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+              const apiBase = isLocalhost ? "http://localhost:3000/api/tts" : "/api/tts";
               const fallbackRes = await fetch(
                 `${apiBase}?text=${encodeURIComponent(text)}&lang=${encodeURIComponent(language)}&voice=${encodeURIComponent(`gradio:${cleanVoice}`)}&gradioUrl=${encodeURIComponent(effectiveGradioUrl)}&_t=${Date.now()}`
               );
@@ -628,30 +625,42 @@ export function ShadowingWorkspace({
 
       setIsTranslatingWithAi(true);
       try {
-        const apiBase = "/api/shadowing/translate-sentences";
+        const savedGeminiKey = localStorage.getItem("settings_gemini_api_key") || localStorage.getItem("gemini_api_key") || "";
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (savedGeminiKey) {
+          headers["Authorization"] = `Bearer ${savedGeminiKey}`;
+          headers["x-gemini-key"] = savedGeminiKey;
+        }
 
-        const res = await fetch(apiBase, {
+        const res = await fetch("/api/shadowing/translate-sentences", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             sentences: targetList.map((s) => ({ id: s.id, text: s.text })),
             rawText,
             sourceLanguage: language,
             targetLanguage: aiTargetLanguage,
             selectedModel: aiTranslationModel,
+            customApiKey: savedGeminiKey,
+            userApiKey: savedGeminiKey,
+            geminiApiKey: savedGeminiKey,
           }),
         });
 
-        const resText = await res.text();
+        const rawTextRes = await res.text();
         let data: any = {};
         try {
-          data = resText ? JSON.parse(resText) : {};
-        } catch (jsonErr) {
-          throw new Error(`تعذر قراءة استجابة السيرفر (${res.status})`);
+          data = rawTextRes ? JSON.parse(rawTextRes) : {};
+        } catch {
+          throw new Error(
+            res.ok
+              ? "استجابة غير صالحة من السيرفر"
+              : `خطأ من السيرفر (${res.status}): ${rawTextRes.slice(0, 150) || res.statusText}`
+          );
         }
 
         if (!res.ok || !data.success) {
-          throw new Error(data.error || "تعذر إتمام الترجمة عبر الذكاء الاصطناعي");
+          throw new Error(data.error || `تعذر إتمام الترجمة عبر الذكاء الاصطناعي (رمز ${res.status})`);
         }
 
         const translationsMap = data.translations || {};
@@ -681,29 +690,41 @@ export function ShadowingWorkspace({
 
       setIsTranslatingWithAi(true);
       try {
-        const apiBase = "/api/shadowing/translate-sentences";
+        const savedGeminiKey = localStorage.getItem("settings_gemini_api_key") || localStorage.getItem("gemini_api_key") || "";
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (savedGeminiKey) {
+          headers["Authorization"] = `Bearer ${savedGeminiKey}`;
+          headers["x-gemini-key"] = savedGeminiKey;
+        }
 
-        const res = await fetch(apiBase, {
+        const res = await fetch("/api/shadowing/translate-sentences", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             sentences: [{ id: targetSent.id, text: targetSent.text }],
             sourceLanguage: language,
             targetLanguage: aiTargetLanguage,
             selectedModel: aiTranslationModel,
+            customApiKey: savedGeminiKey,
+            userApiKey: savedGeminiKey,
+            geminiApiKey: savedGeminiKey,
           }),
         });
 
-        const resText = await res.text();
+        const rawTextRes = await res.text();
         let data: any = {};
         try {
-          data = resText ? JSON.parse(resText) : {};
-        } catch (jsonErr) {
-          throw new Error(`تعذر قراءة استجابة السيرفر (${res.status})`);
+          data = rawTextRes ? JSON.parse(rawTextRes) : {};
+        } catch {
+          throw new Error(
+            res.ok
+              ? "استجابة غير صالحة من السيرفر"
+              : `خطأ من السيرفر (${res.status}): ${rawTextRes.slice(0, 150) || res.statusText}`
+          );
         }
 
         if (!res.ok || !data.success) {
-          throw new Error(data.error || "تعذر ترجمة الجملة");
+          throw new Error(data.error || `تعذر ترجمة الجملة (رمز ${res.status})`);
         }
 
         const trans = data.translations?.[targetSent.id];
