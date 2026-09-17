@@ -17,6 +17,8 @@ import {
   Languages,
   Mic,
   Cpu,
+  Radio,
+  AlertCircle,
 } from "lucide-react";
 import { DEFAULT_GRADIO_VOICES, GRADIO_LANGUAGES } from "../types";
 import { fetchGradioAudioBlob, speakClient } from "./Modals";
@@ -210,21 +212,15 @@ export const BUILTIN_PIPER_MODELS: PiperVoiceModelItem[] = [
 
 // Additional Edge-TTS / Gradio voices list
 export const EXTENDED_EDGE_VOICES = [
-  { id: "ryan", name: "Ryan (ذكوري - إنجليزي/ألماني)", lang: "de", gender: "male" as const, desc: "صوت طبيعي متوازن" },
-  { id: "serena", name: "Serena (أنثوي - إنجليزي/ألماني)", lang: "de", gender: "female" as const, desc: "نبرة أنثوية دافئة" },
-  { id: "vivian", name: "Vivian (أنثوي - إنجليزي/ألماني)", lang: "de", gender: "female" as const, desc: "نبرة احترافية واضحة" },
-  { id: "aiden", name: "Aiden (ذكوري - إنجليزي/ألماني)", lang: "en", gender: "male" as const, desc: "صوت شبابي ديناميكي" },
-  { id: "eric", name: "Eric (ذكوري - إنجليزي/ألماني)", lang: "de", gender: "male" as const, desc: "نبرة هادئة ورصينة" },
-  { id: "dylan", name: "Dylan (ذكوري - إنجليزي/ألماني)", lang: "en", gender: "male" as const, desc: "نطق واضح للجمل السريعة" },
-  { id: "de-DE-KatjaNeural", name: "Katja Neural (ألماني أنثوي - Microsoft Edge)", lang: "de", gender: "female" as const, desc: "صوت إيدج الواقعي للألمانية" },
-  { id: "de-DE-ConradNeural", name: "Conrad Neural (ألماني ذكوري - Microsoft Edge)", lang: "de", gender: "male" as const, desc: "صوت ذكوري عميق ودقيق" },
-  { id: "en-US-JennyNeural", name: "Jenny Neural (إنجليزي أمريكي أنثوي)", lang: "en", gender: "female" as const, desc: "أعلى دقة للنطق الأمريكي" },
-  { id: "en-US-GuyNeural", name: "Guy Neural (إنجليزي أمريكي ذكوري)", lang: "en", gender: "male" as const, desc: "صوت إذاعي طبيعي" },
-  { id: "ar-SA-HamedNeural", name: "Hamed Neural (عربي ذكوري فصيح)", lang: "ar", gender: "male" as const, desc: "نطق عربي فصيح متقن" },
-  { id: "ar-SA-ZariyahNeural", name: "Zariyah Neural (عربي أنثوي فصيح)", lang: "ar", gender: "female" as const, desc: "نبرة فصيحة عذبة" },
-  { id: "uncle_fu", name: "Uncle Fu (صيني/إنجليزي)", lang: "zh", gender: "male" as const, desc: "نبرة ودية مميزة" },
-  { id: "ono_anna", name: "Ono Anna (ياباني/إنجليزي)", lang: "ja", gender: "female" as const, desc: "صوت ياباني نقي" },
-  { id: "sohee", name: "Sohee (كوري/إنجليزي)", lang: "ko", gender: "female" as const, desc: "صوت كوري واضح" },
+  { id: "ryan", name: "Ryan (ذكوري طبيعي - Qwen3)", lang: "all", gender: "male" as const, desc: "صوت طبيعي متوازن عالي النقاء" },
+  { id: "serena", name: "Serena (أنثوي طبيعي - Qwen3)", lang: "all", gender: "female" as const, desc: "نبرة أنثوية دافئة وواضحة" },
+  { id: "vivian", name: "Vivian (أنثوي احترافي - Qwen3)", lang: "all", gender: "female" as const, desc: "نبرة احترافية واضحة ومخارج دقيقة" },
+  { id: "aiden", name: "Aiden (ذكوري شبابي - Qwen3)", lang: "all", gender: "male" as const, desc: "صوت شبابي ديناميكي وحيوي" },
+  { id: "eric", name: "Eric (ذكوري هادئ - Qwen3)", lang: "all", gender: "male" as const, desc: "نبرة هادئة ورصينة ومتقنة" },
+  { id: "dylan", name: "Dylan (ذكوري عصري - Qwen3)", lang: "all", gender: "male" as const, desc: "نطق سريع وواضح للجمل التفاعلية" },
+  { id: "uncle_fu", name: "Uncle Fu (ذكوري حكيم - Qwen3)", lang: "all", gender: "male" as const, desc: "نبرة ودية عميقة ومميزة" },
+  { id: "ono_anna", name: "Ono Anna (أنثوي نقي - Qwen3)", lang: "all", gender: "female" as const, desc: "صوت نقي ومخارج حروف واضحة" },
+  { id: "sohee", name: "Sohee (أنثوي تفاعلي - Qwen3)", lang: "all", gender: "female" as const, desc: "صوت أنثوي حيوي ومعبر" },
 ];
 
 export interface ShadowingVoiceSettingsModalProps {
@@ -256,12 +252,18 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
   onSaveSettings,
   currentSentenceText = "",
 }) => {
+  const defaultGradioUrl =
+    localStorage.getItem("settings_gradio_tts_url") ||
+    localStorage.getItem("gradio_api_url") ||
+    initialGradioUrl ||
+    "http://192.168.0.159:7860";
+
   // Local active editing states
   const [provider, setProvider] = useState<ShadowingVoiceProvider>(initialProvider);
   const [selectedVoiceId, setSelectedVoiceId] = useState<string>(initialVoiceId);
   const [language, setLanguage] = useState<string>(initialLanguage);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(initialPlaybackSpeed);
-  const [gradioUrl, setGradioUrl] = useState<string>(initialGradioUrl);
+  const [gradioUrl, setGradioUrl] = useState<string>(defaultGradioUrl);
 
   // Dynamic server piper models list
   const [serverModels, setServerModels] = useState<PiperVoiceModelItem[]>([]);
@@ -282,15 +284,70 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
   const [testError, setTestError] = useState<string | null>(null);
   const activeTestAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Gradio Ping Connection Test
+  const [isTestingGradioConn, setIsTestingGradioConn] = useState<boolean>(false);
+  const [gradioConnResult, setGradioConnResult] = useState<{ ok: boolean; msg: string; latencyMs?: number } | null>(null);
+
+  const handleTestGradioConnection = async () => {
+    setIsTestingGradioConn(true);
+    setGradioConnResult(null);
+    const targetUrl = (
+      gradioUrl ||
+      localStorage.getItem("settings_gradio_tts_url") ||
+      localStorage.getItem("gradio_api_url") ||
+      "http://192.168.0.159:7860"
+    ).trim();
+
+    const startTime = performance.now();
+    try {
+      const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const apiBase = isLocalhost ? "http://localhost:3000/api/tts/gradio/test" : "/api/tts/gradio/test";
+      const res = await fetch(apiBase, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: targetUrl })
+      });
+      const data = await res.json().catch(() => ({}));
+      const latency = Math.round(performance.now() - startTime);
+
+      if (res.ok && data.success) {
+        setGradioConnResult({
+          ok: true,
+          msg: `متصل بنجاح (${data.title || "Gradio Qwen3-TTS"})`,
+          latencyMs: latency
+        });
+      } else {
+        setGradioConnResult({
+          ok: false,
+          msg: data.error || "تعذر الاتصال بخادم Gradio"
+        });
+      }
+    } catch (err: any) {
+      setGradioConnResult({
+        ok: false,
+        msg: `خطأ اتصال: ${err?.message || "تعذر الوصول للسيرفر"}`
+      });
+    } finally {
+      setIsTestingGradioConn(false);
+    }
+  };
+
   // Sync state when modal opens
   useEffect(() => {
     if (isOpen) {
+      const effectiveUrl =
+        localStorage.getItem("settings_gradio_tts_url") ||
+        localStorage.getItem("gradio_api_url") ||
+        initialGradioUrl ||
+        "http://192.168.0.159:7860";
+
       setProvider(initialProvider);
       setSelectedVoiceId(initialVoiceId);
       setLanguage(initialLanguage);
       setPlaybackSpeed(initialPlaybackSpeed);
-      setGradioUrl(initialGradioUrl);
+      setGradioUrl(effectiveUrl);
       setTestError(null);
+      setGradioConnResult(null);
 
       // Default sample test text based on sentence or language
       if (currentSentenceText && currentSentenceText.trim().length > 0) {
@@ -586,12 +643,21 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
       window.speechSynthesis.cancel();
     }
 
+    const resolvedGradioUrl =
+      gradioUrl.trim() ||
+      localStorage.getItem("settings_gradio_tts_url") ||
+      localStorage.getItem("gradio_api_url") ||
+      "http://192.168.0.159:7860";
+
+    localStorage.setItem("settings_gradio_tts_url", resolvedGradioUrl);
+    localStorage.setItem("gradio_api_url", resolvedGradioUrl);
+
     onSaveSettings({
       provider,
-      selectedVoiceId: selectedVoiceId.trim() || (provider === "google" ? "google" : "de_DE-thorsten-medium"),
+      selectedVoiceId: selectedVoiceId.trim() || (provider === "google" ? "google" : "ryan"),
       language,
       playbackSpeed,
-      gradioUrl: gradioUrl.trim() || "https://media.smart-cards.online",
+      gradioUrl: resolvedGradioUrl,
     });
 
     onClose();
@@ -721,7 +787,7 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
                   )}
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  أصوات بشرية واقعية وشخصيات تفاعلية (Ryan, Serena, Katja, Conrad, Jenny, Hamed).
+                  أصوات بشرية واقعية وشخصيات تفاعلية (Ryan, Serena, Vivian, Aiden, Eric, Dylan, Uncle Fu, Ono Anna, Sohee).
                 </p>
                 <div className="flex items-center gap-1.5 text-[10px] text-purple-400 font-semibold pt-1">
                   <span>شخصيات صوتية متعددة</span>
@@ -958,31 +1024,75 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
                 </div>
 
                 {/* Gradio Server URL & Custom Voice Name */}
-                <div className="pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                      اسم الصوت المخصص (Voice ID):
-                    </label>
-                    <input
-                      type="text"
-                      value={selectedVoiceId}
-                      onChange={(e) => setSelectedVoiceId(e.target.value)}
-                      placeholder="ryan, serena, KatjaNeural, etc."
-                      className="w-full text-xs bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 placeholder-slate-500 focus:border-purple-500 outline-none font-mono"
-                    />
+                <div className="pt-3 border-t border-slate-800/80 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                        اسم الصوت المخصص (Voice ID):
+                      </label>
+                      <input
+                        type="text"
+                        value={selectedVoiceId}
+                        onChange={(e) => setSelectedVoiceId(e.target.value)}
+                        placeholder="ryan, serena, vivian, etc."
+                        className="w-full text-xs bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 placeholder-slate-500 focus:border-purple-500 outline-none font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                        عنوان خادم Gradio (Server URL):
+                      </label>
+                      <input
+                        type="text"
+                        value={gradioUrl}
+                        onChange={(e) => {
+                          setGradioUrl(e.target.value);
+                          setGradioConnResult(null);
+                        }}
+                        placeholder="http://192.168.0.159:7860"
+                        className="w-full text-xs bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 placeholder-slate-500 focus:border-purple-500 outline-none font-mono"
+                      />
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                      عنوان خادم Gradio (Server URL):
-                    </label>
-                    <input
-                      type="text"
-                      value={gradioUrl}
-                      onChange={(e) => setGradioUrl(e.target.value)}
-                      placeholder="https://media.smart-cards.online"
-                      className="w-full text-xs bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 placeholder-slate-500 focus:border-purple-500 outline-none font-mono"
-                    />
+                  {/* Server Connection Test Button & Ping Status */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-900/60 border border-slate-800">
+                    <button
+                      type="button"
+                      onClick={handleTestGradioConnection}
+                      disabled={isTestingGradioConn}
+                      className="px-3 py-1.5 rounded-lg bg-purple-600/20 border border-purple-500/40 text-purple-300 hover:bg-purple-600/30 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      {isTestingGradioConn ? (
+                        <div className="w-3.5 h-3.5 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <Radio className="w-3.5 h-3.5 text-purple-400" />
+                      )}
+                      فحص الاتصال بسيرفر Gradio
+                    </button>
+
+                    {gradioConnResult && (
+                      <div
+                        className={`text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5 font-medium ${
+                          gradioConnResult.ok
+                            ? "bg-emerald-950/60 border border-emerald-500/40 text-emerald-300"
+                            : "bg-red-950/60 border border-red-500/40 text-red-300"
+                        }`}
+                      >
+                        {gradioConnResult.ok ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        ) : (
+                          <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+                        )}
+                        <span>{gradioConnResult.msg}</span>
+                        {gradioConnResult.latencyMs !== undefined && (
+                          <span className="text-[10px] font-mono bg-emerald-900/50 px-1 py-0.5 rounded text-emerald-200">
+                            {gradioConnResult.latencyMs}ms
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

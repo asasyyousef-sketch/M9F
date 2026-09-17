@@ -258,7 +258,15 @@ export const fetchGradioAudioBlob = async (
   if (!cleanText) return null;
 
   const cleanVoice = voiceId.replace(/^gradio[:_]/i, "").trim() || "ryan";
-  const serverUrl = (customServerUrl || localStorage.getItem("settings_gradio_tts_url") || "http://192.168.0.159:7860").trim();
+  // Resolve server URL prioritizing valid configured URLs
+  const storedSettingUrl = localStorage.getItem("settings_gradio_tts_url") || "";
+  const storedAppUrl = localStorage.getItem("gradio_api_url") || "";
+  const fallbackDefault = "http://192.168.0.159:7860";
+
+  let serverUrl = customServerUrl && customServerUrl.trim() && customServerUrl !== "https://media.smart-cards.online"
+    ? customServerUrl.trim()
+    : storedSettingUrl.trim() || storedAppUrl.trim() || customServerUrl?.trim() || fallbackDefault;
+
   const normalizedUrl = serverUrl.replace(/\/+$/, "");
 
   let targetLang = langCode.toLowerCase().trim();
@@ -359,7 +367,6 @@ export const fetchGradioAudioBlob = async (
     }
 
     // 2. Fallback: Server-side proxy call (/api/tts/gradio/generate)
-    // Only attempt if direct connection didn't already start and time out on the host
     if (!directAttemptedAndPending) {
       try {
         const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
@@ -378,11 +385,32 @@ export const fetchGradioAudioBlob = async (
         });
 
         if (res.ok) {
-          return await res.blob();
+          const cType = res.headers.get("content-type") || "";
+          if (cType.includes("audio")) {
+            return await res.blob();
+          }
         }
       } catch (proxyErr) {
         console.warn("Proxy Gradio call failed:", proxyErr);
       }
+    }
+
+    // 3. Fallback: Stream GET /api/tts endpoint
+    try {
+      const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const apiBase = isLocalhost ? "http://localhost:3000/api/tts" : "/api/tts";
+      const res = await fetch(
+        `${apiBase}?text=${encodeURIComponent(cleanText)}&lang=${encodeURIComponent(targetLang)}&voice=${encodeURIComponent(`gradio:${cleanVoice}`)}&gradioUrl=${encodeURIComponent(normalizedUrl)}&bypassCache=${Boolean(bypassCache)}&_t=${Date.now()}`,
+        { signal: AbortSignal.timeout(dynamicTimeoutMs + 30000) }
+      );
+      if (res.ok) {
+        const cType = res.headers.get("content-type") || "";
+        if (cType.includes("audio")) {
+          return await res.blob();
+        }
+      }
+    } catch (fallbackErr) {
+      console.warn("GET /api/tts Gradio fallback failed:", fallbackErr);
     }
 
     return null;
@@ -1045,7 +1073,14 @@ export const playGradioClientAudio = async (
   if (!cleanText) return { ok: false, error: "النص فارغ" };
 
   const cleanVoice = voiceId.replace(/^gradio[:_]/i, "").trim() || "ryan";
-  const serverUrl = (customServerUrl || localStorage.getItem("settings_gradio_tts_url") || "http://192.168.0.159:7860").trim();
+  const storedSettingUrl = localStorage.getItem("settings_gradio_tts_url") || "";
+  const storedAppUrl = localStorage.getItem("gradio_api_url") || "";
+  const fallbackDefault = "http://192.168.0.159:7860";
+
+  let serverUrl = customServerUrl && customServerUrl.trim() && customServerUrl !== "https://media.smart-cards.online"
+    ? customServerUrl.trim()
+    : storedSettingUrl.trim() || storedAppUrl.trim() || customServerUrl?.trim() || fallbackDefault;
+
   const normalizedUrl = serverUrl.replace(/\/+$/, "");
 
   const langShort = (langCode || "de").toLowerCase().split("-")[0].split("_")[0];

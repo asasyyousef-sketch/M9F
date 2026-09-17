@@ -228,7 +228,11 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     return localStorage.getItem("shadowing_voice_id") || "google";
   });
   const [gradioUrl, setGradioUrl] = useState<string>(() => {
-    return localStorage.getItem("gradio_api_url") || "https://media.smart-cards.online";
+    return (
+      localStorage.getItem("settings_gradio_tts_url") ||
+      localStorage.getItem("gradio_api_url") ||
+      "http://192.168.0.159:7860"
+    );
   });
 
   // Audio Recording States
@@ -448,8 +452,34 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     try {
       if (voiceProvider === "external") {
         const cleanVoice = selectedVoiceId.replace(/^gradio[:_]/i, "").trim() || "ryan";
-        const blob = await fetchGradioAudioBlob(cue.text, cleanVoice, lang, gradioUrl, false);
-        if (blob) {
+        const effectiveGradioUrl = (
+          gradioUrl ||
+          localStorage.getItem("settings_gradio_tts_url") ||
+          localStorage.getItem("gradio_api_url") ||
+          "http://192.168.0.159:7860"
+        ).trim();
+
+        let blob = await fetchGradioAudioBlob(cue.text, cleanVoice, lang, effectiveGradioUrl, false);
+
+        if (!blob) {
+          try {
+            const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+            const apiBase = isLocalhost ? "http://localhost:3000/api/tts" : "/api/tts";
+            const fallbackRes = await fetch(
+              `${apiBase}?text=${encodeURIComponent(cue.text)}&lang=${encodeURIComponent(lang)}&voice=${encodeURIComponent(`gradio:${cleanVoice}`)}&gradioUrl=${encodeURIComponent(effectiveGradioUrl)}&_t=${Date.now()}`
+            );
+            if (fallbackRes.ok) {
+              const cType = fallbackRes.headers.get("content-type") || "";
+              if (cType.includes("audio")) {
+                blob = await fallbackRes.blob();
+              }
+            }
+          } catch (fbErr) {
+            console.warn("Direct GET /api/tts fallback in StudioModal failed:", fbErr);
+          }
+        }
+
+        if (blob && blob.size > 100) {
           const audio = new Audio(URL.createObjectURL(blob));
           audio.playbackRate = playbackSpeed;
           audio.play();
@@ -1302,6 +1332,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
             localStorage.setItem("shadowing_voice_provider", newSettings.provider);
             localStorage.setItem("shadowing_voice_id", newSettings.selectedVoiceId);
             localStorage.setItem("shadowing_playback_speed", newSettings.playbackSpeed.toString());
+            localStorage.setItem("settings_gradio_tts_url", newSettings.gradioUrl);
             localStorage.setItem("gradio_api_url", newSettings.gradioUrl);
           }}
         />

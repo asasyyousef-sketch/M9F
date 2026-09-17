@@ -4846,7 +4846,8 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         reqVoiceLower.startsWith("gradio_") ||
         reqVoiceLower === "gradio" ||
         req.query.provider === "gradio" ||
-        ["ryan", "serena", "vivian", "aiden", "eric", "dylan", "uncle_fu", "ono_anna", "sohee"].includes(reqVoiceLower);
+        req.query.provider === "external" ||
+        ["ryan", "serena", "vivian", "aiden", "eric", "dylan", "uncle_fu", "ono_anna", "sohee"].some(v => reqVoiceLower === v || reqVoiceLower.startsWith(v));
 
       if (isGradioRequested) {
         const gradioVoiceName = reqVoiceLower.replace(/^gradio[:_]/i, "").trim() || "ryan";
