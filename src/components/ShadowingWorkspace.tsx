@@ -626,6 +626,7 @@ export function ShadowingWorkspace({
       setIsTranslatingWithAi(true);
       try {
         const savedGeminiKey = localStorage.getItem("settings_gemini_api_key") || localStorage.getItem("gemini_api_key") || "";
+        const savedGroqKey = localStorage.getItem("settings_groq_api_key") || localStorage.getItem("groq_api_key") || "";
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (savedGeminiKey) {
           headers["Authorization"] = `Bearer ${savedGeminiKey}`;
@@ -644,6 +645,7 @@ export function ShadowingWorkspace({
             customApiKey: savedGeminiKey,
             userApiKey: savedGeminiKey,
             geminiApiKey: savedGeminiKey,
+            groqApiKey: savedGroqKey,
           }),
         });
 
@@ -691,6 +693,7 @@ export function ShadowingWorkspace({
       setIsTranslatingWithAi(true);
       try {
         const savedGeminiKey = localStorage.getItem("settings_gemini_api_key") || localStorage.getItem("gemini_api_key") || "";
+        const savedGroqKey = localStorage.getItem("settings_groq_api_key") || localStorage.getItem("groq_api_key") || "";
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (savedGeminiKey) {
           headers["Authorization"] = `Bearer ${savedGeminiKey}`;
@@ -708,6 +711,7 @@ export function ShadowingWorkspace({
             customApiKey: savedGeminiKey,
             userApiKey: savedGeminiKey,
             geminiApiKey: savedGeminiKey,
+            groqApiKey: savedGroqKey,
           }),
         });
 

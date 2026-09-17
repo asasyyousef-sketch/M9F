@@ -1709,7 +1709,7 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
     }
   });
 
-  // API Route - Translate Shadowing Sentences using Gemini AI
+  // API Route - Translate Shadowing Sentences using Gemini AI or Groq AI
   app.post("/api/shadowing/translate-sentences", async (req, res) => {
     try {
       const {
@@ -1717,8 +1717,9 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
         rawText = "",
         sourceLanguage = "de",
         targetLanguage = "ar",
-        selectedModel = "gemini-3.8-flash",
-        customApiKey = ""
+        selectedModel = "gemini-3.6-flash",
+        customApiKey = "",
+        groqApiKey = ""
       } = req.body;
 
       if (!Array.isArray(sentences) || sentences.length === 0) {
@@ -1728,21 +1729,20 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
       const headerAuth = (req.headers.authorization || "").replace("Bearer ", "").trim();
       const headerKey = (req.headers["x-gemini-key"] as string) || "";
       const effectiveGeminiKey =
-        (customApiKey && customApiKey.trim()) ||
-        (req.body.userApiKey && req.body.userApiKey.trim()) ||
-        (req.body.apiKey && req.body.apiKey.trim()) ||
+        (customApiKey && !customApiKey.startsWith("gsk_") ? customApiKey.trim() : "") ||
+        (req.body.userApiKey && !req.body.userApiKey.startsWith("gsk_") ? req.body.userApiKey.trim() : "") ||
+        (req.body.geminiApiKey && req.body.geminiApiKey.trim()) ||
         headerKey.trim() ||
-        headerAuth ||
+        (headerAuth && !headerAuth.startsWith("gsk_") ? headerAuth : "") ||
         process.env.GEMINI_API_KEY ||
         "";
 
-      if (!effectiveGeminiKey) {
-        return res.status(500).json({
-          error: "مفتاح GEMINI_API_KEY غير متوفر. يرجى ضبط مفتاح Gemini في الإعدادات."
-        });
-      }
-
-      const aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
+      const effectiveGroqKey =
+        (groqApiKey && groqApiKey.trim()) ||
+        (customApiKey && customApiKey.startsWith("gsk_") ? customApiKey.trim() : "") ||
+        (headerAuth && headerAuth.startsWith("gsk_") ? headerAuth : "") ||
+        process.env.GROQ_API_KEY ||
+        "";
 
       const langNameMap: Record<string, string> = {
         ar: "العربية",
@@ -1771,7 +1771,7 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
 
 الشروط:
 1. حافظ على المعنى السياقي السليم، والصياغة الطبيعية والمفهومة.
-2. أرجع النتيجة حصراً كمصفوفة JSON بالتنسيق التالي بدون أي نصوص إضافية:
+2. أرجع النتيجة حصراً كـ JSON بالتنسيق التالي بدون أي نصوص إضافية:
 [
   {
     "id": "معرف الجملة نفسه",
@@ -1779,50 +1779,116 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
   }
 ]`;
 
-      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
-      const candidateModels = Array.from(new Set([
-        primaryModel,
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.7-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-3.1-flash-lite",
-        "gemini-2.5-flash",
-        "gemini-1.5-flash"
-      ])).filter(m => Boolean(m) && !m.includes("groq"));
-
-      let rawJson = "[]";
-      let usedModel = primaryModel;
+      let rawJson = "";
+      let usedModel = selectedModel || "Gemini AI";
       let lastErr: any = null;
 
-      for (const modelToTry of candidateModels) {
+      const isGroqModel = (selectedModel && (selectedModel.toLowerCase().includes("groq") || selectedModel.toLowerCase().includes("llama"))) ||
+        (customApiKey && customApiKey.startsWith("gsk_"));
+
+      // 1. Try Groq API if selected or key available
+      if (isGroqModel && effectiveGroqKey) {
         try {
-          const response = await aiClient.models.generateContent({
-            model: modelToTry,
-            contents: prompt,
-            config: {
-              responseMimeType: "application/json"
-            }
+          const resGroq = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${effectiveGroqKey}`
+            },
+            body: JSON.stringify({
+              model: "llama-3.3-70b-versatile",
+              messages: [
+                {
+                  role: "system",
+                  content: "أنت مترجم لغوي احترافي للجمل. أرجع الإجابة ككائن JSON يحتوي على مصفوفة باسم 'translations' تحتوي على كائنات بها 'id' و 'translation'."
+                },
+                { role: "user", content: prompt }
+              ],
+              response_format: { type: "json_object" },
+              temperature: 0.2
+            })
           });
-          if (response.text) {
-            rawJson = response.text;
-            usedModel = modelToTry;
-            break;
+
+          if (resGroq.ok) {
+            const groqData = await resGroq.json();
+            rawJson = groqData.choices?.[0]?.message?.content || "";
+            usedModel = "Groq Llama 3.3 70B 🚀";
+          } else {
+            console.warn("Groq request failed with status:", resGroq.status);
           }
         } catch (err: any) {
-          console.warn(`Shadowing translation failed on model ${modelToTry}, trying fallback...`, err?.message);
+          console.warn("Groq API error in shadowing translate:", err?.message);
           lastErr = err;
         }
       }
 
-      if ((!rawJson || rawJson === "[]") && lastErr) {
+      // 2. Fallback / Main path for Gemini API
+      if (!rawJson) {
+        if (!effectiveGeminiKey) {
+          return res.status(500).json({
+            error: "مفتاح GEMINI_API_KEY غير متوفر. يرجى ضبط مفتاح Gemini في الإعدادات."
+          });
+        }
+
+        const aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
+
+        // Map UI model aliases (like gemini-3.8-flash) to real Google API model names
+        const mapToRealGeminiModel = (name: string): string => {
+          if (!name) return "gemini-2.5-flash";
+          const lower = name.toLowerCase().trim();
+          if (lower.includes("pro")) return "gemini-2.5-pro";
+          if (lower.includes("lite")) return "gemini-2.5-flash-lite";
+          if (lower.includes("1.5")) return "gemini-1.5-flash";
+          if (lower.includes("2.0")) return "gemini-2.0-flash";
+          return "gemini-2.5-flash";
+        };
+
+        const targetModelMapped = mapToRealGeminiModel(selectedModel);
+        const candidateModels = Array.from(new Set([
+          targetModelMapped,
+          "gemini-2.5-flash",
+          "gemini-2.5-pro",
+          "gemini-1.5-flash",
+          "gemini-2.5-flash-lite",
+          "gemini-2.0-flash"
+        ]));
+
+        for (const modelToTry of candidateModels) {
+          try {
+            const response = await aiClient.models.generateContent({
+              model: modelToTry,
+              contents: prompt,
+              config: {
+                responseMimeType: "application/json"
+              }
+            });
+            if (response.text) {
+              rawJson = response.text;
+              usedModel = modelToTry;
+              break;
+            }
+          } catch (err: any) {
+            console.warn(`Shadowing translation failed on Gemini model ${modelToTry}, trying fallback...`, err?.message);
+            lastErr = err;
+          }
+        }
+      }
+
+      if (!rawJson && lastErr) {
         throw lastErr;
       }
 
-      let parsedResults: any[] = safeExtractAndParseJSON<any[]>(rawJson, []);
-      if (!Array.isArray(parsedResults) || parsedResults.length === 0) {
-        if (parsedResults && typeof parsedResults === "object" && Array.isArray((parsedResults as any).translations)) {
-          parsedResults = (parsedResults as any).translations;
+      let parsedResults: any[] = [];
+      const parsedObj = safeExtractAndParseJSON<any>(rawJson, []);
+      if (Array.isArray(parsedObj)) {
+        parsedResults = parsedObj;
+      } else if (parsedObj && typeof parsedObj === "object") {
+        if (Array.isArray(parsedObj.translations)) {
+          parsedResults = parsedObj.translations;
+        } else if (Array.isArray(parsedObj.result)) {
+          parsedResults = parsedObj.result;
+        } else if (Array.isArray(parsedObj.data)) {
+          parsedResults = parsedObj.data;
         }
       }
 
