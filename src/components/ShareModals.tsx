@@ -22,7 +22,6 @@ import {
   ChevronDown,
   ChevronUp
 } from "lucide-react";
-import QRCode from "qrcode";
 import { Folder as FolderType, Flashcard, SharedDeckData, getSafeImageStyle } from "../types";
 
 // ─── ShareFolderModal ──────────────────────────────────────────────────────────
@@ -104,19 +103,9 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
         if (data.success && data.shareUrl) {
           setShareUrl(data.shareUrl);
           setShareId(data.shareId);
-          // Generate QR code for mobile scanning
-          QRCode.toDataURL(data.shareUrl, {
-            width: 256,
-            margin: 2,
-            color: {
-              dark: "#0f172a",
-              light: "#ffffff"
-            }
-          })
-            .then(qr => {
-              if (isMounted) setQrCodeDataUrl(qr);
-            })
-            .catch(err => console.error("QR Code error:", err));
+          // Generate QR code for mobile scanning (zero external dependencies)
+          const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=10&data=${encodeURIComponent(data.shareUrl)}`;
+          setQrCodeDataUrl(qrUrl);
         } else {
           setError(data.error || "تعذر إنشاء رابط المشاركة");
         }
