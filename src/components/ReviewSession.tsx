@@ -1883,6 +1883,23 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   const [activeSettingsTab, setActiveSettingsTab] = useState<"classic" | "challenge" | "write" | "listen" | "article" | "match" | "puzzles" | "sound">(() => {
     return method === "classic" ? "classic" : (method === "puzzles" ? "puzzles" : (method as any));
   });
+
+  const openReviewSettings = (tab?: "classic" | "challenge" | "write" | "listen" | "article" | "match" | "puzzles" | "sound") => {
+    if (tab) {
+      setActiveSettingsTab(tab);
+    } else {
+      setActiveSettingsTab(
+        method === "classic" ? "classic" :
+        method === "write" ? "write" :
+        method === "listen" ? "listen" :
+        method === "article" ? "article" :
+        method === "challenge" ? "challenge" :
+        method === "puzzles" ? "puzzles" :
+        method === "match" ? "match" : "classic"
+      );
+    }
+    setIsSettingsOpen(true);
+  };
   
   const [hideFront, setHideFront] = useState(() => {
     return localStorage.getItem("settings_hide_front") === "true";
@@ -1899,6 +1916,30 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   const [hideImage, setHideImage] = useState(() => {
     return localStorage.getItem("settings_hide_image") === "true";
   });
+
+  useEffect(() => {
+    localStorage.setItem("settings_hide_front", String(hideFront));
+  }, [hideFront]);
+
+  useEffect(() => {
+    localStorage.setItem("settings_hide_back", String(hideBack));
+  }, [hideBack]);
+
+  useEffect(() => {
+    localStorage.setItem("settings_hide_prompt_text", String(hidePromptText));
+  }, [hidePromptText]);
+
+  useEffect(() => {
+    localStorage.setItem("settings_hide_image", String(hideImage));
+  }, [hideImage]);
+
+  useEffect(() => {
+    localStorage.setItem("settings_write_test_target", writeTestTarget);
+  }, [writeTestTarget]);
+
+  useEffect(() => {
+    localStorage.setItem("settings_write_question_face", writeQuestionFace);
+  }, [writeQuestionFace]);
 
   // Session Images Download & Cache Modal States
   const [isSessionImageModalOpen, setIsSessionImageModalOpen] = useState(false);
@@ -4527,7 +4568,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
           </div>
 
           {/* Right: Timer */}
-          <div className="flex items-center justify-end gap-1.5 sm:gap-2 shrink-0">
+          <div className="w-16 flex items-center justify-end">
             <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 font-mono text-xs font-semibold bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1.5 rounded-xl border border-slate-200/50 dark:border-slate-700/50">
               <Timer className="w-3.5 h-3.5 text-slate-400" />
               <span>{formatTimer(time)}</span>
@@ -4859,41 +4900,281 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
               className="w-full flex flex-col items-center gap-4"
             >
               {/* Action Bar (Shuffle & Settings & Night Mode & Autoplay & Edit) with expandable distraction-free toggle */}
-              {method !== "match" && method !== "article" && method !== "write" && method !== "listen" && method !== "repetition" && currentCard && (
+              {/* Unified Action Bar (Settings & Auto Advance & Audio & Mode Controls & Night Mode) */}
+              {currentCard && method !== "match" && method !== "spoken_challenge" && method !== "repetition" && (
                 <div className="flex flex-col items-center gap-1.5 mb-1 animate-fadeIn">
                   <div className="flex items-center justify-center gap-1.5 sm:gap-2 bg-surface-container-low/70 backdrop-blur-md px-2.5 sm:px-3 py-1.5 rounded-full border border-outline-variant/20 shadow-2xs">
-                    {/* Collapsed / Core Controls */}
+                    {/* 1. Mode-specific Primary Controls */}
                     {method === "classic" && (
-                      <button
-                        type="button"
-                        onClick={handleToggleAutoPlay}
-                        title={isAutoPlaying ? "إيقاف التشغيل التلقائي" : "بدء التشغيل التلقائي"}
-                        className={`p-2 rounded-full transition-all cursor-pointer shadow-2xs active:scale-90 flex items-center justify-center ${
-                          isAutoPlaying 
-                            ? "bg-primary text-white hover:bg-primary-container" 
-                            : "bg-emerald-600/90 text-white hover:bg-emerald-700"
-                        }`}
-                      >
-                        {isAutoPlaying ? (
-                          <Pause className="w-4 h-4 animate-pulse" />
-                        ) : (
-                          <Play className="w-4 h-4" />
-                        )}
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleToggleAutoPlay}
+                          title={isAutoPlaying ? "إيقاف التشغيل التلقائي" : "بدء التشغيل التلقائي"}
+                          className={`p-2 rounded-full transition-all cursor-pointer shadow-2xs active:scale-90 flex items-center justify-center ${
+                            isAutoPlaying 
+                              ? "bg-primary text-white hover:bg-primary-container" 
+                              : "bg-emerald-600/90 text-white hover:bg-emerald-700"
+                          }`}
+                        >
+                          {isAutoPlaying ? (
+                            <Pause className="w-4 h-4 animate-pulse" />
+                          ) : (
+                            <Play className="w-4 h-4" />
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleRepeatClick}
+                          onMouseDown={handleRepeatTouchStart}
+                          onMouseUp={handleRepeatTouchEnd}
+                          onMouseLeave={handleRepeatTouchEnd}
+                          onTouchStart={handleRepeatTouchStart}
+                          onTouchEnd={handleRepeatTouchEnd}
+                          onTouchMove={handleRepeatTouchEnd}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setIsRepeatModalOpen(true);
+                          }}
+                          title={isRepeatAudioEnabled ? "إيقاف تكرار النطق المخصص (اضغط مطولاً للإعدادات)" : "تفعيل تكرار النطق المخصص (اضغط مطولاً للإعدادات)"}
+                          className={`p-2 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center relative select-none ${
+                            isRepeatAudioEnabled
+                              ? "bg-indigo-600 text-white shadow-2xs"
+                              : "bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+                          }`}
+                        >
+                          <Repeat className="w-4 h-4" />
+                          {isRepeatAudioEnabled && (
+                            <span className="absolute -top-1 -right-1 min-w-3.5 h-3.5 px-0.5 flex items-center justify-center rounded-full bg-slate-200 text-[8px] font-black text-slate-950 border border-white shadow-3xs">
+                              {repeatSequence.some(s => s.type === "note") ? "🎤" : `${repeatSequence.filter(s => s.type === "speak").length}x`}
+                            </span>
+                          )}
+                        </button>
+                      </>
+                    )}
+
+                    {/* Writing Mode Controls */}
+                    {method === "write" && (
+                      <>
+                        {/* Audio Pronunciation */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const t = writeQuestionFace === "front" ? currentCard.frontText : currentCard.backText;
+                            const l = writeQuestionFace === "front" ? currentCard.frontLang || "de" : currentCard.backLang || "ar";
+                            playPronunciation(t, l, true);
+                          }}
+                          title="استمع لنطق السؤال"
+                          className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all cursor-pointer active:scale-90 flex items-center justify-center"
+                        >
+                          <Volume2 className="w-4 h-4" />
+                        </button>
+
+                        {/* Auto Advance Toggle */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAutoAdvance(prev => {
+                              const next = !prev;
+                              localStorage.setItem("settings_article_auto_next", String(next));
+                              return next;
+                            });
+                          }}
+                          title={autoAdvance ? "إيقاف التقليب التلقائي بعد التحقق" : "تفعيل التقليب التلقائي بعد التحقق"}
+                          className={`p-2 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center relative ${
+                            autoAdvance 
+                              ? "bg-amber-500 text-white shadow-2xs" 
+                              : "bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+                          }`}
+                        >
+                          <Timer className="w-4 h-4" />
+                          {autoAdvance && (
+                            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-white animate-pulse" />
+                          )}
+                        </button>
+
+                        {/* Toggle Front Text / Question Visibility */}
+                        <button
+                          type="button"
+                          onClick={() => setHidePromptText(prev => !prev)}
+                          title={hidePromptText ? "إظهار النص الأمامي (وجه السؤال)" : "إخفاء النص الأمامي (وجه السؤال) لاختبار الذاكرة"}
+                          className={`p-2 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center ${
+                            hidePromptText 
+                              ? "bg-purple-600 text-white shadow-2xs" 
+                              : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                          }`}
+                        >
+                          {hidePromptText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </>
+                    )}
+
+                    {/* Listening Mode Controls */}
+                    {method === "listen" && (
+                      <>
+                        {/* Replay audio */}
+                        <button
+                          type="button"
+                          onClick={() => playPronunciation(currentCard.frontText, currentCard.frontLang || "de", true)}
+                          title="إعادة نطق الكلمة المسموعة"
+                          className="p-2 rounded-full bg-primary text-white hover:bg-primary/90 transition-all cursor-pointer active:scale-90 flex items-center justify-center shadow-2xs"
+                        >
+                          <Volume2 className="w-4 h-4" />
+                        </button>
+
+                        {/* Auto Advance Toggle */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAutoAdvance(prev => {
+                              const next = !prev;
+                              localStorage.setItem("settings_article_auto_next", String(next));
+                              return next;
+                            });
+                          }}
+                          title={autoAdvance ? "إيقاف التقليب التلقائي بعد السماع" : "تفعيل التقليب التلقائي بعد السماع والاختيار"}
+                          className={`p-2 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center relative ${
+                            autoAdvance 
+                              ? "bg-amber-500 text-white shadow-2xs" 
+                              : "bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+                          }`}
+                        >
+                          <Timer className="w-4 h-4" />
+                          {autoAdvance && (
+                            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-white animate-pulse" />
+                          )}
+                        </button>
+
+                        {/* Quick Choice Display Selector (شنو الينعرض) */}
+                        <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-full border border-slate-200/50 dark:border-slate-700/50">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setListenChoiceType("image");
+                              localStorage.setItem("settings_listen_choice_type", "image");
+                            }}
+                            title="عرض الصور في خيارات الإجابة"
+                            className={`px-2 py-1 rounded-full text-[10px] font-bold transition-all cursor-pointer ${
+                              listenChoiceType === "image"
+                                ? "bg-white dark:bg-slate-700 text-primary shadow-xs"
+                                : "text-slate-500 hover:text-slate-800"
+                            }`}
+                          >
+                            🖼️ صور
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setListenChoiceType("front");
+                              localStorage.setItem("settings_listen_choice_type", "front");
+                            }}
+                            title="عرض النص الألماني في الخيارات"
+                            className={`px-2 py-1 rounded-full text-[10px] font-bold transition-all cursor-pointer ${
+                              listenChoiceType === "front"
+                                ? "bg-white dark:bg-slate-700 text-primary shadow-xs"
+                                : "text-slate-500 hover:text-slate-800"
+                            }`}
+                          >
+                            🇩🇪 ألماني
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setListenChoiceType("back");
+                              localStorage.setItem("settings_listen_choice_type", "back");
+                            }}
+                            title="عرض المعنى العربي في الخيارات"
+                            className={`px-2 py-1 rounded-full text-[10px] font-bold transition-all cursor-pointer ${
+                              listenChoiceType === "back"
+                                ? "bg-white dark:bg-slate-700 text-primary shadow-xs"
+                                : "text-slate-500 hover:text-slate-800"
+                            }`}
+                          >
+                            🇸🇦 عربي
+                          </button>
+                        </div>
+                      </>
+                    )}
+
+                    {/* Article Mode Controls */}
+                    {method === "article" && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const correctArt = currentCard.correctArticle;
+                            const spokenText = correctArt 
+                              ? `${correctArt === "die-plural" ? "die" : correctArt} ${currentCard.frontText}`
+                              : currentCard.frontText;
+                            setIsPronouncingCorrect(true);
+                            playPronunciationWithEnd(spokenText, currentCard.frontLang || "de", () => {
+                              setIsPronouncingCorrect(false);
+                            }, true);
+                          }}
+                          className={`p-2 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center ${
+                            isPronouncingCorrect 
+                              ? "bg-emerald-500 text-white shadow-2xs" 
+                              : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          }`}
+                          title="نطق الكلمة مع أداة التعريف"
+                        >
+                          <Volume2 className={`w-4 h-4 ${isPronouncingCorrect ? "animate-pulse" : ""}`} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAutoAdvance(prev => {
+                              const next = !prev;
+                              localStorage.setItem("settings_article_auto_next", String(next));
+                              return next;
+                            });
+                          }}
+                          className={`p-2 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center relative ${
+                            autoAdvance 
+                              ? "bg-amber-500 text-white shadow-2xs" 
+                              : "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700"
+                          }`}
+                          title={autoAdvance ? "إيقاف التقليب التلقائي" : "تفعيل التقليب التلقائي بعد السماع"}
+                        >
+                          <Timer className="w-4 h-4" />
+                          {autoAdvance && (
+                            <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-white rounded-full animate-ping" />
+                          )}
+                        </button>
+                      </>
                     )}
 
                     {/* AI Chat / Discussion Tutor Button */}
                     <button
                       type="button"
                       onClick={() => setIsReviewChatOpen(true)}
-                      title="مناقشة واستفسار بالذكاء الاصطناعي والمصحح اللغوي (محادثة ليلية AI)"
+                      title="مناقشة واستفسار بالذكاء الاصطناعي والمصحح اللغوي"
                       className="p-2 rounded-full bg-indigo-600/15 hover:bg-indigo-600/25 text-indigo-500 dark:text-indigo-400 border border-indigo-500/30 hover:border-indigo-500/60 transition-all cursor-pointer active:scale-90 flex items-center justify-center relative shadow-2xs"
                     >
                       <Bot className="w-4 h-4" />
                       <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
                     </button>
 
-                    {/* Quick Sound Toggle */}
+                    {/* REVIEW SETTINGS BUTTON - ALWAYS VISIBLE IN TOOLBAR */}
+                    <button
+                      type="button"
+                      onClick={() => openReviewSettings(
+                        method === "classic" ? "classic" :
+                        method === "write" ? "write" :
+                        method === "listen" ? "listen" :
+                        method === "article" ? "article" :
+                        method === "challenge" ? "challenge" :
+                        method === "puzzles" ? "puzzles" :
+                        method === "match" ? "match" : "classic"
+                      )}
+                      title={`إعدادات وضع ${methodArabicLabels[method] || "المراجعة"}`}
+                      className="p-2 bg-primary/10 hover:bg-primary/20 text-primary dark:text-blue-400 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center border border-primary/20 shadow-2xs"
+                    >
+                      <Sliders className="w-4 h-4" />
+                    </button>
+
                     {/* Sound Mute/Unmute */}
                     <button
                       type="button"
@@ -4912,80 +5193,33 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       )}
                     </button>
 
-                    {/* Quick Repeat Audio toggle (Classic) */}
-                    {method === "classic" && (
-                      <button
-                        type="button"
-                        onClick={handleRepeatClick}
-                        onMouseDown={handleRepeatTouchStart}
-                        onMouseUp={handleRepeatTouchEnd}
-                        onMouseLeave={handleRepeatTouchEnd}
-                        onTouchStart={handleRepeatTouchStart}
-                        onTouchEnd={handleRepeatTouchEnd}
-                        onTouchMove={handleRepeatTouchEnd}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setIsRepeatModalOpen(true);
-                        }}
-                        title={isRepeatAudioEnabled ? "إيقاف تكرار النطق المخصص (اضغط مطولاً للإعدادات)" : "تفعيل تكرار النطق المخصص (اضغط مطولاً للإعدادات)"}
-                        className={`p-2 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center relative select-none ${
-                          isRepeatAudioEnabled
-                            ? "bg-indigo-600 text-white shadow-2xs"
-                            : "bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
-                        }`}
-                      >
-                        <Repeat className="w-4 h-4" />
-                        {isRepeatAudioEnabled && (
-                          <span className="absolute -top-1 -right-1 min-w-3.5 h-3.5 px-0.5 flex items-center justify-center rounded-full bg-slate-200 text-[8px] font-black text-slate-950 border border-white shadow-3xs">
-                            {repeatSequence.some(s => s.type === "note") ? "🎤" : `${repeatSequence.filter(s => s.type === "speak").length}x`}
-                          </span>
-                        )}
-                      </button>
-                    )}
-
                     {/* Divider */}
                     <div className="w-px h-4 bg-outline-variant/30 mx-0.5" />
 
-                    {/* Expanded Items (Rendered smoothly when isToolbarExpanded is true) */}
+                    {/* Expanded Items */}
                     {isToolbarExpanded && (
                       <div className="flex items-center gap-1.5 animate-fadeIn">
                         {/* Edit Card */}
+                        {onEditCard && (
+                          <button
+                            type="button"
+                            onClick={handleOpenEditCard}
+                            title="تعديل البطاقة الحالية"
+                            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        )}
+                        {/* Shuffle Cards */}
                         <button
                           type="button"
-                          onClick={handleOpenEditCard}
-                          title="تعديل البطاقة الحالية"
+                          id="shuffle-btn"
+                          onClick={handleShuffleSessionCards}
+                          title="خلط البطاقات عشوائياً"
                           className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center"
                         >
-                          <Pencil className="w-4 h-4" />
+                          <Shuffle className="w-4 h-4" />
                         </button>
-
-                        {(method === "classic" || method === "challenge") && (
-                          <button
-                            type="button"
-                            id="shuffle-btn"
-                            onClick={handleShuffleSessionCards}
-                            title="خلط البطاقات"
-                            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center"
-                          >
-                            <Shuffle className="w-4 h-4" />
-                          </button>
-                        )}
-                        
-                        {(method === "classic" || method === "challenge") && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setActiveSettingsTab(method === "classic" ? "classic" : "challenge");
-                              setIsSettingsOpen(true);
-                            }}
-                            title={method === "classic" ? "إعدادات وضع البطاقات" : "إعدادات وضع التحدي"}
-                            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center"
-                          >
-                            <Sliders className="w-4 h-4" />
-                          </button>
-                        )}
-
                         {/* Night Mode toggle */}
                         <button
                           type="button"
@@ -5016,102 +5250,6 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       )}
                     </button>
                   </div>
-                </div>
-              )}
-
-              {/* Special Action Bar for Article Mode */}
-              {method === "article" && currentCard && (
-                <div className="flex items-center justify-center gap-1.5 sm:gap-2 mb-1 bg-surface-container-low/70 backdrop-blur-md px-3 py-1.5 rounded-full border border-outline-variant/20 shadow-2xs w-fit animate-fadeIn">
-                  {/* زر الإعدادات */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveSettingsTab("article");
-                      setIsSettingsOpen(true);
-                    }}
-                    className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center"
-                    title="إعدادات وضع أداة التعريف"
-                  >
-                    <Sliders className="w-4 h-4" />
-                  </button>
-
-                  {/* Night Mode Toggle */}
-                  <button
-                    type="button"
-                    onClick={() => setIsDarkMode(prev => !prev)}
-                    title={isDarkMode ? "الوضع النهاري" : "الوضع الليلي"}
-                    className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center"
-                  >
-                    {isDarkMode ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-slate-600 dark:text-slate-300" />}
-                  </button>
-
-                  {/* 1. زر الصوت */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const correctArt = currentCard.correctArticle;
-                      const spokenText = correctArt 
-                        ? `${correctArt === "die-plural" ? "die" : correctArt} ${currentCard.frontText}`
-                        : currentCard.frontText;
-                      setIsPronouncingCorrect(true);
-                      playPronunciationWithEnd(spokenText, currentCard.frontLang || "de", () => {
-                        setIsPronouncingCorrect(false);
-                      }, true);
-                    }}
-                    className={`p-2 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center ${
-                      isPronouncingCorrect 
-                        ? "bg-emerald-500 text-white shadow-2xs" 
-                        : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-                    }`}
-                    title="نطق الكلمة الصحيحة ونبرتها"
-                  >
-                    <Volume2 className={`w-4 h-4 ${isPronouncingCorrect ? "animate-pulse" : ""}`} />
-                  </button>
-
-                  {/* 2. زر تلقائي التقليب */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAutoAdvance(prev => {
-                        const next = !prev;
-                        localStorage.setItem("settings_article_auto_next", String(next));
-                        return next;
-                      });
-                    }}
-                    className={`p-2 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center relative ${
-                      autoAdvance 
-                        ? "bg-amber-500 text-white shadow-2xs" 
-                        : "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700"
-                    }`}
-                    title={autoAdvance ? "إيقاف التقليب التلقائي" : "تفعيل التقليب التلقائي بعد السماع"}
-                  >
-                    <Timer className="w-4 h-4" />
-                    {autoAdvance && (
-                      <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-white rounded-full animate-ping" />
-                    )}
-                  </button>
-
-                  {/* 3. زر الخلط */}
-                  <button
-                    type="button"
-                    onClick={handleShuffleSessionCards}
-                    className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center"
-                    title="خلط الكروت عشوائياً"
-                  >
-                    <Shuffle className="w-4 h-4" />
-                  </button>
-
-                  {/* 4. زر التعديل */}
-                  {onEditCard && (
-                    <button
-                      type="button"
-                      onClick={() => onEditCard(currentCard)}
-                      className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-full transition-all cursor-pointer active:scale-90 flex items-center justify-center"
-                      title="تعديل هذا الكرت"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                  )}
                 </div>
               )}
               
@@ -6082,15 +6220,13 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
             {/* Horizontal Scrollable Mode Tabs */}
             <div className="flex border-b border-slate-100 bg-slate-50 overflow-x-auto scrollbar-none scroll-smooth">
               {[
-                ...(method === "classic" ? [
-                  { id: "classic", label: "التقليدي 🃏" },
-                  { id: "puzzles", label: "الألغاز 🧩" }
-                ] : []),
-                ...(method === "challenge" ? [{ id: "challenge", label: "التحدي ⏱️" }] : []),
-                ...(method === "write" ? [{ id: "write", label: "الكتابة ✍️" }] : []),
-                ...(method === "listen" ? [{ id: "listen", label: "الاستماع 🎧" }] : []),
-                ...(method === "article" ? [{ id: "article", label: "الأداة 🇩🇪" }] : []),
-                ...(method === "match" ? [{ id: "match", label: "التوصيل 🔗" }] : []),
+                { id: "classic", label: "التقليدي 🃏" },
+                { id: "write", label: "الكتابة ✍️" },
+                { id: "listen", label: "الاستماع 🎧" },
+                { id: "article", label: "الأداة 🇩🇪" },
+                { id: "challenge", label: "التحدي ⏱️" },
+                { id: "puzzles", label: "الألغاز 🧩" },
+                { id: "match", label: "التوصيل 🔗" },
                 { id: "sound", label: "الصوت والأداء ⚙️" }
               ].map((tab) => (
                 <button
@@ -6099,7 +6235,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                   onClick={() => setActiveSettingsTab(tab.id as any)}
                   className={`px-4 py-2.5 text-[11px] font-bold whitespace-nowrap border-b-2 transition-all cursor-pointer ${
                     activeSettingsTab === tab.id
-                      ? "border-primary text-primary bg-white"
+                      ? "border-primary text-primary bg-white shadow-xs"
                       : "border-transparent text-slate-500 hover:text-slate-800"
                   }`}
                 >
@@ -6543,74 +6679,19 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                 <div className="space-y-4 animate-fadeIn">
                   <div className="flex items-center gap-1.5 border-b border-slate-100 pb-1">
                     <span className="w-1.5 h-3.5 bg-primary rounded-full" />
-                    <span className="font-bold text-[11px] text-slate-700 uppercase tracking-wider block">إعدادات مراجعة الكتابة والاملاء</span>
+                    <span className="font-bold text-[11px] text-slate-700 uppercase tracking-wider block">إعدادات مراجعة الكتابة والإملاء ✍️</span>
                   </div>
 
                   {renderVoiceTargetSelector("وضع الكتابة والإملاء")}
 
-                  <div className="flex items-center justify-between py-1 border-b border-slate-50">
+                  {/* Switch: Auto Advance (التقليب التلقائي) */}
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50 bg-amber-50/40 dark:bg-amber-950/10 p-2 rounded-xl">
                     <div className="flex flex-col gap-0.5 text-right">
-                      <span className="text-xs font-bold text-slate-700">نطق السؤال تلقائياً</span>
-                      <span className="text-[10px] text-slate-400">عند ظهور بطاقة الكتابة الجديدة</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setWriteAutoListenQuestion(!writeAutoListenQuestion)}
-                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${writeAutoListenQuestion ? 'bg-emerald-500' : 'bg-slate-200'}`}
-                    >
-                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${writeAutoListenQuestion ? 'translate-x-5' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between py-1 border-b border-slate-50">
-                    <div className="flex flex-col gap-0.5 text-right">
-                      <span className="text-xs font-bold text-slate-700">نطق الإجابة عند نجاح التحقق</span>
-                      <span className="text-[10px] text-slate-400">سماع اللفظ الصحيح للإجابة تلقائياً</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setWriteAutoListenSuccess(!writeAutoListenSuccess)}
-                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${writeAutoListenSuccess ? 'bg-emerald-500' : 'bg-slate-200'}`}
-                    >
-                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${writeAutoListenSuccess ? 'translate-x-5' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-
-                  {/* Switch 1: Show Prompt Text */}
-                  <div className="flex items-center justify-between py-1 border-b border-slate-50">
-                    <div className="flex flex-col gap-0.5 text-right">
-                      <span className="text-xs font-bold text-slate-700">عرض وجه السؤال</span>
-                      <span className="text-[10px] text-slate-400">إظهار أو إخفاء نص السؤال المساعد</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setHidePromptText(!hidePromptText)}
-                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${!hidePromptText ? 'bg-emerald-500' : 'bg-slate-200'}`}
-                    >
-                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${!hidePromptText ? 'translate-x-5' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-
-                  {/* Switch 2: Show Image */}
-                  <div className="flex items-center justify-between py-1 border-b border-slate-50">
-                    <div className="flex flex-col gap-0.5 text-right">
-                      <span className="text-xs font-bold text-slate-700">عرض الصورة التوضيحية</span>
-                      <span className="text-[10px] text-slate-400">إظهار أو إخفاء الصور المساعدة</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setHideImage(!hideImage)}
-                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${!hideImage ? 'bg-emerald-500' : 'bg-slate-200'}`}
-                    >
-                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${!hideImage ? 'translate-x-5' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-
-                  {/* Switch 3: Auto Advance */}
-                  <div className="flex items-center justify-between py-1 border-b border-slate-50">
-                    <div className="flex flex-col gap-0.5 text-right">
-                      <span className="text-xs font-bold text-slate-700">التقليب التلقائي (Auto)</span>
-                      <span className="text-[10px] text-slate-400">المرور للبطاقة التالية تلقائياً بعد التحقق</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-100">التقليب التلقائي (Auto Advance)</span>
+                        <span className="text-[9px] bg-amber-500/20 text-amber-700 dark:text-amber-400 font-extrabold px-1.5 py-0.5 rounded-full">تلقائي</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400">المرور للبطاقة التالية تلقائياً فور التحقق من صحة الإجابة</span>
                     </div>
                     <button
                       type="button"
@@ -6621,15 +6702,75 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           return next;
                         });
                       }}
-                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${autoAdvance ? 'bg-emerald-500' : 'bg-slate-200'}`}
+                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${autoAdvance ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}
                     >
                       <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${autoAdvance ? 'translate-x-5' : 'translate-x-0'}`} />
                     </button>
                   </div>
 
-                  <div className="flex flex-col gap-1.5">
-                    <span className="text-xs font-bold text-slate-500">وجه السؤال المعروض:</span>
-                    <div className="bg-slate-100 p-1 rounded-xl grid grid-cols-2 gap-1">
+                  {/* Switch 1: Show Front Text / Question (عرض النص الأمامي) */}
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                    <div className="flex flex-col gap-0.5 text-right">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-200">عرض النص الأمامي (وجه السؤال)</span>
+                      <span className="text-[10px] text-slate-400">إظهار نص السؤال أو إخفاؤه للاختبار بالاعتماد على الصوت والذاكرة فقط</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setHidePromptText(!hidePromptText)}
+                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${!hidePromptText ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${!hidePromptText ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+
+                  {/* Switch 2: Show Image */}
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                    <div className="flex flex-col gap-0.5 text-right">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-200">عرض الصورة التوضيحية</span>
+                      <span className="text-[10px] text-slate-400">إظهار أو إخفاء الصور المساعدة أثناء مراجعة الكتابة</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setHideImage(!hideImage)}
+                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${!hideImage ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${!hideImage ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+
+                  {/* Audio toggles */}
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                    <div className="flex flex-col gap-0.5 text-right">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-200">نطق السؤال تلقائياً</span>
+                      <span className="text-[10px] text-slate-400">عند ظهور بطاقة الكتابة الجديدة لسماع الكلمة فوراً</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setWriteAutoListenQuestion(!writeAutoListenQuestion)}
+                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${writeAutoListenQuestion ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${writeAutoListenQuestion ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                    <div className="flex flex-col gap-0.5 text-right">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-200">نطق الإجابة عند نجاح التحقق</span>
+                      <span className="text-[10px] text-slate-400">سماع اللفظ الصحيح للإجابة تلقائياً بعد التحقق</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setWriteAutoListenSuccess(!writeAutoListenSuccess)}
+                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${writeAutoListenSuccess ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${writeAutoListenSuccess ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+
+                  {/* Face selector */}
+                  <div className="flex flex-col gap-1.5 pt-1">
+                    <span className="text-xs font-bold text-slate-600 dark:text-slate-300">وجه السؤال المعروض:</span>
+                    <div className="bg-slate-100 dark:bg-slate-800 p-1 rounded-xl grid grid-cols-2 gap-1">
                       <button
                         type="button"
                         onClick={() => {
@@ -6639,8 +6780,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                         }}
                         className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                           writeQuestionFace === "front"
-                            ? "bg-white text-slate-800 shadow-sm"
-                            : "text-slate-500 hover:text-slate-800"
+                            ? "bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow-sm"
+                            : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
                         }`}
                       >
                         ألماني 🇩🇪
@@ -6654,8 +6795,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                         }}
                         className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                           writeQuestionFace === "back"
-                            ? "bg-white text-slate-800 shadow-sm"
-                            : "text-slate-500 hover:text-slate-800"
+                            ? "bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow-sm"
+                            : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
                         }`}
                       >
                         عربي 🇸🇦
@@ -6664,8 +6805,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                   </div>
 
                   <div className="flex flex-col gap-1.5">
-                    <span className="text-xs font-bold text-slate-500">لغة الإجابة المطلوبة:</span>
-                    <div className="bg-slate-100 p-1 rounded-xl grid grid-cols-2 gap-1">
+                    <span className="text-xs font-bold text-slate-600 dark:text-slate-300">لغة الإجابة المطلوبة:</span>
+                    <div className="bg-slate-100 dark:bg-slate-800 p-1 rounded-xl grid grid-cols-2 gap-1">
                       <button
                         type="button"
                         onClick={() => {
@@ -6675,8 +6816,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                         }}
                         className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                           writeTestTarget === "front"
-                            ? "bg-white text-slate-800 shadow-sm"
-                            : "text-slate-500 hover:text-slate-800"
+                            ? "bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow-sm"
+                            : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
                         }`}
                       >
                         ألماني 🇩🇪
@@ -6690,8 +6831,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                         }}
                         className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                           writeTestTarget === "back"
-                            ? "bg-white text-slate-800 shadow-sm"
-                            : "text-slate-500 hover:text-slate-800"
+                            ? "bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow-sm"
+                            : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
                         }`}
                       >
                         عربي 🇸🇦
@@ -6706,44 +6847,76 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                 <div className="space-y-4 animate-fadeIn">
                   <div className="flex items-center gap-1.5 border-b border-slate-100 pb-1">
                     <span className="w-1.5 h-3.5 bg-primary rounded-full" />
-                    <span className="font-bold text-[11px] text-slate-700 uppercase tracking-wider block">إعدادات وضع مراجعة الاستماع</span>
+                    <span className="font-bold text-[11px] text-slate-700 uppercase tracking-wider block">إعدادات وضع مراجعة الاستماع 🎧</span>
                   </div>
 
                   {renderVoiceTargetSelector("وضع مراجعة الاستماع")}
 
-                  <div className="flex items-center justify-between py-1 border-b border-slate-50">
-                    <div className="flex flex-col gap-0.5 text-right">
-                      <span className="text-xs font-bold text-slate-700">نطق الملف الصوتي تلقائياً</span>
-                      <span className="text-[10px] text-slate-400">سماع الكلمة فور الانتقال للبطاقة الجديدة</span>
+                  {/* شنو الينعرض: نوع الخيارات المعروضة للمطابقة */}
+                  <div className="flex flex-col gap-1.5 p-3 bg-blue-50/60 dark:bg-blue-950/30 rounded-2xl border border-blue-200/60 dark:border-blue-900/40">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-extrabold text-blue-900 dark:text-blue-200">شنو الينعرض (نوع خيارات الإجابة):</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setListenAutoListenPrompt(!listenAutoListenPrompt)}
-                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${listenAutoListenPrompt ? 'bg-emerald-500' : 'bg-slate-200'}`}
-                    >
-                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${listenAutoListenPrompt ? 'translate-x-5' : 'translate-x-0'}`} />
-                    </button>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                      اختر ما يتم عرضه في مربعات الخيارات للمطابقة مع الصوت المسموع:
+                    </span>
+                    <div className="bg-white/80 dark:bg-slate-800 p-1 rounded-xl grid grid-cols-3 gap-1 mt-1 border border-blue-100 dark:border-blue-900/30">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setListenChoiceType("image");
+                          localStorage.setItem("settings_listen_choice_type", "image");
+                        }}
+                        className={`py-2 text-[10px] font-bold rounded-lg transition-all cursor-pointer flex flex-col items-center gap-0.5 ${
+                          listenChoiceType === "image"
+                            ? "bg-primary text-white shadow-sm"
+                            : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        }`}
+                      >
+                        <span className="text-xs">الصور 🖼️</span>
+                        <span className="text-[8px] opacity-80">مطابقة صورة</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setListenChoiceType("front");
+                          localStorage.setItem("settings_listen_choice_type", "front");
+                        }}
+                        className={`py-2 text-[10px] font-bold rounded-lg transition-all cursor-pointer flex flex-col items-center gap-0.5 ${
+                          listenChoiceType === "front"
+                            ? "bg-primary text-white shadow-sm"
+                            : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        }`}
+                      >
+                        <span className="text-xs">الأمامي 🇩🇪</span>
+                        <span className="text-[8px] opacity-80">الكلمة بالألمانية</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setListenChoiceType("back");
+                          localStorage.setItem("settings_listen_choice_type", "back");
+                        }}
+                        className={`py-2 text-[10px] font-bold rounded-lg transition-all cursor-pointer flex flex-col items-center gap-0.5 ${
+                          listenChoiceType === "back"
+                            ? "bg-primary text-white shadow-sm"
+                            : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        }`}
+                      >
+                        <span className="text-xs">الخلفي 🇸🇦</span>
+                        <span className="text-[8px] opacity-80">الترجمة بالعربية</span>
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="flex items-center justify-between py-1 border-b border-slate-50">
+                  {/* Switch: Auto Advance (التقليب التلقائي) */}
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50 bg-amber-50/40 dark:bg-amber-950/10 p-2 rounded-xl">
                     <div className="flex flex-col gap-0.5 text-right">
-                      <span className="text-xs font-bold text-slate-700">إعادة نطق الإجابة عند النجاح</span>
-                      <span className="text-[10px] text-slate-400">سماع الكلمة الصحيحة مرة أخرى عند اختيارها</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setListenAutoListenSuccess(!listenAutoListenSuccess)}
-                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${listenAutoListenSuccess ? 'bg-emerald-500' : 'bg-slate-200'}`}
-                    >
-                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${listenAutoListenSuccess ? 'translate-x-5' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-
-                  {/* Switch: Auto Advance */}
-                  <div className="flex items-center justify-between py-1 border-b border-slate-50">
-                    <div className="flex flex-col gap-0.5 text-right">
-                      <span className="text-xs font-bold text-slate-700">التقليب التلقائي (Auto)</span>
-                      <span className="text-[10px] text-slate-400">المرور للبطاقة التالية تلقائياً بعد السماع والاختيار</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-100">التقليب التلقائي (Auto Advance)</span>
+                        <span className="text-[9px] bg-amber-500/20 text-amber-700 dark:text-amber-400 font-extrabold px-1.5 py-0.5 rounded-full">تلقائي</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400">المرور للبطاقة التالية تلقائياً بعد السماع واختيار الإجابة الصحيحة</span>
                     </div>
                     <button
                       type="button"
@@ -6754,49 +6927,39 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           return next;
                         });
                       }}
-                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${autoAdvance ? 'bg-emerald-500' : 'bg-slate-200'}`}
+                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${autoAdvance ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}
                     >
                       <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${autoAdvance ? 'translate-x-5' : 'translate-x-0'}`} />
                     </button>
                   </div>
 
-                  <div className="flex flex-col gap-1.5">
-                    <span className="text-xs font-bold text-slate-500">نوع الخيارات المعروضة للمطابقة:</span>
-                    <div className="bg-slate-100 p-1 rounded-xl grid grid-cols-3 gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setListenChoiceType("image")}
-                        className={`py-2 text-[10px] font-bold rounded-lg transition-all cursor-pointer ${
-                          listenChoiceType === "image"
-                            ? "bg-white text-slate-800 shadow-sm"
-                            : "text-slate-500 hover:text-slate-800"
-                        }`}
-                      >
-                        الصور 🖼️
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setListenChoiceType("front")}
-                        className={`py-2 text-[10px] font-bold rounded-lg transition-all cursor-pointer ${
-                          listenChoiceType === "front"
-                            ? "bg-white text-slate-800 shadow-sm"
-                            : "text-slate-500 hover:text-slate-800"
-                        }`}
-                      >
-                        الأمامي 🇩🇪
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setListenChoiceType("back")}
-                        className={`py-2 text-[10px] font-bold rounded-lg transition-all cursor-pointer ${
-                          listenChoiceType === "back"
-                            ? "bg-white text-slate-800 shadow-sm"
-                            : "text-slate-500 hover:text-slate-800"
-                        }`}
-                      >
-                        الخلفي 🇸🇦
-                      </button>
+                  {/* Audio triggers */}
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                    <div className="flex flex-col gap-0.5 text-right">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-200">نطق الملف الصوتي تلقائياً</span>
+                      <span className="text-[10px] text-slate-400">سماع الكلمة فور الانتقال للبطاقة الجديدة مباشرة</span>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setListenAutoListenPrompt(!listenAutoListenPrompt)}
+                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${listenAutoListenPrompt ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${listenAutoListenPrompt ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                    <div className="flex flex-col gap-0.5 text-right">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-200">إعادة نطق الإجابة عند النجاح</span>
+                      <span className="text-[10px] text-slate-400">سماع الكلمة الصحيحة مرة أخرى عند اختيارها لتثبيت النطق</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setListenAutoListenSuccess(!listenAutoListenSuccess)}
+                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${listenAutoListenSuccess ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${listenAutoListenSuccess ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
                   </div>
                 </div>
               )}

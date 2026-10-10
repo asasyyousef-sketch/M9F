@@ -1226,7 +1226,6 @@ export const ALL_AVAILABLE_MODELS: AIModelOption[] = [
   // High Quota Models (500 RPD)
   { key: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite ⚡ (500 RPD)", desc: "سريع مع 500 طلب يومياً", badge: "500 RPD", group: "high_quota" },
   { key: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite ⚡ (500 RPD)", desc: "خفيف واقتصادي مع 500 طلب يومياً", badge: "500 RPD", group: "high_quota" },
-  { key: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite ⚡ (10 RPM)", desc: "خفيف وعالي الاستجابة", badge: "10 RPM", group: "high_quota" },
   // General & Advanced Models
   { key: "gemini-3.6-flash", name: "Gemini 3.6 Flash ⚡", desc: "أحدث معالجة ذكية ومستقرة (موصى به)", badge: "موصى به", group: "general" },
   { key: "gemini-3.5-flash", name: "Gemini 3.5 Flash ⚡", desc: "نموذج فلاش فائق الاستقرار", badge: "مستقر", group: "general" },
@@ -2444,8 +2443,6 @@ export const AICorrectorWorkspace: React.FC<AICorrectorWorkspaceProps> = ({
         return "Gemini 3.5 Flash Lite ⚡";
       case "gemini-3.1-flash-lite":
         return "Gemini 3.1 Flash Lite ⚡";
-      case "gemini-2.5-flash-lite":
-        return "Gemini 2.5 Flash Lite ⚡";
       case "gemini-3.7-flash":
         return "Gemini 3.7 Flash ⚡";
       case "gemini-3.5-flash":
@@ -5096,7 +5093,6 @@ ${personaInstruction}
                   <optgroup label="🔥 الموديلات ذات الطلبات الكثيرة (500 RPD)">
                     <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite ⚡ (500 RPD)</option>
                     <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite ⚡ (500 RPD)</option>
-                    <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite ⚡ (10 RPM)</option>
                   </optgroup>
                   <optgroup label="✨ النماذج العامة والمتقدمة">
                     <option value="gemini-3.6-flash">Gemini 3.6 Flash ⚡ (أحدث معالجة - موصى به)</option>
@@ -5131,7 +5127,6 @@ ${personaInstruction}
                   <optgroup label="🔥 الموديلات ذات الطلبات الكثيرة (500 RPD)">
                     <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite ⚡ (500 RPD)</option>
                     <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite ⚡ (500 RPD)</option>
-                    <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite ⚡ (10 RPM)</option>
                   </optgroup>
                   <optgroup label="✨ النماذج العامة والمتقدمة">
                     <option value="gemini-3.6-flash">Gemini 3.6 Flash ⚡ (أحدث معالجة - موصى به)</option>
@@ -5166,7 +5161,6 @@ ${personaInstruction}
                   <optgroup label="🔥 الموديلات ذات الطلبات الكثيرة (500 RPD)">
                     <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite ⚡ (500 RPD)</option>
                     <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite ⚡ (500 RPD)</option>
-                    <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite ⚡ (10 RPM)</option>
                   </optgroup>
                   <optgroup label="✨ النماذج العامة والمتقدمة">
                     <option value="gemini-3.6-flash">Gemini 3.6 Flash ⚡ (أحدث معالجة - موصى به)</option>
@@ -5201,7 +5195,6 @@ ${personaInstruction}
                   <optgroup label="🔥 الموديلات ذات الطلبات الكثيرة (500 RPD)">
                     <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite ⚡ (500 RPD)</option>
                     <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite ⚡ (500 RPD)</option>
-                    <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite ⚡ (10 RPM)</option>
                   </optgroup>
                   <optgroup label="✨ النماذج العامة والمتقدمة">
                     <option value="gemini-3.6-flash">Gemini 3.6 Flash ⚡ (أحدث معالجة - موصى به)</option>
@@ -5236,7 +5229,6 @@ ${personaInstruction}
                   <optgroup label="🔥 الموديلات ذات الطلبات الكثيرة (500 RPD)">
                     <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite ⚡ (500 RPD)</option>
                     <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite ⚡ (500 RPD)</option>
-                    <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite ⚡ (10 RPM)</option>
                   </optgroup>
                   <optgroup label="✨ النماذج العامة والمتقدمة">
                     <option value="gemini-3.6-flash">Gemini 3.6 Flash ⚡ (أحدث معالجة - موصى به)</option>
@@ -5782,7 +5774,6 @@ ${personaInstruction}
                         <optgroup label="🔥 الموديلات ذات الطلبات الكثيرة (500 RPD)">
                           <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite ⚡ (500 RPD)</option>
                           <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite ⚡ (500 RPD)</option>
-                          <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite ⚡ (10 RPM)</option>
                         </optgroup>
                         <optgroup label="✨ النماذج العامة والمتقدمة">
                           <option value="gemini-3.5-flash">Gemini 3.5 Flash ⚡ (مستقر - موصى به)</option>
@@ -6015,7 +6006,6 @@ ${personaInstruction}
                     <optgroup label="🔥 الموديلات ذات الطلبات الكثيرة (500 RPD)">
                       <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite ⚡ (500 RPD)</option>
                       <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite ⚡ (500 RPD)</option>
-                      <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite ⚡ (10 RPM)</option>
                     </optgroup>
                     <optgroup label="✨ النماذج العامة والمتقدمة">
                       <option value="gemini-3.6-flash">Gemini 3.6 Flash ⚡ (أحدث معالجة - موصى به)</option>
@@ -6043,7 +6033,6 @@ ${personaInstruction}
                     {[
                       { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite ⚡", desc: "500 طلب/يومياً (500 RPD) و 15/دقيقة - أقصى سعة للعمل المكثف المستمر", tag: "500 RPD" },
                       { id: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite ⚡", desc: "500 طلب/يومياً (500 RPD) و 15/دقيقة - نموذج خفيف مستقر دون انقطاع", tag: "500 RPD" },
-                      { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite ⚡", desc: "10 طلبات/دقيقة (20 RPD) - استجابة خفيفة وسريعة جداً للمحاذاة المباشرة", tag: "10 RPM" },
                     ].map((m) => {
                       const isSelected = selectedModel === m.id;
                       return (

@@ -225,6 +225,173 @@ export function registerAuthRoutes(
     });
   });
 
+  // Check username availability in real time
+  app.get("/api/auth/check-username", async (req: any, res: any) => {
+    const raw = String(req.query.username || "").trim().toLowerCase();
+    if (!raw || raw.length < 3) {
+      return res.json({ available: false, reason: "الاسم قصير جداً (3 أحرف على الأقل)" });
+    }
+    const users = loadUsers(dbPath);
+    const exists = users.some((u) => u.username.toLowerCase() === raw);
+    res.json({ available: !exists, username: raw });
+  });
+
+  // Public User Registration (إنشاء حساب جديد وتسجيل الدخول تلقائياً)
+  app.post("/api/auth/register", async (req: any, res: any) => {
+    const { username, password, name } = req.body || {};
+    if (!username || !username.trim() || !password) {
+      return res.status(400).json({ error: "اسم المستخدم وكلمة المرور مطلوبان لإنشاء الحساب." });
+    }
+
+    const cleanUsername = username.trim().toLowerCase();
+
+    if (cleanUsername.length < 3) {
+      return res.status(400).json({ error: "يجب أن يتكون اسم المستخدم من 3 أحرف أو أرقام على الأقل." });
+    }
+
+    if (!/^[a-zA-Z0-9_\-\u0600-\u06FF]+$/.test(cleanUsername)) {
+      return res.status(400).json({ error: "اسم المستخدم يمكن أن يحتوي فقط على أحرف أو أرقام أو شرطة." });
+    }
+
+    if (password.length < 4) {
+      return res.status(400).json({ error: "يجب أن تتكون كلمة المرور من 4 خانات على الأقل." });
+    }
+
+    let users = loadUsers(dbPath);
+    if (users.length === 0) {
+      try {
+        users = await syncUsersWithSupabase(dbPath);
+      } catch (e) {
+        // non-blocking
+      }
+    }
+
+    // Check if user already exists
+    if (users.some((u) => u.username.toLowerCase() === cleanUsername)) {
+      return res.status(400).json({ error: "اسم المستخدم هذا مسجل بالفعل، يرجى اختيار اسم مستخدم آخر أو تسجيل الدخول." });
+    }
+
+    // If there is no admin registered yet, make this first registered user an admin!
+    const isFirstUser = users.length === 0 || !users.some((u) => u.role === "admin");
+    const role: "admin" | "user" = isFirstUser ? "admin" : "user";
+    const newId = "usr_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6);
+    const { salt, hash } = hashPassword(password);
+
+    const newUser: AppUser = {
+      id: newId,
+      username: cleanUsername,
+      name: (name && name.trim()) || cleanUsername,
+      role,
+      salt,
+      passwordHash: hash,
+      createdAt: new Date().toISOString(),
+    };
+
+    users.push(newUser);
+    saveUsers(dbPath, users);
+
+    // If first admin, link original data if callback provided
+    if (isFirstUser && onAdminSetup) {
+      try {
+        onAdminSetup(newId);
+      } catch (err) {
+        console.error("[Auth Register] Error in onAdminSetup callback:", err);
+      }
+    } else if (!isFirstUser) {
+      // Seed a helpful starter folder and cards for this new user so they have a fresh workspace ready
+      try {
+        if (fs.existsSync(dbPath)) {
+          const raw = fs.readFileSync(dbPath, "utf-8");
+          const dbData = JSON.parse(raw);
+          dbData.folders = dbData.folders || [];
+          dbData.cards = dbData.cards || [];
+
+          const starterFolderId = "folder_" + Date.now();
+          const starterFolder = {
+            id: starterFolderId,
+            userId: newId,
+            name: "مجلدي التعليمي الأول",
+            description: "مجلد افتراضي لبدء التعلم وحفظ البطاقات الخاصة بك",
+            color: "#0056f6",
+            frontLang: "de",
+            backLang: "ar",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+
+          const starterCards = [
+            {
+              id: "card_" + Date.now() + "_1",
+              userId: newId,
+              folderId: starterFolderId,
+              frontText: "Hallo",
+              frontLang: "de",
+              backText: "مرحباً",
+              backLang: "ar",
+              streak: 0,
+              createdAt: new Date().toISOString(),
+            },
+            {
+              id: "card_" + Date.now() + "_2",
+              userId: newId,
+              folderId: starterFolderId,
+              frontText: "Danke schön",
+              frontLang: "de",
+              backText: "شكراً جزيلاً",
+              backLang: "ar",
+              streak: 0,
+              createdAt: new Date().toISOString(),
+            },
+            {
+              id: "card_" + Date.now() + "_3",
+              userId: newId,
+              folderId: starterFolderId,
+              frontText: "Auf Wiedersehen",
+              frontLang: "de",
+              backText: "إلى اللقاء / مع السلامة",
+              backLang: "ar",
+              streak: 0,
+              createdAt: new Date().toISOString(),
+            },
+          ];
+
+          dbData.folders.push(starterFolder);
+          dbData.cards.push(...starterCards);
+          fs.writeFileSync(dbPath, JSON.stringify(dbData, null, 2), "utf-8");
+        }
+      } catch (seedErr) {
+        console.warn("[Auth Register] Notice seeding starter folder:", seedErr);
+      }
+    }
+
+    // Create session token (valid for 30 days)
+    const token = crypto.randomBytes(32).toString("hex");
+    const session: UserSession = {
+      token,
+      userId: newUser.id,
+      username: newUser.username,
+      name: newUser.name,
+      role: newUser.role,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+    };
+    activeSessions.set(token, session);
+    persistSessions();
+
+    res.json({
+      success: true,
+      message: "تم إنشاء الحساب بنجاح وتم تسجيل الدخول تلقائياً!",
+      user: {
+        id: newUser.id,
+        username: newUser.username,
+        name: newUser.name,
+        role: newUser.role,
+        createdAt: newUser.createdAt,
+      },
+      token,
+    });
+  });
+
   // Setup first admin account
   app.post("/api/auth/setup-admin", (req: any, res: any) => {
     const users = loadUsers(dbPath);

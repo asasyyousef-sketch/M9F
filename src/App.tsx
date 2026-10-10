@@ -17,10 +17,12 @@ import {
   EditFolderModal,
   EditCardModal
 } from "./components/Modals";
+import { ShareFolderModal, ImportSharedDeckModal } from "./components/ShareModals";
 import { ReviewSession } from "./components/ReviewSession";
-import { Folder, Flashcard, ReviewMethod, DbStatus, TranscriptDocument } from "./types";
+import { Folder, Flashcard, ReviewMethod, DbStatus, TranscriptDocument, SharedDeckData } from "./types";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { AuthScreen } from "./components/AuthScreen";
+import { CheckCircle2 } from "lucide-react";
 
 function MainStudyApp() {
   const { currentUser, isLoading: isAuthLoading, authFetch } = useAuth();
@@ -87,6 +89,15 @@ function MainStudyApp() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingFolder, setEditingFolder] = useState<Folder | null>(null);
   const [editingCard, setEditingCard] = useState<Flashcard | null>(null);
+
+  // Shared Decks state
+  const [sharingFolder, setSharingFolder] = useState<Folder | null>(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [sharedDeckData, setSharedDeckData] = useState<SharedDeckData | null>(null);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isShareLoading, setIsShareLoading] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   
   // Image picker callback channel
   const [isImagePickerOpen, setIsImagePickerOpen] = useState(false);
@@ -186,6 +197,51 @@ function MainStudyApp() {
         const baseFontSize = 12.65;
         document.documentElement.style.fontSize = `${baseFontSize * (scaleVal / 100)}px`;
       }
+    }
+  }, []);
+
+  // Auto-dismiss toast messages after 5 seconds
+  useEffect(() => {
+    if (toastMessage) {
+      const timer = setTimeout(() => {
+        setToastMessage(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
+
+  // Detect shared deck link (?share=...) on initial mount
+  useEffect(() => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const shareParam = urlParams.get("share");
+      if (shareParam) {
+        setIsShareLoading(true);
+        setIsImportModalOpen(true);
+        setShareError(null);
+
+        fetch(`/api/share/${encodeURIComponent(shareParam)}`)
+          .then((res) => {
+            if (!res.ok) throw new Error("الملف المشارك غير موجود أو انتهت صلاحيته");
+            return res.json();
+          })
+          .then((data) => {
+            if (data.success && data.data) {
+              setSharedDeckData(data.data);
+            } else {
+              setShareError(data.error || "تعذر العثور على الملف المشارك");
+            }
+          })
+          .catch((err) => {
+            console.error("[Share] Error loading shared deck:", err);
+            setShareError("تعذر تحميل الملف المشارك. يرجى التأكد من صحة الرابط.");
+          })
+          .finally(() => {
+            setIsShareLoading(false);
+          });
+      }
+    } catch (e) {
+      console.error("[Share] URL parse error:", e);
     }
   }, []);
 
@@ -1018,6 +1074,82 @@ function MainStudyApp() {
     setEditingCard(card);
   }, []);
 
+  const handleOpenShareFolder = useCallback((folder: Folder) => {
+    setSharingFolder(folder);
+    setIsShareModalOpen(true);
+  }, []);
+
+  const handleImportSharedDeck = useCallback((shared: SharedDeckData, openImmediately: boolean = true) => {
+    try {
+      const newFolderId = "f_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7);
+      const idMap: Record<string, string> = { [shared.folder.id]: newFolderId };
+
+      // Map subfolders if any
+      const newSubfolders: Folder[] = (shared.subfolders || []).map((sf, idx) => {
+        const subId = "f_" + Date.now() + "_sub_" + idx + "_" + Math.random().toString(36).substring(2, 6);
+        idMap[sf.id] = subId;
+        return {
+          ...sf,
+          id: subId,
+          parentId: sf.parentId ? (idMap[sf.parentId] || newFolderId) : newFolderId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+      });
+
+      // Name conflict checking
+      let targetFolderName = shared.folder.name;
+      const isDuplicate = folders.some((f) => f.name.trim().toLowerCase() === targetFolderName.trim().toLowerCase());
+      if (isDuplicate) {
+        targetFolderName = `${shared.folder.name} (مشارك)`;
+      }
+
+      const newFolder: Folder = {
+        ...shared.folder,
+        id: newFolderId,
+        name: targetFolderName,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      // Map cards preserving exact order
+      const newCards: Flashcard[] = (shared.cards || []).map((c, index) => {
+        const assignedFolderId = idMap[c.folderId] || newFolderId;
+        return {
+          ...c,
+          id: "c_" + Date.now() + "_" + index + "_" + Math.random().toString(36).substring(2, 7),
+          folderId: assignedFolderId,
+          streak: 0,
+          createdAt: new Date(Date.now() + index * 100).toISOString()
+        };
+      });
+
+      const updatedFolders = [...folders, newFolder, ...newSubfolders];
+      const updatedCards = [...cards, ...newCards];
+
+      setFolders(updatedFolders);
+      setCards(updatedCards);
+      persistDB(updatedFolders, updatedCards);
+
+      if (openImmediately) {
+        setActiveFolderId(newFolderId);
+        setViewMode("library");
+      }
+
+      setIsImportModalOpen(false);
+      setToastMessage(`🎉 تمت إضافة ملف "${newFolder.name}" (${newCards.length} بطاقة) بنجاح إلى مكتبتك!`);
+
+      // Clean up URL query parameter without page reload
+      try {
+        const cleanUrl = window.location.pathname + window.location.hash;
+        window.history.replaceState({}, document.title, cleanUrl);
+      } catch (e) {}
+    } catch (err) {
+      console.error("[Share] Failed to import shared deck:", err);
+      alert("حدث خطأ أثناء حفظ الملف المشارك في مكتبتك.");
+    }
+  }, [folders, cards, persistDB]);
+
   const handleRefineFolderWithAI = useCallback((folderId: string) => {
     setAiRefineFolderId(folderId);
     setViewMode("ai");
@@ -1173,6 +1305,7 @@ function MainStudyApp() {
             onCreateFolderClick={handleOpenCreateFolder}
             onEditFolder={handleOpenEditFolder}
             onEditCard={handleOpenEditCard}
+            onShareFolder={handleOpenShareFolder}
             onToggleSidebar={handleToggleSidebar}
             onRefineFolderWithAI={handleRefineFolderWithAI}
             onOpenReviewSetup={handleOpenReviewSetup}
@@ -1206,6 +1339,7 @@ function MainStudyApp() {
           folder={editingFolder}
           onSave={handleEditFolder}
           onOpenImageSearch={handleOpenImageSearch}
+          onShare={handleOpenShareFolder}
         />
       )}
 
@@ -1273,6 +1407,61 @@ function MainStudyApp() {
         onClose={() => setIsSettingsOpen(false)}
         onOpen={() => setIsSettingsOpen(true)}
       />
+
+      {/* 4. SHARE AND IMPORT MODALS */}
+      {sharingFolder && (
+        <ShareFolderModal
+          isOpen={isShareModalOpen}
+          onClose={() => {
+            setIsShareModalOpen(false);
+            setSharingFolder(null);
+          }}
+          folder={sharingFolder}
+          allFolders={folders}
+          allCards={cards}
+          currentUserName={currentUser?.name || currentUser?.username}
+        />
+      )}
+
+      <ImportSharedDeckModal
+        isOpen={isImportModalOpen}
+        onClose={() => {
+          setIsImportModalOpen(false);
+          setSharedDeckData(null);
+          setShareError(null);
+          try {
+            const cleanUrl = window.location.pathname + window.location.hash;
+            window.history.replaceState({}, document.title, cleanUrl);
+          } catch (e) {}
+        }}
+        sharedData={sharedDeckData}
+        isLoading={isShareLoading}
+        error={shareError}
+        onImport={handleImportSharedDeck}
+        onStartReview={(reviewCards) => {
+          setActiveReview({
+            method: "classic",
+            cards: reviewCards
+          });
+        }}
+        existingFolders={folders}
+      />
+
+      {/* Floating Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-4 duration-200 pointer-events-auto">
+          <div className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-slate-900/95 text-white shadow-2xl border border-slate-700/60 backdrop-blur-md text-xs font-bold">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{toastMessage}</span>
+            <button
+              onClick={() => setToastMessage(null)}
+              className="w-5 h-5 rounded-full hover:bg-white/20 flex items-center justify-center mr-1 text-slate-400 hover:text-white cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

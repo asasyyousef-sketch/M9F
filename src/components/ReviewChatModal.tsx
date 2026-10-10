@@ -101,7 +101,6 @@ const AVAILABLE_MODELS = [
   // High quota models (500 RPD / lightweight)
   { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite ⚡", desc: "أداء ممتاز وخفيف مع حصة يومية عالية (500 طلب/يوم)", tag: "500 RPD" },
   { id: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite ⚡", desc: "سريع وخفيف جداً للمحادثات اليومية (500 طلب/يوم)", tag: "500 RPD" },
-  { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite ⚡", desc: "اقتصادي وسريع جداً للمحادثات الفورية", tag: "خفيف" },
   
   // General & Advanced Models
   { id: "gemini-3.6-flash", name: "Gemini 3.6 Flash ⚡", desc: "أحدث وأقوى نموذج لمعالجة اللغات والشرح الدقيق (موصى به)", tag: "موصى به" },

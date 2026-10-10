@@ -42,6 +42,18 @@ export interface Flashcard {
   imageSearchQuery?: string;
 }
 
+export interface SharedDeckData {
+  id: string;
+  folder: Folder;
+  cards: Flashcard[];
+  subfolders?: Folder[];
+  cardCount: number;
+  authorName?: string;
+  createdAt: string;
+  views?: number;
+}
+
+
 export function getCardSearchQuery(
   card: { frontText?: string; backText?: string; imageSearchQuery?: string }
 ): string {

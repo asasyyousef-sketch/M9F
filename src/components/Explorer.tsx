@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronLeft, Folder, Volume2, Trash2, FolderPlus, Bell, User, Play, Plus, Search, Pencil, Menu, Home, Layers, BookOpen, RectangleVertical, CheckSquare, Scissors, Copy, X, Check, Clipboard, ListChecks, Sparkles, History, Headphones, DownloadCloud, Download, CheckCircle2, Loader2, VolumeX, FileAudio, Image as ImageIcon, FileImage, Minimize2, Maximize2 } from "lucide-react";
+import { ChevronLeft, Folder, Volume2, Trash2, FolderPlus, Bell, User, Play, Plus, Search, Pencil, Menu, Home, Layers, BookOpen, RectangleVertical, CheckSquare, Scissors, Copy, X, Check, Clipboard, ListChecks, Sparkles, History, Headphones, DownloadCloud, Download, CheckCircle2, Loader2, VolumeX, FileAudio, Image as ImageIcon, FileImage, Minimize2, Maximize2, Share2 } from "lucide-react";
 import { Folder as FolderType, Flashcard, getSafeImageStyle, getCardSearchQuery } from "../types";
 import { speakClient, preloadTTS, preloadImage, fetchGradioAudioBlob, fetchAudioBlob } from "./Modals";
 import { ImageWithSkeleton } from "./ReviewSession";
@@ -81,6 +81,7 @@ interface ExplorerProps {
   onCreateFolderClick: () => void;
   onEditFolder: (folder: FolderType) => void;
   onEditCard: (card: Flashcard) => void;
+  onShareFolder?: (folder: FolderType) => void;
   onToggleSidebar?: () => void;
   onBulkDelete?: (folderIds: string[], cardIds: string[]) => void;
   onBulkMove?: (folderIds: string[], cardIds: string[], targetFolderId: string) => void;
@@ -104,6 +105,7 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
   onCreateFolderClick,
   onEditFolder,
   onEditCard,
+  onShareFolder,
   onToggleSidebar,
   onBulkDelete,
   onBulkMove,
@@ -2030,6 +2032,17 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                 </button>
               )}
 
+              {/* Share Current Folder Action Button */}
+              {activeFolder && onShareFolder && (
+                <button
+                  onClick={() => onShareFolder(activeFolder)}
+                  className="w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-xs hover:scale-105 active:scale-95 bg-blue-50/80 hover:bg-blue-100 text-[#0056f6] outline-none border border-blue-100 shrink-0"
+                  title="مشاركة هذا الملف برابط 🔗"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+
               {/* Divider */}
               <div className="w-[1px] h-4 bg-slate-200" />
 
@@ -2281,8 +2294,19 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
 
                   {/* Left Side: Metadata & Delete Action (renders on left in RTL) */}
                   {!isSelectionMode && (
-                    <div className="flex items-center gap-3">
-
+                    <div className="flex items-center gap-2">
+                      {onShareFolder && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onShareFolder(f);
+                          }}
+                          className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 text-outline hover:text-[#0056f6] hover:bg-blue-50 rounded-xl transition-all cursor-pointer"
+                          title="مشاركة هذا المجلد برابط 🔗"
+                        >
+                          <Share2 className="w-4 h-4" />
+                        </button>
+                      )}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();

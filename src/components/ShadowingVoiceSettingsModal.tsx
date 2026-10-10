@@ -47,12 +47,6 @@ export const SHADOWING_AI_MODELS: ShadowingAiModelOption[] = [
     description: "نموذج خفيف مستقر واقتصادي (500 طلب/يومياً) للاستجابات السريعة اللحظية.",
     badge: "500 RPD",
   },
-  {
-    id: "gemini-2.5-flash-lite",
-    name: "Gemini 2.5 Flash Lite ⚡ (10 RPM)",
-    description: "استجابة خفيفة وسريعة جداً للترجمة المباشرة والمحاذاة.",
-    badge: "10 RPM",
-  },
   // General & Advanced Models
   {
     id: "gemini-3.6-flash",
@@ -356,7 +350,7 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
     return (
       initialAiModel ||
       localStorage.getItem("shadowing_ai_translation_model") ||
-      "gemini-3.8-flash"
+      "gemini-3.5-flash"
     );
   });
   const [aiTargetLanguage, setAiTargetLanguage] = useState<string>(() => {
@@ -451,7 +445,7 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
       setAiTranslationModel(
         initialAiModel ||
         localStorage.getItem("shadowing_ai_translation_model") ||
-        "gemini-3.8-flash"
+        "gemini-3.5-flash"
       );
       setAiTargetLanguage(
         initialAiTargetLang ||
@@ -1431,7 +1425,6 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
                 <optgroup label="🔥 الموديلات ذات الطلبات الكثيرة (500 RPD)">
                   <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite ⚡ (500 RPD)</option>
                   <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite ⚡ (500 RPD)</option>
-                  <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite ⚡ (10 RPM)</option>
                 </optgroup>
                 <optgroup label="✨ النماذج العامة والمتقدمة">
                   <option value="gemini-3.6-flash">Gemini 3.6 Flash ⚡ (أحدث معالجة - موصى به)</option>

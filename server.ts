@@ -1709,7 +1709,7 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
     }
   });
 
-  // API Route - Translate Shadowing Sentences using Gemini AI or Groq AI
+  // API Route - Translate Shadowing Sentences using Gemini AI
   app.post("/api/shadowing/translate-sentences", async (req, res) => {
     try {
       const {
@@ -1717,9 +1717,8 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
         rawText = "",
         sourceLanguage = "de",
         targetLanguage = "ar",
-        selectedModel = "gemini-3.6-flash",
-        customApiKey = "",
-        groqApiKey = ""
+        selectedModel = "gemini-3.8-flash",
+        customApiKey = ""
       } = req.body;
 
       if (!Array.isArray(sentences) || sentences.length === 0) {
@@ -1729,20 +1728,21 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
       const headerAuth = (req.headers.authorization || "").replace("Bearer ", "").trim();
       const headerKey = (req.headers["x-gemini-key"] as string) || "";
       const effectiveGeminiKey =
-        (customApiKey && !customApiKey.startsWith("gsk_") ? customApiKey.trim() : "") ||
-        (req.body.userApiKey && !req.body.userApiKey.startsWith("gsk_") ? req.body.userApiKey.trim() : "") ||
-        (req.body.geminiApiKey && req.body.geminiApiKey.trim()) ||
+        (customApiKey && customApiKey.trim()) ||
+        (req.body.userApiKey && req.body.userApiKey.trim()) ||
+        (req.body.apiKey && req.body.apiKey.trim()) ||
         headerKey.trim() ||
-        (headerAuth && !headerAuth.startsWith("gsk_") ? headerAuth : "") ||
+        headerAuth ||
         process.env.GEMINI_API_KEY ||
         "";
 
-      const effectiveGroqKey =
-        (groqApiKey && groqApiKey.trim()) ||
-        (customApiKey && customApiKey.startsWith("gsk_") ? customApiKey.trim() : "") ||
-        (headerAuth && headerAuth.startsWith("gsk_") ? headerAuth : "") ||
-        process.env.GROQ_API_KEY ||
-        "";
+      if (!effectiveGeminiKey) {
+        return res.status(500).json({
+          error: "مفتاح GEMINI_API_KEY غير متوفر. يرجى ضبط مفتاح Gemini في الإعدادات."
+        });
+      }
+
+      const aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
 
       const langNameMap: Record<string, string> = {
         ar: "العربية",
@@ -1771,7 +1771,7 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
 
 الشروط:
 1. حافظ على المعنى السياقي السليم، والصياغة الطبيعية والمفهومة.
-2. أرجع النتيجة حصراً كـ JSON بالتنسيق التالي بدون أي نصوص إضافية:
+2. أرجع النتيجة حصراً كمصفوفة JSON بالتنسيق التالي بدون أي نصوص إضافية:
 [
   {
     "id": "معرف الجملة نفسه",
@@ -1779,117 +1779,49 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
   }
 ]`;
 
-      let rawJson = "";
-      let usedModel = selectedModel || "Gemini AI";
+      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.8-flash";
+      const candidateModels = Array.from(new Set([
+        primaryModel,
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-3.1-pro-preview"
+      ])).filter(m => !m.includes("groq") && m !== "gemini-2.5-flash" && m !== "gemini-1.5-flash");
+
+      let rawJson = "[]";
+      let usedModel = primaryModel;
       let lastErr: any = null;
 
-      const isGroqModel = (selectedModel && (selectedModel.toLowerCase().includes("groq") || selectedModel.toLowerCase().includes("llama"))) ||
-        (customApiKey && customApiKey.startsWith("gsk_"));
-
-      // 1. Try Groq API if selected or key available
-      if (isGroqModel && effectiveGroqKey) {
+      for (const modelToTry of candidateModels) {
         try {
-          const resGroq = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${effectiveGroqKey}`
-            },
-            body: JSON.stringify({
-              model: "llama-3.3-70b-versatile",
-              messages: [
-                {
-                  role: "system",
-                  content: "أنت مترجم لغوي احترافي للجمل. أرجع الإجابة ككائن JSON يحتوي على مصفوفة باسم 'translations' تحتوي على كائنات بها 'id' و 'translation'."
-                },
-                { role: "user", content: prompt }
-              ],
-              response_format: { type: "json_object" },
-              temperature: 0.2
-            })
+          const response = await aiClient.models.generateContent({
+            model: modelToTry,
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json"
+            }
           });
-
-          if (resGroq.ok) {
-            const groqData = await resGroq.json();
-            rawJson = groqData.choices?.[0]?.message?.content || "";
-            usedModel = "Groq Llama 3.3 70B 🚀";
-          } else {
-            console.warn("Groq request failed with status:", resGroq.status);
+          if (response.text) {
+            rawJson = response.text;
+            usedModel = modelToTry;
+            break;
           }
         } catch (err: any) {
-          console.warn("Groq API error in shadowing translate:", err?.message);
+          console.warn(`Shadowing translation failed on model ${modelToTry}, trying fallback...`, err?.message);
           lastErr = err;
         }
       }
 
-      // 2. Fallback / Main path for Gemini API
-      if (!rawJson) {
-        if (!effectiveGeminiKey) {
-          return res.status(500).json({
-            error: "مفتاح GEMINI_API_KEY غير متوفر. يرجى ضبط مفتاح Gemini في الإعدادات."
-          });
-        }
-
-        const aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
-
-        // Map UI model aliases (like gemini-3.8-flash) to real Google API model names
-        const mapToRealGeminiModel = (name: string): string => {
-          if (!name) return "gemini-2.5-flash";
-          const lower = name.toLowerCase().trim();
-          if (lower.includes("pro")) return "gemini-2.5-pro";
-          if (lower.includes("lite")) return "gemini-2.5-flash-lite";
-          if (lower.includes("1.5")) return "gemini-1.5-flash";
-          if (lower.includes("2.0")) return "gemini-2.0-flash";
-          return "gemini-2.5-flash";
-        };
-
-        const targetModelMapped = mapToRealGeminiModel(selectedModel);
-        const candidateModels = Array.from(new Set([
-          targetModelMapped,
-          "gemini-2.5-flash",
-          "gemini-2.5-pro",
-          "gemini-1.5-flash",
-          "gemini-2.5-flash-lite",
-          "gemini-2.0-flash"
-        ]));
-
-        for (const modelToTry of candidateModels) {
-          try {
-            const response = await aiClient.models.generateContent({
-              model: modelToTry,
-              contents: prompt,
-              config: {
-                responseMimeType: "application/json"
-              }
-            });
-            if (response.text) {
-              rawJson = response.text;
-              usedModel = modelToTry;
-              break;
-            }
-          } catch (err: any) {
-            console.warn(`Shadowing translation failed on Gemini model ${modelToTry}, trying fallback...`, err?.message);
-            lastErr = err;
-          }
-        }
-      }
-
-      if (!rawJson && lastErr) {
+      if (rawJson === "[]" && lastErr) {
         throw lastErr;
       }
 
       let parsedResults: any[] = [];
-      const parsedObj = safeExtractAndParseJSON<any>(rawJson, []);
-      if (Array.isArray(parsedObj)) {
-        parsedResults = parsedObj;
-      } else if (parsedObj && typeof parsedObj === "object") {
-        if (Array.isArray(parsedObj.translations)) {
-          parsedResults = parsedObj.translations;
-        } else if (Array.isArray(parsedObj.result)) {
-          parsedResults = parsedObj.result;
-        } else if (Array.isArray(parsedObj.data)) {
-          parsedResults = parsedObj.data;
-        }
+      try {
+        parsedResults = JSON.parse(rawJson);
+      } catch (err) {
+        console.error("Failed to parse Gemini Shadowing translation JSON:", err);
       }
 
       if (!Array.isArray(parsedResults) || parsedResults.length === 0) {
@@ -3109,6 +3041,142 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
     // Immediately return success response with local db state (Supabase will finalize in the background)
     res.json({ status: "success", message: "Data saved successfully", dbStatus });
   });
+
+  // ─── Shared Decks System ────────────────────────────────────────────────────────
+  const SHARED_DECKS_PATH = path.join(process.cwd(), "shared_decks.json");
+
+  function loadSharedDecks(): Record<string, any> {
+    try {
+      if (fs.existsSync(SHARED_DECKS_PATH)) {
+        const raw = fs.readFileSync(SHARED_DECKS_PATH, "utf-8").trim();
+        if (raw) return JSON.parse(raw);
+      }
+    } catch (e) {
+      console.error("[Shared Decks] Error reading shared_decks.json:", e);
+    }
+    return {};
+  }
+
+  function saveSharedDecks(data: Record<string, any>) {
+    try {
+      fs.writeFileSync(SHARED_DECKS_PATH, JSON.stringify(data, null, 2), "utf-8");
+    } catch (e) {
+      console.error("[Shared Decks] Error writing shared_decks.json:", e);
+    }
+  }
+
+  // API Route - Create or update a shared deck link
+  app.post("/api/share/folder", express.json({ limit: "50mb" }), async (req, res) => {
+    try {
+      const { folder, cards, subfolders, authorName } = req.body;
+      if (!folder || !folder.name) {
+        return res.status(400).json({ success: false, error: "بيانات المجلد غير صالحة" });
+      }
+
+      // Generate a clean, unique 8-character hex ID
+      const shareId = crypto.randomBytes(4).toString("hex");
+
+      const shared = loadSharedDecks();
+      const payload = {
+        id: shareId,
+        folder: {
+          id: folder.id,
+          name: folder.name,
+          description: folder.description || "",
+          color: folder.color || "#0056f6",
+          coverImage: folder.coverImage || "",
+          coverImagePosition: folder.coverImagePosition || "50% 50%",
+          frontLang: folder.frontLang || "de",
+          backLang: folder.backLang || "ar",
+          parentId: folder.parentId || null
+        },
+        cards: (cards || []).map((c: any, index: number) => ({
+          id: c.id,
+          folderId: c.folderId || folder.id,
+          frontText: c.frontText || "",
+          frontLang: c.frontLang || folder.frontLang || "de",
+          frontImage: c.frontImage || "",
+          frontImagePosition: c.frontImagePosition || "50% 50%",
+          frontAudioUrl: c.frontAudioUrl || "",
+          backText: c.backText || "",
+          backLang: c.backLang || folder.backLang || "ar",
+          backImage: c.backImage || "",
+          backImagePosition: c.backImagePosition || "50% 50%",
+          backAudioUrl: c.backAudioUrl || "",
+          isArticleMode: !!c.isArticleMode,
+          correctArticle: c.correctArticle || "",
+          isPluralMode: !!c.isPluralMode,
+          pluralText: c.pluralText || "",
+          pluralLang: c.pluralLang || "de",
+          translationHint: c.translationHint || "",
+          streak: c.streak || 0,
+          difficulty: c.difficulty || "medium",
+          orderIndex: index
+        })),
+        subfolders: (subfolders || []).map((sf: any) => ({
+          id: sf.id,
+          name: sf.name,
+          description: sf.description || "",
+          color: sf.color || "#0056f6",
+          coverImage: sf.coverImage || "",
+          coverImagePosition: sf.coverImagePosition || "50% 50%",
+          frontLang: sf.frontLang || "de",
+          backLang: sf.backLang || "ar",
+          parentId: sf.parentId
+        })),
+        cardCount: (cards || []).length,
+        authorName: authorName || (req as any).user?.username || (req as any).user?.name || "صاحب الملف",
+        createdAt: new Date().toISOString(),
+        views: 0
+      };
+
+      shared[shareId] = payload;
+      saveSharedDecks(shared);
+
+      const host = req.get("x-forwarded-host") || req.get("host") || "localhost:3000";
+      const proto = req.get("x-forwarded-proto") || req.protocol || "http";
+      const shareUrl = `${proto}://${host}/?share=${shareId}`;
+
+      console.log(`[Shared Decks] Created share link: ${shareUrl} for folder "${folder.name}" with ${payload.cardCount} cards`);
+
+      return res.json({
+        success: true,
+        shareId,
+        shareUrl,
+        cardCount: payload.cardCount,
+        folderName: folder.name
+      });
+    } catch (err: any) {
+      console.error("[Shared Decks Error]", err);
+      return res.status(500).json({ success: false, error: err.message || "حدث خطأ أثناء إنشاء رابط المشاركة" });
+    }
+  });
+
+  // API Route - Get shared deck by shareId (public, no authentication required)
+  app.get("/api/share/:shareId", (req, res) => {
+    try {
+      const { shareId } = req.params;
+      const shared = loadSharedDecks();
+      const item = shared[shareId];
+      if (!item) {
+        return res.status(404).json({ success: false, error: "الملف المشارك غير موجود أو انتهت صلاحيته" });
+      }
+
+      item.views = (item.views || 0) + 1;
+      saveSharedDecks(shared);
+
+      return res.json({ success: true, data: item });
+    } catch (err: any) {
+      console.error("[Shared Decks Error]", err);
+      return res.status(500).json({ success: false, error: err.message || "تعذر تحميل الملف المشارك" });
+    }
+  });
+
+  // Redirect /share/:shareId directly to /?share=:shareId for easy friendly links
+  app.get("/share/:shareId", (req, res) => {
+    res.redirect(`/?share=${req.params.shareId}`);
+  });
+
 
   // API Route - Force Push Local data to Supabase Cloud
   app.post("/api/sync/push", async (req, res) => {
