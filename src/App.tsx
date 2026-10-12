@@ -1198,6 +1198,7 @@ function MainStudyApp() {
         {/* Left Drawer (Arabic Right-aligned Sidebar) */}
         <Sidebar
           folders={folders}
+          cards={cards}
           activeFolderId={activeFolderId}
           onSelectFolder={handleSelectFolder}
           onHomeClick={handleHomeClick}

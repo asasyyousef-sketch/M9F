@@ -20,11 +20,12 @@ import {
   Headphones,
   LogOut
 } from "lucide-react";
-import { Folder as FolderType, DbStatus } from "../types";
+import { Folder as FolderType, Flashcard, DbStatus } from "../types";
 import { useAuth } from "../context/AuthContext";
 
 interface SidebarProps {
   folders: FolderType[];
+  cards?: Flashcard[];
   activeFolderId: string;
   onSelectFolder: (id: string) => void;
   onHomeClick: () => void;
@@ -45,6 +46,7 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = React.memo(({
   folders,
+  cards = [],
   activeFolderId,
   onSelectFolder,
   onHomeClick,
@@ -377,8 +379,11 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                     <span className="truncate font-bold">المكتبة</span>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded-md">
-                      {folders.length}
+                    <span 
+                      className="text-[10px] font-mono font-bold px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded-md cursor-help border border-slate-200/50"
+                      title={`إجمالي عدد المجلدات في المكتبة: ${folders.length} مجلد`}
+                    >
+                      {folders.length} مجلد
                     </span>
                     <div
                       onClick={(e) => {

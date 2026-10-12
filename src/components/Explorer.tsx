@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronLeft, Folder, Volume2, Trash2, FolderPlus, Bell, User, Play, Plus, Search, Pencil, Menu, Home, Layers, BookOpen, RectangleVertical, CheckSquare, Scissors, Copy, X, Check, Clipboard, ListChecks, Sparkles, History, Headphones, DownloadCloud, Download, CheckCircle2, Loader2, VolumeX, FileAudio, Image as ImageIcon, FileImage, Minimize2, Maximize2, Share2 } from "lucide-react";
+import { ChevronLeft, Folder, Volume2, Trash2, FolderPlus, Bell, User, Play, Plus, Search, Pencil, Menu, Home, Layers, BookOpen, RectangleVertical, CheckSquare, Scissors, Copy, X, Check, Clipboard, ListChecks, Sparkles, History, Headphones, DownloadCloud, Download, CheckCircle2, Loader2, VolumeX, FileAudio, Image as ImageIcon, FileImage, Minimize2, Maximize2, Share2, MoreVertical, ChevronDown, Info, Calendar } from "lucide-react";
 import { Folder as FolderType, Flashcard, getSafeImageStyle, getCardSearchQuery } from "../types";
 import { speakClient, preloadTTS, preloadImage, fetchGradioAudioBlob, fetchAudioBlob } from "./Modals";
 import { ImageWithSkeleton } from "./ReviewSession";
@@ -219,6 +219,32 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
     setSearchHistory([]);
     localStorage.removeItem("study_search_history");
   };
+
+  // State for Clean Overflow Menus
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = React.useState(false);
+  const [isAddMenuOpen, setIsAddMenuOpen] = React.useState(false);
+  const [openFolderMenuId, setOpenFolderMenuId] = React.useState<string | null>(null);
+  const [folderDetailsTarget, setFolderDetailsTarget] = React.useState<FolderType | null>(null);
+  const moreMenuRef = React.useRef<HTMLDivElement>(null);
+  const addMenuRef = React.useRef<HTMLDivElement>(null);
+  const folderMenuRef = React.useRef<HTMLDivElement>(null);
+
+  // Close menus when clicking outside
+  React.useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setIsMoreMenuOpen(false);
+      }
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
+        setIsAddMenuOpen(false);
+      }
+      if (folderMenuRef.current && !folderMenuRef.current.contains(e.target as Node)) {
+        setOpenFolderMenuId(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Drag and Drop States
   const [draggedFolderId, setDraggedFolderId] = React.useState<string | null>(null);
@@ -1386,23 +1412,25 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
 
         <div 
           ref={breadcrumbsRef}
-          className="flex flex-nowrap overflow-x-auto scrollbar-none items-center gap-1.5 text-xs font-bold text-slate-500 bg-white border border-slate-100 px-4 py-1.5 rounded-2xl shadow-3xs transition-all duration-300 max-w-full"
+          className="flex flex-nowrap items-center justify-between gap-1.5 text-xs font-bold text-slate-500 bg-white border border-slate-100 px-3.5 py-1.5 rounded-2xl shadow-3xs transition-all duration-300 w-full"
           style={{
             borderRight: activeFolder ? `3px solid ${folderColor}` : "3px solid #e2e8f0"
           }}
         >
-          <span 
-            onClick={() => onSelectFolder("")} 
-            onDragOver={(e) => {
-              e.preventDefault();
-              handleDragEnterSpringLoad("");
-            }}
-            onDragLeave={handleDragLeaveSpringLoad}
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 hover:bg-slate-100/80 text-slate-600 rounded-lg transition-all cursor-pointer hover:text-[#0056f6] shrink-0"
-          >
-            <Home className="w-3.5 h-3.5 text-slate-400" />
-            <span>المكتبة</span>
-          </span>
+          {/* Scrollable path section */}
+          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none min-w-0">
+            <span 
+              onClick={() => onSelectFolder("")} 
+              onDragOver={(e) => {
+                e.preventDefault();
+                handleDragEnterSpringLoad("");
+              }}
+              onDragLeave={handleDragLeaveSpringLoad}
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 hover:bg-slate-100/80 text-slate-600 rounded-lg transition-all cursor-pointer hover:text-[#0056f6] shrink-0"
+            >
+              <Home className="w-3.5 h-3.5 text-slate-400" />
+              <span>المكتبة</span>
+            </span>
           
           {activeFolderId && (() => {
             const path = getFolderPath(activeFolderId);
@@ -1675,16 +1703,17 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
               </>
             );
           })()}
+          </div>
         </div>
       </div>
 
-      {/* 3. Elegant Folder Banner (Clean details only, no tools clogging it) */}
+      {/* 3. Elegant Folder Banner (Clean details only, responsive height and cover) */}
       <div 
-        className={`relative overflow-hidden p-6 md:p-8 rounded-3xl border shadow-sm mb-1.5 md:mb-2 ${
-          activeFolder ? "pl-28 md:pl-56" : ""
+        className={`relative overflow-hidden p-4 md:p-6 rounded-2xl border shadow-xs mb-2.5 ${
+          activeFolder ? "pl-20 md:pl-52" : ""
         }`}
         style={{
-          borderRight: activeFolder ? `5px solid ${folderColor}` : "4px solid #e2e8f0",
+          borderRight: activeFolder ? `4px solid ${folderColor}` : "3px solid #e2e8f0",
           backgroundColor: activeFolder ? folderColor : "#ffffff",
           backgroundImage: activeFolder 
             ? "none" 
@@ -1720,103 +1749,72 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
           }}
         />
 
-        {/* Content Row: Title & description at the bottom */}
-        <div className="flex flex-col gap-2 w-full z-10 relative text-right">
-          {/* Title & Description Block */}
-          <div className="space-y-1">
-            <h2 
-              className={`text-xl md:text-3.5xl font-black tracking-tight leading-tight flex items-center gap-2 flex-wrap ${
-                activeFolder 
-                  ? "text-white drop-shadow-sm" 
-                  : "text-slate-800"
-              }`}
-            >
-              {activeFolder ? activeFolder.name : "المكتبة"}
-            </h2>
-            {activeFolder?.description && (
-              <p className={`text-[11px] md:text-xs font-semibold max-w-2xl leading-relaxed mt-1 pr-1 ${activeFolder ? "text-white/85" : "text-slate-500"}`}>
-                {activeFolder.description}
-              </p>
-            )}
-          </div>
+        {/* Content Row: Clean Title & description only with proper text truncation */}
+        <div className="flex flex-col gap-1 w-full z-10 relative text-right min-w-0 pr-1">
+          <h2 
+            className={`text-lg md:text-2xl font-black tracking-tight leading-tight truncate ${
+              activeFolder 
+                ? "text-white drop-shadow-sm" 
+                : "text-slate-800"
+            }`}
+            title={activeFolder ? activeFolder.name : "المكتبة"}
+          >
+            {activeFolder ? activeFolder.name : "المكتبة"}
+          </h2>
 
-          {/* Info Stats Badges */}
-          <div className="flex flex-wrap items-center gap-1.5 md:gap-2 pt-0.5">
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 md:px-3 md:py-1 text-[10px] md:text-[11px] font-bold rounded-lg border ${
-              activeFolder 
-                ? "bg-white/10 text-white border-white/10" 
-                : "bg-slate-100 text-slate-600 border-slate-200/40"
-            }`}>
-              <Layers className={`w-3 h-3 md:w-3.5 md:h-3.5 ${activeFolder ? "text-white/70" : "text-slate-400"}`} />
-              <span>{displayedFolders.length} مجلدات</span>
-            </span>
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 md:px-3 md:py-1 text-[10px] md:text-[11px] font-bold rounded-lg border ${
-              activeFolder 
-                ? "bg-white/10 text-white border-white/10" 
-                : "bg-slate-100 text-slate-600 border-slate-200/40"
-            }`}>
-              <BookOpen className={`w-3 h-3 md:w-3.5 md:h-3.5 ${activeFolder ? "text-white/70" : "text-slate-400"}`} />
-              <span>{activeFolderId ? getRecursiveCardCount(activeFolderId) : (searchQuery ? displayedCards.length : cards.length)} بطاقات</span>
-            </span>
-          </div>
+          {/* Description Block */}
+          {activeFolder?.description && (
+            <p 
+              className={`text-[11px] md:text-xs font-semibold leading-snug line-clamp-1 max-w-xl pr-0.5 ${
+                activeFolder ? "text-white/85" : "text-slate-500"
+              }`}
+              title={activeFolder.description}
+            >
+              {activeFolder.description}
+            </p>
+          )}
         </div>
 
-        {/* Left Side: Fully Integrated full-height Cover Panel (غلاف المجلد متكامل تماماً) */}
+        {/* Left Side: Fully Integrated full-height Cover Panel (غلاف المجلد متكامل تماماً وبحجم مدروس للموبايل) */}
         {activeFolder && (
           <div 
-            className="absolute left-0 top-0 bottom-0 w-24 md:w-48 border-r md:border-r-0 md:border-l border-slate-100/10 overflow-hidden flex items-center justify-center shrink-0 z-10"
+            className="absolute left-0 top-0 bottom-0 w-16 md:w-48 border-r md:border-r-0 md:border-l border-slate-100/10 overflow-hidden flex items-center justify-center shrink-0 z-10"
             style={{
               backgroundColor: `${folderColor}15`,
             }}
           >
+            {/* Clean Modern Folder Cover Panel */}
             {activeFolder.coverImage ? (
               <>
                 <ImageWithSkeleton
                   src={activeFolder.coverImage}
                   alt="غلاف المجلد"
-                  className="absolute inset-0 w-full h-full object-cover opacity-95"
+                  className="absolute inset-0 w-full h-full object-cover"
                   style={getSafeImageStyle(activeFolder.coverImagePosition)}
                   referrerPolicy="no-referrer"
                 />
-                <div className="absolute inset-0 bg-gradient-to-r from-black/20 via-transparent to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-r from-black/25 via-transparent to-transparent pointer-events-none" />
               </>
             ) : (
-              // Premium fallback folder/notebook design using its color
               <div 
-                className="absolute inset-0 flex flex-col justify-between p-4 text-white"
+                className="absolute inset-0 flex items-center justify-center text-white"
                 style={{
-                  background: `linear-gradient(135deg, ${folderColor}, ${folderColor}cc)`
+                  background: `linear-gradient(135deg, ${folderColor}, ${folderColor}dd)`
                 }}
               >
-                <div className="flex justify-between items-start">
-                  <Folder className="w-6 h-6 fill-white/10 text-white" />
-                </div>
+                <Folder className="w-6 h-6 md:w-8 md:h-8 fill-white/20 text-white" />
               </div>
             )}
-            
-            {/* Notebook binder/spine decoration (on the right for Arabic RTL books) */}
-            <div 
-              className="absolute right-0 top-0 bottom-0 w-3 flex flex-col justify-around py-2 items-center"
-              style={{ backgroundColor: folderColor, filter: "brightness(0.85)" }}
-            >
-              <div className="w-1.5 h-1 bg-black/20 rounded-full" />
-              <div className="w-1.5 h-1 bg-black/20 rounded-full" />
-              <div className="w-1.5 h-1 bg-black/20 rounded-full" />
-              <div className="w-1.5 h-1 bg-black/20 rounded-full" />
-              <div className="w-1.5 h-1 bg-black/20 rounded-full" />
-            </div>
-            {/* Subtle line to simulate page thickness on the left edge */}
-            <div className="absolute left-0 top-0 bottom-0 w-1 bg-white/20" />
           </div>
         )}
       </div>
 
-      {/* 4. Top Action Toolbar (شريط الإجراءات السريعة ومجموعة الأزرار المتناسقة) */}
+      {/* 4. Top Action Toolbar (شريط الأدوات النظيف بدون أي تزاحم) */}
       <div 
-        className="flex items-center justify-between gap-3 w-full bg-slate-50/45 p-1.5 rounded-2xl border border-slate-100/70 shadow-3xs" 
+        className="flex items-center justify-between gap-2 w-full bg-slate-50/45 p-1.5 rounded-2xl border border-slate-100/70 shadow-3xs" 
         dir="rtl"
       >
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
           {isSelectionMode || clipboard ? (
             <button
               onClick={() => {
@@ -1911,80 +1909,21 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                 <Scissors className="w-3.5 h-3.5" />
               </button>
             </>
-          ) : clipboard ? (
-            <>
-              {/* Paste - Same design style as Review button */}
-              <button
-                onClick={handleExecutePaste}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-xs hover:scale-105 hover:brightness-110 active:scale-95 shrink-0 text-white outline-none"
-                style={{ backgroundColor: folderColor }}
-                title={`لصق العناصر (${clipboard.folderIds.length + clipboard.cardIds.length})`}
-              >
-                <Clipboard className="w-3.5 h-3.5" />
-              </button>
-
-              {/* Divider */}
-              <div className="w-[1px] h-4 bg-slate-200" />
-
-              {/* Create Folder */}
-              <button
-                onClick={onCreateFolderClick}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer active:scale-95 bg-slate-50 hover:bg-slate-100 text-slate-700 outline-none"
-                title="إنشاء مجلد جديد"
-              >
-                <FolderPlus className="w-3.5 h-3.5" />
-              </button>
-
-              {/* Download / Cache Audio */}
-              <button
-                onClick={() => {
-                  setIsAudioModalOpen(true);
-                  setAudioDownloadedSuccess(false);
-                }}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer active:scale-95 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-[#0056f6] hover:bg-blue-50/80 outline-none"
-                title="تنزيل وتخزين الصوتيات مسبقاً"
-              >
-                <Headphones className="w-3.5 h-3.5" />
-              </button>
-
-              {/* Download / Cache Primary Images */}
-              <button
-                onClick={() => {
-                  setIsImageModalOpen(true);
-                  setIncludeAuto10Images(false);
-                  setImageDownloadedSuccess(false);
-                }}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer active:scale-95 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-emerald-600 hover:bg-emerald-50/80 outline-none"
-                title="تنزيل وتخزين الصور الأساسية مسبقاً"
-              >
-                <ImageIcon className="w-3.5 h-3.5" />
-              </button>
-
-              {/* Dedicated Button: Download / Cache 10 Auto Images per card */}
-              <button
-                onClick={() => {
-                  setIsImageModalOpen(true);
-                  setIncludeAuto10Images(true);
-                  setImageDownloadedSuccess(false);
-                }}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer active:scale-95 bg-amber-50/80 hover:bg-amber-100/80 text-amber-700 hover:text-amber-800 outline-none border border-amber-200/50"
-                title="تنزيل وتخزين الـ 10 صور التلقائية المقترحة لكل بطاقة 🖼️"
-              >
-                <Layers className="w-3.5 h-3.5 text-amber-600" />
-              </button>
-
-              {/* Create Card */}
-              <button
-                onClick={onAddCardClick}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer active:scale-95 bg-slate-50 hover:bg-slate-100 text-slate-700 outline-none"
-                title="إنشاء بطاقة جديدة"
-              >
-                <Plus className="w-3.5 h-3.5" />
-              </button>
-            </>
           ) : (
-            <>
-              {/* Play/Review Action Button - Prominent Accent */}
+            <div className="flex items-center gap-1.5 relative">
+              {clipboard && (
+                <button
+                  onClick={handleExecutePaste}
+                  className="px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-xs hover:scale-102 active:scale-95 text-white text-xs font-bold outline-none"
+                  style={{ backgroundColor: folderColor }}
+                  title={`لصق العناصر (${clipboard.folderIds.length + clipboard.cardIds.length})`}
+                >
+                  <Clipboard className="w-3.5 h-3.5" />
+                  <span>لصق ({clipboard.folderIds.length + clipboard.cardIds.length})</span>
+                </button>
+              )}
+
+              {/* Primary Action Button: Start Review with clear icon & label */}
               <button
                 onClick={() => {
                   if (activeFolder) {
@@ -2001,112 +1940,179 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                     });
                   }
                 }}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-xs hover:scale-105 hover:brightness-110 active:scale-95 shrink-0 text-white outline-none"
+                className="px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-xs hover:brightness-105 active:scale-95 shrink-0 text-white outline-none text-xs font-bold"
                 style={{ backgroundColor: folderColor }}
                 title="بدء المراجعة"
               >
-                <Play className="w-3.5 h-3.5 fill-current mr-0.5" />
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>مراجعة</span>
               </button>
 
-              {/* AI Refinement Action Button */}
-              {activeFolder && onRefineFolderWithAI && (
+              {/* Add Menu Dropdown (Create Card or Create Folder) */}
+              <div className="relative" ref={addMenuRef}>
                 <button
-                  onClick={() => {
-                    onRefineFolderWithAI(activeFolder.id);
-                  }}
-                  className="w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-xs hover:scale-105 hover:brightness-110 active:scale-95 shrink-0 text-white outline-none bg-gradient-to-tr from-[#0056f6] to-violet-600 border border-violet-400/20"
-                  title="تعديل وتنقيح جماعي بالذكاء الاصطناعي 🪄"
+                  onClick={() => setIsAddMenuOpen(!isAddMenuOpen)}
+                  className="px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer active:scale-95 bg-slate-100 hover:bg-slate-200/80 text-slate-800 outline-none text-xs font-bold"
+                  title="إضافة عنصر جديد"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-white" />
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>إضافة</span>
+                  <ChevronDown className="w-3 h-3 text-slate-500" />
                 </button>
-              )}
 
-              {/* Edit Current Folder Action Button */}
-              {activeFolder && (
+                {isAddMenuOpen && (
+                  <div 
+                    className="absolute left-0 top-full mt-1.5 w-48 bg-white border border-slate-200/80 rounded-xl shadow-lg p-1.5 z-40 text-right animate-in fade-in zoom-in-95 duration-100" 
+                    dir="rtl"
+                  >
+                    <button
+                      onClick={() => {
+                        setIsAddMenuOpen(false);
+                        onAddCardClick();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold text-slate-700 hover:text-[#0056f6] hover:bg-blue-50/70 transition-colors cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4 text-[#0056f6]" />
+                      <span>بطاقة جديدة</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsAddMenuOpen(false);
+                        onCreateFolderClick();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold text-slate-700 hover:text-[#0056f6] hover:bg-blue-50/70 transition-colors cursor-pointer"
+                    >
+                      <FolderPlus className="w-4 h-4 text-[#0056f6]" />
+                      <span>مجلد جديد</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* More Actions Menu Button (...) */}
+              <div className="relative" ref={moreMenuRef}>
                 <button
-                  onClick={() => onEditFolder(activeFolder)}
-                  className="w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-xs hover:scale-105 active:scale-95 bg-slate-50 hover:bg-slate-100 text-slate-700 outline-none border border-slate-100 shrink-0"
-                  title="تعديل هذا المجلد"
+                  onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer active:scale-95 outline-none ${
+                    isMoreMenuOpen ? "bg-slate-200 text-slate-900" : "bg-slate-100 hover:bg-slate-200/80 text-slate-700"
+                  }`}
+                  title="خيارات إضافية"
                 >
-                  <Pencil className="w-3.5 h-3.5" />
+                  <MoreVertical className="w-4 h-4" />
                 </button>
-              )}
 
-              {/* Share Current Folder Action Button */}
-              {activeFolder && onShareFolder && (
-                <button
-                  onClick={() => onShareFolder(activeFolder)}
-                  className="w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-xs hover:scale-105 active:scale-95 bg-blue-50/80 hover:bg-blue-100 text-[#0056f6] outline-none border border-blue-100 shrink-0"
-                  title="مشاركة هذا الملف برابط 🔗"
-                >
-                  <Share2 className="w-3.5 h-3.5" />
-                </button>
-              )}
+                {isMoreMenuOpen && (
+                  <div 
+                    className="absolute left-0 top-full mt-1.5 w-44 bg-white border border-slate-200/80 rounded-xl shadow-lg p-1.5 z-40 text-right animate-in fade-in zoom-in-95 duration-100" 
+                    dir="rtl"
+                  >
+                    {/* Folder Details */}
+                    {activeFolder && (
+                      <button
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          setFolderDetailsTarget(activeFolder);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-slate-700 hover:text-[#0056f6] hover:bg-blue-50/70 transition-colors cursor-pointer"
+                      >
+                        <Info className="w-4 h-4 text-[#0056f6]" />
+                        <span>التفاصيل</span>
+                      </button>
+                    )}
 
-              {/* Divider */}
-              <div className="w-[1px] h-4 bg-slate-200" />
+                    {/* Share Folder */}
+                    {activeFolder && onShareFolder && (
+                      <button
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          onShareFolder(activeFolder);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-slate-700 hover:text-[#0056f6] hover:bg-blue-50/70 transition-colors cursor-pointer"
+                      >
+                        <Share2 className="w-4 h-4 text-[#0056f6]" />
+                        <span>مشاركة</span>
+                      </button>
+                    )}
 
-              {/* Create Folder */}
-              <button
-                onClick={onCreateFolderClick}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer active:scale-95 bg-slate-50 hover:bg-slate-100 text-slate-700 outline-none"
-                title="إنشاء مجلد جديد"
-              >
-                <FolderPlus className="w-3.5 h-3.5" />
-              </button>
+                    {/* Edit Current Folder */}
+                    {activeFolder && (
+                      <button
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          onEditFolder(activeFolder);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+                      >
+                        <Pencil className="w-4 h-4 text-slate-500" />
+                        <span>تعديل</span>
+                      </button>
+                    )}
 
-              {/* Download / Cache Audio */}
-              <button
-                onClick={() => {
-                  setIsAudioModalOpen(true);
-                  setAudioDownloadedSuccess(false);
-                }}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer active:scale-95 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-[#0056f6] hover:bg-blue-50/80 outline-none"
-                title="تنزيل وتخزين الصوتيات مسبقاً"
-              >
-                <Headphones className="w-3.5 h-3.5" />
-              </button>
+                    {/* AI Refinement */}
+                    {activeFolder && onRefineFolderWithAI && (
+                      <button
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          onRefineFolderWithAI(activeFolder.id);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-slate-700 hover:text-purple-700 hover:bg-purple-50 transition-colors cursor-pointer"
+                      >
+                        <Sparkles className="w-4 h-4 text-purple-600" />
+                        <span>تعديل بالذكاء</span>
+                      </button>
+                    )}
 
-              {/* Download / Cache Primary Images */}
-              <button
-                onClick={() => {
-                  setIsImageModalOpen(true);
-                  setIncludeAuto10Images(false);
-                  setImageDownloadedSuccess(false);
-                }}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer active:scale-95 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-emerald-600 hover:bg-emerald-50/80 outline-none"
-                title="تنزيل وتخزين الصور الأساسية مسبقاً"
-              >
-                <ImageIcon className="w-3.5 h-3.5" />
-              </button>
+                    {activeFolder && <div className="my-1 border-t border-slate-100" />}
 
-              {/* Dedicated Button: Download / Cache 10 Auto Images per card */}
-              <button
-                onClick={() => {
-                  setIsImageModalOpen(true);
-                  setIncludeAuto10Images(true);
-                  setImageDownloadedSuccess(false);
-                }}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer active:scale-95 bg-amber-50/80 hover:bg-amber-100/80 text-amber-700 hover:text-amber-800 outline-none border border-amber-200/50"
-                title="تنزيل وتخزين الـ 10 صور التلقائية المقترحة لكل بطاقة 🖼️"
-              >
-                <Layers className="w-3.5 h-3.5 text-amber-600" />
-              </button>
+                    {/* Download / Cache Audio */}
+                    <button
+                      onClick={() => {
+                        setIsMoreMenuOpen(false);
+                        setIsAudioModalOpen(true);
+                        setAudioDownloadedSuccess(false);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+                    >
+                      <Headphones className="w-4 h-4 text-slate-500" />
+                      <span>تنزيل الصوتيات</span>
+                    </button>
 
-              {/* Create Card */}
-              <button
-                onClick={onAddCardClick}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer active:scale-95 bg-slate-50 hover:bg-slate-100 text-slate-700 outline-none"
-                title="إنشاء بطاقة جديدة"
-              >
-                <Plus className="w-3.5 h-3.5" />
-              </button>
-            </>
+                    {/* Download / Cache Primary Images */}
+                    <button
+                      onClick={() => {
+                        setIsMoreMenuOpen(false);
+                        setIsImageModalOpen(true);
+                        setIncludeAuto10Images(false);
+                        setImageDownloadedSuccess(false);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+                    >
+                      <ImageIcon className="w-4 h-4 text-slate-500" />
+                      <span>تنزيل الصور</span>
+                    </button>
+
+                    {/* Dedicated Button: Download / Cache 10 Auto Images per card */}
+                    <button
+                      onClick={() => {
+                        setIsMoreMenuOpen(false);
+                        setIsImageModalOpen(true);
+                        setIncludeAuto10Images(true);
+                        setImageDownloadedSuccess(false);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-slate-700 hover:text-amber-700 hover:bg-amber-50 transition-colors cursor-pointer"
+                    >
+                      <Layers className="w-4 h-4 text-amber-600" />
+                      <span>تنزيل 10 صور مقترحة</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </div>
 
-      {/* 3. Unified Items List (Folders first, then Cards) */}
+      {/* 5. Unified Items List (Folders first, then Cards) */}
       <div 
         className="pt-1 min-h-[300px] pb-20"
         onDragOver={handleContainerDragOver}
@@ -2198,139 +2204,121 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                       </div>
                     )}
 
-                    {/* Stylized Folder/Notebook Icon with a real folder tab shape */}
-                    <div className="relative w-14 h-14 shrink-0">
-                      {/* Folder Tab (always visible, indicating a folder/notebook) */}
-                      <div 
-                        className="absolute top-0 right-1 w-6 h-2 rounded-t-xs border-t border-x z-0"
-                        style={{ 
-                          backgroundColor: f.color || '#0056f6',
-                          borderColor: `${f.color || '#0056f6'}40`
-                        }}
-                      />
-                      {/* Folder Main Body */}
-                      <div 
-                        className="absolute bottom-0 left-0 right-0 h-[46px] rounded-b-md rounded-tl-md overflow-hidden border shadow-3xs flex items-center justify-center transition-all duration-300 z-10"
-                        style={{
-                          backgroundColor: f.coverImage ? "#ffffff" : `${f.color || '#0056f6'}15`,
-                          borderColor: f.color ? `${f.color}50` : "#e2e8f0",
-                          borderWidth: "1.5px"
-                        }}
-                      >
-                        {f.coverImage ? (
-                          <>
-                            {/* Main Cover Image (100% visible, no heavy badges blocking it) */}
-                            <ImageWithSkeleton
-                              src={f.coverImage}
-                              alt=""
-                              className="absolute inset-0 w-full h-full object-cover opacity-95 transition-all"
-                              style={getSafeImageStyle(f.coverImagePosition)}
-                              referrerPolicy="no-referrer"
-                            />
-                            {/* Soft faded black gradient covering the bottom 30% for badge contrast - very subtle (10% depth) */}
-                            <div className="absolute bottom-0 left-0 right-0 h-1/3 bg-gradient-to-t from-black/10 via-black/5 to-transparent pointer-events-none z-10" />
-                            
-                            {/* Notebook Binder Spine Overlay (very thin, styled perfectly, no heavy icons blocking the view) */}
-                            <div 
-                              className="absolute right-0 top-0 bottom-0 w-1.5 shadow-xs flex flex-col justify-around py-1.5 items-center z-20"
-                              style={{ backgroundColor: f.color || "#0056f6", filter: "brightness(0.9)" }}
-                            >
-                              <div className="w-0.5 h-0.5 bg-white/50 rounded-full" />
-                              <div className="w-0.5 h-0.5 bg-white/50 rounded-full" />
-                            </div>
-
-                            {/* Ultra-light, high-contrast Folder Indicator Badge that doesn't block the cover image (only 14px size) */}
-                            <div 
-                              className="absolute left-1 bottom-1 bg-white/95 p-0.5 rounded-xs z-20 border border-slate-100 flex items-center justify-center"
-                              style={{ 
-                                borderColor: `${f.color || '#0056f6'}20`,
-                                boxShadow: "0 2px 5px rgba(0,0,0,0.18), 0 0 3px rgba(255,255,255,0.7)"
-                              }}
-                            >
-                              <Folder className="w-2.5 h-2.5 fill-current" style={{ color: f.color || '#0056f6' }} />
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div 
-                              className="absolute inset-0 transition-all duration-300 group-hover:brightness-105"
-                              style={{
-                                background: `linear-gradient(135deg, ${f.color || '#0056f6'}, ${f.color ? f.color + "dd" : "#0047cc"})`
-                              }}
-                            />
-                            
-                            {/* Notebook Binder Spine (RTL Book layout) representing a notebook/folder - only shown on solid folder layout */}
-                            <div 
-                              className="absolute right-0 top-0 bottom-0 w-2 shadow-sm transition-all flex flex-col justify-around py-1.5 items-center z-10"
-                              style={{ backgroundColor: f.color || "#0056f6", filter: "brightness(0.82)" }}
-                            >
-                              <div className="w-0.5 h-0.5 bg-black/25 rounded-full" />
-                              <div className="w-0.5 h-0.5 bg-black/25 rounded-full" />
-                              <div className="w-0.5 h-0.5 bg-black/25 rounded-full" />
-                            </div>
-
-                            {/* Small Folder Indicator Badge */}
-                            <div 
-                              className="absolute left-1 bottom-1 bg-white p-0.5 rounded-xs z-10 border shadow-xs flex items-center justify-center"
-                              style={{ borderColor: `${f.color || '#0056f6'}15` }}
-                            >
-                              <Folder className="w-2.5 h-2.5 fill-current" style={{ color: f.color || '#0056f6' }} />
-                            </div>
-                          </>
-                        )}
-                      </div>
+                    {/* Modern Clean Folder Thumbnail */}
+                    <div className="relative w-12 h-12 shrink-0 rounded-xl overflow-hidden border border-slate-200/70 shadow-2xs flex items-center justify-center bg-slate-50 transition-transform group-hover:scale-102">
+                      {f.coverImage ? (
+                        <>
+                          <ImageWithSkeleton
+                            src={f.coverImage}
+                            alt=""
+                            className="absolute inset-0 w-full h-full object-cover"
+                            style={getSafeImageStyle(f.coverImagePosition)}
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent pointer-events-none" />
+                          <div className="absolute left-1 bottom-1 p-0.5 bg-black/40 backdrop-blur-xs rounded-md flex items-center justify-center">
+                            <Folder className="w-2.5 h-2.5 text-white fill-white/80" />
+                          </div>
+                        </>
+                      ) : (
+                        <div 
+                          className="w-full h-full flex items-center justify-center transition-all"
+                          style={{
+                            background: `linear-gradient(135deg, ${f.color || '#0056f6'}18, ${f.color || '#0056f6'}30)`
+                          }}
+                        >
+                          <Folder className="w-5 h-5 fill-current" style={{ color: f.color || '#0056f6' }} />
+                        </div>
+                      )}
                     </div>
 
                     {/* Text block */}
                     <div>
-                      <h4 className="font-bold text-[#202124] text-base group-hover:text-[#0056f6] transition-colors">
+                      <h4 className="font-bold text-[#202124] text-base group-hover:text-[#0056f6] transition-colors leading-snug">
                         <HighlightText text={f.name} search={searchQuery} />
                       </h4>
-                      <p className="text-xs text-[#5f6368] font-medium mt-1">
-                        {fRecursiveCardCount} بطاقات • اليوم، ١٠:٣٠ ص
+                      <p className="text-xs text-slate-500 font-medium mt-0.5 flex items-center gap-1.5">
+                        <span>{fRecursiveCardCount} بطاقة</span>
                       </p>
                     </div>
                   </div>
 
-                  {/* Left Side: Metadata & Delete Action (renders on left in RTL) */}
+                  {/* Left Side: Folder Options Dropdown Menu (renders on left in RTL) */}
                   {!isSelectionMode && (
-                    <div className="flex items-center gap-2">
-                      {onShareFolder && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onShareFolder(f);
-                          }}
-                          className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 text-outline hover:text-[#0056f6] hover:bg-blue-50 rounded-xl transition-all cursor-pointer"
-                          title="مشاركة هذا المجلد برابط 🔗"
+                    <div 
+                      className="relative"
+                      ref={openFolderMenuId === f.id ? folderMenuRef : undefined}
+                    >
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenFolderMenuId(prev => prev === f.id ? null : f.id);
+                        }}
+                        className={`p-2 rounded-xl transition-all cursor-pointer ${
+                          openFolderMenuId === f.id 
+                            ? "bg-slate-100 text-[#0056f6]" 
+                            : "opacity-100 md:opacity-0 md:group-hover:opacity-100 text-slate-500 hover:text-[#0056f6] hover:bg-slate-100"
+                        }`}
+                        title="خيارات المجلد"
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </button>
+
+                      {/* Dropdown Options Menu */}
+                      {openFolderMenuId === f.id && (
+                        <div 
+                          className="absolute left-0 top-full mt-1.5 w-36 bg-white border border-slate-200/80 rounded-xl shadow-lg p-1.5 z-40 text-right animate-in fade-in zoom-in-95 duration-100"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <Share2 className="w-4 h-4" />
-                        </button>
+                          <button
+                            onClick={() => {
+                              setOpenFolderMenuId(null);
+                              setFolderDetailsTarget(f);
+                            }}
+                            className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-[#0056f6] transition-colors"
+                          >
+                            <span>التفاصيل</span>
+                            <Info className="w-3.5 h-3.5 text-slate-400" />
+                          </button>
+                          {onShareFolder && (
+                            <button
+                              onClick={() => {
+                                setOpenFolderMenuId(null);
+                                onShareFolder(f);
+                              }}
+                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-[#0056f6] transition-colors"
+                            >
+                              <span>مشاركة</span>
+                              <Share2 className="w-3.5 h-3.5 text-slate-400" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setOpenFolderMenuId(null);
+                              onEditFolder(f);
+                            }}
+                            className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-[#0056f6] transition-colors"
+                          >
+                            <span>تعديل</span>
+                            <Pencil className="w-3.5 h-3.5 text-slate-400" />
+                          </button>
+                          <div className="my-1 border-t border-slate-100" />
+                          <button
+                            onClick={() => {
+                              setOpenFolderMenuId(null);
+                              setConfirmDelete({
+                                type: "folder",
+                                id: f.id,
+                                title: f.name
+                              });
+                            }}
+                            className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors"
+                          >
+                            <span>حذف</span>
+                            <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                          </button>
+                        </div>
                       )}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEditFolder(f);
-                        }}
-                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 text-outline hover:text-[#0056f6] hover:bg-slate-50 rounded-xl transition-all cursor-pointer"
-                        title="تعديل المجلد"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setConfirmDelete({
-                            type: "folder",
-                            id: f.id,
-                            title: f.name
-                          });
-                        }}
-                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 text-outline hover:text-error hover:bg-error-container/15 rounded-xl transition-all cursor-pointer"
-                        title="حذف المجلد"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
                     </div>
                   )}
                 </div>
@@ -2408,97 +2396,51 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                       </div>
                     )}
 
-                    {/* Unified Card Icon: Physical Card Stack design (distinctive study card design, no side spine, no overlay blocking images) */}
-                    <div className="relative w-14 h-14 shrink-0">
-                      {/* Back Card 2 (Bottom) */}
-                      <div 
-                        className="absolute top-1 right-1 w-[44px] h-[44px] rounded-xs border bg-white/80 shadow-3xs"
-                        style={{ 
-                          borderColor: `${cardColor}20`,
-                          transform: "rotate(-6deg)" 
-                        }}
-                      />
-                      {/* Back Card 1 (Middle) */}
-                      <div 
-                        className="absolute top-1 right-1 w-[44px] h-[44px] rounded-xs border bg-white/95 shadow-3xs"
-                        style={{ 
-                          borderColor: `${cardColor}25`,
-                          transform: "rotate(4deg)" 
-                        }}
-                      />
-                      {/* Main Front Card */}
-                      <div 
-                        className="absolute bottom-0.5 left-0.5 w-[46px] h-[46px] rounded-sm overflow-hidden border shadow-2xs flex items-center justify-center z-10"
-                        style={{
-                          backgroundColor: card.frontImage ? "#ffffff" : `${cardColor}10`,
-                          borderColor: card.frontImage ? "rgba(192, 132, 252, 0.4)" : `${cardColor}30`, // Soft high-contrast purple border indicating flashcard
-                          borderWidth: "1.5px"
-                        }}
-                      >
-                        {card.frontImage ? (
-                          <>
-                            <ImageWithSkeleton
-                              src={card.frontImage}
-                              alt=""
-                              className="absolute inset-0 w-full h-full object-cover opacity-95 transition-all"
-                              style={getSafeImageStyle(card.frontImagePosition)}
-                              referrerPolicy="no-referrer"
-                            />
-                            {/* Soft faded black gradient covering the bottom 30% for badge contrast - very subtle (10% depth) */}
-                            <div className="absolute bottom-0 left-0 right-0 h-1/3 bg-gradient-to-t from-black/10 via-black/5 to-transparent pointer-events-none z-10" />
-
-                            {/* Ultra-light, high-contrast Card Indicator Badge that doesn't block the front image (only 14px size) */}
-                            <div 
-                              className="absolute left-1 bottom-1 bg-white/95 p-0.5 rounded-xs z-20 border border-slate-100 flex items-center justify-center"
-                              style={{ 
-                                borderColor: "#c084fc30",
-                                boxShadow: "0 2px 5px rgba(0,0,0,0.18), 0 0 3px rgba(255,255,255,0.7)"
-                              }}
-                            >
-                              <RectangleVertical className="w-2.5 h-2.5 text-purple-600 fill-purple-600/10" />
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            {/* Lined Index Card design to signify a Flashcard */}
-                            <div className="absolute inset-0 bg-white flex flex-col justify-center gap-1 p-1 px-1.5 overflow-hidden">
-                              {/* Horizontal lines */}
-                              <div className="h-0.5 w-[85%] bg-slate-100 rounded-full" />
-                              <div className="h-0.5 w-[70%] bg-slate-100 rounded-full" />
-                              <div className="h-0.5 w-[80%] bg-slate-100 rounded-full" />
-                              {/* Red vertical margin line for index card look */}
-                              <div className="absolute right-2 top-0 bottom-0 w-[1px] bg-rose-200" />
-                            </div>
-
-                            {/* Small Card Indicator Badge in Solid White with a Vivid Purple Icon for maximum contrast - ONLY when there is no cover image */}
-                            <div 
-                              className="absolute left-1 bottom-1 bg-white p-0.5 rounded-xs z-10 border shadow-xs flex items-center justify-center"
-                              style={{ borderColor: "#c084fc30" }}
-                            >
-                              <RectangleVertical className="w-2.5 h-2.5 text-purple-600 fill-purple-600/10" />
-                            </div>
-                          </>
-                        )}
-                      </div>
+                    {/* Modern Clean Card Thumbnail */}
+                    <div className="relative w-12 h-12 shrink-0 rounded-xl overflow-hidden border border-slate-200/70 shadow-2xs flex items-center justify-center bg-slate-50 transition-transform group-hover:scale-102">
+                      {card.frontImage ? (
+                        <>
+                          <ImageWithSkeleton
+                            src={card.frontImage}
+                            alt=""
+                            className="absolute inset-0 w-full h-full object-cover"
+                            style={getSafeImageStyle(card.frontImagePosition)}
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent pointer-events-none" />
+                          <div className="absolute left-1 bottom-1 p-0.5 bg-black/40 backdrop-blur-xs rounded-md flex items-center justify-center">
+                            <RectangleVertical className="w-2.5 h-2.5 text-white fill-white/80" />
+                          </div>
+                        </>
+                      ) : (
+                        <div 
+                          className="w-full h-full flex items-center justify-center transition-all"
+                          style={{
+                            background: `linear-gradient(135deg, ${cardColor}15, ${cardColor}28)`
+                          }}
+                        >
+                          <RectangleVertical className="w-5 h-5 fill-current" style={{ color: cardColor }} />
+                        </div>
+                      )}
                     </div>
 
                     {/* Text block */}
-                    <div>
-                      <h4 className="font-bold text-[#202124] text-base group-hover:text-[#0056f6] transition-colors">
-                        <HighlightText text={card.frontText} search={searchQuery} />
-                      </h4>
-                      <p className="text-xs text-[#5f6368] font-medium mt-1 flex flex-wrap items-center gap-1.5">
-                        {card.translationHint || card.backText ? (
-                          <HighlightText text={card.translationHint || card.backText} search={searchQuery} />
-                        ) : (
-                          <span>بطاقة دراسة جاهزة للمراجعة</span>
-                        )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-baseline gap-2">
+                        <h4 className="font-bold text-[#202124] text-base group-hover:text-[#0056f6] transition-colors leading-snug" dir="ltr">
+                          <HighlightText text={card.frontText} search={searchQuery} />
+                        </h4>
                         {card.isPluralMode && card.pluralText && (
-                          <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100 shrink-0">
-                            الجمع: <HighlightText text={card.pluralText} search={searchQuery} />
+                          <span className="text-xs text-slate-500 font-normal" dir="ltr">
+                            (Pl: <HighlightText text={card.pluralText} search={searchQuery} />)
                           </span>
                         )}
-                      </p>
+                      </div>
+                      {(card.translationHint || card.backText) && (
+                        <p className="text-xs text-slate-500 font-medium mt-0.5 truncate" dir="rtl">
+                          <HighlightText text={card.translationHint || card.backText} search={searchQuery} />
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -3542,6 +3484,171 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                 <div className="flex items-center gap-1 mt-1 text-[10.5px] font-extrabold text-emerald-600 dark:text-emerald-400 group-hover:underline">
                   <Maximize2 className="w-3 h-3 text-emerald-600 group-hover:scale-125 transition-transform" />
                   <span>انقر للرجوع للنافذة ↗</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Folder Details Modal (نافذة تفاصيل المجلد الشاملة) */}
+      {folderDetailsTarget && (() => {
+        const targetDirectCards = cards.filter(c => c.folderId === folderDetailsTarget.id);
+        const targetSubfolders = folders.filter(f => f.parentId === folderDetailsTarget.id);
+        const targetRecursiveCards = getRecursiveCardCount(folderDetailsTarget.id);
+        const formattedDate = folderDetailsTarget.createdAt 
+          ? new Date(folderDetailsTarget.createdAt).toLocaleDateString('ar-EG', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })
+          : "غير محدد";
+
+        return (
+          <div 
+            className="fixed inset-0 z-[250] bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200"
+            dir="rtl"
+            onClick={() => setFolderDetailsTarget(null)}
+          >
+            <div 
+              className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-100 overflow-hidden animate-in zoom-in-95 duration-150 text-right"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header with Folder Color and Cover Preview */}
+              <div 
+                className="relative p-6 text-white overflow-hidden"
+                style={{ backgroundColor: folderDetailsTarget.color || "#0056f6" }}
+              >
+                {folderDetailsTarget.coverImage && (
+                  <div className="absolute inset-0 z-0">
+                    <img 
+                      src={folderDetailsTarget.coverImage} 
+                      alt="" 
+                      className="w-full h-full object-cover opacity-25 filter blur-xs"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
+                  </div>
+                )}
+                
+                <div className="relative z-10 flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/20 shadow-xs">
+                      <Folder className="w-6 h-6 text-white fill-white/80" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black leading-tight text-white drop-shadow-sm">
+                        {folderDetailsTarget.name}
+                      </h3>
+                      <p className="text-xs text-white/80 mt-0.5 font-medium">
+                        تفاصيل ومعلومات المجلد
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setFolderDetailsTarget(null)}
+                    className="w-8 h-8 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center text-white transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Details Body */}
+              <div className="p-6 space-y-4">
+                {/* Description */}
+                {folderDetailsTarget.description ? (
+                  <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                    <div className="text-[11px] font-bold text-slate-400 mb-1">الوصف</div>
+                    <p className="text-xs font-semibold text-slate-700 leading-relaxed">
+                      {folderDetailsTarget.description}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="text-xs font-medium text-slate-400 italic bg-slate-50/60 p-3 rounded-2xl text-center border border-dashed border-slate-200">
+                    لا يوجد وصف لهذا المجلد
+                  </div>
+                )}
+
+                {/* Stats Grid */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                    <div className="flex items-center gap-1.5 text-slate-500 mb-1">
+                      <BookOpen className="w-3.5 h-3.5 text-[#0056f6]" />
+                      <span className="text-[11px] font-bold">إجمالي البطاقات</span>
+                    </div>
+                    <div className="text-lg font-black text-slate-800">
+                      {targetRecursiveCards} <span className="text-xs font-normal text-slate-500">بطاقة</span>
+                    </div>
+                    {targetSubfolders.length > 0 && (
+                      <div className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                        ({targetDirectCards.length} مباشرة)
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                    <div className="flex items-center gap-1.5 text-slate-500 mb-1">
+                      <Layers className="w-3.5 h-3.5 text-purple-600" />
+                      <span className="text-[11px] font-bold">المجلدات الفرعية</span>
+                    </div>
+                    <div className="text-lg font-black text-slate-800">
+                      {targetSubfolders.length} <span className="text-xs font-normal text-slate-500">مجلد</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Metadata List */}
+                <div className="space-y-2 pt-1 border-t border-slate-100">
+                  <div className="flex items-center justify-between text-xs py-1">
+                    <span className="text-slate-400 font-bold flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                      تاريخ الإنشاء:
+                    </span>
+                    <span className="font-semibold text-slate-700">{formattedDate}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs py-1">
+                    <span className="text-slate-400 font-bold">لون المجلد:</span>
+                    <div className="flex items-center gap-2">
+                      <div 
+                        className="w-4 h-4 rounded-full border border-slate-200" 
+                        style={{ backgroundColor: folderDetailsTarget.color || "#0056f6" }} 
+                      />
+                      <span className="font-mono text-[11px] text-slate-600 font-bold">
+                        {folderDetailsTarget.color || "#0056f6"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {folderDetailsTarget.coverImage && (
+                    <div className="flex items-center justify-between text-xs py-1">
+                      <span className="text-slate-400 font-bold">صورة الغلاف:</span>
+                      <span className="font-semibold text-emerald-600 flex items-center gap-1">
+                        <Check className="w-3 h-3 stroke-[3]" /> مضافة
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Modal Footer Actions */}
+                <div className="pt-2 flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const tgt = folderDetailsTarget;
+                      setFolderDetailsTarget(null);
+                      onEditFolder(tgt);
+                    }}
+                    className="flex-1 py-2.5 px-3 bg-[#0056f6] hover:bg-blue-600 text-white font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    <span>تعديل المجلد</span>
+                  </button>
+                  <button
+                    onClick={() => setFolderDetailsTarget(null)}
+                    className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                  >
+                    إغلاق
+                  </button>
                 </div>
               </div>
             </div>
