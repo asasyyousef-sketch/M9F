@@ -1760,6 +1760,20 @@ export const CreateFolderModal: React.FC<CreateFolderModalProps> = ({
             </div>
           </div>
 
+          {/* Description */}
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-on-surface-variant block" htmlFor="folderDesc">
+              الوصف (اختياري)
+            </label>
+            <textarea
+              id="folderDesc"
+              rows={2}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="اكتب نبذة مختصرة عن هذا المجلد أو المادة..."
+              className="w-full bg-surface border border-outline-variant rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-on-surface placeholder-on-surface-variant/40 resize-none"
+            />
+          </div>
 
           {/* Footer Actions */}
           <div className="pt-4 border-t border-outline-variant flex justify-end gap-3">
@@ -2007,6 +2021,20 @@ export const EditFolderModal: React.FC<EditFolderModalProps> = ({
             </div>
           </div>
 
+          {/* Description */}
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-on-surface-variant block" htmlFor="folderDesc">
+              الوصف (اختياري)
+            </label>
+            <textarea
+              id="folderDesc"
+              rows={2}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="اكتب نبذة مختصرة عن هذا المجلد أو المادة..."
+              className="w-full bg-surface border border-outline-variant rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-on-surface placeholder-on-surface-variant/40 resize-none"
+            />
+          </div>
 
           {/* Footer Actions */}
           <div className="pt-4 border-t border-outline-variant flex items-center justify-between gap-3">
