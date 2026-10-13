@@ -529,13 +529,39 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
     setShowPreviewPlural(false);
   }, [previewCard, isPreviewFlipped]);
   const [windowWidth, setWindowWidth] = React.useState(typeof window !== "undefined" ? window.innerWidth : 1200);
-  const hiddenBreadcrumbsRef = React.useRef<HTMLDivElement>(null);
+  const [breadcrumbBarWidth, setBreadcrumbBarWidth] = React.useState<number>(0);
+  const breadcrumbsBarRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    const handleResize = () => setWindowWidth(window.innerWidth);
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
+    const updateBarWidth = () => {
+      setWindowWidth(window.innerWidth);
+      if (breadcrumbsBarRef.current && breadcrumbsBarRef.current.clientWidth > 0) {
+        setBreadcrumbBarWidth(breadcrumbsBarRef.current.clientWidth);
+      } else if (containerRef.current && containerRef.current.clientWidth > 0) {
+        const padding = window.innerWidth >= 768 ? 64 : 32;
+        setBreadcrumbBarWidth(Math.max(180, containerRef.current.clientWidth - padding));
+      } else if (typeof window !== "undefined") {
+        setBreadcrumbBarWidth(Math.max(180, window.innerWidth - (window.innerWidth >= 768 ? 290 : 32)));
+      }
+    };
+
+    updateBarWidth();
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(() => {
+        updateBarWidth();
+      });
+      if (containerRef.current) ro.observe(containerRef.current);
+      if (breadcrumbsBarRef.current) ro.observe(breadcrumbsBarRef.current);
+    }
+
+    window.addEventListener("resize", updateBarWidth);
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener("resize", updateBarWidth);
+    };
+  }, [activeFolderId]);
 
   // Bulk Selection States
   const [isSelectionMode, setIsSelectionMode] = React.useState(false);
@@ -590,90 +616,69 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
     return path;
   }, [folders]);
 
-  // Synchronous, bulletproof Breadcrumbs Width & Collapse Calculator
-  const getDynamicCollapseCount = () => {
-    if (!activeFolderId) return 0;
-    const path = getFolderPath(activeFolderId);
+  // Synchronous, responsive Breadcrumbs Width & Collapse Calculator
+  // Calculates how many folders after the Library to collapse into "..."
+  // - Dots only appear if needed by available width
+  // - When width increases (window resize or sidebar toggle), dots immediately disappear or collapse fewer folders (from 2-3 to 1 or 0)
+  // - Collapses from beginning after Library, protecting "ما قبل المجلد الحالي" (the folders preceding activeFolder)
+  const getDynamicCollapseCount = React.useCallback((path: FolderType[]): number => {
     const pathLength = path.length;
     if (pathLength <= 1) return 0;
 
-    // Detect screen mode
     const isDesktop = windowWidth >= 1024;
     const isTablet = windowWidth >= 768 && windowWidth < 1024;
+    const isDesktopOrTablet = isDesktop || isTablet;
 
-    // Define constants based on screen mode
-    const font = isDesktop || isTablet ? "bold 12px Inter, sans-serif" : "bold 10px Inter, sans-serif";
-    const folderPadding = isDesktop || isTablet ? 20 : 16;
-    const gap = isDesktop || isTablet ? 6 : 4;
-    
-    const maxFolderWidth = isDesktop ? 140 : isTablet ? 100 : 85;
-    const maxLastFolderWidth = isDesktop ? 250 : isTablet ? 140 : 120;
-    
-    const chevronWidth = (isDesktop || isTablet ? 14 : 12) + gap;
-    const libraryWidth = (isDesktop || isTablet ? 85 : 70) + gap;
-    const ellipsisWidth = (isDesktop || isTablet ? 28 : 22) + gap + chevronWidth;
+    const font = isDesktopOrTablet ? "500 12px Inter, sans-serif" : "500 11px Inter, sans-serif";
+    const gap = 4;
+    const chevronWidth = 14 + gap;
+    const libraryWidth = (isDesktopOrTablet ? 74 : 64) + gap;
+    const dotsWidth = 26 + gap;
+    const maxFolderWidth = isDesktop ? 130 : isTablet ? 100 : 80;
+    const maxLastFolderWidth = isDesktop ? 220 : isTablet ? 150 : 110;
 
-    // Calculate full width of the path
+    // Calculate full width of path (k = 0)
     let totalFullWidth = libraryWidth;
     const individualFolderWidths = path.map((f, index) => {
       const isLast = index === pathLength - 1;
       const textW = getTextWidth(f.name, font);
       const limit = isLast ? maxLastFolderWidth : maxFolderWidth;
-      const width = Math.min(textW + folderPadding, limit);
+      const width = Math.min(textW + 12, limit);
       totalFullWidth += width + chevronWidth;
       return width;
     });
 
-    const parent = breadcrumbsRef.current?.parentElement;
-    const containerWidth = parent ? parent.clientWidth : windowWidth;
-    const availableWidth = (containerWidth > 0 ? containerWidth : windowWidth) - 32; // safe margin
+    const measuredBarWidth = breadcrumbBarWidth > 0 
+      ? breadcrumbBarWidth 
+      : (containerRef.current ? containerRef.current.clientWidth - (isDesktopOrTablet ? 64 : 32) : windowWidth - 32);
+    const availableWidth = Math.max(180, measuredBarWidth - 20); // safe margin
 
     if (totalFullWidth <= availableWidth) {
-      return 0; // fits fully, no collapse needed
+      return 0; // fits completely, no dots needed!
     }
 
     // Find the smallest k (1 <= k < pathLength) such that the collapsed path fits
-    let optimalK = pathLength - 1; // Default to maximum collapse
+    // Collapsing first k folders immediately after Library
+    let optimalK = pathLength - 1;
     for (let k = 1; k < pathLength; k++) {
-      // Sum the width of the collapsed folders (first k folders)
       let sumCollapsedWidth = 0;
       for (let i = 0; i < k; i++) {
         sumCollapsedWidth += individualFolderWidths[i] + chevronWidth;
       }
-
-      const collapsedWidth = totalFullWidth - sumCollapsedWidth + ellipsisWidth;
+      const collapsedWidth = totalFullWidth - sumCollapsedWidth + dotsWidth + chevronWidth;
       if (collapsedWidth <= availableWidth) {
         optimalK = k;
         break;
       }
     }
 
-    // Cap optimalK to ensure we always maintain an elegant, dynamic tree structure.
-    // - On Desktop: Keep at least 3 folders visible if path length allows (showing a rich hierarchy).
-    // - On Tablet & Mobile: Keep at least 2 folders visible (showing 'Parent > Active Folder' instead of a single folder).
-    const minVisibleFolders = isDesktop ? 3 : 2;
-    const maxCollapseLimit = Math.max(0, pathLength - minVisibleFolders);
-    if (optimalK > maxCollapseLimit) {
-      optimalK = maxCollapseLimit;
+    // Protect "ما قبل المجلد الحالي": keep at least the direct parent visible if path allows and width permits
+    if (pathLength >= 2 && optimalK >= pathLength - 1 && availableWidth >= 260) {
+      optimalK = pathLength - 2;
     }
 
     return optimalK;
-  };
-
-  const collapsedCount = getDynamicCollapseCount();
-  const needsCollapse = collapsedCount > 0;
-
-  React.useEffect(() => {
-    if (breadcrumbsRef.current) {
-      // In RTL, the active folder is on the far left.
-      // To ensure it is fully visible, we scroll all the way to the left.
-      // Setting scrollLeft to a very large negative value will scroll to the leftmost edge.
-      breadcrumbsRef.current.scrollTo({
-        left: -99999,
-        behavior: "smooth"
-      });
-    }
-  }, [activeFolderId, isPathExpanded, needsCollapse]);
+  }, [breadcrumbBarWidth, windowWidth]);
 
   // Filter list based on search and selected folder
   const displayedFolders = folders.filter((f) => {
@@ -1250,289 +1255,194 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
   };
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-y-auto px-4 md:px-8 py-4 md:py-6 space-y-4 md:space-y-6 font-sans bg-white" dir="rtl">
-      
-      {/* 1. Global Navigation Top Header within Explorer */}
-      <div className="flex justify-between items-center pb-4 border-b border-outline-variant/10 gap-3">
-        
-        {/* Top Row: Menu Toggle, Search */}
-        <div className="flex items-center gap-3">
-          {onToggleSidebar && (
-            <button
-              onClick={onToggleSidebar}
-              className="md:hidden p-2 text-[#5f6368] hover:bg-slate-100 rounded-xl cursor-pointer"
-              title="القائمة"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-          )}
-          
-          {/* Enhanced Search Input */}
-          <div className="relative flex items-center">
-            <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200/60 focus-within:border-[#0056f6] focus-within:bg-white transition-all focus-within:ring-2 focus-within:ring-[#0056f6]/10">
-              <Search className="w-4 h-4 text-[#5f6368] shrink-0" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => {
-                  onSearchChange(e.target.value);
-                }}
-                onFocus={() => setIsSearchFocused(true)}
-                onBlur={() => {
-                  setTimeout(() => setIsSearchFocused(false), 200);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && searchQuery.trim()) {
-                    handleAddSearchHistory(searchQuery.trim());
-                  }
-                }}
-                placeholder="ابحث عن بطاقات ومجلدات..."
-                className="bg-transparent border-none text-xs outline-none w-36 sm:w-48 md:w-56 transition-all text-right text-on-surface placeholder-[#5f6368]/50 focus:ring-0"
-                dir="rtl"
-              />
-              
-              {searchQuery && (
-                <span className="bg-slate-200/80 text-slate-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0">
-                  {displayedFolders.length + displayedCards.length}
-                </span>
-              )}
-
-              {searchQuery && (
-                <button
-                  onClick={() => onSearchChange("")}
-                  className="p-0.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200/50 rounded-full transition-colors cursor-pointer"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              )}
-            </div>
-
-            {isSearchFocused && searchHistory.length > 0 && (
-              <div className="absolute top-full right-0 mt-1.5 w-64 bg-white border border-slate-200/60 rounded-xl shadow-lg p-2 z-50 flex flex-col gap-1 text-right animate-fade-in" dir="rtl">
-                <div className="flex items-center justify-between px-2 py-1 border-b border-slate-100">
-                  <span className="text-[10px] font-bold text-slate-400">عمليات البحث الأخيرة</span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleClearSearchHistory();
-                    }}
-                    className="text-[10px] font-bold text-rose-500 hover:text-rose-700 hover:underline cursor-pointer"
-                  >
-                    مسح السجل
-                  </button>
-                </div>
-                <div className="max-h-48 overflow-y-auto py-1 flex flex-col">
-                  {searchHistory.map((hist, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
-                      onMouseDown={() => {
-                        onSearchChange(hist);
-                      }}
-                    >
-                      <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
-                        <History className="w-3.5 h-3.5 text-slate-400" />
-                        <span>{hist}</span>
-                      </div>
-                      <button
-                        onMouseDown={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          handleRemoveHistoryItem(hist);
-                        }}
-                        className="p-1 text-slate-400 hover:text-rose-500 rounded hover:bg-slate-100 transition-colors cursor-pointer"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* User profile */}
-        <div className="flex items-center gap-1">
-          <button className="text-outline hover:text-on-surface transition-colors p-2 rounded-full hover:bg-slate-100 cursor-pointer">
-            <Bell className="w-5 h-5 text-[#5f6368]" />
-          </button>
-          <div className="w-8 h-8 rounded-full bg-[#f1f3f4] border border-outline-variant/20 flex items-center justify-center font-bold text-xs text-[#5f6368] cursor-pointer hover:bg-slate-200">
-            <User className="w-4 h-4 text-[#5f6368]" />
-          </div>
-        </div>
-
-      </div>
-
-
-
-      {/* 3. Unified Header & Action Toolbar (مدموج بالكامل: عنوان المجلد والأدوات في شريط واحد مدمج دون أي هوامش أو مكان طولي زائد) */}
-      <div 
-        className="relative flex items-center justify-between gap-2 w-full p-2 md:p-2.5 rounded-2xl border shadow-3xs z-30 transition-all duration-200"
+    <div className="flex-1 flex flex-col h-full overflow-hidden font-sans bg-white" dir="rtl">
+      {/* 1. Full-Width Edge-to-Edge Header (بدون مارجن جانبي يمين أو يسار لاستغلال كامل المساحة) */}
+      <header
+        className="w-full shrink-0 z-30 transition-all duration-200"
         style={{
-          borderRight: activeFolder ? `4px solid ${folderColor}` : "3px solid #e2e8f0",
           backgroundColor: activeFolder ? folderColor : "#ffffff",
-          borderColor: activeFolder ? `${folderColor}dd` : "#e2e8f0"
         }}
-        dir="rtl"
       >
-        {/* Full-width Cover Image Backdrop at 18% opacity with soft blur (without clipping dropdowns) */}
-        {activeFolder?.coverImage && (
-          <div className="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none z-0">
-            <img
-              src={activeFolder.coverImage}
-              alt=""
-              className="w-full h-full object-cover"
-              style={{
-                ...getSafeImageStyle(activeFolder.coverImagePosition),
-                opacity: 0.18,
-                filter: "blur(4px)"
-              }}
-              referrerPolicy="no-referrer"
-            />
-            {/* Subtle gradient overlay to smoothly blend with the solid theme color */}
-            <div className="absolute inset-0 bg-gradient-to-l from-black/25 via-transparent to-black/10" />
-          </div>
-        )}
-
-        {/* Subtle Ambient Theme Glow */}
+        {/* Unified Header & Action Toolbar */}
         <div 
-          className="absolute -top-12 -left-12 w-32 h-32 rounded-full blur-2xl pointer-events-none z-0"
-          style={{ 
-            backgroundColor: activeFolder ? '#ffffff' : folderColor,
-            opacity: activeFolder ? 0.15 : 0.08
+          className="relative flex items-center justify-between gap-2.5 w-full py-2.5 md:py-3 px-3.5 md:px-6 border-b shadow-3xs transition-all duration-200 min-h-[56px] md:min-h-[60px]"
+          style={{
+            borderBottomColor: activeFolder ? `${folderColor}dd` : "#e2e8f0"
           }}
-        />
+          dir="rtl"
+        >
+          {/* Full-width Cover Image Backdrop at 18% opacity with soft blur */}
+          {activeFolder?.coverImage && (
+            <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+              <img
+                src={activeFolder.coverImage}
+                alt=""
+                className="w-full h-full object-cover"
+                style={{
+                  ...getSafeImageStyle(activeFolder.coverImagePosition),
+                  opacity: 0.18,
+                  filter: "blur(4px)"
+                }}
+                referrerPolicy="no-referrer"
+              />
+              {/* Subtle gradient overlay to smoothly blend with the solid theme color */}
+              <div className="absolute inset-0 bg-gradient-to-l from-black/25 via-transparent to-black/10" />
+            </div>
+          )}
 
-        {/* Header content container */}
-        <div className="flex items-center justify-between gap-2 w-full relative z-10">
-          {isSelectionMode ? (
-            /* في وضع التحديد: شريط أدوات التحديد المدمج بكامل العرض */
-            <>
-              {/* Right side in Selection Mode: زر الإلغاء، زر تحديد الكل، وعدد المحدد */}
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  onClick={() => {
-                    setIsSelectionMode(false);
-                    setSelectedFolderIds([]);
-                    setSelectedCardIds([]);
-                    setClipboard(null);
-                  }}
-                  className="w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 outline-none"
-                  title="إلغاء التحديد"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+          {/* Subtle Ambient Theme Glow */}
+          <div 
+            className="absolute -top-12 -left-12 w-32 h-32 rounded-full blur-2xl pointer-events-none z-0"
+            style={{ 
+              backgroundColor: activeFolder ? '#ffffff' : folderColor,
+              opacity: activeFolder ? 0.15 : 0.08
+            }}
+          />
 
-                <button
-                  onClick={handleSelectAll}
-                  disabled={displayedFolders.length === 0 && displayedCards.length === 0}
-                  className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 border outline-none ${
-                    displayedFolders.length === 0 && displayedCards.length === 0
-                      ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed"
-                      : isAllSelectedInView
-                        ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200"
-                        : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200"
-                  }`}
-                  title={isAllSelectedInView ? "إلغاء تحديد الكل" : "تحديد الكل"}
-                >
-                  <CheckSquare className="w-4 h-4" />
-                </button>
-
-                {(selectedFolderIds.length > 0 || selectedCardIds.length > 0) && (
-                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-lg select-none ${
-                    activeFolder ? "bg-white/20 text-white" : "text-slate-500 bg-slate-100"
-                  }`}>
-                    {selectedFolderIds.length + selectedCardIds.length} محدد
-                  </span>
-                )}
-              </div>
-
-              {/* Left side in Selection Mode: أدوات الإجراءات المجمعة وزر الإغلاق */}
-              <div className="flex items-center gap-1.5 shrink-0">
-                <div className={`flex items-center gap-1 p-0.5 rounded-xl border ${
-                  activeFolder ? "bg-black/20 border-white/20" : "bg-slate-50 border-slate-200/60"
-                }`}>
-                  {/* Delete */}
+          {/* Header content container */}
+          <div className="flex items-center justify-between gap-2.5 w-full relative z-10">
+            {isSelectionMode ? (
+              /* في وضع التحديد: شريط أدوات التحديد المدمج بكامل العرض */
+              <>
+                {/* Right side in Selection Mode: زر الإلغاء، زر تحديد الكل، وعدد المحدد */}
+                <div className="flex items-center gap-1.5 shrink-0">
                   <button
-                    onClick={() => setConfirmBulkDelete(true)}
-                    disabled={selectedFolderIds.length === 0 && selectedCardIds.length === 0}
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer active:scale-95 outline-none bg-white text-rose-600 border border-slate-200/70 shadow-3xs ${
-                      selectedFolderIds.length === 0 && selectedCardIds.length === 0
-                        ? "opacity-50 cursor-not-allowed"
-                        : "hover:bg-rose-50 hover:border-rose-200"
-                    }`}
-                    title="حذف العناصر المحددة"
+                    onClick={() => {
+                      setIsSelectionMode(false);
+                      setSelectedFolderIds([]);
+                      setSelectedCardIds([]);
+                      setClipboard(null);
+                    }}
+                    className="w-8.5 h-8.5 md:w-9 md:h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 outline-none"
+                    title="إلغاء التحديد"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <X className="w-4 h-4" />
                   </button>
 
-                  {/* Copy */}
                   <button
-                    onClick={handleStartCopy}
-                    disabled={selectedFolderIds.length === 0 && selectedCardIds.length === 0}
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer active:scale-95 outline-none bg-white text-blue-600 border border-slate-200/70 shadow-3xs ${
-                      selectedFolderIds.length === 0 && selectedCardIds.length === 0
-                        ? "opacity-50 cursor-not-allowed"
-                        : "hover:bg-blue-50 hover:border-blue-200"
+                    onClick={handleSelectAll}
+                    disabled={displayedFolders.length === 0 && displayedCards.length === 0}
+                    className={`w-8.5 h-8.5 md:w-9 md:h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 border outline-none ${
+                      displayedFolders.length === 0 && displayedCards.length === 0
+                        ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed"
+                        : isAllSelectedInView
+                          ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200"
+                          : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200"
                     }`}
-                    title="نسخ العناصر المحددة"
+                    title={isAllSelectedInView ? "إلغاء تحديد الكل" : "تحديد الكل"}
                   >
-                    <Copy className="w-4 h-4" />
+                    <CheckSquare className="w-4 h-4" />
                   </button>
 
-                  {/* Cut */}
-                  <button
-                    onClick={handleStartCut}
-                    disabled={selectedFolderIds.length === 0 && selectedCardIds.length === 0}
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer active:scale-95 outline-none bg-white text-amber-600 border border-slate-200/70 shadow-3xs ${
-                      selectedFolderIds.length === 0 && selectedCardIds.length === 0
-                        ? "opacity-50 cursor-not-allowed"
-                        : "hover:bg-amber-50 hover:border-amber-200"
-                    }`}
-                    title="قص العناصر المحددة"
-                  >
-                    <Scissors className="w-4 h-4" />
-                  </button>
+                  {(selectedFolderIds.length > 0 || selectedCardIds.length > 0) && (
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-lg select-none ${
+                      activeFolder ? "bg-white/20 text-white" : "text-slate-500 bg-slate-100"
+                    }`}>
+                      {selectedFolderIds.length + selectedCardIds.length} محدد
+                    </span>
+                  )}
                 </div>
 
-                <button
-                  onClick={() => {
-                    setIsSelectionMode(false);
-                    setSelectedFolderIds([]);
-                    setSelectedCardIds([]);
-                    setClipboard(null);
-                  }}
-                  className="w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 outline-none"
-                  title="إلغاء التحديد"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </>
-          ) : (
-            /* في الوضع العادي: الهيدر المدمج بكامل الأناقة والترتيب المطلوب */
-            <>
-              {/* Right side in RTL (أقصى اليمين): زر الخيارات (...) متبوعاً بعنوان وغلاف المجلد */}
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                {/* 1. زر الخيارات في أقصى اليمين تماماً */}
-                <div className="relative shrink-0" ref={moreMenuRef}>
+                {/* Left side in Selection Mode: أدوات الإجراءات المجمعة وزر الإغلاق */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <div className={`flex items-center gap-1 p-0.5 rounded-xl border ${
+                    activeFolder ? "bg-black/20 border-white/20" : "bg-slate-50 border-slate-200/60"
+                  }`}>
+                    {/* Delete */}
+                    <button
+                      onClick={() => setConfirmBulkDelete(true)}
+                      disabled={selectedFolderIds.length === 0 && selectedCardIds.length === 0}
+                      className={`w-7.5 h-7.5 md:w-8 md:h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer active:scale-95 outline-none bg-white text-rose-600 border border-slate-200/70 shadow-3xs ${
+                        selectedFolderIds.length === 0 && selectedCardIds.length === 0
+                          ? "opacity-50 cursor-not-allowed"
+                          : "hover:bg-rose-50 hover:border-rose-200"
+                      }`}
+                      title="حذف العناصر المحددة"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                    </button>
+
+                    {/* Copy */}
+                    <button
+                      onClick={handleStartCopy}
+                      disabled={selectedFolderIds.length === 0 && selectedCardIds.length === 0}
+                      className={`w-7.5 h-7.5 md:w-8 md:h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer active:scale-95 outline-none bg-white text-blue-600 border border-slate-200/70 shadow-3xs ${
+                        selectedFolderIds.length === 0 && selectedCardIds.length === 0
+                          ? "opacity-50 cursor-not-allowed"
+                          : "hover:bg-blue-50 hover:border-blue-200"
+                      }`}
+                      title="نسخ العناصر المحددة"
+                    >
+                      <Copy className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                    </button>
+
+                    {/* Cut */}
+                    <button
+                      onClick={handleStartCut}
+                      disabled={selectedFolderIds.length === 0 && selectedCardIds.length === 0}
+                      className={`w-7.5 h-7.5 md:w-8 md:h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer active:scale-95 outline-none bg-white text-amber-600 border border-slate-200/70 shadow-3xs ${
+                        selectedFolderIds.length === 0 && selectedCardIds.length === 0
+                          ? "opacity-50 cursor-not-allowed"
+                          : "hover:bg-amber-50 hover:border-amber-200"
+                      }`}
+                      title="قص العناصر المحددة"
+                    >
+                      <Scissors className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                    </button>
+                  </div>
+
                   <button
-                    onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
-                    className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 border outline-none ${
-                      activeFolder
-                        ? isMoreMenuOpen
-                          ? "bg-white text-slate-900 border-white shadow-xs"
-                          : "bg-white/20 hover:bg-white/30 text-white border-white/20"
-                        : isMoreMenuOpen 
-                          ? "bg-slate-200 text-slate-900 border-slate-300" 
-                          : "bg-slate-100 hover:bg-slate-200/80 text-slate-700 border-slate-200/60"
-                    }`}
-                    title="خيارات إضافية"
-                    aria-label="خيارات إضافية"
+                    onClick={() => {
+                      setIsSelectionMode(false);
+                      setSelectedFolderIds([]);
+                      setSelectedCardIds([]);
+                      setClipboard(null);
+                    }}
+                    className="w-8.5 h-8.5 md:w-9 md:h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 outline-none"
+                    title="إلغاء التحديد"
                   >
-                    <MoreVertical className="w-4 h-4" />
+                    <X className="w-4 h-4" />
                   </button>
+                </div>
+              </>
+            ) : (
+              /* في الوضع العادي: الهيدر المدمج بكامل الأناقة والترتيب المطلوب */
+              <>
+                {/* Right side in RTL (أقصى اليمين): زر القائمة للموبايل + زر الخيارات (...) متبوعاً بعنوان وغلاف المجلد والبحث */}
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  {/* زر القائمة للموبايل */}
+                  {onToggleSidebar && (
+                    <button
+                      onClick={onToggleSidebar}
+                      className={`md:hidden w-8.5 h-8.5 rounded-xl flex items-center justify-center transition-all cursor-pointer shrink-0 border outline-none ${
+                        activeFolder
+                          ? "bg-white/20 text-white border-white/20 hover:bg-white/30"
+                          : "bg-slate-100 text-slate-700 border-slate-200/60 hover:bg-slate-200"
+                      }`}
+                      title="القائمة"
+                    >
+                      <Menu className="w-4.5 h-4.5" />
+                    </button>
+                  )}
+
+                  {/* 1. زر الخيارات في أقصى اليمين تماماً */}
+                  <div className="relative shrink-0" ref={moreMenuRef}>
+                    <button
+                      onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
+                      className={`w-8.5 h-8.5 md:w-9 md:h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 border outline-none ${
+                        activeFolder
+                          ? isMoreMenuOpen
+                            ? "bg-white text-slate-900 border-white shadow-xs"
+                            : "bg-white/20 hover:bg-white/30 text-white border-white/20"
+                          : isMoreMenuOpen 
+                            ? "bg-slate-200 text-slate-900 border-slate-300" 
+                            : "bg-slate-100 hover:bg-slate-200/80 text-slate-700 border-slate-200/60"
+                      }`}
+                      title="خيارات إضافية"
+                      aria-label="خيارات إضافية"
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
 
                   {isMoreMenuOpen && (
                     <div 
@@ -1657,25 +1567,25 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                   )}
                 </div>
 
-                {/* 2. Folder Navigation, Thumbnail & Title (مدموج بالكامل: مسار التنقل + زر الرجوع + العنوان + الغلاف) */}
-                <div className="flex items-center gap-2 min-w-0 flex-1 pr-0.5">
+                {/* 2. Folder Navigation, Thumbnail & Title */}
+                <div className="flex items-center gap-2 min-w-0 shrink-0 pr-0.5">
                   {/* زر الرجوع للمستوى السابق عند فتح أي مجلد فرعي */}
                   {activeFolder && (
                     <button
                       type="button"
                       onClick={() => onSelectFolder(activeFolder.parentId || "")}
-                      className="w-7 h-7 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 shrink-0 bg-white/20 hover:bg-white/30 text-white border border-white/20 outline-none shadow-3xs"
+                      className="w-8 h-8 md:w-8.5 md:h-8.5 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 shrink-0 bg-white/20 hover:bg-white/30 text-white border border-white/20 outline-none shadow-3xs"
                       title="رجوع للمستوى السابق"
                       aria-label="رجوع للمستوى السابق"
                     >
-                      <ChevronRight className="w-4 h-4" />
+                      <ChevronRight className="w-4.5 h-4.5" />
                     </button>
                   )}
 
                   {/* صورة غلاف المجلد أو أيقونته */}
                   {activeFolder ? (
                     activeFolder.coverImage ? (
-                      <div className="relative w-8 h-8 rounded-xl overflow-hidden shrink-0 border border-white/30 shadow-3xs bg-black/10">
+                      <div className="relative w-8.5 h-8.5 md:w-9 md:h-9 rounded-xl overflow-hidden shrink-0 border border-white/30 shadow-3xs bg-black/10">
                         <ImageWithSkeleton
                           src={activeFolder.coverImage}
                           alt="غلاف المجلد"
@@ -1686,43 +1596,31 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                       </div>
                     ) : (
                       <div 
-                        className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border border-white/20 bg-white/20 text-white shadow-3xs"
+                        className="w-8.5 h-8.5 md:w-9 md:h-9 rounded-xl flex items-center justify-center shrink-0 border border-white/20 bg-white/20 text-white shadow-3xs"
                       >
                         <Folder className="w-4 h-4 fill-current" />
                       </div>
                     )
                   ) : (
-                    <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border border-slate-200/80 bg-slate-50 text-slate-600 shadow-3xs">
+                    <div className="w-8.5 h-8.5 md:w-9 md:h-9 rounded-xl flex items-center justify-center shrink-0 border border-slate-200/80 bg-slate-50 text-slate-600 shadow-3xs">
                       <Folder className="w-4 h-4 fill-slate-300 text-slate-600" />
                     </div>
                   )}
 
-                  {/* Clean Title & Description */}
-                  <div className="flex flex-col min-w-0 justify-center">
-                    <h2 
-                      className={`text-xs md:text-sm font-black tracking-tight leading-tight truncate ${
-                        activeFolder 
-                          ? "text-white drop-shadow-xs" 
-                          : "text-slate-800"
-                      }`}
-                      title={activeFolder ? activeFolder.name : "المكتبة"}
-                    >
-                      {activeFolder ? activeFolder.name : "المكتبة"}
-                    </h2>
-
-                    {activeFolder?.description && (
-                      <p 
-                        className={`text-[10px] md:text-[11px] font-semibold leading-tight line-clamp-1 truncate ${
-                          activeFolder ? "text-white/80" : "text-slate-500"
-                        }`}
-                        title={activeFolder.description}
-                      >
-                        {activeFolder.description}
-                      </p>
-                    )}
-                  </div>
+                  {/* Clean Title */}
+                  <h2 
+                    className={`text-sm md:text-base font-bold tracking-tight leading-snug truncate ${
+                      activeFolder 
+                        ? "text-white drop-shadow-xs" 
+                        : "text-slate-800"
+                    }`}
+                    title={activeFolder ? activeFolder.name : "المكتبة"}
+                  >
+                    {activeFolder ? activeFolder.name : "المكتبة"}
+                  </h2>
                 </div>
-              </div>
+
+                </div>
 
               {/* Left side in RTL (الجانب الأيسر): زر المراجعة بأقصى اليسار وزر الإضافة بجانبه من اليمين */}
               <div className="flex items-center gap-1.5 shrink-0">
@@ -1730,7 +1628,7 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                 {clipboard && (
                   <button
                     onClick={handleExecutePaste}
-                    className={`px-2.5 h-8 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-xs hover:scale-102 active:scale-95 text-xs font-bold outline-none ${
+                    className={`px-3 h-8.5 md:h-9 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-xs hover:scale-102 active:scale-95 text-xs font-bold outline-none ${
                       activeFolder 
                         ? "bg-white text-slate-900 border border-white/40" 
                         : "text-white"
@@ -1750,7 +1648,7 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                 <div className="relative" ref={addMenuRef}>
                   <button
                     onClick={() => setIsAddMenuOpen(!isAddMenuOpen)}
-                    className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 border outline-none ${
+                    className={`w-8.5 h-8.5 md:w-9 md:h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 border outline-none ${
                       activeFolder
                         ? isAddMenuOpen
                           ? "bg-white text-slate-900 border-white shadow-xs"
@@ -1811,7 +1709,7 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                       });
                     }
                   }}
-                  className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-xs hover:scale-105 active:scale-95 shrink-0 outline-none ${
+                  className={`w-8.5 h-8.5 md:w-9 md:h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-xs hover:scale-105 active:scale-95 shrink-0 outline-none ${
                     activeFolder
                       ? "bg-white text-slate-900 hover:bg-slate-50 border border-white/60 shadow-sm"
                       : "text-white"
@@ -1820,7 +1718,7 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                   title="بدء المراجعة"
                   aria-label="بدء المراجعة"
                 >
-                  <Play className="w-4 h-4 fill-current ml-0.5" />
+                  <Play className="w-4.5 h-4.5 fill-current ml-0.5" />
                 </button>
               </div>
             </>
@@ -1829,16 +1727,19 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
       </div>
 
       {/* 4. Straight Text Breadcrumb Trail Span (شريط نصي خفيف متكيف تحت الهيدر: المكتبة > الأب > الحالي) */}
-      {activeFolder && (() => {
-        const fullPath = getFolderPath(activeFolder.id);
-        const hasIntermediates = fullPath.length > 3;
-        const intermediateFolders = fullPath.slice(1, -1);
+        {activeFolder && (() => {
+          const fullPath = getFolderPath(activeFolder.id);
+          const collapseCount = getDynamicCollapseCount(fullPath);
+          const hasCollapsed = collapseCount > 0;
+          const collapsedFolders = hasCollapsed ? fullPath.slice(0, collapseCount) : [];
+          const visibleFolders = hasCollapsed ? fullPath.slice(collapseCount) : fullPath;
 
-        return (
-          <div 
-            className="w-full px-2.5 py-1 mb-1.5 flex items-center gap-1.5 text-[11px] md:text-xs text-slate-500 bg-slate-50/70 hover:bg-slate-50 rounded-xl border border-slate-200/60 select-none overflow-hidden transition-colors"
-            dir="rtl"
-          >
+          return (
+            <div 
+              ref={breadcrumbsBarRef}
+              className="w-full px-3.5 md:px-6 py-2 flex items-center gap-1.5 text-[11px] md:text-xs text-slate-500 bg-slate-50/80 border-b border-slate-200/60 select-none overflow-hidden transition-colors"
+              dir="rtl"
+            >
             {/* مسار العناوين المتكيف مع العرض بدون أي شريط تمرير أفقي */}
             <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden">
               {/* المكتبة */}
@@ -1870,9 +1771,80 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                 <span>المكتبة</span>
               </button>
 
-              {/* إذا كان المسار قصيراً (3 مجلدات أو أقل): يظهر المسار بالكامل كنص رشيق */}
-              {!hasIntermediates && fullPath.map((folderItem, idx, pathArr) => {
-                const isLast = idx === pathArr.length - 1;
+              {/* إذا تم اختصار أي مجلدات بعد المكتبة: تظهر النقاط (...) مباشرة بعد المكتبة مع قائمة منسدلة */}
+              {hasCollapsed && (
+                <>
+                  <span className="text-slate-300 font-bold select-none shrink-0 text-[10px] md:text-[11px]">&gt;</span>
+
+                  {/* قائمة المجلدات المطوية بعد المكتبة: تظهر كنقاط نصية فقط (...) متناسقة مع المسار */}
+                  <div className="relative shrink-0" ref={intermediateMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setIsIntermediateMenuOpen(!isIntermediateMenuOpen)}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setIsIntermediateMenuOpen(true);
+                      }}
+                      className="font-bold text-slate-500 hover:text-[#0056f6] hover:underline cursor-pointer tracking-widest px-0.5 transition-colors select-none"
+                      title={`المسار السابق (${collapsedFolders.length} مجلدات مطوية) - انقر لعرض المسار`}
+                    >
+                      ...
+                    </button>
+
+                    {isIntermediateMenuOpen && (
+                      <div 
+                        className="absolute top-full mt-1.5 right-0 z-50 min-w-[210px] max-w-[290px] bg-white rounded-xl shadow-xl border border-slate-200/80 p-1.5 text-xs animate-in fade-in zoom-in-95 duration-100"
+                        dir="rtl"
+                      >
+                        <div className="px-2 py-1.5 text-[11px] font-bold text-slate-500 border-b border-slate-100 mb-1 flex items-center justify-between">
+                          <span>المسار السابق ({collapsedFolders.length} مجلدات)</span>
+                          <Folder className="w-3.5 h-3.5 text-[#0056f6]" />
+                        </div>
+                        <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                          {collapsedFolders.map((collapsedFolder) => (
+                            <button
+                              key={collapsedFolder.id}
+                              type="button"
+                              onClick={() => {
+                                setIsIntermediateMenuOpen(false);
+                                onSelectFolder(collapsedFolder.id);
+                              }}
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                                handleDragEnterSpringLoad(collapsedFolder.id);
+                              }}
+                              onDragLeave={handleDragLeaveSpringLoad}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (draggedFolderId && draggedFolderId !== collapsedFolder.id && !isDescendantFolder(draggedFolderId, collapsedFolder.id)) {
+                                  const updatedFolders = folders.map(f => f.id === draggedFolderId ? { ...f, parentId: collapsedFolder.id, updatedAt: new Date().toISOString() } : f);
+                                  onReorderFolders?.(updatedFolders);
+                                  clearAllDragStates();
+                                } else if (draggedCardId) {
+                                  const updatedCards = cards.map(c => c.id === draggedCardId ? { ...c, folderId: collapsedFolder.id } : c);
+                                  onReorderCards?.(updatedCards);
+                                  clearAllDragStates();
+                                }
+                              }}
+                              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-slate-700 hover:text-[#0056f6] hover:bg-blue-50/70 text-right transition-colors cursor-pointer group text-xs"
+                              title={`${collapsedFolder.name} (انقر للانتقال أو اسحب للإفلات)`}
+                            >
+                              <span className="text-slate-300 group-hover:text-blue-400 text-[10px] font-mono">↳</span>
+                              <Folder className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                              <span className="truncate font-medium flex-1">{collapsedFolder.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* المجلدات الظاهرة (تشمل مجلدات المسار المتبقية + ما قبل المجلد الحالي + المجلد الحالي) */}
+              {visibleFolders.map((folderItem, idx, arr) => {
+                const isLast = idx === arr.length - 1;
                 return (
                   <React.Fragment key={folderItem.id}>
                     <span className="text-slate-300 font-bold select-none shrink-0 text-[10px] md:text-[11px]">&gt;</span>
@@ -1914,134 +1886,32 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                   </React.Fragment>
                 );
               })}
-
-              {/* إذا كان المسار عميقاً (4 مستويات فأكثر): اختصار ذكي مع إظهار زر النقاط (...x2) كزر صريح وتفاعلي */}
-              {hasIntermediates && (
-                <>
-                  <span className="text-slate-300 font-bold select-none shrink-0 text-[10px] md:text-[11px]">&gt;</span>
-                  
-                  {/* المجلد الجذري الأول */}
-                  <button
-                    type="button"
-                    onClick={() => onSelectFolder(fullPath[0].id)}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      handleDragEnterSpringLoad(fullPath[0].id);
-                    }}
-                    onDragLeave={handleDragLeaveSpringLoad}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      if (draggedFolderId && draggedFolderId !== fullPath[0].id && !isDescendantFolder(draggedFolderId, fullPath[0].id)) {
-                        const updatedFolders = folders.map(f => f.id === draggedFolderId ? { ...f, parentId: fullPath[0].id, updatedAt: new Date().toISOString() } : f);
-                        onReorderFolders?.(updatedFolders);
-                        clearAllDragStates();
-                      } else if (draggedCardId) {
-                        const updatedCards = cards.map(c => c.id === draggedCardId ? { ...c, folderId: fullPath[0].id } : c);
-                        onReorderCards?.(updatedCards);
-                        clearAllDragStates();
-                      }
-                    }}
-                    className="font-medium text-slate-500 hover:text-[#0056f6] hover:underline cursor-pointer truncate min-w-0 max-w-[90px] sm:max-w-[130px] transition-colors"
-                    title={`${fullPath[0].name} (انقر للانتقال)`}
-                  >
-                    {fullPath[0].name}
-                  </button>
-
-                  <span className="text-slate-300 font-bold select-none shrink-0 text-[10px] md:text-[11px]">&gt;</span>
-
-                  {/* قائمة المجلدات الوسيطة المنسدلة: تظهر كنقاط نصية فقط (...) متناسقة مع المسار */}
-                  <div className="relative shrink-0" ref={intermediateMenuRef}>
-                    <button
-                      type="button"
-                      onClick={() => setIsIntermediateMenuOpen(!isIntermediateMenuOpen)}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        setIsIntermediateMenuOpen(true);
-                      }}
-                      className="font-bold text-slate-500 hover:text-[#0056f6] hover:underline cursor-pointer tracking-widest px-0.5 transition-colors select-none"
-                      title={`المسار الوسيط (${intermediateFolders.length} مجلدات) - انقر لعرض المسار`}
-                    >
-                      ...
-                    </button>
-
-                    {isIntermediateMenuOpen && (
-                      <div 
-                        className="absolute top-full mt-1.5 right-0 z-50 min-w-[210px] max-w-[290px] bg-white rounded-xl shadow-xl border border-slate-200/80 p-1.5 text-xs animate-in fade-in zoom-in-95 duration-100"
-                        dir="rtl"
-                      >
-                        <div className="px-2 py-1.5 text-[11px] font-bold text-slate-500 border-b border-slate-100 mb-1 flex items-center justify-between">
-                          <span>المسار الوسيط ({intermediateFolders.length} مجلدات)</span>
-                          <Folder className="w-3.5 h-3.5 text-[#0056f6]" />
-                        </div>
-                        <div className="space-y-0.5 max-h-48 overflow-y-auto">
-                          {intermediateFolders.map((intermediateFolder) => (
-                            <button
-                              key={intermediateFolder.id}
-                              type="button"
-                              onClick={() => {
-                                setIsIntermediateMenuOpen(false);
-                                onSelectFolder(intermediateFolder.id);
-                              }}
-                              onDragOver={(e) => {
-                                e.preventDefault();
-                                handleDragEnterSpringLoad(intermediateFolder.id);
-                              }}
-                              onDragLeave={handleDragLeaveSpringLoad}
-                              onDrop={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                if (draggedFolderId && draggedFolderId !== intermediateFolder.id && !isDescendantFolder(draggedFolderId, intermediateFolder.id)) {
-                                  const updatedFolders = folders.map(f => f.id === draggedFolderId ? { ...f, parentId: intermediateFolder.id, updatedAt: new Date().toISOString() } : f);
-                                  onReorderFolders?.(updatedFolders);
-                                  clearAllDragStates();
-                                } else if (draggedCardId) {
-                                  const updatedCards = cards.map(c => c.id === draggedCardId ? { ...c, folderId: intermediateFolder.id } : c);
-                                  onReorderCards?.(updatedCards);
-                                  clearAllDragStates();
-                                }
-                              }}
-                              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-slate-700 hover:text-[#0056f6] hover:bg-blue-50/70 text-right transition-colors cursor-pointer group text-xs"
-                              title={`${intermediateFolder.name} (انقر للانتقال أو اسحب للإفلات)`}
-                            >
-                              <span className="text-slate-300 group-hover:text-blue-400 text-[10px] font-mono">↳</span>
-                              <Folder className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                              <span className="truncate font-medium flex-1">{intermediateFolder.name}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <span className="text-slate-300 font-bold select-none shrink-0 text-[10px] md:text-[11px]">&gt;</span>
-
-                  {/* المجلد الحالي النشط */}
-                  <span 
-                    className="font-bold text-slate-800 truncate min-w-0"
-                    title={activeFolder.name}
-                  >
-                    {activeFolder.name}
-                  </span>
-                </>
-              )}
             </div>
           </div>
         );
       })()}
+      </header>
 
-      {/* 5. Unified Items List (Folders first, then Cards) */}
+      {/* 2. Scrollable Body Content (Folders & Cards) */}
       <div 
-        className="pt-1 min-h-[300px] pb-20"
-        onDragOver={handleContainerDragOver}
-        onDrop={handleContainerDrop}
+        ref={containerRef}
+        className="flex-1 overflow-y-auto px-4 md:px-8 py-3.5 md:py-5 space-y-3 md:space-y-4 font-sans"
+        dir="rtl"
       >
+        {/* Unified Items List (Folders first, then Cards) */}
+        <div 
+          className="pt-1 min-h-[300px] pb-20"
+          onDragOver={handleContainerDragOver}
+          onDrop={handleContainerDrop}
+        >
         {displayedFolders.length === 0 && displayedCards.length === 0 ? (
-          <div className="text-center py-20 bg-slate-50 rounded-2xl border-2 border-dashed border-outline-variant/30 flex flex-col items-center justify-center p-6" dir="rtl">
-            <Folder className="w-12 h-12 text-outline-variant/40 mb-3" />
-            <h4 className="font-bold text-on-surface text-sm">لا توجد عناصر مضافة بعد</h4>
-            <p className="text-xs text-on-surface-variant mt-1 max-w-sm leading-relaxed font-semibold">
-              هذا المجلد فارغ حالياً. اضغط على أزرار الإضافة في الأعلى لإنشاء مجلدات فرعية أو بطاقات دراسية جديدة!
+          <div className="text-center py-16 bg-slate-50/60 rounded-2xl border border-dashed border-slate-200/80 flex flex-col items-center justify-center p-6" dir="rtl">
+            <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 mb-2.5">
+              <Folder className="w-5 h-5 text-slate-400" />
+            </div>
+            <h4 className="font-semibold text-slate-700 text-sm">المجلد فارغ</h4>
+            <p className="text-xs text-slate-400 mt-1 font-normal">
+              اضغط على (+) بالأعلى لإضافة مجلدات أو بطاقات
             </p>
           </div>
         ) : (
@@ -2092,19 +1962,19 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                     draggable={!isSelectionMode}
                     onDragStart={(e) => handleFolderDragStart(e, f.id)}
                     onDragEnd={handleDragEnd}
-                    className={`flex items-center justify-between p-4 bg-white border rounded-lg hover:shadow-xs transition-all cursor-pointer group select-none relative ${
+                    className={`flex items-center justify-between py-2.5 px-3 md:px-3.5 bg-white border rounded-xl hover:shadow-xs transition-all cursor-pointer group select-none relative ${
                       isSelectionMode && isSelected
                         ? "border-[#0056f6] bg-blue-50/25 shadow-2xs"
-                        : `border-slate-100 hover:bg-slate-50/40 ${dragStyle}`
+                        : `border-slate-100 hover:bg-slate-50/60 ${dragStyle}`
                     } ${isDraggingAny ? "[&_*]:pointer-events-none" : ""}`}
                   >
                     {/* Absolute visual overlay for dropping inside a folder - clear solid colored boundaries with soft blue tint */}
                     {showInsideHighlight && (
-                      <div className="absolute inset-0 border-2 border-[#0056f6] bg-[#0056f6]/8 rounded-lg pointer-events-none z-30 animate-pulse" />
+                      <div className="absolute inset-0 border-2 border-[#0056f6] bg-[#0056f6]/8 rounded-xl pointer-events-none z-30 animate-pulse" />
                     )}
 
                   {/* Right Side: Blue Folder icon + Text (renders on right in RTL) */}
-                  <div className="flex items-center gap-4 text-right">
+                  <div className="flex items-center gap-3 text-right min-w-0 flex-1">
                     {/* Checkbox for Selection Mode */}
                     {isSelectionMode && (
                       <div 
@@ -2112,18 +1982,18 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                           e.stopPropagation();
                           toggleFolderSelection(f.id);
                         }}
-                        className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all shrink-0 ${
+                        className={`w-4.5 h-4.5 rounded-md border flex items-center justify-center transition-all shrink-0 ${
                           isSelected
                             ? "bg-[#0056f6] border-[#0056f6] text-white"
                             : "border-slate-300 hover:border-slate-400 bg-white"
                         }`}
                       >
-                        {isSelected && <Check className="w-3.5 h-3.5 stroke-[3px]" />}
+                        {isSelected && <Check className="w-3 h-3 stroke-[3px]" />}
                       </div>
                     )}
 
                     {/* Modern Clean Folder Thumbnail */}
-                    <div className="relative w-12 h-12 shrink-0 rounded-xl overflow-hidden border border-slate-200/70 shadow-2xs flex items-center justify-center bg-slate-50 transition-transform group-hover:scale-102">
+                    <div className="relative w-9.5 h-9.5 shrink-0 rounded-lg overflow-hidden border border-slate-200/70 shadow-2xs flex items-center justify-center bg-slate-50 transition-transform group-hover:scale-102">
                       {f.coverImage ? (
                         <>
                           <ImageWithSkeleton
@@ -2134,9 +2004,6 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                             referrerPolicy="no-referrer"
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent pointer-events-none" />
-                          <div className="absolute left-1 bottom-1 p-0.5 bg-black/40 backdrop-blur-xs rounded-md flex items-center justify-center">
-                            <Folder className="w-2.5 h-2.5 text-white fill-white/80" />
-                          </div>
                         </>
                       ) : (
                         <div 
@@ -2145,19 +2012,19 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                             background: `linear-gradient(135deg, ${f.color || '#0056f6'}18, ${f.color || '#0056f6'}30)`
                           }}
                         >
-                          <Folder className="w-5 h-5 fill-current" style={{ color: f.color || '#0056f6' }} />
+                          <Folder className="w-4.5 h-4.5 fill-current" style={{ color: f.color || '#0056f6' }} />
                         </div>
                       )}
                     </div>
 
-                    {/* Text block */}
-                    <div>
-                      <h4 className="font-bold text-[#202124] text-base group-hover:text-[#0056f6] transition-colors leading-snug">
+                    {/* Text block: Clean single line with quiet count */}
+                    <div className="flex items-baseline gap-2 min-w-0">
+                      <h4 className="font-semibold text-slate-800 text-sm md:text-base group-hover:text-[#0056f6] transition-colors leading-snug truncate">
                         <HighlightText text={f.name} search={searchQuery} />
                       </h4>
-                      <p className="text-xs text-slate-500 font-medium mt-0.5 flex items-center gap-1.5">
-                        <span>{fRecursiveCardCount} بطاقة</span>
-                      </p>
+                      <span className="text-[11px] text-slate-400 font-normal shrink-0">
+                        ({fRecursiveCardCount})
+                      </span>
                     </div>
                   </div>
 
@@ -2289,14 +2156,14 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                     draggable={!isSelectionMode}
                     onDragStart={(e) => handleCardDragStart(e, card.id)}
                     onDragEnd={handleDragEnd}
-                    className={`flex items-center justify-between p-4 bg-white border rounded-lg hover:shadow-xs transition-all group cursor-pointer relative select-none ${
+                    className={`flex items-center justify-between py-2.5 px-3 md:px-3.5 bg-white border rounded-xl hover:shadow-xs transition-all group cursor-pointer relative select-none ${
                       isSelectionMode && isSelected
                         ? "border-[#0056f6] bg-blue-50/25 shadow-2xs"
-                        : `border-slate-100 hover:bg-slate-50/40 ${dragStyle}`
+                        : `border-slate-100 hover:bg-slate-50/60 ${dragStyle}`
                     } ${isDraggingAny ? "[&_*]:pointer-events-none" : ""}`}
                   >
                   {/* Right Side: Card Icon + Text (renders on right in RTL) */}
-                  <div className="flex items-center gap-4 text-right">
+                  <div className="flex items-center gap-3 text-right min-w-0 flex-1">
                     {/* Checkbox for Selection Mode */}
                     {isSelectionMode && (
                       <div 
@@ -2304,18 +2171,18 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                           e.stopPropagation();
                           toggleCardSelection(card.id);
                         }}
-                        className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all shrink-0 ${
+                        className={`w-4.5 h-4.5 rounded-md border flex items-center justify-center transition-all shrink-0 ${
                           isSelected
                             ? "bg-[#0056f6] border-[#0056f6] text-white"
                             : "border-slate-300 hover:border-slate-400 bg-white"
                         }`}
                       >
-                        {isSelected && <Check className="w-3.5 h-3.5 stroke-[3px]" />}
+                        {isSelected && <Check className="w-3 h-3 stroke-[3px]" />}
                       </div>
                     )}
 
                     {/* Modern Clean Card Thumbnail */}
-                    <div className="relative w-12 h-12 shrink-0 rounded-xl overflow-hidden border border-slate-200/70 shadow-2xs flex items-center justify-center bg-slate-50 transition-transform group-hover:scale-102">
+                    <div className="relative w-9.5 h-9.5 shrink-0 rounded-lg overflow-hidden border border-slate-200/70 shadow-2xs flex items-center justify-center bg-slate-50 transition-transform group-hover:scale-102">
                       {card.frontImage ? (
                         <>
                           <ImageWithSkeleton
@@ -2326,9 +2193,6 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                             referrerPolicy="no-referrer"
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent pointer-events-none" />
-                          <div className="absolute left-1 bottom-1 p-0.5 bg-black/40 backdrop-blur-xs rounded-md flex items-center justify-center">
-                            <RectangleVertical className="w-2.5 h-2.5 text-white fill-white/80" />
-                          </div>
                         </>
                       ) : (
                         <div 
@@ -2337,27 +2201,25 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                             background: `linear-gradient(135deg, ${cardColor}15, ${cardColor}28)`
                           }}
                         >
-                          <RectangleVertical className="w-5 h-5 fill-current" style={{ color: cardColor }} />
+                          <RectangleVertical className="w-4 h-4 fill-current" style={{ color: cardColor }} />
                         </div>
                       )}
                     </div>
 
-                    {/* Text block */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-baseline gap-2">
-                        <h4 className="font-bold text-[#202124] text-base group-hover:text-[#0056f6] transition-colors leading-snug" dir="ltr">
-                          <HighlightText text={card.frontText} search={searchQuery} />
-                        </h4>
-                        {card.isPluralMode && card.pluralText && (
-                          <span className="text-xs text-slate-500 font-normal" dir="ltr">
-                            (Pl: <HighlightText text={card.pluralText} search={searchQuery} />)
-                          </span>
-                        )}
-                      </div>
+                    {/* Text block: Clean single-line layout */}
+                    <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                      <h4 className="font-semibold text-slate-800 text-sm md:text-base group-hover:text-[#0056f6] transition-colors leading-snug truncate shrink-0 max-w-[45%]" dir="ltr">
+                        <HighlightText text={card.frontText} search={searchQuery} />
+                      </h4>
+                      {card.isPluralMode && card.pluralText && (
+                        <span className="text-[11px] text-slate-400 font-normal shrink-0" dir="ltr">
+                          (Pl: <HighlightText text={card.pluralText} search={searchQuery} />)
+                        </span>
+                      )}
                       {(card.translationHint || card.backText) && (
-                        <p className="text-xs text-slate-500 font-medium mt-0.5 truncate" dir="rtl">
-                          <HighlightText text={card.translationHint || card.backText} search={searchQuery} />
-                        </p>
+                        <span className="text-xs text-slate-400 font-normal truncate mr-1.5 min-w-0" dir="rtl">
+                          · <HighlightText text={card.translationHint || card.backText} search={searchQuery} />
+                        </span>
                       )}
                     </div>
                   </div>
@@ -2400,8 +2262,8 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
 
             {/* Show progressive loading indicator if some elements are hidden */}
             {displayedFolders.length + displayedCards.length > visibleCount && (
-              <div className="text-center py-5 text-xs text-slate-400 font-bold bg-slate-50/50 rounded-2xl border border-dashed border-slate-200/50 mt-4 animate-pulse">
-                جاري عرض {visibleCount} من أصل {displayedFolders.length + displayedCards.length} عنصر... مرر لأسفل لعرض المزيد ✨
+              <div className="text-center py-3 text-xs text-slate-400 font-normal">
+                مرر للمزيد ({visibleCount} من {displayedFolders.length + displayedCards.length})
               </div>
             )}
 
@@ -3473,20 +3335,6 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
 
               {/* Details Body */}
               <div className="p-6 space-y-4">
-                {/* Description */}
-                {folderDetailsTarget.description ? (
-                  <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
-                    <div className="text-[11px] font-bold text-slate-400 mb-1">الوصف</div>
-                    <p className="text-xs font-semibold text-slate-700 leading-relaxed">
-                      {folderDetailsTarget.description}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="text-xs font-medium text-slate-400 italic bg-slate-50/60 p-3 rounded-2xl text-center border border-dashed border-slate-200">
-                    لا يوجد وصف لهذا المجلد
-                  </div>
-                )}
-
                 {/* Stats Grid */}
                 <div className="grid grid-cols-2 gap-2.5">
                   <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
@@ -3573,6 +3421,7 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
           </div>
         );
       })()}
+      </div>
     </div>
   );
 });
