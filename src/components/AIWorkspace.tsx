@@ -4928,27 +4928,37 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
 
                         {/* Interactive Navigation and Action Controls */}
                         <div className="space-y-4">
-                          {/* Pagination Bar styled EXACTLY like ReviewSession manual paginations */}
-                          <div className="flex justify-between w-full max-w-[356px] mx-auto items-center px-1 mt-1">
-                            <button
-                              onClick={handleReviewPrev}
-                              disabled={currentReviewIndex === 0}
-                              className="px-5 py-2.5 bg-[#f1f5f9] border border-slate-200 rounded-2xl text-[11px] font-bold text-slate-700 disabled:opacity-40 flex items-center gap-1 cursor-pointer hover:bg-slate-200 transition-colors"
-                            >
-                              <ArrowRight className="w-4 h-4" /> البطاقة السابقة
-                            </button>
-                            
-                            <span className="text-[11px] font-bold text-on-surface-variant bg-surface-container px-3 py-1.5 rounded-full border border-outline-variant/10 shadow-3xs">
-                              {currentReviewIndex + 1} من {folderCards.length}
-                            </span>
-                            
-                            <button
-                              onClick={handleReviewNext}
-                              disabled={currentReviewIndex === folderCards.length - 1}
-                              className="px-5 py-2.5 bg-primary text-white rounded-2xl text-[11px] font-bold shadow-sm flex items-center gap-1 cursor-pointer hover:opacity-95 disabled:opacity-40"
-                            >
-                              البطاقة التالية <ArrowLeft className="w-4 h-4" />
-                            </button>
+                          {/* Unified Navigation Dock */}
+                          <div className="w-full max-w-[356px] mx-auto mt-1">
+                            <div className="flex items-center justify-between bg-white dark:bg-slate-850 border border-slate-200/90 dark:border-slate-750/90 rounded-2xl p-1.5 shadow-2xs">
+                              <button
+                                type="button"
+                                onClick={handleReviewPrev}
+                                disabled={currentReviewIndex === 0}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-25 disabled:pointer-events-none transition-all cursor-pointer active:scale-95 group"
+                                title="البطاقة السابقة"
+                              >
+                                <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200 transition-colors" />
+                                <span>السابقة</span>
+                              </button>
+
+                              <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-100 dark:border-slate-700/60 font-mono text-xs font-bold text-slate-700 dark:text-slate-300 select-none">
+                                <span className="text-primary dark:text-blue-400 font-extrabold">{currentReviewIndex + 1}</span>
+                                <span className="text-slate-400 dark:text-slate-500 font-normal">/</span>
+                                <span>{folderCards.length}</span>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={handleReviewNext}
+                                disabled={currentReviewIndex === folderCards.length - 1}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-25 disabled:pointer-events-none transition-all cursor-pointer active:scale-95 group"
+                                title="البطاقة التالية"
+                              >
+                                <span>التالية</span>
+                                <ChevronLeft className="w-4 h-4 text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200 transition-colors" />
+                              </button>
+                            </div>
                           </div>
                         </div>
 

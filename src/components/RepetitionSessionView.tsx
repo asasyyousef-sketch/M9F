@@ -1379,25 +1379,14 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
                     )}
                   </button>
 
-                  {/* 6. Voice Target Toggle (1 = Primary, 2 = Secondary) */}
+                  {/* 6. Voice Target Toggle (Unified & Simplified, no numbers) */}
                   {onToggleVoiceTarget && (
                     <button
                       onClick={onToggleVoiceTarget}
-                      className={`h-8 px-2 border rounded-none flex items-center gap-1.5 transition-all cursor-pointer select-none ${
-                        reviewVoiceTarget === "secondary"
-                          ? "bg-amber-500 text-slate-950 border-amber-400 font-extrabold shadow-xs ring-1 ring-amber-400/50"
-                          : "bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-750"
-                      }`}
-                      title={reviewVoiceTarget === "secondary" ? "الصوت الحالي: الثانوي (2) • انقر للتبديل للصوت الأساسي (1)" : "الصوت الحالي: الأساسي (1) • انقر للتبديل للصوت الثانوي (2)"}
+                      className="h-8 px-2.5 border border-slate-700 bg-slate-800 hover:bg-slate-750 text-white rounded-none flex items-center justify-center transition-all cursor-pointer select-none"
+                      title={reviewVoiceTarget === "secondary" ? "الصوت الحالي: الثانوي • انقر للتبديل للصوت الأساسي" : "الصوت الحالي: الأساسي • انقر للتبديل للصوت الثانوي"}
                     >
-                      <Volume2 className="w-3.5 h-3.5" />
-                      <span className={`w-4 h-4 rounded text-[10px] font-black flex items-center justify-center border shadow-xs ${
-                        reviewVoiceTarget === "secondary"
-                          ? "bg-slate-950 text-amber-400 border-amber-300"
-                          : "bg-blue-600 text-white border-blue-400"
-                      }`}>
-                        {reviewVoiceTarget === "secondary" ? "2" : "1"}
-                      </span>
+                      <Volume2 className="w-3.5 h-3.5 text-white" />
                     </button>
                   )}
 

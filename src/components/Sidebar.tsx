@@ -1,17 +1,13 @@
 import React, { useState, useEffect } from "react";
 import {
-  Folder,
   FolderOpen,
   Settings,
-  ChevronLeft,
-  ChevronDown,
   X,
   Database,
   Copy,
   Check,
   Sparkles,
   Trash2,
-  Youtube,
   PenTool,
   Film,
   PanelRightClose,
@@ -33,10 +29,9 @@ interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
   dbStatus?: DbStatus;
-  activeTab?: "library" | "ai" | "trash" | "youtube" | "corrector" | "media" | "notes" | "shadowing";
+  activeTab?: "library" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing";
   onSelectAI?: () => void;
   onSelectTrash?: () => void;
-  onSelectYoutube?: () => void;
   onSelectCorrector?: () => void;
   onSelectMedia?: () => void;
   onSelectNotes?: () => void;
@@ -57,7 +52,6 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   activeTab = "library",
   onSelectAI,
   onSelectTrash,
-  onSelectYoutube,
   onSelectCorrector,
   onSelectMedia,
   onSelectNotes,
@@ -83,15 +77,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
     });
   };
 
-  // Keep track of expanded state for collapsible folders
-  const [isLibraryExpanded, setIsLibraryExpanded] = useState(true);
-  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
-    "folder-chemistry-root": true,
-    "folder-organic": true,
-  });
 
-  // Mini rail quick folder popover
-  const [isMiniFolderMenuOpen, setIsMiniFolderMenuOpen] = useState(false);
 
   const { currentUser, authFetch, logout } = useAuth();
   const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
@@ -137,123 +123,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
     }
   };
 
-  // Helper to check if a folder is active or has an active descendant
-  const isFolderActiveOrDescendantActive = (folderId: string): boolean => {
-    if (activeFolderId === folderId) return true;
-    const children = folders.filter((f) => f.parentId === folderId);
-    return children.some((child) => isFolderActiveOrDescendantActive(child.id));
-  };
 
-  // Find all root-level folders (folders with no parent or whose parent is missing)
-  const rootFolders = folders.filter(
-    (f) => !f.parentId || !folders.some((p) => p.id === f.parentId)
-  );
-
-  // Consistent sorting: predefined folders first, then custom folders by creation date
-  const sortedRootFolders = [...rootFolders].sort((a, b) => {
-    const predefinedOrder = ["folder-math", "folder-chemistry-root", "folder-physics"];
-    const indexA = predefinedOrder.indexOf(a.id);
-    const indexB = predefinedOrder.indexOf(b.id);
-
-    if (indexA !== -1 && indexB !== -1) return indexA - indexB;
-    if (indexA !== -1) return -1;
-    if (indexB !== -1) return 1;
-
-    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-  });
-
-  // Sort subfolders
-  const getSortedChildren = (parentId: string) => {
-    const children = folders.filter((f) => f.parentId === parentId);
-    return [...children].sort((a, b) => {
-      const predefinedOrder = ["folder-organic", "folder-inorganic", "folder-alkanes"];
-      const indexA = predefinedOrder.indexOf(a.id);
-      const indexB = predefinedOrder.indexOf(b.id);
-
-      if (indexA !== -1 && indexB !== -1) return indexA - indexB;
-      if (indexA !== -1) return -1;
-      if (indexB !== -1) return 1;
-
-      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-    });
-  };
-
-  // Recursive dynamic folder tree renderer (Windows File Explorer style: clean hierarchy lines, no animation, compact)
-  const renderFolderTree = (folder: FolderType, depth: number) => {
-    const children = getSortedChildren(folder.id);
-    const hasKids = children.length > 0;
-    const isExpanded = !!expandedFolders[folder.id];
-    const isActive = activeFolderId === folder.id && activeTab === "library";
-    const isHighlight = isFolderActiveOrDescendantActive(folder.id) && activeTab === "library";
-
-    return (
-      <div key={folder.id} className="flex flex-col min-w-0">
-        {/* Folder Item Row */}
-        <div
-          onClick={() => {
-            onSelectFolder(folder.id);
-            onClose?.();
-          }}
-          title={folder.name}
-          className={`group flex items-center w-full min-w-0 px-1 py-1 rounded-md text-right text-xs cursor-pointer select-none ${
-            isActive
-              ? "bg-blue-100 text-blue-900 font-semibold border-r-2 border-blue-600"
-              : isHighlight
-              ? "text-blue-700 bg-blue-50/50 hover:bg-slate-100 font-medium"
-              : "text-slate-700 hover:bg-slate-100 font-normal"
-          }`}
-        >
-          {/* Expand/Collapse Toggle Button or Empty Spacer */}
-          {hasKids ? (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setExpandedFolders((prev) => ({ ...prev, [folder.id]: !prev[folder.id] }));
-              }}
-              className="w-4 h-4 flex items-center justify-center shrink-0 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded cursor-pointer ml-0.5"
-              title={isExpanded ? "طي المجلد" : "توسيع المجلد"}
-            >
-              {isExpanded ? (
-                <ChevronDown className="w-3 h-3" />
-              ) : (
-                <ChevronLeft className="w-3 h-3" />
-              )}
-            </button>
-          ) : (
-            <span className="w-4 h-4 shrink-0 ml-0.5" />
-          )}
-
-          {/* Folder Icon (Windows style) */}
-          <span className="shrink-0 ml-1.5 flex items-center">
-            {isExpanded ? (
-              <FolderOpen
-                className="w-3.5 h-3.5"
-                style={{ color: folder.color || "#eab308" }}
-              />
-            ) : (
-              <Folder
-                className="w-3.5 h-3.5"
-                style={{ color: folder.color || "#ca8a04" }}
-              />
-            )}
-          </span>
-
-          {/* Folder Name */}
-          <span className="truncate flex-1 min-w-0 text-xs">
-            {folder.name}
-          </span>
-        </div>
-
-        {/* Nested Children (Tree branch lines) */}
-        {hasKids && isExpanded && (
-          <div className="flex flex-col mr-2 pr-1.5 border-r border-slate-200/90 space-y-0.5 mt-0.5">
-            {children.map((child) => renderFolderTree(child, depth + 1))}
-          </div>
-        )}
-      </div>
-    );
-  };
 
   return (
     <>
@@ -350,90 +220,34 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
         {/* ========================================================================= */}
         <nav className="py-2 px-2 flex-1 overflow-y-auto overflow-x-hidden space-y-1 custom-scrollbar">
           
-          {/* SECTION 1: EDUCATIONAL LIBRARY & FOLDERS (في الأعلى) */}
-          <div className="space-y-1">
-            {!isCollapsed ? (
-              <>
-                {/* Root Library Button */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSelectFolder("");
-                    onClose?.();
-                    setIsLibraryExpanded(true);
-                  }}
-                  className={`w-full flex items-center justify-between px-2 py-1.5 rounded-xl text-right transition-colors font-bold text-xs cursor-pointer group ${
-                    activeFolderId === "" && activeTab === "library"
-                      ? "bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs"
-                      : "text-slate-700 hover:bg-slate-100"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                      activeFolderId === "" && activeTab === "library"
-                        ? "bg-blue-600 text-white shadow-2xs"
-                        : "bg-slate-100 text-slate-500 group-hover:bg-slate-200/80 group-hover:text-slate-800"
-                    }`}>
-                      <FolderOpen className="w-3.5 h-3.5" />
-                    </div>
-                    <span className="truncate font-bold">المكتبة</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <span 
-                      className="text-[10px] font-mono font-bold px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded-md cursor-help border border-slate-200/50"
-                      title={`إجمالي عدد المجلدات في المكتبة: ${folders.length} مجلد`}
-                    >
-                      {folders.length} مجلد
-                    </span>
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsLibraryExpanded(!isLibraryExpanded);
-                      }}
-                      className="p-1 hover:bg-black/5 rounded-md transition-colors cursor-pointer text-slate-400 hover:text-slate-600"
-                      title={isLibraryExpanded ? "طي المجلدات" : "عرض المجلدات"}
-                    >
-                      {isLibraryExpanded ? (
-                        <ChevronDown className="w-3.5 h-3.5" />
-                      ) : (
-                        <ChevronLeft className="w-3.5 h-3.5" />
-                      )}
-                    </div>
-                  </div>
-                </button>
-
-                {/* Folder Tree (Windows Explorer style, scrollable, max-h-64) */}
-                {isLibraryExpanded && (
-                  <div className="pr-1 mt-0.5 space-y-0.5 max-h-64 overflow-y-auto overflow-x-hidden custom-scrollbar">
-                    {sortedRootFolders.length > 0 ? (
-                      sortedRootFolders.map((rootFolder) => renderFolderTree(rootFolder, 0))
-                    ) : (
-                      <div className="py-2.5 text-center text-xs text-slate-400">
-                        لا توجد مجلدات حالياً
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSelectFolder("");
-                    onClose?.();
-                  }}
-                  title="المكتبة"
-                  className={`w-10 h-10 mx-auto flex items-center justify-center rounded-xl transition-colors cursor-pointer ${
-                    activeFolderId === "" && activeTab === "library"
-                      ? "bg-blue-600 text-white shadow-2xs"
-                      : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-                  }`}
-                >
-                  <FolderOpen className="w-4 h-4" />
-                </button>
+          {/* SECTION 1: EDUCATIONAL LIBRARY (المكتبة) */}
+          <div className="space-y-0.5">
+            <button
+              type="button"
+              onClick={() => {
+                onSelectFolder("");
+                onClose?.();
+              }}
+              title="المكتبة"
+              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
+                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
+              } ${
+                activeTab === "library"
+                  ? "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-2xs"
+                  : "text-slate-700 hover:bg-slate-100"
+              }`}
+            >
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                activeTab === "library" 
+                  ? "bg-blue-600 text-white shadow-2xs" 
+                  : "bg-slate-100 text-slate-500 group-hover:bg-slate-200/80 group-hover:text-slate-800"
+              }`}>
+                <FolderOpen className="w-3.5 h-3.5" />
               </div>
-            )}
+              {!isCollapsed && (
+                <span className="truncate">المكتبة</span>
+              )}
+            </button>
           </div>
 
           {/* DIVIDER */}
@@ -470,33 +284,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
               )}
             </button>
 
-            {/* YouTube Transcription */}
-            <button
-              type="button"
-              onClick={() => {
-                onSelectYoutube?.();
-                onClose?.();
-              }}
-              title="تفريغ اليوتيوب"
-              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
-                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
-              } ${
-                activeTab === "youtube"
-                  ? "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-2xs"
-                  : "text-slate-700 hover:bg-slate-100"
-              }`}
-            >
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                activeTab === "youtube" 
-                  ? "bg-blue-600 text-white shadow-2xs" 
-                  : "bg-slate-100 text-slate-500 group-hover:bg-slate-200/80 group-hover:text-slate-800"
-              }`}>
-                <Youtube className="w-3.5 h-3.5" />
-              </div>
-              {!isCollapsed && (
-                <span className="truncate">تفريغ اليوتيوب</span>
-              )}
-            </button>
+
 
             {/* AI Corrector */}
             <button
@@ -655,10 +443,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
               <div className="p-2 rounded-xl bg-white border border-slate-200 flex items-center justify-between text-xs shadow-2xs">
                 <div className="flex items-center gap-2 min-w-0">
                   {dbStatus.tablesExist ? (
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                    </span>
+                    <span className="inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                   ) : (
                     <span className="w-2 h-2 rounded-full bg-amber-500"></span>
                   )}

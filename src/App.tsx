@@ -4,7 +4,6 @@ import { Explorer } from "./components/Explorer";
 import { AIWorkspace, AIFolder, AICard } from "./components/AIWorkspace";
 import { AICorrectorWorkspace } from "./components/AICorrectorWorkspace";
 import { RecycleBin } from "./components/RecycleBin";
-import { YoutubeWorkspace } from "./components/YoutubeWorkspace";
 import { MediaPlayerWorkspace } from "./components/MediaPlayerWorkspace";
 import { NotesWorkspace } from "./components/NotesWorkspace";
 import { ShadowingWorkspace } from "./components/ShadowingWorkspace";
@@ -115,8 +114,8 @@ function MainStudyApp() {
   // Mobile sidebar visibility state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Tab navigation view state: "library" | "ai" | "trash" | "youtube" | "corrector" | "media" | "notes" | "shadowing"
-  const [viewMode, setViewMode] = useState<"library" | "ai" | "trash" | "youtube" | "corrector" | "media" | "notes" | "shadowing">("library");
+  // Tab navigation view state: "library" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing"
+  const [viewMode, setViewMode] = useState<"library" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing">("library");
 
   // YouTube transcripts (spT) state
   const [transcripts, setTranscripts] = useState<TranscriptDocument[]>(() => {
@@ -1003,10 +1002,6 @@ function MainStudyApp() {
     setViewMode("trash");
   }, []);
 
-  const handleSelectYoutube = useCallback(() => {
-    setViewMode("youtube");
-  }, []);
-
   const handleSelectCorrector = useCallback(() => {
     setViewMode("corrector");
   }, []);
@@ -1209,7 +1204,6 @@ function MainStudyApp() {
           activeTab={viewMode}
           onSelectAI={handleSelectAI}
           onSelectTrash={handleSelectTrash}
-          onSelectYoutube={handleSelectYoutube}
           onSelectCorrector={handleSelectCorrector}
           onSelectMedia={handleSelectMedia}
           onSelectNotes={handleSelectNotes}
@@ -1280,14 +1274,6 @@ function MainStudyApp() {
             transcripts={transcripts}
             initialSelectedTranscriptId={initialSelectedTranscriptId}
             onClearInitialSelectedTranscriptId={handleClearInitialSelectedTranscriptId}
-          />
-        ) : viewMode === "youtube" ? (
-          <YoutubeWorkspace
-            transcripts={transcripts}
-            onSaveTranscripts={handleSaveTranscripts}
-            onSendToAI={handleSendToAI}
-            onToggleSidebar={handleToggleSidebar}
-            onBackToLibrary={handleHomeClick}
           />
         ) : (
           <Explorer

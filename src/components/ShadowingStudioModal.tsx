@@ -1131,7 +1131,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
                 >
                   {isRecording ? (
                     <>
-                      <span className="w-2 h-2 rounded-full bg-white animate-ping" />
+                      <span className="w-2 h-2 rounded-full bg-white" />
                       <MicOff className="w-3.5 h-3.5" />
                       <span>إيقاف التسجيل ({recordingSeconds}ث)</span>
                     </>

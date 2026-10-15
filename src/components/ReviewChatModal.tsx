@@ -795,7 +795,7 @@ const ChatImageCard: React.FC<{
           <div className="h-3 bg-slate-700/70 rounded w-2/3"></div>
           <div className="h-2.5 bg-slate-800/80 rounded w-1/3"></div>
           <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
             جاري تحميل الصورة التوضيحية...
           </span>
         </div>
@@ -2613,31 +2613,7 @@ export const ReviewChatModal: React.FC<ReviewChatModalProps> = ({
           ref={chatScrollContainerRef}
           className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 select-text"
         >
-          {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center max-w-md mx-auto my-auto space-y-4 py-8">
-              <div className="w-14 h-14 rounded-2xl bg-indigo-600/15 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
-                <Sparkles className="w-7 h-7" />
-              </div>
-              <p className="text-sm text-slate-300 font-medium">
-                اسأل عن القواعد، المعاني، أو اطلب جمل وأمثلة توضيحية
-              </p>
-
-              {/* Quick Prompts */}
-              <div className="w-full flex flex-wrap items-center justify-center gap-2 pt-2">
-                {quickPrompts.map((qp, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => handleSendMessage(qp.prompt)}
-                    className="px-3 py-1.5 bg-slate-800/90 hover:bg-indigo-600/20 hover:border-indigo-500/50 border border-slate-700/80 rounded-xl text-xs text-slate-200 transition-all cursor-pointer active:scale-95 text-right shadow-sm flex items-center gap-1.5"
-                  >
-                    <span>{qp.icon}</span>
-                    <span>{qp.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
+          {messages.length === 0 ? null : (
             <div className="space-y-4">
               {/* LOAD MORE MESSAGES BUTTON (PAGINATION) */}
               {messages.length > visibleCount && (

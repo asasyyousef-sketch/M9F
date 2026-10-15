@@ -1649,7 +1649,7 @@ export const LivePiperSandboxModal: React.FC<LivePiperSandboxModalProps> = ({
                   <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 to-blue-950 text-white space-y-3 shadow-md">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
                         <span className="text-xs font-bold text-emerald-300">
                           {isPlaying ? "جاري تشغيل الصوت الآن 🔊" : "الملف الصوتي جاهز للاستماع والتنزيل"}
                         </span>

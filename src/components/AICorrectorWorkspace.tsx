@@ -1438,7 +1438,7 @@ const ExerciseChecklistWidget: React.FC<{
 
                     {/* Single subtle active indicator */}
                     {isActive && (
-                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-ping mr-auto" />
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 mr-auto" />
                     )}
                   </div>
 

@@ -496,9 +496,6 @@ export const ImportSharedDeckModal: React.FC<ImportSharedDeckModalProps> = ({
                 {/* Details */}
                 <div className="flex-1 min-w-0">
                   <h4 className="font-bold text-slate-800 text-base truncate">{folder.name}</h4>
-                  {folder.description && (
-                    <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{folder.description}</p>
-                  )}
                   <div className="flex items-center gap-2 mt-2">
                     <span className="text-xs text-slate-600 font-semibold bg-white px-2 py-0.5 rounded-md border border-slate-200/70">
                       {cards.length} بطاقة

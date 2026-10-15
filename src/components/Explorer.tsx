@@ -1,6 +1,7 @@
 import React from "react";
 import { ChevronLeft, Folder, Volume2, Trash2, FolderPlus, Bell, User, Play, Plus, Search, Pencil, Menu, Home, Layers, BookOpen, RectangleVertical, CheckSquare, Scissors, Copy, X, Check, Clipboard, ListChecks, Sparkles, History, Headphones, DownloadCloud, Download, CheckCircle2, Loader2, VolumeX, FileAudio, Image as ImageIcon, FileImage, Minimize2, Maximize2, Share2, MoreVertical, ChevronDown, Info, Calendar } from "lucide-react";
 import { Folder as FolderType, Flashcard, getSafeImageStyle, getCardSearchQuery } from "../types";
+import { FolderThumbnail, CardThumbnail } from "./ThumbnailStyles";
 import { speakClient, preloadTTS, preloadImage, fetchGradioAudioBlob, fetchAudioBlob } from "./Modals";
 import { ImageWithSkeleton } from "./ReviewSession";
 import { motion } from "motion/react";
@@ -225,9 +226,18 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
   const [isAddMenuOpen, setIsAddMenuOpen] = React.useState(false);
   const [openFolderMenuId, setOpenFolderMenuId] = React.useState<string | null>(null);
   const [folderDetailsTarget, setFolderDetailsTarget] = React.useState<FolderType | null>(null);
+  const [openCardMenuId, setOpenCardMenuId] = React.useState<string | null>(null);
+  // Clean up any legacy temporary style setting from storage
+  React.useEffect(() => {
+    try {
+      localStorage.removeItem("temp_item_preview_style");
+    } catch (e) {}
+  }, []);
+
   const moreMenuRef = React.useRef<HTMLDivElement>(null);
   const addMenuRef = React.useRef<HTMLDivElement>(null);
   const folderMenuRef = React.useRef<HTMLDivElement>(null);
+  const cardMenuRef = React.useRef<HTMLDivElement>(null);
 
   // Close menus when clicking outside
   React.useEffect(() => {
@@ -240,6 +250,9 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
       }
       if (folderMenuRef.current && !folderMenuRef.current.contains(e.target as Node)) {
         setOpenFolderMenuId(null);
+      }
+      if (cardMenuRef.current && !cardMenuRef.current.contains(e.target as Node)) {
+        setOpenCardMenuId(null);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -1889,7 +1902,7 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                     <span>تحديد عناصر</span>
                   </button>
 
-                  <div className="my-1 border-t border-slate-100" />
+
 
                   {/* Folder Details */}
                   {activeFolder && (
@@ -2076,6 +2089,8 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                 </button>
               )}
 
+
+
               {/* 1. زر الإضافة (+) بجانب زر المراجعة من جهة اليمين */}
               <div className="relative" ref={addMenuRef}>
                 <button
@@ -2242,33 +2257,8 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                       </div>
                     )}
 
-                    {/* Modern Clean Folder Thumbnail */}
-                    <div className="relative w-12 h-12 shrink-0 rounded-xl overflow-hidden border border-slate-200/70 shadow-2xs flex items-center justify-center bg-slate-50 transition-transform group-hover:scale-102">
-                      {f.coverImage ? (
-                        <>
-                          <ImageWithSkeleton
-                            src={f.coverImage}
-                            alt=""
-                            className="absolute inset-0 w-full h-full object-cover"
-                            style={getSafeImageStyle(f.coverImagePosition)}
-                            referrerPolicy="no-referrer"
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent pointer-events-none" />
-                          <div className="absolute left-1 bottom-1 p-0.5 bg-black/40 backdrop-blur-xs rounded-md flex items-center justify-center">
-                            <Folder className="w-2.5 h-2.5 text-white fill-white/80" />
-                          </div>
-                        </>
-                      ) : (
-                        <div 
-                          className="w-full h-full flex items-center justify-center transition-all"
-                          style={{
-                            background: `linear-gradient(135deg, ${f.color || '#0056f6'}18, ${f.color || '#0056f6'}30)`
-                          }}
-                        >
-                          <Folder className="w-5 h-5 fill-current" style={{ color: f.color || '#0056f6' }} />
-                        </div>
-                      )}
-                    </div>
+                    {/* Folder Thumbnail with chosen style S18 */}
+                    <FolderThumbnail folder={f} styleId="S18" />
 
                     {/* Text block */}
                     <div>
@@ -2434,33 +2424,8 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                       </div>
                     )}
 
-                    {/* Modern Clean Card Thumbnail */}
-                    <div className="relative w-12 h-12 shrink-0 rounded-xl overflow-hidden border border-slate-200/70 shadow-2xs flex items-center justify-center bg-slate-50 transition-transform group-hover:scale-102">
-                      {card.frontImage ? (
-                        <>
-                          <ImageWithSkeleton
-                            src={card.frontImage}
-                            alt=""
-                            className="absolute inset-0 w-full h-full object-cover"
-                            style={getSafeImageStyle(card.frontImagePosition)}
-                            referrerPolicy="no-referrer"
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent pointer-events-none" />
-                          <div className="absolute left-1 bottom-1 p-0.5 bg-black/40 backdrop-blur-xs rounded-md flex items-center justify-center">
-                            <RectangleVertical className="w-2.5 h-2.5 text-white fill-white/80" />
-                          </div>
-                        </>
-                      ) : (
-                        <div 
-                          className="w-full h-full flex items-center justify-center transition-all"
-                          style={{
-                            background: `linear-gradient(135deg, ${cardColor}15, ${cardColor}28)`
-                          }}
-                        >
-                          <RectangleVertical className="w-5 h-5 fill-current" style={{ color: cardColor }} />
-                        </div>
-                      )}
-                    </div>
+                    {/* Card Thumbnail with chosen style S18 */}
+                    <CardThumbnail card={card} cardColor={cardColor} styleId="S18" />
 
                     {/* Text block */}
                     <div className="flex-1 min-w-0">
@@ -2482,37 +2447,62 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                     </div>
                   </div>
 
-                  {/* Left Side: Actions (renders on left in RTL) */}
-                  <div className="flex items-center gap-1.5">
-                    {!isSelectionMode && (
-                      <>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onEditCard(card);
-                          }}
-                          className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 text-[#5f6368] hover:text-[#0056f6] hover:bg-slate-50 rounded-xl transition-all cursor-pointer border border-transparent hover:border-slate-100"
-                          title="تعديل البطاقة"
+                  {/* Left Side: Card Options Dropdown Menu (renders on left in RTL) */}
+                  {!isSelectionMode && (
+                    <div 
+                      className="relative"
+                      ref={openCardMenuId === card.id ? cardMenuRef : undefined}
+                    >
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenCardMenuId(prev => prev === card.id ? null : card.id);
+                        }}
+                        className={`p-2 rounded-xl transition-all cursor-pointer ${
+                          openCardMenuId === card.id 
+                            ? "bg-slate-100 text-[#0056f6]" 
+                            : "opacity-100 md:opacity-0 md:group-hover:opacity-100 text-slate-500 hover:text-[#0056f6] hover:bg-slate-100"
+                        }`}
+                        title="خيارات البطاقة"
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </button>
+
+                      {/* Dropdown Options Menu (فقط خيارا التعديل والحذف) */}
+                      {openCardMenuId === card.id && (
+                        <div 
+                          className="absolute left-0 top-full mt-1.5 w-32 bg-white border border-slate-200 rounded-xl shadow-2xl p-1.5 z-50 text-right animate-in fade-in zoom-in-95 duration-100"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setConfirmDelete({
-                              type: "card",
-                              id: card.id,
-                              title: card.frontText
-                            });
-                          }}
-                          className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 text-[#5f6368] hover:text-error hover:bg-error-container/15 rounded-xl transition-all cursor-pointer border border-transparent hover:border-error-container/10"
-                          title="حذف البطاقة"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </>
-                    )}
-                  </div>
+                          <button
+                            onClick={() => {
+                              setOpenCardMenuId(null);
+                              onEditCard(card);
+                            }}
+                            className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-[#0056f6] transition-colors cursor-pointer"
+                          >
+                            <span>تعديل</span>
+                            <Pencil className="w-3.5 h-3.5 text-slate-400" />
+                          </button>
+                          <div className="my-1 border-t border-slate-100" />
+                          <button
+                            onClick={() => {
+                              setOpenCardMenuId(null);
+                              setConfirmDelete({
+                                type: "card",
+                                id: card.id,
+                                title: card.frontText
+                              });
+                            }}
+                            className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                          >
+                            <span>حذف</span>
+                            <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
               );
@@ -3693,6 +3683,8 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
           </div>
         );
       })()}
+
+
     </div>
   );
 });

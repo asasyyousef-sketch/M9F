@@ -147,7 +147,16 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
 
   // Audio Playback State
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
-  const [audioSpeed, setAudioSpeed] = useState<number>(1.0);
+  const [audioSpeed, setAudioSpeed] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("spoken_challenge_speed");
+      if (saved) {
+        const parsed = parseFloat(saved);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      }
+    } catch {}
+    return 1.0;
+  });
   const [autoPlayAudio, setAutoPlayAudio] = useState<boolean>(true);
 
   // Audio Single-Controller Refs
@@ -758,7 +767,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
             </p>
           </div>
 
-          {/* 4. Number of Challenges (Allows > 25, up to 100) */}
+          {/* 4. Number of Challenges (Supports 518 cards or full deck) */}
           <div>
             <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
               <span>عدد التحديات والجمل المطلوبة:</span>
@@ -767,17 +776,17 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
                 <input
                   type="number"
                   min="1"
-                  max="100"
+                  max={Math.max(cards.length, 1000)}
                   value={challengeCount}
                   onChange={(e) => {
                     const val = parseInt(e.target.value, 10) || 1;
-                    const clamped = Math.max(1, Math.min(100, val));
+                    const clamped = Math.max(1, Math.min(Math.max(cards.length, 1000), val));
                     setChallengeCount(clamped);
                     try {
                       localStorage.setItem("spoken_challenge_count", String(clamped));
                     } catch {}
                   }}
-                  className="w-16 px-2 py-1 text-center font-black text-sm text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className="w-20 px-2 py-1 text-center font-black text-sm text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
                 <span className="text-xs text-slate-500 font-bold">جملة</span>
               </div>
@@ -785,7 +794,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
 
             {/* Quick selector chips */}
             <div className="flex flex-wrap gap-1.5 mb-3">
-              {[5, 10, 15, 20, 25, 30, 40, 50].map((num) => (
+              {[5, 10, 15, 20, 25, 30, 50].map((num) => (
                 <button
                   key={num}
                   type="button"
@@ -804,13 +813,33 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
                   {num}
                 </button>
               ))}
+
+              {/* All Cards in Deck Chip (e.g. 518) */}
+              {cards.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChallengeCount(cards.length);
+                    try {
+                      localStorage.setItem("spoken_challenge_count", String(cards.length));
+                    } catch {}
+                  }}
+                  className={`px-3.5 py-1.5 text-xs font-black rounded-xl border transition-all cursor-pointer ${
+                    challengeCount === cards.length
+                      ? "bg-purple-600 text-white border-purple-600 shadow-md shadow-purple-500/20 scale-105"
+                      : "bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800 hover:bg-purple-100"
+                  }`}
+                >
+                  ⚡ كل بطاقات المجلد ({cards.length})
+                </button>
+              )}
             </div>
 
             <input
               type="range"
               min="1"
-              max="50"
-              value={Math.min(challengeCount, 50)}
+              max={Math.max(cards.length, 100)}
+              value={Math.min(challengeCount, Math.max(cards.length, 100))}
               onChange={(e) => {
                 const val = parseInt(e.target.value, 10);
                 setChallengeCount(val);
@@ -822,7 +851,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
             />
             {challengeCount > 50 && (
               <span className="text-[11px] text-purple-600 dark:text-purple-400 font-bold block mt-1">
-                ⭐ تم اختيار {challengeCount} جملة يدوياً عبر حقل الإدخال.
+                ⭐ تم اختيار {challengeCount} جملة وتحدياً للممارسة.
               </span>
             )}
           </div>
@@ -965,52 +994,38 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
           )}
         </div>
 
-        {/* Audio & Playback Controls */}
+        {/* Audio & Playback Controls - Sleek, Clean, Final */}
         <div className="flex items-center gap-2">
-          {/* Voice Selector in active session */}
-          <select
-            value={selectedVoice}
-            onChange={(e) => {
-              const val = e.target.value;
-              setSelectedVoice(val);
-              try {
-                localStorage.setItem("spoken_challenge_voice", val);
-              } catch (err) {}
-            }}
-            className="hidden md:inline-block bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs px-2 py-1 rounded-lg font-bold border-none focus:outline-none cursor-pointer max-w-[150px] truncate"
-            title="الناطق الصوتي المحدد"
-          >
-            {CHALLENGE_VOICE_OPTIONS.map((grp) => (
-              <optgroup key={grp.group} label={grp.group}>
-                {grp.options.map((opt) => (
-                  <option key={opt.id} value={opt.id}>
-                    {opt.name}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
+          {/* Autoplay Toggle */}
           <button
+            type="button"
             onClick={() => setAutoPlayAudio(!autoPlayAudio)}
-            className={`px-2.5 py-1 text-xs rounded-lg font-bold transition-colors flex items-center gap-1.5 cursor-pointer ${
+            className={`px-2.5 py-1.5 text-xs rounded-xl font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
               autoPlayAudio
-                ? "bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-800"
-                : "bg-slate-100 dark:bg-slate-800 text-slate-400"
+                ? "bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-800 shadow-2xs"
+                : "bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-slate-600"
             }`}
-            title="تشغيل الصوت تلقائياً عند الكشف"
+            title="تشغيل الصوت تلقائياً عند كشف الجملة"
           >
             <Volume2 className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">نطق تلقائي</span>
           </button>
-          <select
-            value={audioSpeed}
-            onChange={(e) => setAudioSpeed(parseFloat(e.target.value))}
-            className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs px-2 py-1 rounded-lg font-bold border-none focus:outline-none cursor-pointer"
+
+          {/* Speed Toggle Chip */}
+          <button
+            type="button"
+            onClick={() => {
+              const nextSpeed = audioSpeed === 1.0 ? 1.2 : audioSpeed === 1.2 ? 0.8 : 1.0;
+              setAudioSpeed(nextSpeed);
+              try {
+                localStorage.setItem("spoken_challenge_speed", String(nextSpeed));
+              } catch {}
+            }}
+            className="px-2.5 py-1.5 text-xs rounded-xl font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer border border-slate-200/60 dark:border-slate-700/60"
+            title="سرعة نطق الصوت (انقر للتبديل: 1x / 1.2x / 0.8x)"
           >
-            <option value="0.8">0.8x</option>
-            <option value="1.0">1.0x</option>
-            <option value="1.2">1.2x</option>
-          </select>
+            {audioSpeed}x
+          </button>
 
           {/* AI Chat / Spoken Challenge Discussion Button */}
           {currentChallenge && (

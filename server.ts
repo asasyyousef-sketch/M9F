@@ -1891,7 +1891,22 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
         }
       }
 
-      // If DuckDuckGo returned no images or failed, construct high quality Unsplash portraits
+      // If DuckDuckGo returned no images or throttled, source from Wikimedia Commons
+      if (images.length === 0) {
+        try {
+          const wikiHits = await searchWikimediaImages(query);
+          if (wikiHits && wikiHits.length > 0) {
+            images = wikiHits.slice(0, 18).map((w: any) => ({
+              title: w.tags || query,
+              image: w.largeImageURL || w.webformatURL,
+              thumbnail: w.webformatURL,
+              source: w.largeImageURL || w.webformatURL
+            }));
+          }
+        } catch (e) {}
+      }
+
+      // If still no images, construct high quality portraits
       if (images.length === 0) {
         images = [
           { title: `${query} 1`, image: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=500&q=80`, thumbnail: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80` },
@@ -2205,8 +2220,15 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
             }
           }
         }
-      } catch (imgErr) {
-        console.warn("Automated portrait image search fallback:", imgErr);
+      } catch (imgErr) {}
+
+      if (avatarUrl === (personaData.emoji || "🎭")) {
+        try {
+          const wikiRes = await searchWikimediaImages(imageQuery);
+          if (wikiRes && wikiRes.length > 0) {
+            avatarUrl = wikiRes[0].largeImageURL || wikiRes[0].webformatURL;
+          }
+        } catch (e) {}
       }
 
       const formatStringValue = (val: any): string => {
@@ -2504,9 +2526,17 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         }
       }
 
+      if (!imageUrl) {
+        try {
+          const wikiRes = await searchWikimediaImages(query);
+          if (wikiRes && wikiRes.length > 0) {
+            imageUrl = wikiRes[0].largeImageURL || wikiRes[0].webformatURL || "";
+          }
+        } catch (e) {}
+      }
+
       return res.json({ success: true, imageUrl });
     } catch (e: any) {
-      console.warn("DuckDuckGo single challenge image search warning:", e?.message || e);
       return res.json({ success: false, imageUrl: "" });
     }
   });
@@ -8561,19 +8591,21 @@ ${structureDirective}
     }
   });
 
-  // Add a simple in-memory cache for DuckDuckGo search queries
+  // Add a simple in-memory cache and rate-limit cooldown for DuckDuckGo search queries
   const ddgImageCache = new Map<string, any[]>();
+  let ddgCooldownUntil = 0;
 
   // Helper to fetch live images from Wikimedia Commons when DDG or Pixabay rate limit/fail
   async function searchWikimediaImages(q: string): Promise<any[]> {
     if (!q || !q.trim()) return [];
     const cleanQ = q.trim();
     try {
-      const url = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(cleanQ)}&gsrlimit=20&gsrnamespace=6&prop=imageinfo&iiprop=url|mime|size&format=json`;
+      const url = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(cleanQ)}&gsrlimit=20&gsrnamespace=6&prop=imageinfo&iiprop=url|mime|size&iiurlwidth=500&format=json`;
       const res = await fetch(url, {
         headers: {
-          "User-Agent": "AnkiApp/1.0 (contact@example.com)"
-        }
+          "User-Agent": "FlashcardsApp/1.0 (educational-vocab@app.internal)"
+        },
+        signal: AbortSignal.timeout(5000)
       });
       if (res.ok) {
         const data = await res.json();
@@ -8582,10 +8614,12 @@ ${structureDirective}
           const results = pages
             .filter((p) => p.imageinfo && p.imageinfo[0] && p.imageinfo[0].url && !p.imageinfo[0].url.endsWith(".svg"))
             .map((p, i) => {
-              const imgUrl = p.imageinfo[0].url;
+              const info = p.imageinfo[0];
+              const imgUrl = info.url;
+              const thumbUrl = info.thumburl || imgUrl;
               return {
                 id: `wiki-${p.pageid || i}-${Date.now()}`,
-                webformatURL: imgUrl,
+                webformatURL: thumbUrl,
                 largeImageURL: imgUrl,
                 tags: p.title ? p.title.replace("File:", "").replace(/\.[^/.]+$/, "") : cleanQ
               };
@@ -8594,7 +8628,7 @@ ${structureDirective}
         }
       }
     } catch (e) {
-      console.error("[Wikimedia Image Search] Error:", e);
+      // Graceful fallback without breaking
     }
     return [];
   }
@@ -8629,23 +8663,10 @@ ${structureDirective}
 
     const candidates: string[] = [];
 
-    // Tier 1: DuckDuckGo with Original Query
-    try {
-      const { hits } = await searchDuckDuckGoImages(qOriginal, "1");
-      if (hits && hits.length > 0) {
-        hits.forEach((h: any) => {
-          const u = h.largeImageURL || h.webformatURL || h.image || h.url;
-          if (u && typeof u === "string" && u.startsWith("http") && !candidates.includes(u)) {
-            candidates.push(u);
-          }
-        });
-      }
-    } catch (e) {}
-
-    // Tier 2: DuckDuckGo with Clean Query
-    if (candidates.length < 5 && qClean && qClean.toLowerCase() !== qOriginal.toLowerCase()) {
+    // Tier 1: DuckDuckGo with Original Query (if not cooldown)
+    if (Date.now() >= ddgCooldownUntil) {
       try {
-        const { hits } = await searchDuckDuckGoImages(qClean, "1");
+        const { hits } = await searchDuckDuckGoImages(qOriginal, "1");
         if (hits && hits.length > 0) {
           hits.forEach((h: any) => {
             const u = h.largeImageURL || h.webformatURL || h.image || h.url;
@@ -8657,7 +8678,7 @@ ${structureDirective}
       } catch (e) {}
     }
 
-    // Tier 3: Wikimedia Commons
+    // Tier 2: Wikimedia Commons (Highly reliable, educational, zero rate limits)
     if (candidates.length < 5) {
       try {
         const wikiHits = await searchWikimediaImages(qClean || qOriginal);
@@ -8672,11 +8693,11 @@ ${structureDirective}
       } catch (e) {}
     }
 
-    // Tier 4: Openverse Free Media Search
+    // Tier 3: Openverse Free Media Search
     if (candidates.length < 5) {
       try {
         const ovUrl = `https://api.openverse.org/v1/images/?q=${encodeURIComponent(qClean || qOriginal)}&page_size=10`;
-        const ovRes = await fetch(ovUrl, { headers: { "User-Agent": "AnkiApp/1.0" } });
+        const ovRes = await fetch(ovUrl, { headers: { "User-Agent": "FlashcardsApp/1.0" }, signal: AbortSignal.timeout(4000) });
         if (ovRes.ok) {
           const ovData = await ovRes.json();
           if (ovData?.results && Array.isArray(ovData.results)) {
@@ -8691,7 +8712,7 @@ ${structureDirective}
       } catch (e) {}
     }
 
-    // Tier 5: Dynamic AI Pollinations Photo Fallback (Ensures every single card gets a valid high-quality photo)
+    // Tier 4: Dynamic AI Pollinations Photo Fallback (Ensures every single card gets a valid high-quality photo)
     if (candidates.length === 0) {
       const fallbackQuery = encodeURIComponent(qClean || qOriginal);
       const pollinationsUrl = `https://image.pollinations.ai/prompt/${fallbackQuery}%20clear%20photo%20isolated%20educational?width=512&height=512&nologo=true`;
@@ -8820,6 +8841,13 @@ ${structureDirective}
 
   // Helper to fetch keyless DuckDuckGo images with proper pagination, retries, and caching
   async function searchDuckDuckGoImages(q: string, page: string = "1", offsetParam?: string): Promise<{ hits: any[]; nextOffset?: number }> {
+    if (!q || !q.trim()) return { hits: [] };
+
+    // If DuckDuckGo has been recently rate-limited or throttled, bypass quietly to allow fallbacks
+    if (Date.now() < ddgCooldownUntil) {
+      return { hits: [] };
+    }
+
     const pageNum = parseInt(page) || 1;
     let offset = offsetParam ? parseInt(offsetParam) : (pageNum - 1) * 30;
     if (isNaN(offset)) {
@@ -8828,122 +8856,98 @@ ${structureDirective}
 
     const cacheKey = `${q.trim().toLowerCase()}_page_${pageNum}_offset_${offset}`;
     if (ddgImageCache.has(cacheKey)) {
-      console.log(`[DDG Image Search] Cache HIT for query: "${q}"`);
       return { hits: ddgImageCache.get(cacheKey) || [], nextOffset: undefined };
     }
 
-    const maxRetries = 2;
-    let attempt = 0;
-
-    while (attempt <= maxRetries) {
-      try {
-        console.log(`[DDG Image Search] Querying DuckDuckGo (Attempt ${attempt + 1}/${maxRetries + 1}): "${q}", page: ${pageNum}, offset: ${offset}`);
-        
-        const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(q)}&iax=images&ia=images`;
-        const userAgent = getRandomUserAgent();
-        const response = await fetch(searchUrl, {
-          headers: {
-            "User-Agent": userAgent,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none"
-          }
-        });
-        
-        if (!response.ok) {
-          console.log(`[DDG Image Search] Failed to fetch DDG page: status ${response.status}`);
-          if (response.status === 403 && attempt < maxRetries) {
-            console.log(`[DDG Image Search] 403 Forbidden rate limit hit. Waiting 1500ms for cooldown before retry...`);
-            attempt++;
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-            continue;
-          }
-          return { hits: [] };
+    try {
+      const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(q)}&iax=images&ia=images`;
+      const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+      const response = await fetch(searchUrl, {
+        headers: {
+          "User-Agent": userAgent,
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+          "Sec-Fetch-Dest": "document",
+          "Sec-Fetch-Mode": "navigate",
+          "Sec-Fetch-Site": "none"
+        },
+        signal: AbortSignal.timeout(4000)
+      });
+      
+      if (!response.ok) {
+        if (response.status === 403 || response.status === 429) {
+          ddgCooldownUntil = Date.now() + 60000;
         }
-        
-        const html = await response.text();
-        const match = html.match(/vqd\s*=\s*["']([^"']+)["']/i) || 
-                      html.match(/vqd\s*:\s*["']([^"']+)["']/i) ||
-                      html.match(/vqd=([^&"'\s)]+)/i);
-        if (!match) {
-          console.log(`[DDG Image Search] Could not extract vqd token from page HTML.`);
-          if (attempt < maxRetries) {
-            attempt++;
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-            continue;
-          }
-          return { hits: [] };
-        }
-        
-        const vqd = match[1];
-        const apiUrl = `https://duckduckgo.com/i.js?l=wt-wt&o=json&q=${encodeURIComponent(q)}&vqd=${vqd}&f=,,,&s=${offset}&p=1`;
-        const apiResponse = await fetch(apiUrl, {
-          headers: {
-            "User-Agent": userAgent,
-            "Referer": "https://duckduckgo.com/",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "X-Requested-With": "XMLHttpRequest"
-          }
-        });
-        
-        if (!apiResponse.ok) {
-          console.log(`[DDG Image Search] API request failed with status ${apiResponse.status}`);
-          if (apiResponse.status === 403 && attempt < maxRetries) {
-            console.log(`[DDG Image Search] API 403 rate limit met. Waiting 1500ms for cooldown before retry...`);
-            attempt++;
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-            continue;
-          }
-          return { hits: [] };
-        }
-        
-        const data = await apiResponse.json();
-        if (data && data.results && data.results.length > 0) {
-          console.log(`[DDG Image Search] Successfully fetched ${data.results.length} images from DuckDuckGo!`);
-          
-          let nextOffset: number | undefined;
-          if (data.next) {
-            const matchS = data.next.match(/[?&]s=([0-9]+)/);
-            if (matchS) {
-              nextOffset = parseInt(matchS[1]);
-            }
-          }
-          
-          if (nextOffset === undefined || nextOffset <= offset) {
-            nextOffset = offset + data.results.length;
-          }
-
-          const hits = data.results.map((item: any, i: number) => {
-            const imageUrl = item.image || item.thumbnail || `ddg-${i}`;
-            const stableId = Buffer.from(imageUrl).toString("base64").replace(/[^a-zA-Z0-9]/g, "").slice(0, 40);
-            return {
-              id: `ddg-${stableId}`,
-              webformatURL: item.thumbnail || item.image,
-              largeImageURL: item.image,
-              tags: item.title || q
-            };
-          });
-
-          // Cache the hits
-          ddgImageCache.set(cacheKey, hits);
-
-          return { hits, nextOffset };
-        }
-        
         return { hits: [] };
-      } catch (err) {
-        console.log(`[DDG Image Search] Exception occurred: ${(err as Error).message}`);
-        if (attempt < maxRetries) {
-          attempt++;
-          await new Promise((resolve) => setTimeout(resolve, 200));
-          continue;
-        }
       }
+      
+      const html = await response.text();
+      const match = html.match(/vqd\s*=\s*["']([^"']+)["']/i) || 
+                    html.match(/vqd\s*:\s*["']([^"']+)["']/i) ||
+                    html.match(/vqd=([^&"'\s)]+)/i);
+      if (!match) {
+        return { hits: [] };
+      }
+      
+      const vqd = match[1];
+      // Only include offset param when offset > 0 to avoid DDG 403 bot detection on s=0
+      const sParam = offset > 0 ? `&s=${offset}` : "";
+      const apiUrl = `https://duckduckgo.com/i.js?l=wt-wt&o=json&q=${encodeURIComponent(q)}&vqd=${vqd}&f=,,,${sParam}&p=1`;
+      const apiResponse = await fetch(apiUrl, {
+        headers: {
+          "User-Agent": userAgent,
+          "Referer": "https://duckduckgo.com/",
+          "Accept": "application/json, text/javascript, */*; q=0.01",
+          "Sec-Fetch-Dest": "empty",
+          "Sec-Fetch-Mode": "cors",
+          "Sec-Fetch-Site": "same-origin"
+        },
+        signal: AbortSignal.timeout(4000)
+      });
+      
+      if (!apiResponse.ok) {
+        if (apiResponse.status === 403 || apiResponse.status === 429) {
+          ddgCooldownUntil = Date.now() + 60000;
+        }
+        return { hits: [] };
+      }
+      
+      const data = await apiResponse.json().catch(() => null);
+      if (data && data.results && Array.isArray(data.results) && data.results.length > 0) {
+        let nextOffset: number | undefined;
+        if (data.next) {
+          const matchS = data.next.match(/[?&]s=([0-9]+)/);
+          if (matchS) {
+            nextOffset = parseInt(matchS[1]);
+          }
+        }
+        
+        if (nextOffset === undefined || nextOffset <= offset) {
+          nextOffset = offset + data.results.length;
+        }
+
+        const hits = data.results.map((item: any, i: number) => {
+          const imageUrl = item.image || item.thumbnail || `ddg-${i}`;
+          const stableId = Buffer.from(imageUrl).toString("base64").replace(/[^a-zA-Z0-9]/g, "").slice(0, 40);
+          return {
+            id: `ddg-${stableId}`,
+            webformatURL: item.thumbnail || item.image,
+            largeImageURL: item.image,
+            tags: item.title || q
+          };
+        });
+
+        // Cache the hits
+        ddgImageCache.set(cacheKey, hits);
+
+        return { hits, nextOffset };
+      }
+      
+      return { hits: [] };
+    } catch (err) {
+      // Quietly return empty hits so fallback providers take over
+      return { hits: [] };
     }
-    
-    return { hits: [] };
   }
 
   // API Route - Image Search proxy with dynamic provider support (DuckDuckGo or Pixabay or Wikimedia)
@@ -8955,15 +8959,12 @@ ${structureDirective}
     const customKey = req.query.customKey as string || "";
     const pixabayKey = customKey || process.env.PIXABAY_API_KEY;
 
-    console.log(`[API Images] Fetching images: "${q}", page: ${page}, offset: ${offsetParam}, provider: ${provider}`);
-
     try {
       // 1. Pixabay Provider handling
       if (provider === "pixabay") {
         if (pixabayKey && pixabayKey.length > 5) {
           try {
             const url = `https://pixabay.com/api/?key=${pixabayKey}&q=${encodeURIComponent(q)}&image_type=photo&per_page=24&page=${page}`;
-            console.log(`[Pixabay Image Request] Querying Pixabay API, page: ${page}`);
             const response = await fetch(url);
             if (response.ok) {
               const data = await response.json();
@@ -8978,25 +8979,22 @@ ${structureDirective}
                   totalHits: data.totalHits || data.hits.length
                 });
               }
-            } else {
-              console.log(`[Pixabay Image Request] Fails with status: ${response.status}. Falling back to DuckDuckGo.`);
             }
           } catch (err) {
-            console.error("Pixabay query error, falling back to DuckDuckGo:", err);
+            // Fallback to subsequent providers
           }
-        } else {
-          console.log(`[Pixabay Image Request] Pixabay API Key is empty or invalid. Falling back to DuckDuckGo.`);
         }
       }
 
-      // 2. DuckDuckGo Provider handling
-      const { hits, nextOffset } = await searchDuckDuckGoImages(q, page, offsetParam);
-      if (hits && hits.length > 0) {
-        return res.json({ hits: hits, totalHits: hits.length * 5, nextOffset });
+      // 2. DuckDuckGo Provider handling (if not cooldown)
+      if (Date.now() >= ddgCooldownUntil) {
+        const { hits, nextOffset } = await searchDuckDuckGoImages(q, page, offsetParam);
+        if (hits && hits.length > 0) {
+          return res.json({ hits: hits, totalHits: hits.length * 5, nextOffset });
+        }
       }
 
       // 3. Wikimedia Commons live query fallback (rate-limit free, high reliability)
-      console.log(`[API Images] DDG returned empty or 403. Sourcing live images from Wikimedia Commons for "${q}"...`);
       const wikiHits = await searchWikimediaImages(q);
       if (wikiHits && wikiHits.length > 0) {
         return res.json({ hits: wikiHits, totalHits: wikiHits.length });
@@ -9178,165 +9176,6 @@ ${structureDirective}
     } catch (e) {
       console.error("Failed to load sliding window usage stats:", e);
       res.status(500).json({ error: "Failed to load sliding window usage stats" });
-    }
-  });
-
-  // Helper functions for YouTube Transcript Extractor
-  function extractVideoId(url: string): string | null {
-    if (!url) return null;
-    url = url.trim();
-    const patterns = [
-      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/shorts\/|youtube\.com\/live\/)([^#\?&"'>]+)/,
-      /^[a-zA-Z0-9_-]{11}$/
-    ];
-    for (const pattern of patterns) {
-      const match = url.match(pattern);
-      if (match && match[1] && match[1].length === 11) {
-        return match[1];
-      } else if (match && match[0] && match[0].length === 11) {
-        return match[0];
-      }
-    }
-    return null;
-  }
-
-  function extractPlayerResponse(html: string): any {
-    let index = html.indexOf("ytInitialPlayerResponse =");
-    if (index === -1) {
-      index = html.indexOf("ytInitialPlayerResponse=");
-    }
-    if (index === -1) {
-      index = html.indexOf("window['ytInitialPlayerResponse']");
-      if (index === -1) {
-        index = html.indexOf('window["ytInitialPlayerResponse"]');
-      }
-    }
-    if (index === -1) {
-      return null;
-    }
-    const start = html.indexOf("{", index);
-    if (start === -1) return null;
-
-    // Use a string-aware brace matching loop that ignores characters inside quotes/escapes
-    const endScript = html.indexOf("</script>", start);
-    const limit = endScript !== -1 ? endScript : html.length;
-
-    let braceCount = 0;
-    let inString = false;
-    let stringChar = "";
-    let isEscaped = false;
-    let end = start;
-
-    for (let i = start; i < limit; i++) {
-      const char = html[i];
-      if (isEscaped) {
-        isEscaped = false;
-        continue;
-      }
-      if (char === "\\") {
-        isEscaped = true;
-        continue;
-      }
-      if (inString) {
-        if (char === stringChar) {
-          inString = false;
-        }
-        continue;
-      }
-      if (char === '"' || char === "'") {
-        inString = true;
-        stringChar = char;
-        continue;
-      }
-      if (char === "{") {
-        braceCount++;
-      } else if (char === "}") {
-        braceCount--;
-        if (braceCount === 0) {
-          end = i;
-          break;
-        }
-      }
-    }
-
-    if (braceCount === 0) {
-      try {
-        const jsonStr = html.slice(start, end + 1);
-        return JSON.parse(jsonStr);
-      } catch (e) {
-        console.error("String-aware brace parsing failed, trying simple script-slice fallback...", e);
-      }
-    }
-
-    // Fallback to simpler search
-    let simpleBraceCount = 0;
-    let simpleEnd = start;
-    for (let i = start; i < html.length; i++) {
-      if (html[i] === "{") simpleBraceCount++;
-      else if (html[i] === "}") {
-        simpleBraceCount--;
-        if (simpleBraceCount === 0) {
-          simpleEnd = i;
-          break;
-        }
-      }
-    }
-    try {
-      const jsonStr = html.slice(start, simpleEnd + 1);
-      return JSON.parse(jsonStr);
-    } catch (e) {
-      console.error("Simple brace parsing fallback failed:", e);
-      return null;
-    }
-  }
-
-  // API Route - Fetch and Parse YouTube Transcript XML
-  app.post("/api/youtube/transcript", async (req, res) => {
-    const { baseUrl } = req.body;
-    if (!baseUrl) {
-      return res.status(400).json({ error: "رابط النص البرمجي (baseUrl) مطلوب." });
-    }
-
-    try {
-      console.log(`[YouTube Transcript] Fetching subtitles from: ${baseUrl}`);
-      const response = await fetch(baseUrl);
-      if (!response.ok) {
-        throw new Error("فشل تحميل نص الترجمة من خوادم يوتيوب.");
-      }
-
-      const xmlText = await response.text();
-      
-      // Parse XML elements using regex
-      const regex = /<text start="([\d.]+)" dur="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g;
-      let match;
-      const segments: { start: number; duration: number; text: string }[] = [];
-      
-      while ((match = regex.exec(xmlText)) !== null) {
-        const start = parseFloat(match[1]);
-        const duration = parseFloat(match[2]);
-        let text = match[3];
-
-        // Decode basic HTML entities commonly returned by YT XML
-        text = text
-          .replace(/&amp;/g, "&")
-          .replace(/&#39;/g, "'")
-          .replace(/&quot;/g, '"')
-          .replace(/&lt;/g, "<")
-          .replace(/&gt;/g, ">")
-          .replace(/&apos;/g, "'")
-          .replace(/&#x2F;/g, "/")
-          .replace(/[\r\n]+/g, " ")
-          .trim();
-
-        if (text) {
-          segments.push({ start, duration, text });
-        }
-      }
-
-      res.json({ segments });
-    } catch (err: any) {
-      console.error("[YouTube Transcript Error]", err);
-      res.status(500).json({ error: err.message || "فشل استخراج الترجمة المصاحبة." });
     }
   });
 

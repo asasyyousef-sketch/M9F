@@ -1760,20 +1760,6 @@ export const CreateFolderModal: React.FC<CreateFolderModalProps> = ({
             </div>
           </div>
 
-          {/* Description */}
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-on-surface-variant block" htmlFor="folderDesc">
-              الوصف (اختياري)
-            </label>
-            <textarea
-              id="folderDesc"
-              rows={2}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="اكتب نبذة مختصرة عن هذا المجلد أو المادة..."
-              className="w-full bg-surface border border-outline-variant rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-on-surface placeholder-on-surface-variant/40 resize-none"
-            />
-          </div>
 
           {/* Footer Actions */}
           <div className="pt-4 border-t border-outline-variant flex justify-end gap-3">
@@ -2021,20 +2007,6 @@ export const EditFolderModal: React.FC<EditFolderModalProps> = ({
             </div>
           </div>
 
-          {/* Description */}
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-on-surface-variant block" htmlFor="folderDesc">
-              الوصف (اختياري)
-            </label>
-            <textarea
-              id="folderDesc"
-              rows={2}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="اكتب نبذة مختصرة عن هذا المجلد أو المادة..."
-              className="w-full bg-surface border border-outline-variant rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-on-surface placeholder-on-surface-variant/40 resize-none"
-            />
-          </div>
 
           {/* Footer Actions */}
           <div className="pt-4 border-t border-outline-variant flex items-center justify-between gap-3">
@@ -3867,10 +3839,11 @@ export const ReviewSetupModal: React.FC<ReviewSetupModalProps> = ({
   const [shuffledCards, setShuffledCards] = useState<Flashcard[]>([]);
   const [method, setMethod] = useState<ReviewMethod>("classic");
   const [isChainMode, setIsChainMode] = useState(false);
-  const [chainMethods, setChainMethods] = useState<ReviewMethod[]>(["classic", "write"]);
+  const [chainMethods, setChainMethods] = useState<ReviewMethod[]>(["classic"]);
+  const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
   const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([]);
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
-  const [activeTab, setActiveTab] = useState<"select" | "preview">("select");
+  const [activeTab, setActiveTab] = useState<"methods" | "folders">("methods");
 
   // Get all descendant folders (subfolders, sub-subfolders, etc.) recursively
   const getAllDescendantFolders = (folderId: string, visited = new Set<string>()): Folder[] => {
@@ -3947,6 +3920,8 @@ export const ReviewSetupModal: React.FC<ReviewSetupModalProps> = ({
       // Keep subfolders collapsed by default, only root folder.id can be expanded/true
       const initialExpanded: Record<string, boolean> = { [folder.id]: true };
       setExpandedFolders(initialExpanded);
+      setChainMethods(["classic"]);
+      setIsAddMenuOpen(false);
     }
   }, [isOpen, folder.id, cards, folders]);
 
@@ -4047,50 +4022,50 @@ export const ReviewSetupModal: React.FC<ReviewSetupModalProps> = ({
   const reviewMethodsList: { value: ReviewMethod; label: string; iconElement: React.ReactNode; desc: string }[] = [
     {
       value: "spoken_challenge",
-      label: "تحدي التحدث والنطق (AI)",
-      iconElement: <Sparkles className="w-5 h-5 text-purple-600 group-hover:text-purple-700 shrink-0 transition-colors" />,
+      label: "تحدي النطق (AI)",
+      iconElement: <Sparkles className="w-4 h-4 text-purple-600 group-hover:text-purple-700 shrink-0 transition-colors" />,
       desc: "تحليل المجلد وصياغة تحديات نطق وتحدث تفاعلية بالذكاء الاصطناعي مع مؤقت وصور"
     },
     {
       value: "repetition",
       label: "وضع الترديد",
-      iconElement: <Activity className="w-5 h-5 text-on-surface-variant group-hover:text-primary shrink-0 transition-colors" />,
+      iconElement: <Activity className="w-4 h-4 text-on-surface-variant group-hover:text-primary shrink-0 transition-colors" />,
       desc: "مشغل صوتي بموجات ترددية تفاعلية وشاشة منقسمة للترديد والتكرار"
     },
     {
       value: "challenge",
       label: "وضع التحدي",
-      iconElement: <Timer className="w-5 h-5 text-on-surface-variant group-hover:text-primary shrink-0 transition-colors" />,
+      iconElement: <Timer className="w-4 h-4 text-on-surface-variant group-hover:text-primary shrink-0 transition-colors" />,
       desc: "تحدَّ نفسك مع مؤقت تنازلي ونطق الإجابة تلقائياً"
     },
     {
       value: "write",
       label: "كتابة",
-      iconElement: <Pencil className="w-5 h-5 text-on-surface-variant group-hover:text-primary shrink-0 transition-colors" />,
+      iconElement: <Pencil className="w-4 h-4 text-on-surface-variant group-hover:text-primary shrink-0 transition-colors" />,
       desc: "اكتب الترجمة أو الإجابة باليد"
     },
     {
       value: "listen",
       label: "استماع",
-      iconElement: <Headphones className="w-5 h-5 text-on-surface-variant group-hover:text-primary shrink-0 transition-colors" />,
+      iconElement: <Headphones className="w-4 h-4 text-on-surface-variant group-hover:text-primary shrink-0 transition-colors" />,
       desc: "استمع إلى النطق ثم خمن واكتب"
     },
     {
       value: "article",
       label: "ال أرتيكل",
-      iconElement: <BookOpen className="w-5 h-5 text-on-surface-variant group-hover:text-primary shrink-0 transition-colors" />,
+      iconElement: <BookOpen className="w-4 h-4 text-on-surface-variant group-hover:text-primary shrink-0 transition-colors" />,
       desc: "ممارسة أدوات التعريف للغة الألمانية"
     },
     {
       value: "match",
-      label: "ربط",
-      iconElement: <Layers className="w-5 h-5 text-on-surface-variant group-hover:text-primary shrink-0 transition-colors" />,
+      label: "ربط المفردات",
+      iconElement: <Layers className="w-4 h-4 text-on-surface-variant group-hover:text-primary shrink-0 transition-colors" />,
       desc: "لعبة تفاعلية لتوصيل الكلمة بمعناها"
     },
     {
       value: "classic",
       label: "وجه وخلف",
-      iconElement: <Copy className="w-5 h-5 text-on-surface-variant group-hover:text-primary shrink-0 transition-colors" />,
+      iconElement: <Copy className="w-4 h-4 text-on-surface-variant group-hover:text-primary shrink-0 transition-colors" />,
       desc: "بطاقات فلاشية ثلاثية الأبعاد تقليدية"
     }
   ];
@@ -4188,7 +4163,6 @@ export const ReviewSetupModal: React.FC<ReviewSetupModalProps> = ({
     const hasKids = children.length > 0 || folderCards.length > 0;
     const isExpanded = !!expandedFolders[f.id];
     const isSelected = selectedFolderIds.includes(f.id);
-    const folderCardsCount = folderCards.length;
 
     const accentColor = f.color || "#0056f6";
 
@@ -4196,14 +4170,14 @@ export const ReviewSetupModal: React.FC<ReviewSetupModalProps> = ({
       <div key={f.id} className="flex flex-col relative">
         {/* Full vertical line if not the last child */}
         {depth > 0 && !isLast && (
-          <div className="absolute right-[-16px] top-0 bottom-0 w-[1px] bg-slate-200 pointer-events-none" />
+          <div className="absolute right-[-12px] sm:right-[-16px] top-0 bottom-0 w-[1px] bg-slate-200 pointer-events-none" />
         )}
 
         {/* Folder Item Row */}
         <div
           onClick={() => handleToggleFolder(f.id)}
-          className={`flex items-center justify-between p-3 rounded-2xl transition-all relative cursor-pointer select-none ${
-            depth > 0 ? "mr-4" : ""
+          className={`flex items-center justify-between p-2 sm:p-2.5 rounded-xl sm:rounded-2xl transition-all relative cursor-pointer select-none ${
+            depth > 0 ? "mr-2.5 sm:mr-3.5" : ""
           } ${
             isSelected
               ? "font-bold"
@@ -4216,48 +4190,48 @@ export const ReviewSetupModal: React.FC<ReviewSetupModalProps> = ({
         >
           {/* Tree-branch curved/bend connector */}
           {depth > 0 && (
-            <div className="absolute right-[-16px] top-0 h-[26px] w-4 border-r border-b border-slate-200 rounded-br-lg pointer-events-none" />
+            <div className="absolute right-[-12px] sm:right-[-16px] top-0 h-[20px] sm:h-[24px] w-3 sm:w-4 border-r border-b border-slate-200 rounded-br-lg pointer-events-none" />
           )}
 
           {/* Active sleek vertical indicator bar */}
           {isSelected && (
             <div 
-              className="absolute right-0 top-1/2 -translate-y-1/2 w-1.5 h-8 rounded-l-full shadow-md"
+              className="absolute right-0 top-1/2 -translate-y-1/2 w-1 sm:w-1.5 h-6 sm:h-7 rounded-l-full shadow-md"
               style={{ 
                 backgroundColor: accentColor,
-                boxShadow: `0 0 10px ${accentColor}40`
+                boxShadow: `0 0 8px ${accentColor}40`
               }}
             />
           )}
 
-          <div className="flex items-center gap-3.5 flex-1 min-w-0 text-right pr-2">
+          <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0 text-right pr-1 sm:pr-2">
             {/* Folder Icon */}
             <div 
-              className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 transition-colors"
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl flex items-center justify-center shrink-0 transition-colors"
               style={{
                 backgroundColor: isSelected ? `${accentColor}15` : "#f1f5f9",
                 color: isSelected ? accentColor : "#64748b",
               }}
             >
               {isExpanded ? (
-                <FolderOpen className="w-5 h-5" />
+                <FolderOpen className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
               ) : (
-                <LucideFolder className="w-5 h-5" />
+                <LucideFolder className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
               )}
             </div>
 
             {/* Title */}
             <div className="flex-1 min-w-0 text-right">
-              <h4 className="font-bold text-sm truncate leading-tight" style={{ color: isSelected ? accentColor : undefined }}>{f.name}</h4>
+              <h4 className="font-bold text-xs sm:text-sm truncate leading-tight" style={{ color: isSelected ? accentColor : undefined }}>{f.name}</h4>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {/* Custom Check Circle Indicator */}
             <div
-              className={`w-5 h-5 rounded-full flex items-center justify-center border transition-all duration-200 shrink-0 ${
+              className={`w-4 h-4 sm:w-4.5 sm:h-4.5 rounded-full flex items-center justify-center border transition-all duration-200 shrink-0 ${
                 isSelected
-                  ? "text-white scale-110 shadow-sm"
+                  ? "text-white scale-105 shadow-sm"
                   : "border-slate-300 hover:border-slate-400 bg-white text-transparent"
               }`}
               style={{
@@ -4266,20 +4240,21 @@ export const ReviewSetupModal: React.FC<ReviewSetupModalProps> = ({
                 boxShadow: isSelected ? `0 2px 6px ${accentColor}30` : undefined,
               }}
             >
-              <Check className="w-3 h-3 stroke-[3px]" />
+              <Check className="w-2.5 h-2.5 stroke-[3px]" />
             </div>
 
             {/* Collapsible Button if contains subfolders with cards */}
             {hasKids && (
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   setExpandedFolders((prev) => ({ ...prev, [f.id]: !prev[f.id] }));
                 }}
-                className="p-1.5 hover:bg-black/5 rounded-lg text-slate-400 hover:text-slate-600 transition-colors cursor-pointer shrink-0"
+                className="p-1 hover:bg-black/5 rounded-lg text-slate-400 hover:text-slate-600 transition-colors cursor-pointer shrink-0"
               >
                 <ChevronDown
-                  className={`w-4 h-4 transition-transform ${
+                  className={`w-3.5 h-3.5 sm:w-4 sm:h-4 transition-transform ${
                     isExpanded ? "rotate-0" : "rotate-90"
                   }`}
                 />
@@ -4290,7 +4265,7 @@ export const ReviewSetupModal: React.FC<ReviewSetupModalProps> = ({
 
         {/* Nested Children (indented dynamically with a visual tree line) */}
         {children.length > 0 && isExpanded && (
-          <div className="flex flex-col gap-1.5 mr-4 pr-0 mt-1 mb-1 relative">
+          <div className="flex flex-col gap-1 mr-3 sm:mr-4 pr-0 mt-0.5 mb-0.5 relative">
             {/* Render subfolders */}
             {children.map((child, idx) => {
               const isLastChild = idx === children.length - 1;
@@ -4303,258 +4278,318 @@ export const ReviewSetupModal: React.FC<ReviewSetupModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-fadeIn" dir="rtl">
-      <div className="bg-[#f8fafc] w-full max-w-xl rounded-3xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[85vh] animate-scaleUp">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-2.5 sm:p-4 bg-slate-900/40 backdrop-blur-sm animate-fadeIn" dir="rtl">
+      <div className="bg-[#f8fafc] w-full max-w-lg rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[90vh] sm:max-h-[85vh] animate-scaleUp">
         {/* Header */}
-        <div className="px-6 py-4.5 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
-          <div className="w-10 sm:w-12" /> {/* Spacer to balance and center the title */}
-          <h2 className="text-base sm:text-lg font-extrabold text-slate-800 text-center flex-1">تخصيص المراجعة</h2>
+        <div className="px-4 py-3 sm:px-6 sm:py-4 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
+          <div className="w-8 sm:w-10" /> {/* Spacer to balance and center the title */}
+          <h2 className="text-sm sm:text-base font-extrabold text-slate-800 text-center flex-1">تخصيص المراجعة</h2>
           <button 
             onClick={onClose} 
             aria-label="Close"
-            className="text-slate-400 hover:text-slate-600 p-2 rounded-full hover:bg-slate-50 transition-colors cursor-pointer active:scale-95"
+            className="text-slate-400 hover:text-slate-600 p-1.5 sm:p-2 rounded-full hover:bg-slate-50 transition-colors cursor-pointer active:scale-95"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 
-        {/* Content (Single Column Scrollable with hidden scrollbar) */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {/* Section 1: Included Folders Card */}
-          <div className="space-y-2">
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">المجلدات المشمولة</h3>
-            <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-3xs">
-              {/* Root Folder Item */}
-              <div className="flex items-center justify-between mb-3 pb-3 border-b border-slate-100/60">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-[#0056f6]/5 text-[#0056f6] flex items-center justify-center">
-                    <LucideFolder className="w-5 h-5" />
+        {/* Navigation Tabs (التنقل بين طريقة المراجعة والمجلدات المشمولة) */}
+        <div className="px-3 pt-2.5 pb-1 sm:px-5 sm:pt-3.5 shrink-0 bg-[#f8fafc]">
+          <div className="flex bg-slate-200/70 p-0.5 sm:p-1 rounded-xl sm:rounded-2xl gap-1 border border-slate-200/60 shadow-3xs" dir="rtl">
+            <button
+              type="button"
+              onClick={() => setActiveTab("methods")}
+              className={`flex-1 py-2 px-2 sm:py-2.5 sm:px-3 text-[11px] sm:text-xs font-bold rounded-lg sm:rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 sm:gap-2 ${
+                activeTab === "methods"
+                  ? "bg-white text-[#0056f6] shadow-sm shadow-black/5"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-white/40"
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span>طريقة المراجعة</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("folders")}
+              className={`flex-1 py-2 px-2 sm:py-2.5 sm:px-3 text-[11px] sm:text-xs font-bold rounded-lg sm:rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 sm:gap-2 ${
+                activeTab === "folders"
+                  ? "bg-white text-[#0056f6] shadow-sm shadow-black/5"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-white/40"
+              }`}
+            >
+              <LucideFolder className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span>المجلدات المشمولة</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Content (Active Tab View with hidden scrollbar) */}
+        <div className="flex-1 overflow-y-auto p-3 sm:p-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {activeTab === "folders" ? (
+            /* Tab 1: Included Folders */
+            <div className="space-y-2">
+              <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-100 p-3 sm:p-4 shadow-3xs">
+                {/* Root Folder Item */}
+                <div className="flex items-center justify-between mb-2.5 pb-2.5 border-b border-slate-100/60">
+                  <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                    <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-[#0056f6]/5 text-[#0056f6] flex items-center justify-center shrink-0">
+                      <LucideFolder className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+                    </div>
+                    <div className="text-right min-w-0 flex-1">
+                      <h4 className="text-xs sm:text-sm font-bold text-slate-800 truncate">{folder.name}</h4>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <h4 className="text-sm font-bold text-slate-800">{folder.name}</h4>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <span className="text-xs font-mono font-bold text-slate-400 bg-slate-50 px-2.5 py-1 rounded-lg">
-                    {getCardCountLabel(cards.filter(c => folder.id === "root-library" ? (!c.folderId || c.folderId === "root-library") : c.folderId === folder.id).length)}
-                  </span>
-                  {/* Select All shortcut if subfolders exist */}
-                  {getEligibleChildren(folder.id).length > 0 && (
+                  {/* Checkbox for Select All */}
+                  <div className="flex items-center gap-2 shrink-0">
                     <button
                       type="button"
-                      onClick={handleSelectAllFolders}
-                      className="text-[10px] font-bold text-[#0056f6] hover:bg-blue-50 px-2 py-1 rounded-md transition-all active:scale-95 cursor-pointer"
+                      onClick={getEligibleChildren(folder.id).length > 0 ? handleSelectAllFolders : () => handleToggleFolder(folder.id)}
+                      className="flex items-center gap-2 hover:bg-slate-50 py-1 px-1.5 rounded-lg transition-all cursor-pointer select-none group"
+                      title={
+                        getEligibleChildren(folder.id).length > 0
+                          ? (isAllFoldersSelected ? "إلغاء تحديد الكل" : "تحديد الكل")
+                          : (selectedFolderIds.includes(folder.id) ? "إلغاء التحديد" : "تحديد")
+                      }
                     >
-                      {isAllFoldersSelected ? "إلغاء تحديد الكل" : "تحديد الكل"}
+                      {getEligibleChildren(folder.id).length > 0 && (
+                        <span className="text-[11px] sm:text-xs font-bold text-slate-500 group-hover:text-slate-700">
+                          {isAllFoldersSelected ? "إلغاء تحديد الكل" : "تحديد الكل"}
+                        </span>
+                      )}
+                      <div
+                        className={`w-4 h-4 sm:w-4.5 sm:h-4.5 rounded-full flex items-center justify-center border transition-all duration-200 shrink-0 ${
+                          (getEligibleChildren(folder.id).length > 0 ? isAllFoldersSelected : selectedFolderIds.includes(folder.id))
+                            ? "bg-[#0056f6] border-[#0056f6] text-white scale-105 shadow-sm shadow-blue-500/25"
+                            : "border-slate-300 hover:border-slate-400 bg-white text-transparent"
+                        }`}
+                      >
+                        <Check className="w-2.5 h-2.5 stroke-[3px]" />
+                      </div>
                     </button>
-                  )}
+                  </div>
                 </div>
+
+                {/* Subfolders if any */}
+                {getEligibleChildren(folder.id).length > 0 ? (
+                  <div className="max-h-[280px] sm:max-h-[340px] overflow-y-auto pr-1 space-y-1 sm:space-y-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    {getEligibleChildren(folder.id).map((child) => renderReviewFolderTree(child, 0))}
+                  </div>
+                ) : (
+                  <p className="text-[10px] sm:text-xs font-semibold text-slate-400 text-center py-4">لا توجد مجلدات فرعية في هذا المجلد.</p>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* Tab 2: Review Methods */
+            <div className="space-y-3">
+              {/* Mode selection Tabs */}
+              <div className="flex bg-slate-100 p-0.5 sm:p-1 rounded-xl" dir="rtl">
+                <button
+                  type="button"
+                  onClick={() => setIsChainMode(false)}
+                  className={`flex-1 py-1.5 sm:py-2 text-[11px] sm:text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    !isChainMode
+                      ? "bg-white text-[#0056f6] shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  مراجعة فردية
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsChainMode(true)}
+                  className={`flex-1 py-1.5 sm:py-2 text-[11px] sm:text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    isChainMode
+                      ? "bg-white text-[#0056f6] shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  مراجعة متسلسلة
+                </button>
               </div>
 
-              {/* Subfolders if any */}
-              {getEligibleChildren(folder.id).length > 0 ? (
-                <div className="max-h-[180px] overflow-y-auto pr-1 space-y-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                  {getEligibleChildren(folder.id).map((child) => renderReviewFolderTree(child, 0))}
+              {!isChainMode ? (
+                /* Single Review Grid */
+                <div className="grid grid-cols-2 gap-1.5 sm:gap-2.5">
+                  {reviewMethodsList.map((m) => {
+                    const isSelected = method === m.value;
+                    return (
+                      <button
+                        key={m.value}
+                        type="button"
+                        onClick={() => setMethod(m.value)}
+                        className={`flex items-center gap-2 px-2 py-1.5 sm:px-3 sm:py-2.5 rounded-xl sm:rounded-2xl border transition-all cursor-pointer group text-right w-full h-[46px] sm:h-[50px] active:scale-[0.98] ${
+                          isSelected
+                            ? "border-[#0056f6] bg-[#0056f6]/5 text-[#0056f6] font-bold shadow-xs ring-1 ring-[#0056f6]"
+                            : "border-slate-100 bg-white hover:bg-slate-50 text-slate-600 hover:border-slate-200"
+                        }`}
+                      >
+                        <div className={`shrink-0 p-1 sm:p-1.5 rounded-lg sm:rounded-xl transition-colors ${
+                          isSelected ? "bg-[#0056f6]/10 text-[#0056f6]" : "bg-slate-50 text-slate-400 group-hover:text-slate-600"
+                        }`}>
+                          {React.cloneElement(m.iconElement as React.ReactElement<any>, {
+                            className: "w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 transition-colors text-current"
+                          })}
+                        </div>
+                        <div className="flex flex-col text-right min-w-0 flex-1">
+                          <span className="text-[11px] sm:text-xs font-bold leading-tight truncate">{m.label}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               ) : (
-                <p className="text-[10px] font-semibold text-slate-400 text-center py-2">لا توجد مجلدات فرعية في هذا المجلد.</p>
-              )}
-            </div>
-          </div>
-
-          {/* Section 2: Review Methods Section */}
-          <div className="space-y-3">
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">طريقة المراجعة</h3>
-            
-            {/* Mode selection Tabs */}
-            <div className="flex bg-slate-100 p-1 rounded-xl" dir="rtl">
-              <button
-                type="button"
-                onClick={() => setIsChainMode(false)}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                  !isChainMode
-                    ? "bg-white text-[#0056f6] shadow-sm"
-                    : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                مراجعة فردية
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsChainMode(true)}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                  isChainMode
-                    ? "bg-white text-[#0056f6] shadow-sm"
-                    : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                سلسلة متسلسلة ⛓️
-              </button>
-            </div>
-
-            {!isChainMode ? (
-              /* Single Review Grid */
-              <div className="grid grid-cols-2 gap-2">
-                {reviewMethodsList.map((m) => {
-                  const isSelected = method === m.value;
-                  return (
-                    <button
-                      key={m.value}
-                      type="button"
-                      onClick={() => setMethod(m.value)}
-                      className={`flex items-center gap-2.5 px-3 py-3 rounded-2xl border transition-all cursor-pointer group text-right w-full min-h-[56px] active:scale-[0.98] ${
-                        isSelected
-                          ? "border-[#0056f6] bg-[#0056f6]/5 text-[#0056f6] font-bold shadow-xs ring-1 ring-[#0056f6]"
-                          : "border-slate-100 bg-white hover:bg-slate-50 text-slate-600 hover:border-slate-200"
-                      }`}
-                    >
-                      <div className={`shrink-0 p-1.5 rounded-xl transition-colors ${
-                        isSelected ? "bg-[#0056f6]/10 text-[#0056f6]" : "bg-slate-50 text-slate-400 group-hover:text-slate-600"
-                      }`}>
-                        {React.cloneElement(m.iconElement as React.ReactElement<any>, {
-                          className: "w-4 h-4 shrink-0 transition-colors text-current"
-                        })}
-                      </div>
-                      <div className="flex flex-col text-right min-w-0">
-                        <span className="text-xs font-bold leading-tight whitespace-nowrap truncate">{m.label}</span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              /* Sequential Review Chain Builder */
-              <div className="space-y-4 bg-white rounded-2xl border border-slate-100 p-4 shadow-3xs text-right">
-                <div className="flex flex-col gap-1">
-                  <p className="text-xs font-bold text-slate-700">قم ببناء مسار المراجعة الخاص بك 👇</p>
-                  <p className="text-[10px] font-semibold text-slate-400">انقر لإضافة الطرق، ورتّبها بالشكل الذي يناسبك للعبها واحدة تلو الأخرى بسلاسة.</p>
-                </div>
-
-                {/* Available Pool of Review Methods */}
-                <div className="flex flex-wrap gap-1.5 p-2 bg-slate-50/60 rounded-xl border border-slate-100">
-                  {reviewMethodsList.map((m) => (
-                    <button
-                      key={m.value}
-                      type="button"
-                      onClick={() => setChainMethods([...chainMethods, m.value])}
-                      className="flex items-center gap-1 px-2.5 py-1.5 bg-white border border-slate-100 hover:border-primary/40 rounded-xl text-[11px] font-bold text-slate-600 cursor-pointer active:scale-95 transition-all"
-                    >
-                      <Plus className="w-3.5 h-3.5 text-primary shrink-0" />
-                      <span>{m.label}</span>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Built Chain list */}
-                <div className="space-y-2 mt-3">
-                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">السلسلة الحالية ({chainMethods.length} خطوة)</span>
-                  {chainMethods.length === 0 ? (
-                    <p className="text-xs font-bold text-center text-slate-400 py-4 bg-slate-50/40 rounded-xl border border-dashed border-slate-100">سلسلتك فارغة! اضغط على الطرق بالأعلى لإضافتها.</p>
-                  ) : (
-                    <div className="space-y-2 max-h-[180px] overflow-y-auto pr-1">
-                      {chainMethods.map((m, idx) => {
-                        const mObj = reviewMethodsList.find(x => x.value === m);
-                        if (!mObj) return null;
-                        return (
-                          <div
-                            key={idx}
-                            className="flex items-center justify-between p-2.5 bg-slate-50/70 border border-slate-100/80 rounded-xl transition-all"
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-black flex items-center justify-center select-none shrink-0">
-                                {idx + 1}
-                              </span>
-                              <div className="flex items-center gap-1.5">
-                                <div className="p-1 rounded-lg bg-white border border-slate-100 text-slate-400 shrink-0">
-                                  {React.cloneElement(mObj.iconElement as React.ReactElement<any>, {
-                                    className: "w-3.5 h-3.5"
-                                  })}
-                                </div>
-                                <span className="text-xs font-bold text-slate-700">{mObj.label}</span>
+                /* Sequential Review Chain Builder */
+                <div className="space-y-2.5 bg-white rounded-xl sm:rounded-2xl border border-slate-100 p-3 sm:p-4 shadow-3xs text-right">
+                  {/* Chain Steps List */}
+                  <div className="space-y-1.5 max-h-[220px] sm:max-h-[260px] overflow-y-auto pr-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    {chainMethods.map((m, idx) => {
+                      const mObj = reviewMethodsList.find((x) => x.value === m);
+                      if (!mObj) return null;
+                      return (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between p-2 sm:p-2.5 bg-slate-50/80 border border-slate-100/90 rounded-xl transition-all"
+                        >
+                          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
+                            <span className="w-5 h-5 sm:w-5.5 sm:h-5.5 rounded-full bg-[#0056f6]/10 text-[#0056f6] text-[10px] sm:text-[11px] font-black flex items-center justify-center select-none shrink-0">
+                              {idx + 1}
+                            </span>
+                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                              <div className="p-1 rounded-lg bg-white border border-slate-100 text-[#0056f6] shrink-0">
+                                {React.cloneElement(mObj.iconElement as React.ReactElement<any>, {
+                                  className: "w-3.5 h-3.5 sm:w-4 sm:h-4"
+                                })}
                               </div>
+                              <span className="text-[11px] sm:text-xs font-bold text-slate-800 truncate">
+                                {mObj.label}
+                              </span>
                             </div>
+                          </div>
 
-                            {/* Control Actions for sorting & deleting */}
-                            <div className="flex items-center gap-1">
-                              {/* Move Up */}
-                              <button
-                                type="button"
-                                disabled={idx === 0}
-                                onClick={() => {
-                                  if (idx === 0) return;
-                                  const copy = [...chainMethods];
-                                  const temp = copy[idx];
-                                  copy[idx] = copy[idx - 1];
-                                  copy[idx - 1] = temp;
-                                  setChainMethods(copy);
-                                }}
-                                className="p-1 rounded bg-white hover:bg-slate-100 text-slate-400 hover:text-slate-600 border border-slate-100 disabled:opacity-30 disabled:pointer-events-none cursor-pointer flex items-center justify-center"
-                                title="تحريك لأعلى"
-                              >
-                                <ChevronDown className="w-3.5 h-3.5 rotate-180" />
-                              </button>
+                          {/* Control Actions for sorting & deleting */}
+                          <div className="flex items-center gap-1 shrink-0">
+                            {/* Move Up */}
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onClick={() => {
+                                if (idx === 0) return;
+                                const copy = [...chainMethods];
+                                const temp = copy[idx];
+                                copy[idx] = copy[idx - 1];
+                                copy[idx - 1] = temp;
+                                setChainMethods(copy);
+                              }}
+                              className="p-1 rounded-lg bg-white hover:bg-slate-100 text-slate-400 hover:text-slate-600 border border-slate-100 disabled:opacity-25 disabled:pointer-events-none cursor-pointer flex items-center justify-center transition-colors"
+                              title="تحريك لأعلى"
+                            >
+                              <ChevronDown className="w-3 h-3 sm:w-3.5 sm:h-3.5 rotate-180" />
+                            </button>
 
-                              {/* Move Down */}
-                              <button
-                                type="button"
-                                disabled={idx === chainMethods.length - 1}
-                                onClick={() => {
-                                  if (idx === chainMethods.length - 1) return;
-                                  const copy = [...chainMethods];
-                                  const temp = copy[idx];
-                                  copy[idx] = copy[idx + 1];
-                                  copy[idx + 1] = temp;
-                                  setChainMethods(copy);
-                                }}
-                                className="p-1 rounded bg-white hover:bg-slate-100 text-slate-400 hover:text-slate-600 border border-slate-100 disabled:opacity-30 disabled:pointer-events-none cursor-pointer flex items-center justify-center"
-                                title="تحريك لأسفل"
-                              >
-                                <ChevronDown className="w-3.5 h-3.5" />
-                              </button>
+                            {/* Move Down */}
+                            <button
+                              type="button"
+                              disabled={idx === chainMethods.length - 1}
+                              onClick={() => {
+                                if (idx === chainMethods.length - 1) return;
+                                const copy = [...chainMethods];
+                                const temp = copy[idx];
+                                copy[idx] = copy[idx + 1];
+                                copy[idx + 1] = temp;
+                                setChainMethods(copy);
+                              }}
+                              className="p-1 rounded-lg bg-white hover:bg-slate-100 text-slate-400 hover:text-slate-600 border border-slate-100 disabled:opacity-25 disabled:pointer-events-none cursor-pointer flex items-center justify-center transition-colors"
+                              title="تحريك لأسفل"
+                            >
+                              <ChevronDown className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                            </button>
 
-                              {/* Delete */}
+                            {/* Delete Button (allowed if more than 1 item) */}
+                            {chainMethods.length > 1 && (
                               <button
                                 type="button"
                                 onClick={() => {
                                   setChainMethods(chainMethods.filter((_, i) => i !== idx));
                                 }}
-                                className="p-1 rounded bg-white hover:bg-red-50 text-slate-400 hover:text-red-600 border border-slate-100 cursor-pointer flex items-center justify-center"
+                                className="p-1 rounded-lg bg-white hover:bg-red-50 text-slate-400 hover:text-red-600 border border-slate-100 cursor-pointer flex items-center justify-center transition-colors"
                                 title="حذف من السلسلة"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                               </button>
-                            </div>
+                            )}
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Add Method Trigger Button & Menu underneath */}
+                  <div className="relative pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddMenuOpen(!isAddMenuOpen)}
+                      className={`w-full py-2 px-3 rounded-xl border border-dashed flex items-center justify-center gap-1.5 transition-all cursor-pointer font-bold text-[11px] sm:text-xs active:scale-[0.99] ${
+                        isAddMenuOpen
+                          ? "border-[#0056f6] bg-[#0056f6]/5 text-[#0056f6]"
+                          : "border-slate-200 hover:border-[#0056f6] text-slate-500 hover:text-[#0056f6] hover:bg-slate-50"
+                      }`}
+                    >
+                      <Plus className={`w-3.5 h-3.5 transition-transform duration-200 ${isAddMenuOpen ? "rotate-45" : ""}`} />
+                      <span>{isAddMenuOpen ? "إغلاق القائمة" : "إضافة طريقة للمراجعة"}</span>
+                    </button>
+
+                    {/* Popover / Dropdown Menu of Available Review Methods */}
+                    {isAddMenuOpen && (
+                      <div className="mt-2 p-2 bg-slate-50 border border-slate-200/80 rounded-xl shadow-xs grid grid-cols-2 gap-1.5 animate-fadeIn">
+                        {reviewMethodsList.map((m) => (
+                          <button
+                            key={m.value}
+                            type="button"
+                            onClick={() => {
+                              setChainMethods([...chainMethods, m.value]);
+                              setIsAddMenuOpen(false);
+                            }}
+                            className="flex items-center gap-2 p-1.5 sm:p-2 bg-white hover:bg-blue-50/70 border border-slate-100 hover:border-blue-200 rounded-lg text-right transition-all cursor-pointer active:scale-95 group"
+                          >
+                            <div className="p-1 rounded-md bg-slate-50 group-hover:bg-blue-100/50 text-slate-500 group-hover:text-[#0056f6] shrink-0 transition-colors">
+                              {React.cloneElement(m.iconElement as React.ReactElement<any>, {
+                                className: "w-3.5 h-3.5 sm:w-4 sm:h-4"
+                              })}
+                            </div>
+                            <span className="text-[10px] sm:text-[11px] font-bold text-slate-700 group-hover:text-[#0056f6] truncate flex-1">
+                              {m.label}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer Actions */}
-        <div className="px-6 py-4.5 border-t border-slate-100 bg-white flex items-center justify-between rounded-b-3xl shrink-0">
-          <div className="flex flex-col text-right">
-            <span className="text-[10px] font-bold text-slate-400">إجمالي بطاقات المراجعة</span>
-            <span className="text-xs sm:text-sm font-extrabold text-[#0056f6]">
+        <div className="px-3.5 py-2.5 sm:px-6 sm:py-4 border-t border-slate-100 bg-white flex items-center justify-between rounded-b-2xl sm:rounded-b-3xl shrink-0">
+          <div className="flex items-center">
+            <span className="text-[11px] sm:text-xs font-black text-[#0056f6] bg-[#0056f6]/10 border border-[#0056f6]/15 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-xl shadow-3xs">
               {getCardCountLabel(selectedVisibleCards.length)}
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3">
             <button
               onClick={onClose}
-              className="px-5 py-2.5 rounded-full text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-colors cursor-pointer active:scale-95"
+              className="px-3 sm:px-5 py-2 sm:py-2.5 rounded-full text-[11px] sm:text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-colors cursor-pointer active:scale-95"
             >
               إلغاء
             </button>
             <button
               onClick={handleStart}
               disabled={selectedVisibleCards.length === 0 || (isChainMode && chainMethods.length === 0)}
-              className="px-7 py-2.5 bg-[#0056f6] text-white font-extrabold text-xs sm:text-sm rounded-full hover:bg-blue-700 active:scale-95 transition-all cursor-pointer shadow-md shadow-blue-500/10 disabled:opacity-40 disabled:pointer-events-none"
+              className="px-4 sm:px-7 py-2 sm:py-2.5 bg-[#0056f6] text-white font-extrabold text-[11px] sm:text-xs rounded-full hover:bg-blue-700 active:scale-95 transition-all cursor-pointer shadow-md shadow-blue-500/10 disabled:opacity-40 disabled:pointer-events-none"
             >
               ابدأ المراجعة
             </button>
