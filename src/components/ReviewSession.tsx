@@ -4513,29 +4513,16 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
             </button>
           </div>
           
-          {/* Center: Title / Current Step Count */}
+          {/* Center: Title */}
           <div className="flex-1 flex flex-col items-center justify-center">
             {chainMethods && chainIndex !== undefined ? (
-              <div className="flex flex-col items-center">
-                <span className="text-[10px] font-extrabold text-primary bg-primary/10 dark:text-blue-400 dark:bg-blue-950/60 px-2.5 py-0.5 rounded-full select-none">
-                  سلسلة المراجعة: خطوة {chainIndex + 1} من {chainMethods.length} ({methodArabicLabels[method]})
-                </span>
-                {method !== "match" && sessionCards.length > 0 && (
-                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mt-0.5">
-                    {currentIndex + 1} من {sessionCards.length}
-                  </span>
-                )}
-              </div>
+              <span className="text-[10px] sm:text-xs font-extrabold text-primary bg-primary/10 dark:text-blue-400 dark:bg-blue-950/60 px-2.5 py-0.5 rounded-full select-none">
+                سلسلة المراجعة: خطوة {chainIndex + 1} من {chainMethods.length} ({methodArabicLabels[method]})
+              </span>
             ) : (
-              method !== "match" && sessionCards.length > 0 ? (
-                <span className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200">
-                  {currentIndex + 1} من {sessionCards.length}
-                </span>
-              ) : (
-                <span className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200">
-                  {method === "match" ? "لعبة التوصيل" : "مراجعة"}
-                </span>
-              )
+              <span className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200 truncate max-w-[200px] sm:max-w-md">
+                {folder?.name || (method === "match" ? "لعبة التوصيل" : methodArabicLabels[method] || "مراجعة")}
+              </span>
             )}
           </div>
 
@@ -5360,13 +5347,9 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                         <span>السابقة</span>
                       </button>
 
-                      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
-                        <span className="text-[12px] font-bold font-mono text-slate-700 dark:text-slate-300">
-                          {currentIndex + 1}
-                        </span>
-                        <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold">/</span>
-                        <span className="text-[12px] font-bold font-mono text-slate-700 dark:text-slate-300">
-                          {sessionCards.length}
+                      <div className="flex items-center justify-center px-3.5 py-1.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
+                        <span className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200 select-none">
+                          {currentIndex + 1} من {sessionCards.length}
                         </span>
                       </div>
 
@@ -6172,13 +6155,9 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           <span>السابقة</span>
                         </button>
 
-                        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
-                          <span className="text-[12px] font-bold font-mono text-slate-700 dark:text-slate-300">
-                            {currentIndex + 1}
-                          </span>
-                          <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold">/</span>
-                          <span className="text-[12px] font-bold font-mono text-slate-700 dark:text-slate-300">
-                            {sessionCards.length}
+                        <div className="flex items-center justify-center px-3.5 py-1.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
+                          <span className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200 select-none">
+                            {currentIndex + 1} من {sessionCards.length}
                           </span>
                         </div>
 
