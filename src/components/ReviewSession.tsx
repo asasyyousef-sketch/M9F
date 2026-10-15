@@ -4913,7 +4913,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           title={isRepeatAudioEnabled ? "إيقاف تكرار النطق المخصص (اضغط مطولاً للإعدادات)" : "تفعيل تكرار النطق المخصص (اضغط مطولاً للإعدادات)"}
                           className={`w-8 h-8 rounded-xl transition-all cursor-pointer active:scale-95 flex items-center justify-center select-none border-0 ${
                             isRepeatAudioEnabled
-                              ? "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100 font-bold"
+                              ? "bg-white text-slate-900 dark:bg-white dark:text-slate-900 shadow-xs ring-1 ring-slate-200/70 dark:ring-white/20 font-bold"
                               : "bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-750 dark:text-slate-300"
                           }`}
                         >
