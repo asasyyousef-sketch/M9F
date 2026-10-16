@@ -18,7 +18,9 @@ import {
   User,
   Sparkles,
   DownloadCloud,
-  RotateCcw
+  RotateCcw,
+  Eye,
+  EyeOff
 } from "lucide-react";
 
 export const AccountsSettingsTab: React.FC = () => {
@@ -134,6 +136,7 @@ export const AccountsSettingsTab: React.FC = () => {
   // New User Form state
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [newName, setNewName] = useState("");
   const [newRole, setNewRole] = useState<"user" | "admin">("user");
   const [creatingUser, setCreatingUser] = useState(false);
@@ -143,6 +146,7 @@ export const AccountsSettingsTab: React.FC = () => {
   // Change Password state
   const [changingPasswordUserId, setChangingPasswordUserId] = useState<string | null>(null);
   const [newPasswordInput, setNewPasswordInput] = useState("");
+  const [showInlinePassword, setShowInlinePassword] = useState(false);
   const [changingPasswordLoading, setChangingPasswordLoading] = useState(false);
   const [changePasswordMsg, setChangePasswordMsg] = useState<{ text: string; isError: boolean } | null>(null);
 
@@ -380,18 +384,26 @@ export const AccountsSettingsTab: React.FC = () => {
 
             <div>
               <label className="block text-xs font-bold text-on-surface mb-1">
-                كلمة المرور *
+                رمز المرور *
               </label>
               <div className="relative">
                 <input
-                  type="password"
+                  type={showNewPassword ? "text" : "password"}
                   required
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full bg-surface-container-low border border-outline-variant rounded-xl py-2 pr-9 pl-3 text-xs font-semibold text-on-surface outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  placeholder="أدخل رمز المرور"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded-xl py-2 pr-9 pl-9 text-xs font-semibold text-on-surface outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                 />
-                <KeyRound className="w-3.5 h-3.5 text-outline absolute right-3 top-1/2 -translate-y-1/2" />
+                <KeyRound className="w-3.5 h-3.5 text-outline absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword((p) => !p)}
+                  title={showNewPassword ? "إخفاء الرمز" : "إظهار الرمز"}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                >
+                  {showNewPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
               </div>
             </div>
 
@@ -542,13 +554,23 @@ export const AccountsSettingsTab: React.FC = () => {
                     {isChangingPassword && (
                       <div className="mt-3 pt-3 border-t border-outline-variant/30 space-y-2 animate-fade-in">
                         <div className="flex items-center gap-2">
-                          <input
-                            type="password"
-                            placeholder="أدخل كلمة المرور الجديدة (4 خانات على الأقل)"
-                            value={newPasswordInput}
-                            onChange={(e) => setNewPasswordInput(e.target.value)}
-                            className="flex-1 bg-surface border border-outline-variant rounded-lg py-1.5 px-2.5 text-xs font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary"
-                          />
+                          <div className="relative flex-1">
+                            <input
+                              type={showInlinePassword ? "text" : "password"}
+                              placeholder="أدخل رمز المرور الجديد (4 خانات على الأقل)"
+                              value={newPasswordInput}
+                              onChange={(e) => setNewPasswordInput(e.target.value)}
+                              className="w-full bg-surface border border-outline-variant rounded-lg py-1.5 pr-2.5 pl-8 text-xs font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowInlinePassword((p) => !p)}
+                              title={showInlinePassword ? "إخفاء الرمز" : "إظهار الرمز"}
+                              className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                            >
+                              {showInlinePassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
                           <button
                             type="button"
                             disabled={changingPasswordLoading}

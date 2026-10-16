@@ -8,6 +8,7 @@ interface AuthContextType {
   isLoading: boolean;
   error: string | null;
   login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  register: (username: string, password: string, name?: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   setupAdmin: (username: string, password: string, name?: string) => Promise<{ success: boolean; error?: string }>;
   refreshStatus: () => Promise<void>;
@@ -174,6 +175,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // User registration
+  const register = async (
+    username: string,
+    password: string,
+    name?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      setError(null);
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, name }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        const msg = data.error || "فشل إنشاء الحساب.";
+        setError(msg);
+        return { success: false, error: msg };
+      }
+
+      if (data.token && data.user) {
+        localStorage.setItem(TOKEN_KEY, data.token);
+        setToken(data.token);
+        setCurrentUser(data.user);
+        return { success: true };
+      }
+      return { success: false, error: "استجابة غير متوقعة من السيرفر." };
+    } catch (err: any) {
+      const msg = err.message || "خطأ في الاتصال بالسيرفر.";
+      setError(msg);
+      return { success: false, error: msg };
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -183,6 +219,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoading,
         error,
         login,
+        register,
         logout,
         setupAdmin,
         refreshStatus,

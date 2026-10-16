@@ -1123,7 +1123,7 @@ const StudyCard: React.FC<StudyCardProps> = ({
         <div className={`absolute inset-0 w-full h-full flip-card-front rounded-2xl sm:rounded-3xl flex flex-col p-4 sm:p-5 bg-surface-container-lowest overflow-hidden justify-between ${
           localFlipped ? "pointer-events-none select-none invisible opacity-0" : "pointer-events-auto visible opacity-100"
         }`}>
-          <div className="w-full aspect-square rounded-xl sm:rounded-2xl overflow-hidden relative mb-3 border border-outline-variant/10 flex items-center justify-center bg-surface-container-low select-none shadow-xs">
+          <div className="w-full aspect-square max-h-[58%] rounded-xl sm:rounded-2xl overflow-hidden relative mb-2 sm:mb-3 border border-outline-variant/10 flex items-center justify-center bg-surface-container-low select-none shadow-xs mx-auto">
             {isSwipeImageEnabled && extraImages.length > 0 ? (
               <div 
                 className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing"
@@ -1606,7 +1606,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   const methodArabicLabels: Record<ReviewMethod, string> = {
     spoken_challenge: "تحدي التحدث والنطق (AI)",
     repetition: "وضع الترديد",
-    classic: "وجه وخلف",
+    classic: "مراجعة",
     write: "كتابة",
     listen: "استماع",
     article: "ال أرتيكل",
@@ -4513,18 +4513,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
             </button>
           </div>
           
-          {/* Center: Title */}
-          <div className="flex-1 flex flex-col items-center justify-center">
-            {chainMethods && chainIndex !== undefined ? (
-              <span className="text-[10px] sm:text-xs font-extrabold text-primary bg-primary/10 dark:text-blue-400 dark:bg-blue-950/60 px-2.5 py-0.5 rounded-full select-none">
-                سلسلة المراجعة: خطوة {chainIndex + 1} من {chainMethods.length} ({methodArabicLabels[method]})
-              </span>
-            ) : (
-              <span className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200 truncate max-w-[200px] sm:max-w-md">
-                {folder?.name || (method === "match" ? "لعبة التوصيل" : methodArabicLabels[method] || "مراجعة")}
-              </span>
-            )}
-          </div>
+          {/* Center: Empty */}
+          <div className="flex-1" />
 
           {/* Right: Timer */}
           <div className="w-16 flex items-center justify-end">
@@ -4549,7 +4539,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
       )}
 
       {/* Main Container Area */}
-      <div className="flex-1 overflow-y-auto bg-surface-bright flex flex-col justify-start sm:justify-center items-center pt-5 sm:pt-9 pb-6 px-4">
+      <div className="flex-1 overflow-y-auto bg-surface-bright flex flex-col justify-center items-center px-3 sm:px-4 py-2 sm:py-4">
         
         <AnimatePresence mode="wait">
           
@@ -4856,12 +4846,12 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="w-full flex flex-col items-center"
+              className="w-full max-w-[368px] sm:max-w-[392px] h-full flex flex-col items-center justify-center my-auto gap-2.5 sm:gap-4 md:gap-5"
             >
               {/* Action Bar (Shuffle & Settings & Night Mode & Autoplay & Edit) with expandable distraction-free toggle */}
               {/* Unified Action Bar (Settings & Auto Advance & Audio & Mode Controls & Night Mode) */}
               {currentCard && method !== "match" && method !== "spoken_challenge" && method !== "repetition" && (
-                <div className="flex flex-col items-center mb-3 animate-fadeIn">
+                <div className="flex flex-col items-center shrink-0 animate-fadeIn">
                   <div className="flex items-center justify-center gap-1.5 bg-surface-container-low/90 dark:bg-slate-900/90 backdrop-blur-md p-1 rounded-2xl shadow-xs border-0">
                     {/* 1. Mode-specific Primary Controls */}
                     {method === "classic" && (
@@ -5245,12 +5235,12 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
               {/* 1. CLASSIC / 3D FLIP CARD MODE */}
               {method === "classic" && currentCard && (
-                <div className="w-full flex flex-col items-center">
+                <div className="w-full flex flex-col items-center gap-2.5 sm:gap-4 md:gap-5">
 
                   {/* Stable Deck Container */}
-                  <div className="relative w-full max-w-[356px] flex items-center justify-center">
-                    {/* Active Card with gorgeous Framer Motion slide/swipe translation */}
-                    <div className="relative w-full h-[466px] select-none overflow-hidden rounded-[24px]">
+                  <div className="relative w-full flex items-center justify-center">
+                    {/* Active Card with responsive vertical scaling */}
+                    <div className="relative w-full h-[clamp(350px,58vh,510px)] select-none overflow-hidden rounded-[24px]">
                       <AnimatePresence initial={false} custom={direction} mode="popLayout">
                         <motion.div
                           key={currentCard.id}
@@ -5330,7 +5320,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                   </div>
 
                   {/* Unified Navigation Dock */}
-                  <div className="w-full max-w-[356px] mt-3">
+                  <div className="w-full shrink-0">
                     <div className="flex items-center justify-between bg-white dark:bg-slate-850 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-1.5 shadow-xs backdrop-blur-xs">
                       <button
                         type="button"
@@ -5372,7 +5362,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
                   {/* Subtle autoplay indicator if enabled (no blinking circle) */}
                   {isAutoPlaying && (
-                    <div className="w-full max-w-[356px] mt-2">
+                    <div className="w-full shrink-0">
                       <div className="w-full py-2 bg-white/90 dark:bg-slate-850/90 border border-slate-200/80 dark:border-slate-800 rounded-xl text-center shadow-xs flex items-center justify-center gap-2">
                         <Play className="w-3.5 h-3.5 text-slate-600 fill-slate-600 dark:text-slate-300 dark:fill-slate-300" />
                         <span className="text-xs font-bold text-slate-600 dark:text-slate-300 font-mono">
@@ -5914,10 +5904,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     : "صيغة الجمع 👥";
 
                 return (
-                  <div className="w-full flex flex-col items-center">
+                  <div className="w-full flex flex-col items-center gap-2.5 sm:gap-4 md:gap-5">
                     
                     {/* Main Card with beautiful countdown or revealed result - Styled EXACTLY like StudyCard */}
-                    <div className="relative w-full max-w-[356px] min-h-[466px] bg-surface-container-lowest rounded-[24px] border border-outline-variant/30 shadow-sm p-5 flex flex-col justify-between select-none overflow-hidden">
+                    <div className="relative w-full h-[clamp(350px,58vh,510px)] bg-surface-container-lowest rounded-[24px] border border-outline-variant/30 shadow-sm p-4 sm:p-5 flex flex-col justify-between select-none overflow-hidden">
                       <div className="absolute top-0 right-0 w-32 h-32 bg-primary/2.5 rounded-full blur-2xl pointer-events-none" />
 
                       {/* If ready to start, show a blurred overlay over the whole card with a green start button */}
@@ -5956,7 +5946,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       <div className="flex flex-col flex-1 justify-start relative">
 
                         {/* Image section */}
-                        <div className="w-full aspect-square rounded-xl overflow-hidden relative mb-4 border border-outline-variant/10 flex items-center justify-center bg-surface-container-low">
+                        <div className="w-full aspect-square max-h-[58%] rounded-xl overflow-hidden relative mb-2 sm:mb-3 border border-outline-variant/10 flex items-center justify-center bg-surface-container-low mx-auto">
                           {hasImage ? (
                             <ImageWithSkeleton
                               src={imageSrc!}
@@ -6138,7 +6128,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     </div>
 
                     {/* Unified Navigation Dock */}
-                    <div className="w-full max-w-[356px] mt-3">
+                    <div className="w-full shrink-0">
                       <div className="flex items-center justify-between bg-white dark:bg-slate-850 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-1.5 shadow-xs backdrop-blur-xs">
                         <button
                           type="button"
