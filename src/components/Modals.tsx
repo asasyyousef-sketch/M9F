@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { X, Search, Image as ImageIcon, Volume2, Link as LinkIcon, Plus, Check, ChevronLeft, ChevronRight, ChevronDown, FolderOpen, HelpCircle, Trash2, Settings, AlertCircle, Play, Folder as LucideFolder, FileText, Eye, Pencil, Headphones, BookOpen, Layers, Copy, Shuffle, Move, Key, Timer, History, Download, RefreshCw, DownloadCloud, HardDrive, Sparkles, Cpu, Star, Square, VolumeX, Radio, Activity, Laptop, Server, Zap, CheckCircle2, Minimize2, Maximize2, Loader2, ExternalLink, Link2, Users, Share2 } from "lucide-react";
-import { Folder, Flashcard, ReviewMethod, getSafeImageStyle, DEFAULT_GRADIO_VOICES, GRADIO_LANGUAGES, GradioVoice } from "../types";
+import { Folder, Flashcard, ReviewMethod, getSafeImageStyle, DEFAULT_GRADIO_VOICES, GRADIO_LANGUAGES, GradioVoice, sanitizeCardArticleAndSentence } from "../types";
 import { LivePiperSandboxModal } from "./LivePiperSandboxModal";
 import { AccountsSettingsTab } from "./AccountsSettingsTab";
 import { useAuth } from "../context/AuthContext";
@@ -2151,9 +2151,15 @@ export const EditCardModal: React.FC<EditCardModalProps> = ({
       return;
     }
 
+    const sanitized = sanitizeCardArticleAndSentence({
+      frontText,
+      correctArticle: isArticleMode ? correctArticle : undefined,
+      isArticleMode
+    });
+
     onSave(card.id, {
       folderId,
-      frontText,
+      frontText: sanitized.frontText,
       frontLang,
       frontImage: frontImage || undefined,
       frontImagePosition: frontImage ? frontImagePosition : undefined,
@@ -2161,8 +2167,8 @@ export const EditCardModal: React.FC<EditCardModalProps> = ({
       backLang,
       backImage: backImage || undefined,
       backImagePosition: backImage ? backImagePosition : undefined,
-      isArticleMode,
-      correctArticle: isArticleMode ? correctArticle : undefined,
+      isArticleMode: sanitized.isArticleMode,
+      correctArticle: sanitized.isArticleMode ? sanitized.correctArticle : undefined,
       isPluralMode,
       pluralText: isPluralMode ? pluralText : undefined,
       pluralLang: isPluralMode ? pluralLang : undefined,
@@ -2774,9 +2780,15 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
       return;
     }
 
+    const sanitized = sanitizeCardArticleAndSentence({
+      frontText,
+      correctArticle: isArticleMode ? correctArticle : undefined,
+      isArticleMode
+    });
+
     onSave({
       folderId,
-      frontText,
+      frontText: sanitized.frontText,
       frontLang,
       frontImage: frontImage || undefined,
       frontImagePosition: frontImage ? frontImagePosition : undefined,
@@ -2784,8 +2796,8 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
       backLang,
       backImage: backImage || undefined,
       backImagePosition: backImage ? backImagePosition : undefined,
-      isArticleMode,
-      correctArticle: isArticleMode ? correctArticle : undefined,
+      isArticleMode: sanitized.isArticleMode,
+      correctArticle: sanitized.isArticleMode ? sanitized.correctArticle : undefined,
       isPluralMode,
       pluralText: isPluralMode ? pluralText : undefined,
       pluralLang: isPluralMode ? pluralLang : undefined,

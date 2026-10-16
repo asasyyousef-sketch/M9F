@@ -67,18 +67,113 @@ export function getCardSearchQuery(
   const subject = front || back || "";
   const custom = card.imageSearchQuery?.trim() || "";
 
+  let queryResult = "";
   if (sourceMode === "front_text_only") {
-    return front || custom || subject || "flashcard";
+    queryResult = front || custom || subject || "flashcard";
   } else if (sourceMode === "back_text_only") {
-    return back || custom || subject || "flashcard";
+    queryResult = back || custom || subject || "flashcard";
   } else if (sourceMode === "combined_front_back") {
-    return [front, back].filter(Boolean).join(" ") || custom || subject || "flashcard";
+    queryResult = [front, back].filter(Boolean).join(" ") || custom || subject || "flashcard";
   } else if (sourceMode === "custom_query_only") {
-    return custom || front || subject || "flashcard";
+    queryResult = custom || front || subject || "flashcard";
   } else {
     // smart_auto (default): Use exact imageSearchQuery returned by AI if present!
-    return custom || front || back || subject || "flashcard";
+    queryResult = custom || front || back || subject || "flashcard";
   }
+
+  // Ensure cartoon/illustration is not forced unless explicitly desired
+  return cleanImageSearchQuery(queryResult);
+}
+
+export function isGermanSentence(text: string): boolean {
+  if (!text) return false;
+  const trimmed = text.trim();
+  if (/[.!?]$/.test(trimmed)) return true;
+  const clean = trimmed.replace(/\([^)]*\)/g, "").replace(/\s*\/.*$/, "").trim();
+  const tokens = clean.split(/\s+/).filter(Boolean);
+  
+  if (tokens.length <= 1) return false;
+  
+  const firstLower = tokens[0].toLowerCase();
+  const isFirstArticle = ["der", "die", "das", "ein", "eine", "einen", "einem", "einer", "eines"].includes(firstLower);
+  
+  if (tokens.length === 2 && isFirstArticle) {
+    const secondLower = tokens[1].toLowerCase();
+    const commonVerbs = ["ist", "sind", "war", "waren", "hat", "haben", "wird", "werden", "geht", "kommt", "kann", "muss"];
+    if (!commonVerbs.includes(secondLower)) {
+      return false; // It's an article + single noun (e.g., "Das Handy", "Der Tisch")
+    }
+  }
+
+  return true; // 3+ tokens, or 2 tokens without leading article/with verb (e.g. "Das Buch ist schön")
+}
+
+export function sanitizeCardArticleAndSentence<T extends {
+  frontText?: string;
+  correctArticle?: string;
+  isArticleMode?: boolean;
+}>(card: T): T {
+  if (!card) return card;
+  let frontText = typeof card.frontText === "string" ? card.frontText.trim() : "";
+  let correctArticle = typeof card.correctArticle === "string" ? card.correctArticle.trim() : "";
+  let isArticleMode = Boolean(card.isArticleMode);
+
+  const isSentence = isGermanSentence(frontText);
+
+  if (isSentence) {
+    // SCENARIO 1: IT IS A SENTENCE (e.g., "Das Buch ist schön" or "Buch ist schön" with correctArticle="das")
+    // If the article was stripped into correctArticle, restore it to frontText
+    if (correctArticle && ["der", "die", "das", "die-plural"].includes(correctArticle.toLowerCase())) {
+      const art = correctArticle.toLowerCase() === "die-plural" ? "Die" : (correctArticle.charAt(0).toUpperCase() + correctArticle.slice(1).toLowerCase());
+      if (!frontText.toLowerCase().startsWith(art.toLowerCase() + " ")) {
+        frontText = `${art} ${frontText}`;
+      }
+    }
+    // Sentence: article mode is always disabled, and correctArticle is empty
+    correctArticle = "";
+    isArticleMode = false;
+  } else {
+    // SCENARIO 2: IT IS A SINGLE NOUN / VOCABULARY (e.g., "Das Handy", "der Tisch", "Lampe")
+    // The article belongs strictly in correctArticle, NOT inside frontText!
+    const match = frontText.match(/^(der|die|das)\s+(.+)$/i);
+    if (match) {
+      const extractedArticle = match[1].toLowerCase();
+      const cleanNoun = match[2].trim();
+      frontText = cleanNoun;
+      if (!correctArticle || correctArticle === "") {
+        correctArticle = extractedArticle;
+      }
+      isArticleMode = true;
+    } else {
+      if (correctArticle && ["der", "die", "das", "die-plural"].includes(correctArticle.toLowerCase())) {
+        isArticleMode = true;
+      }
+    }
+  }
+
+  return {
+    ...card,
+    frontText,
+    correctArticle,
+    isArticleMode
+  };
+}
+
+export function cleanImageSearchQuery(query: string, userInstruction?: string): string {
+  if (!query) return "";
+  let clean = query.trim();
+  const userWantsCartoon = userInstruction && (
+    /cartoon|vector|illustration|clipart|كرتون|رسومات|انمي|أنمي/i.test(userInstruction)
+  );
+
+  if (!userWantsCartoon) {
+    clean = clean
+      .replace(/\b(cartoon\s+illustration|flat\s+vector\s+illustration|vector\s+illustration|cartoon|vector|clipart|anime|illustration)\b/gi, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  }
+
+  return clean;
 }
 
 export type ReviewMethod = 'challenge' | 'write' | 'listen' | 'article' | 'match' | 'classic' | 'puzzles' | 'repetition' | 'spoken_challenge';
@@ -380,3 +475,27 @@ export interface AppUser {
   role: UserRole;
   createdAt?: string;
 }
+
+export interface AIModelOption {
+  key: string;
+  name: string;
+  desc: string;
+  badge: string;
+  group?: "high_quota" | "general";
+}
+
+export const ALL_AVAILABLE_MODELS: AIModelOption[] = [
+  // High Quota Models (500 RPD)
+  { key: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite ⚡ (500 RPD)", desc: "سريع مع 500 طلب يومياً", badge: "500 RPD", group: "high_quota" },
+  { key: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite ⚡ (500 RPD)", desc: "خفيف واقتصادي مع 500 طلب يومياً", badge: "500 RPD", group: "high_quota" },
+  // General & Advanced Models
+  { key: "gemini-3.6-flash", name: "Gemini 3.6 Flash ⚡", desc: "أحدث معالجة ذكية ومستقرة (موصى به)", badge: "موصى به", group: "general" },
+  { key: "gemini-3.5-flash", name: "Gemini 3.5 Flash ⚡", desc: "نموذج فلاش فائق الاستقرار", badge: "مستقر", group: "general" },
+  { key: "gemini-3.7-flash", name: "Gemini 3.7 Flash ⚡", desc: "تفكير متقدم واستنتاج تحليلي", badge: "تفكير متقدم", group: "general" },
+  { key: "groq-llama-3.3-70b", name: "Groq Llama 3.3 70B 🚀", desc: "محرك جروك الفائق في السرعة والتصحيح", badge: "فائق السرعة", group: "general" },
+  { key: "grok-2", name: "Grok 2 🤖", desc: "أسلوب تفاعلي وحوار طبيعي", badge: "تفاعلي", group: "general" },
+  { key: "gemini-2.5-flash", name: "Gemini 2.5 Flash ⚡", desc: "نموذج فلاش القياسي السريع", badge: "خفيف وسريع", group: "general" },
+  { key: "gemini-2.5-pro", name: "Gemini 2.5 Pro 💎", desc: "تحليل لغوي وبلاغي عميق جداً", badge: "تحليل عميق", group: "general" },
+  { key: "gemini-1.5-pro", name: "Gemini 1.5 Pro 💎", desc: "سياق واسع وفهم دقيق للجمل", badge: "سياق كبير", group: "general" },
+  { key: "gemini-1.5-flash", name: "Gemini 1.5 Flash ⚡", desc: "نموذج فلاش القياسي الكلاسيكي", badge: "مستقر", group: "general" }
+];

@@ -1,6 +1,6 @@
 import React from "react";
 import { ChevronLeft, Folder, Volume2, Trash2, FolderPlus, Bell, User, Play, Plus, Search, Pencil, Menu, Home, Layers, BookOpen, RectangleVertical, CheckSquare, Scissors, Copy, X, Check, Clipboard, ListChecks, Sparkles, History, Headphones, DownloadCloud, Download, CheckCircle2, Loader2, VolumeX, FileAudio, Image as ImageIcon, FileImage, Minimize2, Maximize2, Share2, MoreVertical, ChevronDown, Info, Calendar } from "lucide-react";
-import { Folder as FolderType, Flashcard, getSafeImageStyle, getCardSearchQuery } from "../types";
+import { Folder as FolderType, Flashcard, getSafeImageStyle, getCardSearchQuery, isGermanSentence } from "../types";
 import { FolderThumbnail, CardThumbnail } from "./ThumbnailStyles";
 import { speakClient, preloadTTS, preloadImage, fetchGradioAudioBlob, fetchAudioBlob } from "./Modals";
 import { ImageWithSkeleton } from "./ReviewSession";
@@ -2433,11 +2433,6 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                         <h4 className="font-bold text-[#202124] text-base group-hover:text-[#0056f6] transition-colors leading-snug" dir="ltr">
                           <HighlightText text={card.frontText} search={searchQuery} />
                         </h4>
-                        {card.isPluralMode && card.pluralText && (
-                          <span className="text-xs text-slate-500 font-normal" dir="ltr">
-                            (Pl: <HighlightText text={card.pluralText} search={searchQuery} />)
-                          </span>
-                        )}
                       </div>
                       {(card.translationHint || card.backText) && (
                         <p className="text-xs text-slate-500 font-medium mt-0.5 truncate" dir="rtl">
@@ -2610,7 +2605,7 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                   {/* Image/Visual if present */}
                   <div className="flex-1 flex flex-col items-center justify-center py-4">
                     {previewCard.frontImage ? (
-                      <div className="w-full aspect-square rounded-xl overflow-hidden relative mb-4 border border-slate-100 flex items-center justify-center bg-slate-50 shrink-0">
+                      <div className="w-full aspect-square max-w-[260px] mx-auto rounded-xl overflow-hidden relative mb-4 border border-slate-100 flex items-center justify-center bg-slate-50 shrink-0">
                         <ImageWithSkeleton
                           src={previewCard.frontImage}
                           alt="Front Illustration"
@@ -2724,7 +2719,7 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                           <span className="whitespace-pre-wrap">{previewCard.backText}</span>
                         )}
                       </h3>
-                      {previewCard.correctArticle && (
+                      {!isGermanSentence(previewCard.frontText || "") && previewCard.correctArticle && (
                         <div className="mt-3.5 inline-flex items-center gap-1.5 px-3 py-1 bg-purple-50 text-purple-700 border border-purple-100 rounded-full font-bold text-xs">
                           <span>أداة التعريف:</span>
                           <span className="font-sans font-extrabold text-sm uppercase">{previewCard.correctArticle === "die-plural" ? "die" : previewCard.correctArticle}</span>

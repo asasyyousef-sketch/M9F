@@ -50,7 +50,7 @@ import {
   CheckCircle2,
   Search
 } from "lucide-react";
-import { Folder as FolderType, Flashcard, getSafeImageStyle, TranscriptDocument, getCardSearchQuery } from "../types";
+import { Folder as FolderType, Flashcard, getSafeImageStyle, TranscriptDocument, getCardSearchQuery, sanitizeCardArticleAndSentence, cleanImageSearchQuery, isGermanSentence } from "../types";
 import { ImageWithSkeleton } from "./ReviewSession";
 import { speakClient, EditCardModal, ImagePickerModal, preloadImage } from "./Modals";
 import { BrowseCard } from "./BrowseCard";
@@ -536,16 +536,28 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
   },
   "cards": [
     {
-      "frontText": "الكلمة أو السؤال باللغة الهدف",
-      "backText": "الترجمة أو الإجابة باللغة العربية",
+      "frontText": "Handy",
+      "backText": "هاتف محمول / جوال",
+      "isArticleMode": true,
+      "correctArticle": "das",
+      "isPluralMode": true,
+      "pluralText": "Handys",
+      "pluralLang": "de",
+      "translationHint": "تلميح: داس هاندي",
+      "difficulty": "medium",
+      "imageSearchQuery": "modern smartphone photo"
+    },
+    {
+      "frontText": "Das Buch ist sehr schön.",
+      "backText": "الكتاب جميل جداً.",
       "isArticleMode": false,
       "correctArticle": "",
       "isPluralMode": false,
       "pluralText": "",
       "pluralLang": "de",
-      "translationHint": "تلميح أو توضيح نطق (اختياري)",
-      "difficulty": "medium",
-      "imageSearchQuery": "كلمة بالإنجليزية لبحث الصور"
+      "translationHint": "جملة كاملة بأداتها",
+      "difficulty": "easy",
+      "imageSearchQuery": "open book on desk"
     }
   ]
 }
@@ -565,22 +577,35 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
       promptText += `- اجعل حقل translationHint دائماً نصاً فارغاً "".\n`;
     }
 
-    if (germanArticlesMode === "on") {
-      promptText += `- تفعيل أدوات التعريف الألمانية (isArticleMode = true) للأسماء المفردة فقط (Single Nouns وليس الجمل الكاملة) وحدد الأداة المناسبة (der/die/das/die-plural) في correctArticle. أما الجمل فتبقى كاملة بأداتها داخل frontText مع isArticleMode = false.\n`;
-    } else if (germanArticlesMode === "off") {
+    if (germanArticlesMode !== "off") {
+      promptText += `\n🚨 قواعد إلزامية صارمة لأدوات التعريف الألمانية (der / die / das / die-plural):
+1. للأسماء والمفردات المفردة (Single Nouns مثل: Das Handy, Der Tisch, Die Katze):
+   - الأداة (der/die/das/die-plural) توضع حصراً وبشكل منفرد في حقل "correctArticle" مع "isArticleMode": true.
+   - حقل "frontText": يجب أن يحتوي فقط على الاسم مجرداً تماماً بدون أداة التعريف (اكتب "Handy" فقط وليس "Das Handy"، واكتب "Tisch" فقط وليس "der Tisch"). يمنع منعاً باتاً كتابة الأداة داخل frontText للأسماء والمفردات!
+2. للجمل والعبارات الكاملة (Sentences & Phrases مثل: "Das Buch ist schön", "Die Kinder spielen"):
+   - الجملة يجب أن تبقى كاملة بجميع كلماتها وأداتها الطبيعية مدمجة داخل "frontText" (مثال: "Das Buch ist schön").
+   - ممنوع منعاً باتاً عزل الأداة من الجملة أو تفكيكها! يجب إلزامياً وضع "isArticleMode": false و "correctArticle": "" كفارغ تماماً.\n`;
+    } else {
       promptText += `- إيقاف أدوات التعريف (isArticleMode = false) و correctArticle = "".\n`;
     }
 
-    if (germanPluralMode === "on") {
-      promptText += `- تفعيل صيغة الجمع (isPluralMode = true) وتوفير الجمع في حقل pluralText.\n`;
-    } else if (germanPluralMode === "off") {
+    if (germanPluralMode !== "off") {
+      promptText += `\n🚨 قواعد إلزامية صارمة ومطلوبة لصيغة الجمع الألمانية (pluralText و isPluralMode):
+- لكل اسم أو مفردة ألمانية (Single Noun)، يجب عليك حتماً وتلقائياً توفير صيغة الجمع الصحيحة في حقل "pluralText" مع وضع "isPluralMode": true.
+- صيغة الجمع في pluralText تُكتب مجردة بدون أداة التعريف (مثال لـ Handy: اكتب في pluralText "Handys". مثال لـ Tisch: اكتب "Tische". مثال لـ Buch: اكتب "Bücher").
+- يمنع منعاً باتاً ترك حقل pluralText فارغاً لأي اسم مفرد! أما الجمل والعبارات الكاملة فاجعل لها "isPluralMode": false و "pluralText": "".\n`;
+    } else {
       promptText += `- إيقاف صيغة الجمع (isPluralMode = false) و pluralText = "".\n`;
     }
 
     if (imagesMode === "off") {
       promptText += `- اجعل حقل imageSearchQuery دائماً نصاً فارغاً "".\n`;
     } else {
-      promptText += `- حقل imageSearchQuery في كل بطاقة يجب أن يتكون بالإنجليزية من الكلمة المفتاحية المحددة للبطاقة مدمجة مع النمط المطلوب (مثال لبطاقة التفاحة: "apple cartoon illustration", ولليمون: "lemon cartoon illustration"). يمنع وضع كلمة النمط العامة فقط بدون اسم البطاقة.\n`;
+      if (imageInstructions.trim()) {
+        promptText += `- حقل imageSearchQuery في كل بطاقة: كلمة مفتاحية بالإنجليزية تعبر بدقة عن الشيء مدمجة مع النمط المطلوب: "${imageInstructions.trim()}".\n`;
+      } else {
+        promptText += `- حقل imageSearchQuery في كل بطاقة: كلمة أو عبارة بالإنجليزية تمثل صورة واقعية وحقيقية عالية الدقة (Realistic Photography) للشيء (مثال للتفاحة: "fresh red apple photo", للهاتف: "modern smartphone", للكتاب: "open book on wooden desk"). يمنع تماماً وضع كلمات رسومات أو كرتون (مثل cartoon أو illustration أو vector أو clipart) ما لم يطلب المستخدم ذلك صراحة!\n`;
+      }
     }
 
     if (frontInstructions.trim()) {
@@ -684,23 +709,47 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
       const folderId = `ai-folder-${Date.now()}`;
       const newCards: AICard[] = cardsList.map((c: any, index: number) => {
         const frontImg = c.frontImage || c.image || undefined;
-        return {
+
+        // Smart extraction of plural text from various keys used by different LLMs
+        let plText = typeof (c.pluralText || c.plural || c.plural_de || c.plural_text || c.germanPlural || c.pluralForm) === "string"
+          ? (c.pluralText || c.plural || c.plural_de || c.plural_text || c.germanPlural || c.pluralForm).trim()
+          : "";
+
+        if (!plText) {
+          // Check if plural was embedded in hint or back text
+          const hintCombined = `${c.translationHint || c.hint || ""} ${c.backText || c.back || ""}`;
+          const plMatch = hintCombined.match(/(?:plural|pl\.|الجمع|جمع)\s*[:=\-–]\s*([A-Za-zÄÖÜäöüß]+)/i);
+          if (plMatch) {
+            plText = plMatch[1].trim();
+          }
+        }
+        if (plText.toLowerCase().startsWith("die ")) {
+          plText = plText.slice(4).trim();
+        }
+
+        const isPlural = Boolean(c.isPluralMode || (plText && plText.length > 0));
+        const art = typeof (c.correctArticle || c.article || c.gender || c.art) === "string"
+          ? (c.correctArticle || c.article || c.gender || c.art).trim().toLowerCase()
+          : "";
+
+        const rawCard: AICard = {
           id: `ai-card-${Date.now()}-${index}`,
           folderId: folderId,
-          frontText: c.frontText || c.front || c.question || "",
-          backText: c.backText || c.back || c.answer || "",
-          isArticleMode: Boolean(c.isArticleMode),
-          correctArticle: c.correctArticle || "",
-          isPluralMode: Boolean(c.isPluralMode),
-          pluralText: c.pluralText || "",
+          frontText: c.frontText || c.front || c.question || c.word || c.german || "",
+          backText: c.backText || c.back || c.answer || c.arabic || c.translation || "",
+          isArticleMode: Boolean(c.isArticleMode || art),
+          correctArticle: art,
+          isPluralMode: isPlural,
+          pluralText: plText || "",
           pluralLang: c.pluralLang || "de",
           translationHint: c.translationHint || c.hint || "",
           difficulty: c.difficulty || "medium",
-          imageSearchQuery: c.imageSearchQuery || undefined,
+          imageSearchQuery: cleanImageSearchQuery(c.imageSearchQuery || "", imageInstructions) || undefined,
           frontImage: frontImg,
           frontImagePosition: frontImg ? "50% 50%" : undefined,
           autoImageCandidates: c.autoImageCandidates || (frontImg ? [frontImg] : undefined)
         };
+        return sanitizeCardArticleAndSentence(rawCard);
       });
 
       const newFolder: AIFolder = {
@@ -1435,21 +1484,24 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
           createdAt: new Date().toISOString()
         };
 
-        const newCards: AICard[] = data.cards.map((c: any, index: number) => ({
-          id: `ai-card-${Date.now()}-${index}`,
-          folderId: folderId,
-          frontText: c.frontText,
-          backText: c.backText,
-          isArticleMode: c.isArticleMode || false,
-          correctArticle: c.correctArticle || "",
-          isPluralMode: c.isPluralMode || false,
-          pluralText: c.pluralText || "",
-          pluralLang: c.pluralLang || "de",
-          translationHint: c.translationHint || "",
-          difficulty: c.difficulty || "medium",
-          frontImage: c.frontImage || undefined,
-          frontImagePosition: c.frontImagePosition || undefined
-        }));
+        const newCards: AICard[] = data.cards.map((c: any, index: number) => {
+          const raw: AICard = {
+            id: `ai-card-${Date.now()}-${index}`,
+            folderId: folderId,
+            frontText: c.frontText,
+            backText: c.backText,
+            isArticleMode: c.isArticleMode || false,
+            correctArticle: c.correctArticle || "",
+            isPluralMode: c.isPluralMode || false,
+            pluralText: c.pluralText || "",
+            pluralLang: c.pluralLang || "de",
+            translationHint: c.translationHint || "",
+            difficulty: c.difficulty || "medium",
+            frontImage: c.frontImage || undefined,
+            frontImagePosition: c.frontImagePosition || undefined
+          };
+          return sanitizeCardArticleAndSentence(raw);
+        });
 
         const updatedFolders = [newFolder, ...aiFolders];
         const updatedCards = [...newCards, ...aiCards];
@@ -1606,21 +1658,24 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
       }
 
       if (data && data.cards && data.cards.length > 0) {
-        const newCards: AICard[] = data.cards.map((c: any, index: number) => ({
-          id: `ai-card-${Date.now()}-${index}`,
-          folderId: activeAiFolder.id,
-          frontText: c.frontText,
-          backText: c.backText,
-          isArticleMode: c.isArticleMode || false,
-          correctArticle: c.correctArticle || "",
-          isPluralMode: c.isPluralMode || false,
-          pluralText: c.pluralText || "",
-          pluralLang: c.pluralLang || "de",
-          translationHint: c.translationHint || "",
-          difficulty: c.difficulty || "medium",
-          frontImage: c.frontImage || undefined,
-          frontImagePosition: c.frontImagePosition || undefined
-        }));
+        const newCards: AICard[] = data.cards.map((c: any, index: number) => {
+          const raw: AICard = {
+            id: `ai-card-${Date.now()}-${index}`,
+            folderId: activeAiFolder.id,
+            frontText: c.frontText,
+            backText: c.backText,
+            isArticleMode: c.isArticleMode || false,
+            correctArticle: c.correctArticle || "",
+            isPluralMode: c.isPluralMode || false,
+            pluralText: c.pluralText || "",
+            pluralLang: c.pluralLang || "de",
+            translationHint: c.translationHint || "",
+            difficulty: c.difficulty || "medium",
+            frontImage: c.frontImage || undefined,
+            frontImagePosition: c.frontImagePosition || undefined
+          };
+          return sanitizeCardArticleAndSentence(raw);
+        });
 
         const updatedCards = [...aiCards, ...newCards];
         setAiCards(updatedCards);
@@ -2351,41 +2406,30 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
   };
 
   const adaptAICardToFlashcard = (aiCard: AICard): Flashcard => {
-    let finalFront = (aiCard.frontText || "").trim();
-    const cleanTokens = finalFront.replace(/\([^)]*\)/g, "").replace(/\s*\/.*$/, "").trim().split(/\s+/);
-    const isSingleWord = cleanTokens.length === 1 && !/[.!?]$/.test(finalFront);
+    const sanitized = sanitizeCardArticleAndSentence(aiCard);
+    const isSingleWord = !isGermanSentence(sanitized.frontText || "");
 
-    let isArticle = isSingleWord && (aiCard.isArticleMode ?? (activeAiFolder?.germanArticlesMode === "on"));
-    let correctArt = isArticle ? (aiCard.correctArticle || "") : "";
-
-    // If it is a sentence (not a single word) and an article was placed in correctArticle, restore it to the sentence
-    if (!isSingleWord && aiCard.correctArticle && ["der", "die", "das", "die-plural"].includes(aiCard.correctArticle.toLowerCase())) {
-      const art = aiCard.correctArticle.toLowerCase() === "die-plural" ? "die" : aiCard.correctArticle.toLowerCase();
-      if (!finalFront.toLowerCase().startsWith(art + " ")) {
-        finalFront = `${art} ${finalFront}`;
-      }
-      isArticle = false;
-      correctArt = "";
-    }
+    let isArticle = isSingleWord && (sanitized.isArticleMode ?? (activeAiFolder?.germanArticlesMode === "on"));
+    let correctArt = isArticle ? (sanitized.correctArticle || "") : "";
 
     return {
-      id: aiCard.id,
-      folderId: aiCard.folderId,
-      frontText: finalFront,
+      id: sanitized.id,
+      folderId: sanitized.folderId,
+      frontText: sanitized.frontText,
       frontLang: activeAiFolder?.frontLang || "de",
-      frontImage: aiCard.frontImage,
-      frontImagePosition: aiCard.frontImagePosition || "50% 50%",
-      backText: aiCard.backText,
+      frontImage: sanitized.frontImage,
+      frontImagePosition: sanitized.frontImagePosition || "50% 50%",
+      backText: sanitized.backText,
       backLang: activeAiFolder?.backLang || "ar",
       isArticleMode: isArticle,
       correctArticle: correctArt,
-      isPluralMode: isSingleWord ? (aiCard.isPluralMode ?? (activeAiFolder?.germanPluralMode === "on")) : false,
-      pluralText: isSingleWord ? (aiCard.pluralText || "") : "",
-      pluralLang: aiCard.pluralLang || "de",
-      translationHint: aiCard.translationHint || "",
+      isPluralMode: isSingleWord ? (sanitized.isPluralMode ?? (activeAiFolder?.germanPluralMode === "on")) : false,
+      pluralText: isSingleWord ? (sanitized.pluralText || "") : "",
+      pluralLang: sanitized.pluralLang || "de",
+      translationHint: sanitized.translationHint || "",
       createdAt: new Date().toISOString(),
       streak: 0,
-      difficulty: aiCard.difficulty || "medium"
+      difficulty: sanitized.difficulty || "medium"
     };
   };
 
@@ -5126,27 +5170,33 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                             </div>
 
                             {/* Card text and definitions */}
-                            <div>
-                              <div className="flex items-center gap-1.5">
-                                {card.correctArticle && (
-                                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100 uppercase">
-                                    {card.correctArticle}
-                                  </span>
-                                )}
-                                <h4 className="font-bold text-[#202124] text-base group-hover:text-[#0056f6] transition-colors whitespace-pre-wrap" dir="ltr">
-                                  {card.frontText}
-                                </h4>
-                              </div>
-                              {cardPluralToggle[card.id] && card.pluralText ? (
-                                <p className="text-xs text-fuchsia-600 font-bold mt-1 whitespace-pre-wrap" dir="ltr">
-                                  صيغة الجمع: {card.pluralText}
-                                </p>
-                              ) : (
-                                <p className="text-xs text-[#5f6368] font-medium mt-1 whitespace-pre-wrap">
-                                  {card.backText} {card.translationHint ? `• (${card.translationHint})` : ""}
-                                </p>
-                              )}
-                            </div>
+                            {(() => {
+                              const sanitized = sanitizeCardArticleAndSentence(card);
+                              const isSentence = isGermanSentence(card.frontText || "");
+                              return (
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    {!isSentence && sanitized.correctArticle && (
+                                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100 uppercase">
+                                        {sanitized.correctArticle === "die-plural" ? "die" : sanitized.correctArticle}
+                                      </span>
+                                    )}
+                                    <h4 className="font-bold text-[#202124] text-base group-hover:text-[#0056f6] transition-colors whitespace-pre-wrap" dir="ltr">
+                                      {sanitized.frontText}
+                                    </h4>
+                                  </div>
+                                  {cardPluralToggle[card.id] && card.pluralText ? (
+                                    <p className="text-xs text-fuchsia-600 font-bold mt-1 whitespace-pre-wrap" dir="ltr">
+                                      صيغة الجمع: {card.pluralText}
+                                    </p>
+                                  ) : (
+                                    <p className="text-xs text-[#5f6368] font-medium mt-1 whitespace-pre-wrap">
+                                      {card.backText} {card.translationHint ? `• (${card.translationHint})` : ""}
+                                    </p>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
 
                           {/* Left Side: Pronounce, Edit and Delete Actions */}

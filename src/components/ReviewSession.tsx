@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X, Flag, Volume2, HelpCircle, RefreshCw, CheckCircle, AlertCircle, Timer, Award, Trophy, ArrowLeft, ArrowRight, Play, Pause, Eye, RotateCcw, ThumbsUp, ThumbsDown, Sparkles, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, MoreHorizontal, Sliders, Shuffle, EyeOff, VolumeX, Clock, Layers, Pencil, Plus, Check, Moon, Sun, DownloadCloud, Image as ImageIcon, CheckCircle2, Loader2, Download, Minimize2, Maximize2, Repeat, Trash2, ArrowUp, ArrowDown, Music, Mic, Save, Square, Bot, MessageSquare, Activity } from "lucide-react";
-import { Flashcard, Folder, ReviewMethod, getSafeImageStyle, getCardSearchQuery, SpeakingChallengeItem } from "../types";
+import { Flashcard, Folder, ReviewMethod, getSafeImageStyle, getCardSearchQuery, SpeakingChallengeItem, sanitizeCardArticleAndSentence, isGermanSentence } from "../types";
 import { speakClient, preloadTTS, ttsCache, stopActiveAudio, fadeAndStopAudio, preloadImage, imageCache, invalidateImageCache, playPiperLocalWasm, playGradioClientAudio } from "./Modals";
 import { motion, AnimatePresence, MotionConfig } from "motion/react";
 import { ReviewChatModal } from "./ReviewChatModal";
@@ -118,6 +118,46 @@ export interface RepeatSequenceStep {
     | "laser";
   includeArticle?: "auto" | "with" | "indefinite" | "without";
 }
+
+export const getFrontSpeechText = (
+  card: Flashcard | { frontText: string; correctArticle?: string; frontLang?: string; isArticleMode?: boolean } | null | undefined,
+  speakArticle: boolean = true
+): string => {
+  if (!card || !card.frontText) return "";
+  const rawText = card.frontText.trim();
+  const lang = (card.frontLang || "de").toLowerCase().split("-")[0].split("_")[0];
+
+  // If not German or it's a full sentence, return original text as-is
+  if (lang !== "de" || isGermanSentence(rawText)) {
+    return rawText;
+  }
+
+  // Determine article (from correctArticle or prefix in text)
+  let article = card.correctArticle ? card.correctArticle.trim().toLowerCase() : "";
+  if (!article) {
+    const match = rawText.match(/^(der|die|das)\s+/i);
+    if (match) {
+      article = match[1].toLowerCase();
+    }
+  }
+
+  // Extract clean noun (without leading article if present)
+  let cleanNoun = rawText;
+  const matchArticlePrefix = cleanNoun.match(/^(der|die|das)\s+(.+)$/i);
+  if (matchArticlePrefix) {
+    cleanNoun = matchArticlePrefix[2].trim();
+  }
+
+  if (speakArticle) {
+    if (article) {
+      const artWord = article === "die-plural" ? "die" : article;
+      return `${artWord} ${cleanNoun}`;
+    }
+    return rawText;
+  } else {
+    return cleanNoun;
+  }
+};
 
 export const formatTextForArticleMode = (
   text: string,
@@ -544,6 +584,7 @@ interface StudyCardProps {
   isSwipeImageEnabled?: boolean;
   swipeSensitivity?: number;
   reviewVoiceTarget?: "primary" | "secondary";
+  speakFrontArticle?: boolean;
 }
 
 const StudyCard: React.FC<StudyCardProps> = ({
@@ -560,6 +601,7 @@ const StudyCard: React.FC<StudyCardProps> = ({
   isSwipeImageEnabled = true,
   swipeSensitivity = 40,
   reviewVoiceTarget = "primary",
+  speakFrontArticle = true,
 }) => {
   // Capture card in local state so it stays exactly the same when unmounting/exiting
   const [localCard, setLocalCard] = useState(card);
@@ -1120,289 +1162,595 @@ const StudyCard: React.FC<StudyCardProps> = ({
       <div className="w-full h-full relative flip-card-inner rounded-2xl sm:rounded-3xl shadow-sm bg-surface-container-lowest border border-outline-variant/30">
         
         {/* FRONT FACE */}
-        <div className={`absolute inset-0 w-full h-full flip-card-front rounded-2xl sm:rounded-3xl flex flex-col p-4 sm:p-5 bg-surface-container-lowest overflow-hidden justify-between ${
-          localFlipped ? "pointer-events-none select-none invisible opacity-0" : "pointer-events-auto visible opacity-100"
-        }`}>
-          <div className="w-full aspect-square max-h-[58%] rounded-xl sm:rounded-2xl overflow-hidden relative mb-2 sm:mb-3 border border-outline-variant/10 flex items-center justify-center bg-surface-container-low select-none shadow-xs mx-auto">
-            {isSwipeImageEnabled && extraImages.length > 0 ? (
-              <div 
-                className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing"
-                onTouchStart={handleTouchStart}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onClick={handleImageContainerClick}
-              >
-                <ImageWithSkeleton
-                  src={extraImages[currentImageIndex]}
-                  alt="Illustration"
-                  className="absolute inset-0 w-full h-full object-cover select-none pointer-events-none"
-                  style={currentImageIndex === 0 && localCard.frontImage ? getSafeImageStyle(localCard.frontImagePosition) : { objectFit: "cover" }}
-                  referrerPolicy="no-referrer"
-                  loading="eager"
-                  fetchPriority="high"
-                  onError={handleImageError}
-                />
-                
-                {/* Space-saving, elegant micro image counter */}
-                <div className="absolute bottom-2 right-2 flex items-center gap-1 z-10 pointer-events-none select-none bg-black/50 backdrop-blur-md text-[10px] text-white/95 px-2 py-0.5 rounded-full font-mono shadow-xs border border-white/10">
-                  {isLoadingMore && (
-                    <RefreshCw className="w-2.5 h-2.5 animate-spin text-white/90" />
+        {(() => {
+          const hasActiveImage = !!(
+            (isSwipeImageEnabled && extraImages.length > 0) ||
+            localCard.frontImage
+          );
+
+          if (hasActiveImage) {
+            return (
+              <div className={`absolute inset-0 w-full h-full flip-card-front rounded-2xl sm:rounded-3xl overflow-hidden relative bg-surface-container-lowest ${
+                localFlipped ? "pointer-events-none select-none invisible opacity-0" : "pointer-events-auto visible opacity-100"
+              }`}>
+                {/* Full-bleed Edge-to-Edge Image filling the entire square card */}
+                {isSwipeImageEnabled && extraImages.length > 0 ? (
+                  <div 
+                    className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing"
+                    onTouchStart={handleTouchStart}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
+                    onMouseDown={handleMouseDown}
+                    onMouseMove={handleMouseMove}
+                    onMouseUp={handleMouseUp}
+                    onClick={handleImageContainerClick}
+                  >
+                    <ImageWithSkeleton
+                      src={extraImages[currentImageIndex]}
+                      alt="Illustration"
+                      className="absolute inset-0 w-full h-full object-cover select-none pointer-events-none"
+                      style={currentImageIndex === 0 && localCard.frontImage ? getSafeImageStyle(localCard.frontImagePosition) : { objectFit: "cover" }}
+                      referrerPolicy="no-referrer"
+                      loading="eager"
+                      fetchPriority="high"
+                      onError={handleImageError}
+                    />
+                    
+                    {/* Top-right micro image counter */}
+                    <div className="absolute top-3 right-3 flex items-center gap-1 z-30 pointer-events-none select-none bg-black/50 backdrop-blur-md text-[10px] text-white/95 px-2.5 py-1 rounded-full font-mono shadow-xs border border-white/15">
+                      {isLoadingMore && (
+                        <RefreshCw className="w-2.5 h-2.5 animate-spin text-white/90" />
+                      )}
+                      <span>
+                        {`${currentImageIndex + 1}/${extraImages.length}`}
+                      </span>
+                    </div>
+                  </div>
+                ) : isSwipeImageEnabled && isLoadingMore ? (
+                  <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-slate-900 text-white">
+                    <RefreshCw className="w-8 h-8 text-primary animate-spin mb-2" />
+                    <span className="text-xs text-white/70 font-bold">جاري البحث عن صور...</span>
+                  </div>
+                ) : (
+                  <ImageWithSkeleton
+                    src={localCard.frontImage!}
+                    alt="Illustration"
+                    className="absolute inset-0 w-full h-full object-cover select-none"
+                    style={getSafeImageStyle(localCard.frontImagePosition)}
+                    referrerPolicy="no-referrer"
+                    loading="eager"
+                    fetchPriority="high"
+                    onError={handleImageError}
+                  />
+                )}
+
+                {/* Top-left Audio buttons overlaid on Image */}
+                <div className={`absolute top-3 left-3 flex items-center gap-1.5 z-30 select-none ${
+                  localFlipped ? "pointer-events-none invisible opacity-0" : "pointer-events-auto visible opacity-100"
+                }`}>
+                  <button
+                    type="button"
+                    disabled={localFlipped}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (localFlipped) return;
+                      onPlayPronunciation(getFrontSpeechText(localCard, speakFrontArticle), localCard.frontLang);
+                    }}
+                    className="w-8 h-8 rounded-xl bg-black/40 hover:bg-black/65 backdrop-blur-md transition-all shadow-sm cursor-pointer flex items-center justify-center active:scale-95 border border-white/25 hover:border-white/50 text-white disabled:pointer-events-none disabled:opacity-0"
+                    title={reviewVoiceTarget === "secondary" ? "استمع للنطق المعتمد: الصوت الثانوي" : "استمع للنطق المعتمد: الصوت الأساسي"}
+                  >
+                    <Volume2 className="w-4 h-4" />
+                  </button>
+                  {onPlaySecondaryPronunciation && (
+                    <button
+                      type="button"
+                      disabled={localFlipped}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (localFlipped) return;
+                        onPlaySecondaryPronunciation(getFrontSpeechText(localCard, speakFrontArticle), localCard.frontLang);
+                      }}
+                      className="w-8 h-8 rounded-xl bg-black/40 hover:bg-black/65 backdrop-blur-md transition-all shadow-sm cursor-pointer flex items-center justify-center active:scale-95 border border-white/25 hover:border-white/50 text-white disabled:pointer-events-none disabled:opacity-0"
+                      title={reviewVoiceTarget === "secondary" ? "استمع للصوت الأساسي" : "استمع للصوت الثانوي"}
+                    >
+                      <Volume2 className="w-4 h-4" />
+                    </button>
                   )}
-                  <span>
-                    {`${currentImageIndex + 1}/${extraImages.length}`}
-                  </span>
+                </div>
+
+                {/* Bottom Overlay with Word, Article Badge, and Hint */}
+                <div className="absolute bottom-0 inset-x-0 z-20 bg-gradient-to-t from-black/90 via-black/55 to-transparent pt-14 pb-4 px-4 sm:px-5 flex flex-col items-center justify-center text-center pointer-events-auto">
+                  {hideFront && !revealFrontTemp ? (
+                    <div 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRevealFrontTemp(true);
+                      }}
+                      className="py-2.5 px-5 bg-black/60 hover:bg-black/80 backdrop-blur-md rounded-2xl border border-white/25 text-white flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 duration-200 mx-auto w-fit shadow-md"
+                    >
+                      <EyeOff className="w-4 h-4 text-white/80" />
+                      <span className="text-xs text-white font-medium">مخفي • انقر للكشف</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 w-full">
+                      {(() => {
+                        const sanitized = sanitizeCardArticleAndSentence(localCard);
+                        const isSentence = isGermanSentence(localCard.frontText || "");
+                        return (
+                          <h3 className="text-2xl sm:text-3xl font-black text-white break-words whitespace-pre-wrap leading-snug px-2 flex flex-row items-center justify-center gap-2.5 drop-shadow-md" dir="ltr">
+                            {!isSentence && sanitized.correctArticle && (
+                              <span className={`text-xs sm:text-sm px-2.5 py-0.5 rounded-lg font-black shrink-0 ${
+                                sanitized.correctArticle === "der" ? "bg-blue-600 text-white shadow-sm" :
+                                sanitized.correctArticle === "die" ? "bg-rose-600 text-white shadow-sm" :
+                                sanitized.correctArticle === "das" ? "bg-emerald-600 text-white shadow-sm" :
+                                sanitized.correctArticle === "die-plural" ? "bg-amber-500 text-white shadow-sm" :
+                                "bg-primary text-white"
+                              }`}>
+                                {sanitized.correctArticle === "die-plural" ? "die" : sanitized.correctArticle}
+                              </span>
+                            )}
+                            <span className="whitespace-pre-wrap tracking-normal">{sanitized.frontText}</span>
+                            {hideFront && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setRevealFrontTemp(false);
+                                }}
+                                className="p-1 rounded-lg bg-black/50 hover:bg-black/70 backdrop-blur-md text-white/80 cursor-pointer transition-colors border border-white/20"
+                                title="إخفاء النص مجدداً"
+                              >
+                                <EyeOff className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </h3>
+                        );
+                      })()}
+                      {localCard.translationHint && (
+                        <p
+                          onClick={handleDescriptionClick}
+                          onMouseDown={startLongPress}
+                          onMouseUp={cancelLongPress}
+                          onMouseLeave={cancelLongPress}
+                          onTouchStart={startLongPress}
+                          onTouchEnd={cancelLongPress}
+                          onTouchMove={cancelLongPress}
+                          onContextMenu={handleDescriptionContextMenu}
+                          className="text-xs sm:text-sm font-semibold text-white/90 hover:text-white transition-colors cursor-pointer select-none drop-shadow-xs"
+                        >
+                          {localCard.translationHint}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
-            ) : isSwipeImageEnabled && isLoadingMore ? (
-              <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900">
-                <RefreshCw className="w-6 h-6 text-primary animate-spin mb-2" />
-                <span className="text-[10px] text-slate-400 font-bold">جاري البحث عن صور...</span>
-              </div>
-            ) : localCard.frontImage ? (
-              <ImageWithSkeleton
-                src={localCard.frontImage}
-                alt="Illustration"
-                className="absolute inset-0 w-full h-full object-cover"
-                style={getSafeImageStyle(localCard.frontImagePosition)}
-                referrerPolicy="no-referrer"
-                loading="eager"
-                fetchPriority="high"
-                onError={handleImageError}
-              />
-            ) : (
-              <div className="text-primary/70 font-bold text-xs flex flex-col items-center gap-2">
-                <span className="material-symbols-outlined text-4xl">style</span>
-                <span>مفهوم تعليمي</span>
-              </div>
-            )}
-            {/* Unified & Simplified Audio Buttons over Image (Clean Neutral White & Glassmorphism) */}
-            <div className={`absolute top-3 left-3 flex items-center gap-1.5 z-30 select-none ${
-              localFlipped ? "pointer-events-none invisible opacity-0" : "pointer-events-auto visible opacity-100"
+            );
+          }
+
+          {/* Cards WITHOUT Image: Clean Minimalist Centered Layout */}
+          return (
+            <div className={`absolute inset-0 w-full h-full flip-card-front rounded-2xl sm:rounded-3xl flex flex-col p-5 sm:p-6 bg-surface-container-lowest overflow-hidden justify-between ${
+              localFlipped ? "pointer-events-none select-none invisible opacity-0" : "pointer-events-auto visible opacity-100"
             }`}>
-              <button
-                type="button"
-                disabled={localFlipped}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (localFlipped) return;
-                  onPlayPronunciation(localCard.frontText, localCard.frontLang);
-                }}
-                className="w-8 h-8 rounded-xl bg-black/35 hover:bg-black/60 backdrop-blur-md transition-all shadow-xs cursor-pointer flex items-center justify-center active:scale-95 border border-white/25 hover:border-white/50 text-white disabled:pointer-events-none disabled:opacity-0"
-                title={reviewVoiceTarget === "secondary" ? "استمع للنطق المعتمد: الصوت الثانوي" : "استمع للنطق المعتمد: الصوت الأساسي"}
-              >
-                <Volume2 className="w-4 h-4" />
-              </button>
-              {onPlaySecondaryPronunciation && (
+              {/* Audio button at top */}
+              <div className="w-full flex items-center justify-start gap-1.5 select-none">
                 <button
                   type="button"
                   disabled={localFlipped}
                   onClick={(e) => {
                     e.stopPropagation();
                     if (localFlipped) return;
-                    onPlaySecondaryPronunciation(localCard.frontText, localCard.frontLang);
+                    onPlayPronunciation(getFrontSpeechText(localCard, speakFrontArticle), localCard.frontLang);
                   }}
-                  className="w-8 h-8 rounded-xl bg-black/35 hover:bg-black/60 backdrop-blur-md transition-all shadow-xs cursor-pointer flex items-center justify-center active:scale-95 border border-white/25 hover:border-white/50 text-white disabled:pointer-events-none disabled:opacity-0"
-                  title={reviewVoiceTarget === "secondary" ? "استمع للصوت الأساسي" : "استمع للصوت الثانوي"}
+                  className="w-9 h-9 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 shadow-3xs"
+                  title={reviewVoiceTarget === "secondary" ? "استمع للنطق المعتمد: الصوت الثانوي" : "استمع للنطق المعتمد: الصوت الأساسي"}
                 >
-                  <Volume2 className="w-4 h-4" />
+                  <Volume2 className="w-4.5 h-4.5" />
                 </button>
-              )}
-            </div>
-          </div>
-          <div className="text-center pb-2 flex-1 flex flex-col justify-center px-2">
-            {hideFront && !revealFrontTemp ? (
-              <div 
-                onClick={(e) => {
-                  e.stopPropagation(); // Prevent card flip
-                  setRevealFrontTemp(true);
-                }}
-                className="py-3 px-5 bg-slate-50/50 hover:bg-slate-100/80 rounded-2xl border border-dashed border-slate-200 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 duration-200 mx-auto w-fit"
-              >
-                <EyeOff className="w-4 h-4 text-slate-400" />
-                <span className="text-[11px] text-slate-500 font-medium">مخفي • انقر للكشف</span>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <h3 className="text-2xl sm:text-3xl font-extrabold text-on-surface break-words whitespace-pre-wrap leading-snug px-2 flex flex-row items-center justify-center gap-2.5" dir="ltr">
-                  {localCard.correctArticle && (
-                    <span className={`text-xs sm:text-sm px-2.5 py-0.5 rounded-lg font-black shrink-0 ${
-                      localCard.correctArticle === "der" ? "bg-blue-600 text-white shadow-xs" :
-                      localCard.correctArticle === "die" ? "bg-rose-600 text-white shadow-xs" :
-                      localCard.correctArticle === "das" ? "bg-emerald-600 text-white shadow-xs" :
-                      localCard.correctArticle === "die-plural" ? "bg-amber-500 text-white shadow-xs" :
-                      "bg-primary text-white"
-                    }`}>
-                    {localCard.correctArticle === "die-plural" ? "die" : localCard.correctArticle}
-                    </span>
-                  )}
-                  <span className="whitespace-pre-wrap tracking-normal">{localCard.frontText}</span>
-                  {hideFront && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setRevealFrontTemp(false);
-                      }}
-                      className="p-1 rounded-lg bg-slate-100/80 hover:bg-slate-200/80 text-slate-500 cursor-pointer transition-colors"
-                      title="إخفاء النص مجدداً"
-                    >
-                      <EyeOff className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </h3>
-                {localCard.translationHint && (
-                  <p
-                    onClick={handleDescriptionClick}
-                    onMouseDown={startLongPress}
-                    onMouseUp={cancelLongPress}
-                    onMouseLeave={cancelLongPress}
-                    onTouchStart={startLongPress}
-                    onTouchEnd={cancelLongPress}
-                    onTouchMove={cancelLongPress}
-                    onContextMenu={handleDescriptionContextMenu}
-                    className="text-xs sm:text-sm font-semibold text-on-surface-variant/70 hover:text-primary transition-colors cursor-pointer select-none"
+                {onPlaySecondaryPronunciation && (
+                  <button
+                    type="button"
+                    disabled={localFlipped}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (localFlipped) return;
+                      onPlaySecondaryPronunciation(getFrontSpeechText(localCard, speakFrontArticle), localCard.frontLang);
+                    }}
+                    className="w-9 h-9 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 shadow-3xs"
+                    title={reviewVoiceTarget === "secondary" ? "استمع للصوت الأساسي" : "استمع للصوت الثانوي"}
                   >
-                    {localCard.translationHint}
-                  </p>
+                    <Volume2 className="w-4.5 h-4.5" />
+                  </button>
                 )}
               </div>
-            )}
-          </div>
-        </div>
+
+              {/* Centered Word and Article */}
+              <div className="flex-1 flex flex-col justify-center items-center text-center px-2">
+                {hideFront && !revealFrontTemp ? (
+                  <div 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRevealFrontTemp(true);
+                    }}
+                    className="py-3 px-5 bg-slate-50/50 hover:bg-slate-100/80 rounded-2xl border border-dashed border-slate-200 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 duration-200 mx-auto w-fit"
+                  >
+                    <EyeOff className="w-4 h-4 text-slate-400" />
+                    <span className="text-[11px] text-slate-500 font-medium">مخفي • انقر للكشف</span>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {(() => {
+                      const sanitized = sanitizeCardArticleAndSentence(localCard);
+                      const isSentence = isGermanSentence(localCard.frontText || "");
+                      return (
+                        <h3 className="text-3xl sm:text-4xl font-extrabold text-on-surface break-words whitespace-pre-wrap leading-snug px-2 flex flex-row items-center justify-center gap-3" dir="ltr">
+                          {!isSentence && sanitized.correctArticle && (
+                            <span className={`text-sm sm:text-base px-3 py-1 rounded-xl font-black shrink-0 ${
+                              sanitized.correctArticle === "der" ? "bg-blue-600 text-white shadow-xs" :
+                              sanitized.correctArticle === "die" ? "bg-rose-600 text-white shadow-xs" :
+                              sanitized.correctArticle === "das" ? "bg-emerald-600 text-white shadow-xs" :
+                              sanitized.correctArticle === "die-plural" ? "bg-amber-500 text-white shadow-xs" :
+                              "bg-primary text-white"
+                            }`}>
+                              {sanitized.correctArticle === "die-plural" ? "die" : sanitized.correctArticle}
+                            </span>
+                          )}
+                          <span className="whitespace-pre-wrap tracking-normal">{sanitized.frontText}</span>
+                          {hideFront && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRevealFrontTemp(false);
+                              }}
+                              className="p-1.5 rounded-lg bg-slate-100/80 hover:bg-slate-200/80 text-slate-500 cursor-pointer transition-colors"
+                              title="إخفاء النص مجدداً"
+                            >
+                              <EyeOff className="w-4 h-4" />
+                            </button>
+                          )}
+                        </h3>
+                      );
+                    })()}
+                    {localCard.translationHint && (
+                      <p
+                        onClick={handleDescriptionClick}
+                        onMouseDown={startLongPress}
+                        onMouseUp={cancelLongPress}
+                        onMouseLeave={cancelLongPress}
+                        onTouchStart={startLongPress}
+                        onTouchEnd={cancelLongPress}
+                        onTouchMove={cancelLongPress}
+                        onContextMenu={handleDescriptionContextMenu}
+                        className="text-sm font-semibold text-on-surface-variant/75 hover:text-primary transition-colors cursor-pointer select-none"
+                      >
+                        {localCard.translationHint}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="h-4" />
+            </div>
+          );
+        })()}
 
         {/* BACK FACE */}
-        <div className={`absolute inset-0 w-full h-full flip-card-back rounded-2xl sm:rounded-3xl flex flex-col p-4 sm:p-5 border border-outline-variant/30 bg-surface-container-lowest overflow-hidden justify-between ${
-          localFlipped ? "pointer-events-auto visible opacity-100" : "pointer-events-none select-none invisible opacity-0"
-        }`}>
-          <div className="flex items-center justify-start gap-2 mb-3">
-            <button
-              type="button"
-              disabled={!localFlipped}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (!localFlipped) return;
-                if (showPlural && localCard.pluralText) {
-                  onPlayPronunciation(localCard.pluralText, localCard.pluralLang || "de");
-                } else {
-                  onPlayPronunciation(localCard.backText, localCard.backLang || "ar");
-                }
-              }}
-              className="w-9 h-9 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 shadow-3xs disabled:pointer-events-none disabled:opacity-0"
-              title={reviewVoiceTarget === "secondary" ? "استمع للنطق المعتمد: الصوت الثانوي" : "استمع للنطق المعتمد: الصوت الأساسي"}
-            >
-              <Volume2 className="w-4.5 h-4.5" />
-            </button>
+        {(() => {
+          const backImageSrc = localCard.backImage || (
+            isSwipeImageEnabled && extraImages.length > 0
+              ? extraImages[currentImageIndex]
+              : localCard.frontImage
+          );
+          const hasBackActiveImage = !!backImageSrc;
 
-            {onPlaySecondaryPronunciation && (
-              <button
-                type="button"
-                disabled={!localFlipped}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!localFlipped) return;
-                  if (showPlural && localCard.pluralText) {
-                    onPlaySecondaryPronunciation(localCard.pluralText, localCard.pluralLang || "de");
-                  } else {
-                    onPlaySecondaryPronunciation(localCard.backText, localCard.backLang || "ar");
-                  }
-                }}
-                className="w-9 h-9 rounded-xl transition-all cursor-pointer flex items-center justify-center relative active:scale-95 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 shadow-3xs disabled:pointer-events-none disabled:opacity-0"
-                title={reviewVoiceTarget === "secondary" ? "استمع للصوت الأساسي" : "استمع للصوت الثانوي"}
-              >
-                <Volume2 className="w-4.5 h-4.5" />
-              </button>
-            )}
+          if (hasBackActiveImage) {
+            return (
+              <div className={`absolute inset-0 w-full h-full flip-card-back rounded-2xl sm:rounded-3xl overflow-hidden relative border border-outline-variant/30 select-none ${
+                localFlipped ? "pointer-events-auto visible opacity-100" : "pointer-events-none select-none invisible opacity-0"
+              }`}>
+                {/* Full-bleed edge-to-edge ambient photographic backdrop */}
+                <div className="absolute inset-0 w-full h-full pointer-events-none select-none overflow-hidden">
+                  <ImageWithSkeleton
+                    src={backImageSrc!}
+                    alt="Illustration"
+                    className="absolute inset-0 w-full h-full object-cover scale-105 filter blur-[2px]"
+                    style={localCard.backImagePosition ? getSafeImageStyle(localCard.backImagePosition) : getSafeImageStyle(localCard.frontImagePosition)}
+                    referrerPolicy="no-referrer"
+                    loading="eager"
+                    fetchPriority="high"
+                  />
+                  <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-xs" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/60 to-black/70" />
+                </div>
 
-            {/* Plural Toggle Button */}
-            {localCard.isPluralMode && localCard.pluralText && (
-              <button
-                type="button"
-                disabled={!localFlipped}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!localFlipped) return;
-                  const nextShow = !showPlural;
-                  setShowPlural(nextShow);
-                  if (nextShow) {
-                    onPlayPronunciation(localCard.pluralText!, localCard.pluralLang || "de");
-                  }
-                }}
-                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer border active:scale-95 ${
-                  showPlural 
-                    ? "bg-purple-600 text-white shadow-xs border-purple-600" 
-                    : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border-slate-200/60 dark:border-slate-700"
-                }`}
-                title={showPlural ? "العودة للترجمة" : "عرض صيغة الجمع للكلمة (+)"}
-              >
-                <Plus className="w-4.5 h-4.5" />
-              </button>
-            )}
-          </div>
-
-          <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
-            {hideBack && !revealBackTemp ? (
-              <div 
-                onClick={(e) => {
-                  e.stopPropagation(); // Prevent action
-                  setRevealBackTemp(true);
-                }}
-                className="py-3 px-5 bg-slate-50/50 hover:bg-slate-100/80 rounded-2xl border border-dashed border-slate-200 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 duration-200"
-              >
-                <EyeOff className="w-4 h-4 text-slate-400" />
-                <span className="text-[11px] text-slate-500 font-medium">مخفي • انقر للكشف</span>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-2 whitespace-pre-wrap">
-                <h3 className="text-2xl sm:text-3xl font-extrabold text-on-surface leading-relaxed flex items-center justify-center gap-2 whitespace-pre-wrap">
-                  {showPlural && localCard.pluralText ? (
-                    <span className="whitespace-pre-wrap font-extrabold text-indigo-600 dark:text-indigo-300 animate-fadeIn">{localCard.pluralText}</span>
-                  ) : (
-                    <span className="whitespace-pre-wrap">{localCard.backText}</span>
-                  )}
-                  {hideBack && (
+                {/* Foreground Card Content with Luxurious Spacing */}
+                <div className="relative z-20 w-full h-full flex flex-col justify-between p-4 sm:p-5 select-none pointer-events-auto">
+                  {/* Top Bar: Arabic Audio Button + Plural Toggle (if applicable) */}
+                  <div className="w-full flex items-center justify-start gap-1.5 select-none">
                     <button
+                      type="button"
+                      disabled={!localFlipped}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setRevealBackTemp(false);
+                        if (!localFlipped) return;
+                        if (showPlural && localCard.pluralText) {
+                          onPlayPronunciation(localCard.pluralText, localCard.pluralLang || "de");
+                        } else {
+                          onPlayPronunciation(localCard.backText, localCard.backLang || "ar");
+                        }
                       }}
-                      className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-500 cursor-pointer transition-colors mt-2"
-                      title="إخفاء النص مجدداً"
+                      className="w-8.5 h-8.5 rounded-xl bg-black/40 hover:bg-black/65 backdrop-blur-md transition-all shadow-sm cursor-pointer flex items-center justify-center active:scale-95 border border-white/25 hover:border-white/50 text-white disabled:pointer-events-none disabled:opacity-0 preserve-bg"
+                      title={reviewVoiceTarget === "secondary" ? "استمع للنطق المعتمد: الصوت الثانوي" : "استمع للنطق المعتمد: الصوت الأساسي"}
                     >
-                      <EyeOff className="w-3.5 h-3.5" />
+                      <Volume2 className="w-4 h-4" />
                     </button>
-                  )}
-                </h3>
-              </div>
-            )}
-          </div>
 
-          <div className="flex gap-3 mt-4 border-t border-slate-100 dark:border-slate-800 pt-4">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClassicKnow(false);
-              }}
-              className="flex-1 py-3 sm:py-3.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-300 border border-slate-200 dark:border-slate-700 hover:border-rose-200 dark:hover:border-rose-800/60 rounded-xl font-bold text-xs sm:text-sm active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 shadow-3xs group"
-            >
-              <ThumbsDown className="w-4 h-4 text-rose-500/80 group-hover:text-rose-500 group-hover:scale-110 transition-all" />
-              <span>لم أعرفها</span>
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClassicKnow(true);
-              }}
-              className="flex-1 py-3 sm:py-3.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 hover:text-emerald-600 dark:hover:text-emerald-300 border border-slate-200 dark:border-slate-700 hover:border-emerald-200 dark:hover:border-emerald-800/60 rounded-xl font-bold text-xs sm:text-sm active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 shadow-3xs group"
-            >
-              <ThumbsUp className="w-4 h-4 text-emerald-500/80 group-hover:text-emerald-500 group-hover:scale-110 transition-all" />
-              <span>عرفتها</span>
-            </button>
-          </div>
-        </div>
+                    {onPlaySecondaryPronunciation && (
+                      <button
+                        type="button"
+                        disabled={!localFlipped}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!localFlipped) return;
+                          if (showPlural && localCard.pluralText) {
+                            onPlaySecondaryPronunciation(localCard.pluralText, localCard.pluralLang || "de");
+                          } else {
+                            onPlaySecondaryPronunciation(localCard.backText, localCard.backLang || "ar");
+                          }
+                        }}
+                        className="w-8.5 h-8.5 rounded-xl bg-black/40 hover:bg-black/65 backdrop-blur-md transition-all shadow-sm cursor-pointer flex items-center justify-center active:scale-95 border border-white/25 hover:border-white/50 text-white disabled:pointer-events-none disabled:opacity-0 preserve-bg"
+                        title={reviewVoiceTarget === "secondary" ? "استمع للصوت الأساسي" : "استمع للصوت الثانوي"}
+                      >
+                        <Volume2 className="w-4 h-4" />
+                      </button>
+                    )}
+
+                    {/* Plural Toggle Button */}
+                    {localCard.isPluralMode && localCard.pluralText && (
+                      <button
+                        type="button"
+                        disabled={!localFlipped}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!localFlipped) return;
+                          const nextShow = !showPlural;
+                          setShowPlural(nextShow);
+                          if (nextShow) {
+                            onPlayPronunciation(localCard.pluralText!, localCard.pluralLang || "de");
+                          }
+                        }}
+                        className={`w-8.5 h-8.5 rounded-xl flex items-center justify-center transition-all cursor-pointer border active:scale-95 preserve-bg ${
+                          showPlural 
+                            ? "bg-purple-600 text-white shadow-sm border-purple-500" 
+                            : "bg-black/40 hover:bg-black/65 backdrop-blur-md text-white border-white/25"
+                        }`}
+                        title={showPlural ? "العودة للترجمة" : "عرض صيغة الجمع للكلمة (+)"}
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Center: Meaning / Translation & Plural presentation */}
+                  <div className="flex-1 flex flex-col items-center justify-center text-center px-2 py-4">
+                    {hideBack && !revealBackTemp ? (
+                      <div 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRevealBackTemp(true);
+                        }}
+                        className="py-3 px-6 bg-black/60 hover:bg-black/80 backdrop-blur-md rounded-2xl border border-white/25 text-white flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 duration-200 mx-auto w-fit shadow-md preserve-bg"
+                      >
+                        <EyeOff className="w-4 h-4 text-white/80" />
+                        <span className="text-xs text-white font-medium">مخفي • انقر للكشف</span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-3 w-full">
+                        {showPlural && localCard.pluralText ? (
+                          <div className="w-full flex items-center justify-center animate-fadeIn">
+                            <h3 className="text-3xl sm:text-4xl font-black text-purple-200 break-words whitespace-pre-wrap leading-relaxed drop-shadow-md text-center px-2" dir="ltr">
+                              {localCard.pluralText}
+                            </h3>
+                          </div>
+                        ) : (
+                          <div className="w-full flex flex-col items-center">
+                            <h3 className="text-2xl sm:text-4xl font-black text-white break-words whitespace-pre-wrap leading-relaxed flex items-center justify-center gap-2.5 drop-shadow-md text-center max-w-full px-2" dir="rtl">
+                              <span className="whitespace-pre-wrap">{localCard.backText}</span>
+                              {hideBack && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setRevealBackTemp(false);
+                                  }}
+                                  className="p-1 rounded-lg bg-black/50 hover:bg-black/70 backdrop-blur-md text-white/80 cursor-pointer transition-colors border border-white/20"
+                                  title="إخفاء النص مجدداً"
+                                >
+                                  <EyeOff className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </h3>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Bottom Action Buttons: Rounded-2xl Frosted Glass */}
+                  <div className="flex gap-3 pt-3 border-t border-white/15">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onClassicKnow(false);
+                      }}
+                      className="flex-1 py-3 sm:py-3.5 bg-rose-500/25 hover:bg-rose-500/40 text-rose-100 hover:text-white border border-rose-500/40 rounded-2xl font-bold text-xs sm:text-sm active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 shadow-xs group backdrop-blur-md preserve-bg"
+                    >
+                      <ThumbsDown className="w-4 h-4 text-rose-300 group-hover:scale-110 transition-transform" />
+                      <span>لم أعرفها</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onClassicKnow(true);
+                      }}
+                      className="flex-1 py-3 sm:py-3.5 bg-emerald-500/30 hover:bg-emerald-500/45 text-emerald-100 hover:text-white border border-emerald-500/45 rounded-2xl font-bold text-xs sm:text-sm active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 shadow-xs group backdrop-blur-md preserve-bg"
+                    >
+                      <ThumbsUp className="w-4 h-4 text-emerald-300 group-hover:scale-110 transition-transform" />
+                      <span>عرفتها</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          {/* Cards WITHOUT Image: Clean, Minimalist, Centered Layout with generous padding */}
+          return (
+            <div className={`absolute inset-0 w-full h-full flip-card-back rounded-2xl sm:rounded-3xl flex flex-col p-4 sm:p-5 border border-outline-variant/30 bg-surface-container-lowest overflow-hidden justify-between ${
+              localFlipped ? "pointer-events-auto visible opacity-100" : "pointer-events-none select-none invisible opacity-0"
+            }`}>
+              {/* Top Bar: Arabic Audio Controls + Plural Switch */}
+              <div className="w-full flex items-center justify-start gap-1.5 mb-2 select-none">
+                <button
+                  type="button"
+                  disabled={!localFlipped}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!localFlipped) return;
+                    if (showPlural && localCard.pluralText) {
+                      onPlayPronunciation(localCard.pluralText, localCard.pluralLang || "de");
+                    } else {
+                      onPlayPronunciation(localCard.backText, localCard.backLang || "ar");
+                    }
+                  }}
+                  className="w-9 h-9 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 shadow-3xs disabled:pointer-events-none disabled:opacity-0"
+                  title={reviewVoiceTarget === "secondary" ? "استمع للنطق المعتمد: الصوت الثانوي" : "استمع للنطق المعتمد: الصوت الأساسي"}
+                >
+                  <Volume2 className="w-4.5 h-4.5" />
+                </button>
+
+                {onPlaySecondaryPronunciation && (
+                  <button
+                    type="button"
+                    disabled={!localFlipped}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!localFlipped) return;
+                      if (showPlural && localCard.pluralText) {
+                        onPlaySecondaryPronunciation(localCard.pluralText, localCard.pluralLang || "de");
+                      } else {
+                        onPlaySecondaryPronunciation(localCard.backText, localCard.backLang || "ar");
+                      }
+                    }}
+                    className="w-9 h-9 rounded-xl transition-all cursor-pointer flex items-center justify-center relative active:scale-95 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 shadow-3xs disabled:pointer-events-none disabled:opacity-0"
+                    title={reviewVoiceTarget === "secondary" ? "استمع للصوت الأساسي" : "استمع للصوت الثانوي"}
+                  >
+                    <Volume2 className="w-4.5 h-4.5" />
+                  </button>
+                )}
+
+                {/* Plural Toggle Button */}
+                {localCard.isPluralMode && localCard.pluralText && (
+                  <button
+                    type="button"
+                    disabled={!localFlipped}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!localFlipped) return;
+                      const nextShow = !showPlural;
+                      setShowPlural(nextShow);
+                      if (nextShow) {
+                        onPlayPronunciation(localCard.pluralText!, localCard.pluralLang || "de");
+                      }
+                    }}
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer border active:scale-95 ${
+                      showPlural 
+                        ? "bg-purple-600 text-white shadow-xs border-purple-600" 
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border-slate-200/60 dark:border-slate-700"
+                    }`}
+                    title={showPlural ? "العودة للترجمة" : "عرض صيغة الجمع للكلمة (+)"}
+                  >
+                    <Plus className="w-4.5 h-4.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Center: Meaning / Translation */}
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-4">
+                {hideBack && !revealBackTemp ? (
+                  <div 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRevealBackTemp(true);
+                    }}
+                    className="py-3 px-5 bg-slate-50/50 hover:bg-slate-100/80 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 duration-200"
+                  >
+                    <EyeOff className="w-4 h-4 text-slate-400" />
+                    <span className="text-[11px] text-slate-500 font-medium">مخفي • انقر للكشف</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-3 w-full">
+                    {showPlural && localCard.pluralText ? (
+                      <div className="w-full flex items-center justify-center animate-fadeIn">
+                        <h3 className="text-3xl sm:text-4xl font-extrabold text-indigo-600 dark:text-indigo-300 break-words whitespace-pre-wrap leading-relaxed text-center px-2" dir="ltr">
+                          {localCard.pluralText}
+                        </h3>
+                      </div>
+                    ) : (
+                      <div className="w-full flex flex-col items-center">
+                        <h3 className="text-2xl sm:text-4xl font-extrabold text-on-surface leading-relaxed flex items-center justify-center gap-2.5 break-words whitespace-pre-wrap text-center max-w-full px-2" dir="rtl">
+                          <span className="whitespace-pre-wrap">{localCard.backText}</span>
+                          {hideBack && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRevealBackTemp(false);
+                              }}
+                              className="p-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-500 cursor-pointer transition-colors"
+                              title="إخفاء النص مجدداً"
+                            >
+                              <EyeOff className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </h3>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Bottom Rating Buttons */}
+              <div className="flex gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onClassicKnow(false);
+                  }}
+                  className="flex-1 py-3 sm:py-3.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-300 border border-slate-200 dark:border-slate-700 hover:border-rose-200 dark:hover:border-rose-800/60 rounded-2xl font-bold text-xs sm:text-sm active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 shadow-3xs group"
+                >
+                  <ThumbsDown className="w-4 h-4 text-rose-500/80 group-hover:text-rose-500 group-hover:scale-110 transition-all" />
+                  <span>لم أعرفها</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onClassicKnow(true);
+                  }}
+                  className="flex-1 py-3 sm:py-3.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 hover:text-emerald-600 dark:hover:text-emerald-300 border border-slate-200 dark:border-slate-700 hover:border-emerald-200 dark:hover:border-emerald-800/60 rounded-2xl font-bold text-xs sm:text-sm active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 shadow-3xs group"
+                >
+                  <ThumbsUp className="w-4 h-4 text-emerald-500/80 group-hover:text-emerald-500 group-hover:scale-110 transition-all" />
+                  <span>عرفتها</span>
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
       </div>
 
@@ -1429,59 +1777,22 @@ const StudyCard: React.FC<StudyCardProps> = ({
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.94, y: 6 }}
                 transition={{ duration: 0.18, ease: "easeOut" }}
-                className={`w-full max-w-sm rounded-2xl p-5 flex flex-col gap-3 relative shadow-xl border ${
+                className={`w-auto max-w-sm rounded-2xl px-6 py-4 relative shadow-2xl border transition-colors cursor-pointer select-text ${
                   isDark
-                    ? "bg-slate-900 text-slate-100 border-slate-800 shadow-2xl"
-                    : "bg-white text-slate-800 border-slate-200/90 shadow-xl"
+                    ? "bg-slate-900/95 text-slate-100 border-slate-700/80 shadow-2xl backdrop-blur-md"
+                    : "bg-white/95 text-slate-800 border-slate-200/90 shadow-xl backdrop-blur-md"
                 }`}
-                onClick={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsDescriptionModalOpen(false);
+                }}
               >
-                {/* Header: Title & Close button */}
-                <div className="flex items-center justify-between border-b pb-2.5 border-slate-100 dark:border-slate-800">
-                  <span className="text-xs font-bold text-slate-400 dark:text-slate-400">
-                    الوصف
-                  </span>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsDescriptionModalOpen(false);
-                    }}
-                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                      isDark
-                        ? "hover:bg-slate-800 text-slate-400 hover:text-white"
-                        : "hover:bg-slate-100 text-slate-400 hover:text-slate-700"
-                    }`}
-                    title="إغلاق"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {/* Description Only */}
-                <div className="py-2.5 text-center px-1">
-                  <p className={`text-base sm:text-lg font-bold leading-relaxed break-words whitespace-pre-wrap select-text ${
-                    isDark ? "text-slate-100" : "text-slate-800"
-                  }`}>
-                    {localCard.translationHint || localCard.frontText}
-                  </p>
-                </div>
-
-                {/* Close Button */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsDescriptionModalOpen(false);
-                  }}
-                  className={`w-full py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-                    isDark
-                      ? "bg-slate-800 hover:bg-slate-750 text-slate-200 active:scale-98"
-                      : "bg-slate-100 hover:bg-slate-200 text-slate-700 active:scale-98"
-                  }`}
-                >
-                  إغلاق
-                </button>
+                {/* Description Text Only */}
+                <p className={`text-base sm:text-lg font-bold leading-relaxed break-words whitespace-pre-wrap text-center ${
+                  isDark ? "text-slate-100" : "text-slate-800"
+                }`}>
+                  {localCard.translationHint || localCard.frontText}
+                </p>
               </motion.div>
             </motion.div>
           )}
@@ -1528,7 +1839,7 @@ const StudyCard: React.FC<StudyCardProps> = ({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onPlayPronunciation(localCard.frontText, localCard.frontLang);
+                    onPlayPronunciation(getFrontSpeechText(localCard, speakFrontArticle), localCard.frontLang);
                   }}
                   className="w-11 h-11 rounded-full bg-black/50 text-white hover:bg-black/75 active:scale-95 transition-all flex items-center justify-center cursor-pointer shadow-lg border border-white/10 pointer-events-auto"
                   title="نطق الكلمة"
@@ -2352,6 +2663,15 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     const saved = localStorage.getItem("settings_auto_listen_back");
     return saved === null ? true : saved === "true";
   });
+
+  const [speakFrontArticle, setSpeakFrontArticle] = useState<boolean>(() => {
+    const saved = localStorage.getItem("settings_speak_front_article");
+    return saved === null ? true : saved === "true";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("settings_speak_front_article", String(speakFrontArticle));
+  }, [speakFrontArticle]);
   
   const [autoFlipMode, setAutoFlipMode] = useState<"front_only" | "back_only" | "default">(() => {
     return (localStorage.getItem("settings_auto_flip_mode") as any) || "default";
@@ -3484,7 +3804,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
     // Determine the current face based on autoFlipMode
     const isBackActive = (flipped || autoFlipMode === "back_only") && autoFlipMode !== "front_only";
-    const activeText = isBackActive ? currentCard.backText : currentCard.frontText;
+    const frontSpeech = getFrontSpeechText(currentCard, speakFrontArticle);
+    const activeText = isBackActive ? currentCard.backText : frontSpeech;
     const activeLang = isBackActive ? currentCard.backLang : currentCard.frontLang;
     const shouldAutoSpeak = isBackActive ? autoListenBack : autoListenFront;
 
@@ -3533,7 +3854,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
         clearTimeout(autoPlayTimerRef.current);
       }
     };
-  }, [currentIndex, flipped, isAutoPlaying, autoFlipMode, autoFlipTrigger, autoFlipSeconds, autoListenFront, autoListenBack, currentCard, isCompleted, isTransitioning, hasStartedStep]);
+  }, [currentIndex, flipped, isAutoPlaying, autoFlipMode, autoFlipTrigger, autoFlipSeconds, autoListenFront, autoListenBack, currentCard, isCompleted, isTransitioning, hasStartedStep, speakFrontArticle]);
 
   // Unified Manual Mode Audio Playback loop with 200ms debounce delay
   useEffect(() => {
@@ -3541,7 +3862,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     if (isAutoPlaying || !isSoundEnabled || !currentCard || isCompleted) return;
     if (method !== "classic") return;
 
-    const activeText = flipped ? currentCard.backText : currentCard.frontText;
+    const frontSpeech = getFrontSpeechText(currentCard, speakFrontArticle);
+    const activeText = flipped ? currentCard.backText : frontSpeech;
     const currentKey = `${currentCard.id}_${activeText ? activeText.trim() : ""}`;
 
     // Skip if this exact text on this card was already spoken (e.g., played during autoplay or prior action)
@@ -3556,13 +3878,13 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
         }
       } else {
         if (manualListenFront) {
-          playPronunciationWithEnd(currentCard.frontText, currentCard.frontLang);
+          playPronunciationWithEnd(frontSpeech, currentCard.frontLang);
         }
       }
     }, 200);
 
     return () => clearTimeout(timer);
-  }, [currentIndex, flipped, isAutoPlaying, isSoundEnabled, manualListenFront, manualListenBack, currentCard, isCompleted, method, hasStartedStep, isRepeatAudioEnabled, repeatSequence]);
+  }, [currentIndex, flipped, isAutoPlaying, isSoundEnabled, manualListenFront, manualListenBack, currentCard, isCompleted, method, hasStartedStep, isRepeatAudioEnabled, repeatSequence, speakFrontArticle]);
 
   // German Article Game Selection
   const [articleResult, setArticleResult] = useState<"correct" | "incorrect" | null>(null);
@@ -3605,7 +3927,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
       if (isAudioPreloadEnabled) {
         // Preload front text
         if (card.frontText) {
-          preloadTTS(card.frontText, card.frontLang || "de");
+          preloadTTS(getFrontSpeechText(card, speakFrontArticle), card.frontLang || "de");
         }
         // Preload back text
         if (card.backText) {
@@ -5239,8 +5561,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
                   {/* Stable Deck Container */}
                   <div className="relative w-full flex items-center justify-center">
-                    {/* Active Card with responsive vertical scaling */}
-                    <div className="relative w-full h-[clamp(350px,58vh,510px)] select-none overflow-hidden rounded-[24px]">
+                    {/* Active Card - strictly square 1:1, non-variable dimensions */}
+                    <div className="relative w-full aspect-square max-h-[min(410px,68vh)] select-none overflow-hidden rounded-[24px]">
                       <AnimatePresence initial={false} custom={direction} mode="popLayout">
                         <motion.div
                           key={currentCard.id}
@@ -5313,6 +5635,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                             isSwipeImageEnabled={isSwipeImageEnabled}
                             swipeSensitivity={swipeSensitivity}
                             reviewVoiceTarget={reviewVoiceTarget}
+                            speakFrontArticle={speakFrontArticle}
                           />
                         </motion.div>
                       </AnimatePresence>
@@ -5946,7 +6269,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       <div className="flex flex-col flex-1 justify-start relative">
 
                         {/* Image section */}
-                        <div className="w-full aspect-square max-h-[58%] rounded-xl overflow-hidden relative mb-2 sm:mb-3 border border-outline-variant/10 flex items-center justify-center bg-surface-container-low mx-auto">
+                        <div className="w-full aspect-square max-h-[190px] sm:max-h-[220px] rounded-xl overflow-hidden relative mb-2 sm:mb-3 border border-outline-variant/10 flex items-center justify-center bg-surface-container-low mx-auto shrink-0">
                           {hasImage ? (
                             <ImageWithSkeleton
                               src={imageSrc!}
@@ -6292,6 +6615,23 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                         className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${manualListenBack ? 'bg-emerald-500' : 'bg-slate-200'}`}
                       >
                         <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${manualListenBack ? 'translate-x-5' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                      <div className="flex flex-col gap-0.5 text-right pl-2">
+                        <span className="text-xs font-bold text-slate-700">قراءة أداة التعريف (الأرتيكل) مع النص الأمامي 🇩🇪</span>
+                        <span className="text-[10px] text-slate-400 leading-normal">
+                          نطق الأداة (der / die / das) مع المفردة الألمانية في الوجه الأمامي (مفعل افتراضياً). عند التعطيل يُقرأ النص دون أداة.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSpeakFrontArticle(!speakFrontArticle)}
+                        className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${speakFrontArticle ? 'bg-emerald-500' : 'bg-slate-200'}`}
+                        title={speakFrontArticle ? "مفعل (يقرأ الأرتيكل)" : "معطل (لا يقرأ الأرتيكل)"}
+                      >
+                        <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${speakFrontArticle ? 'translate-x-5' : 'translate-x-0'}`} />
                       </button>
                     </div>
                   </div>
@@ -7093,6 +7433,23 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${isSoundEnabled ? 'bg-emerald-500' : 'bg-slate-200'}`}
                     >
                       <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${isSoundEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                    <div className="flex flex-col gap-0.5 text-right pl-2">
+                      <span className="text-xs font-bold text-slate-700">قراءة أداة التعريف (الأرتيكل) مع النص الأمامي 🇩🇪</span>
+                      <span className="text-[10px] text-slate-400 leading-normal">
+                        نطق الأداة (der / die / das) مع المفردة الألمانية في الوجه الأمامي (مفعل افتراضياً). عند التعطيل يُقرأ النص دون أداة.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSpeakFrontArticle(!speakFrontArticle)}
+                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${speakFrontArticle ? 'bg-emerald-500' : 'bg-slate-200'}`}
+                      title={speakFrontArticle ? "مفعل (يقرأ الأرتيكل)" : "معطل (لا يقرأ الأرتيكل)"}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${speakFrontArticle ? 'translate-x-5' : 'translate-x-0'}`} />
                     </button>
                   </div>
 

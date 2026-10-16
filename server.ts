@@ -1479,41 +1479,18 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
 `;
 
       const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
-      const candidateModels = Array.from(new Set([
-        primaryModel,
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.7-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-3.1-flash-lite"
-      ])).filter(m => !m.includes("groq") && m !== "gemini-2.5-flash");
-
       let rawJson = "[]";
       let usedModel = primaryModel;
-      let lastErr: any = null;
 
-      for (const modelToTry of candidateModels) {
-        try {
-          const response = await aiClient.models.generateContent({
-            model: modelToTry,
-            contents: prompt,
-            config: {
-              responseMimeType: "application/json"
-            }
-          });
-          if (response.text) {
-            rawJson = response.text;
-            usedModel = modelToTry;
-            break;
-          }
-        } catch (err: any) {
-          console.warn(`Subtitle gen failed on model ${modelToTry}, trying fallback...`, err?.message);
-          lastErr = err;
+      const response = await aiClient.models.generateContent({
+        model: primaryModel,
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json"
         }
-      }
-
-      if (rawJson === "[]" && lastErr) {
-        throw lastErr;
+      });
+      if (response.text) {
+        rawJson = response.text;
       }
 
       let parsedCues: any[] = [];
@@ -1627,41 +1604,18 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
 ]`;
 
       const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
-      const candidateModels = Array.from(new Set([
-        primaryModel,
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.7-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-3.1-flash-lite"
-      ])).filter(m => !m.includes("groq") && m !== "gemini-2.5-flash");
-
       let rawJson = "[]";
       let usedModel = primaryModel;
-      let lastErr: any = null;
 
-      for (const modelToTry of candidateModels) {
-        try {
-          const response = await aiClient.models.generateContent({
-            model: modelToTry,
-            contents: prompt,
-            config: {
-              responseMimeType: "application/json"
-            }
-          });
-          if (response.text) {
-            rawJson = response.text;
-            usedModel = modelToTry;
-            break;
-          }
-        } catch (err: any) {
-          console.warn(`Subtitle translation failed on model ${modelToTry}, trying fallback...`, err?.message);
-          lastErr = err;
+      const response = await aiClient.models.generateContent({
+        model: primaryModel,
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json"
         }
-      }
-
-      if (rawJson === "[]" && lastErr) {
-        throw lastErr;
+      });
+      if (response.text) {
+        rawJson = response.text;
       }
 
       let translatedCues: any[] = [];
@@ -1780,41 +1734,18 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
 ]`;
 
       const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.8-flash";
-      const candidateModels = Array.from(new Set([
-        primaryModel,
-        "gemini-3.8-flash",
-        "gemini-3.7-flash",
-        "gemini-3.5-flash",
-        "gemini-3.1-flash-lite",
-        "gemini-3.1-pro-preview"
-      ])).filter(m => !m.includes("groq") && m !== "gemini-2.5-flash" && m !== "gemini-1.5-flash");
-
       let rawJson = "[]";
       let usedModel = primaryModel;
-      let lastErr: any = null;
 
-      for (const modelToTry of candidateModels) {
-        try {
-          const response = await aiClient.models.generateContent({
-            model: modelToTry,
-            contents: prompt,
-            config: {
-              responseMimeType: "application/json"
-            }
-          });
-          if (response.text) {
-            rawJson = response.text;
-            usedModel = modelToTry;
-            break;
-          }
-        } catch (err: any) {
-          console.warn(`Shadowing translation failed on model ${modelToTry}, trying fallback...`, err?.message);
-          lastErr = err;
+      const response = await aiClient.models.generateContent({
+        model: primaryModel,
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json"
         }
-      }
-
-      if (rawJson === "[]" && lastErr) {
-        throw lastErr;
+      });
+      if (response.text) {
+        rawJson = response.text;
       }
 
       let parsedResults: any[] = [];
@@ -1889,35 +1820,6 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
             }));
           }
         }
-      }
-
-      // If DuckDuckGo returned no images or throttled, source from Wikimedia Commons
-      if (images.length === 0) {
-        try {
-          const wikiHits = await searchWikimediaImages(query);
-          if (wikiHits && wikiHits.length > 0) {
-            images = wikiHits.slice(0, 18).map((w: any) => ({
-              title: w.tags || query,
-              image: w.largeImageURL || w.webformatURL,
-              thumbnail: w.webformatURL,
-              source: w.largeImageURL || w.webformatURL
-            }));
-          }
-        } catch (e) {}
-      }
-
-      // If still no images, construct high quality portraits
-      if (images.length === 0) {
-        images = [
-          { title: `${query} 1`, image: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=500&q=80`, thumbnail: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80` },
-          { title: `${query} 2`, image: `https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=500&q=80`, thumbnail: `https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80` },
-          { title: `${query} 3`, image: `https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=500&q=80`, thumbnail: `https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&q=80` },
-          { title: `${query} 4`, image: `https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=500&q=80`, thumbnail: `https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=200&q=80` },
-          { title: `${query} 5`, image: `https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=500&q=80`, thumbnail: `https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=200&q=80` },
-          { title: `${query} 6`, image: `https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=500&q=80`, thumbnail: `https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=200&q=80` },
-          { title: `${query} 7`, image: `https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=500&q=80`, thumbnail: `https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=200&q=80` },
-          { title: `${query} 8`, image: `https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=500&q=80`, thumbnail: `https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=200&q=80` }
-        ];
       }
 
       return res.json({ success: true, query, results: images });
@@ -2524,15 +2426,6 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
             }
           }
         }
-      }
-
-      if (!imageUrl) {
-        try {
-          const wikiRes = await searchWikimediaImages(query);
-          if (wikiRes && wikiRes.length > 0) {
-            imageUrl = wikiRes[0].largeImageURL || wikiRes[0].webformatURL || "";
-          }
-        } catch (e) {}
       }
 
       return res.json({ success: true, imageUrl });
@@ -5542,6 +5435,8 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       germanArticlesMode,
       germanPluralMode,
       aiProvider,
+      selectedModel: reqSelectedModel,
+      model: reqModel,
       customFolderName,
       customFolderDesc,
       folderDescMode,
@@ -5557,7 +5452,11 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       return res.status(400).json({ error: "Prompt is required" });
     }
 
-    const provider = aiProvider === "groq" ? "groq" : "gemini";
+    const userModel = ((reqSelectedModel || reqModel || "") as string).trim();
+    const provider = (aiProvider === "groq" || userModel.includes("groq") || userModel === "llama-3.3-70b-versatile") ? "groq" : "gemini";
+    const chosenGeminiModel = (userModel && !userModel.includes("groq") && !userModel.includes("grok"))
+      ? userModel
+      : "gemini-3.6-flash";
     let apiKey = "";
 
     const headerAuth = req.headers.authorization?.startsWith("Bearer ")
@@ -5655,20 +5554,16 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         customRules += "\n- أضف تلميح ترجمة أو وصفاً (translationHint) عند الحاجة أو إذا كان مفيداً للبطاقة.";
       }
 
-      if (germanArticlesMode === "on") {
-        customRules += "\n- يجب تفعيل وضع أدوات التعريف الألمانية (isArticleMode = true) لكل الأسماء الألمانية المفردة فقط (Single Nouns وليس الجمل) وتحديد الأداة المناسبة (der/die/das/die-plural) في حقل correctArticle.";
-      } else if (germanArticlesMode === "off") {
-        customRules += "\n- ممنوع تماماً استخدام وضع أدوات التعريف الألمانية. يجب وضع (isArticleMode = false) and (correctArticle = \"\") لجميع البطاقات دون استثناء.";
+      if (germanArticlesMode !== "off") {
+        customRules += "\n- 🚨 قاعدة أدوات التعريف الألمانية (isArticleMode و correctArticle): للأسماء والمفردات المفردة (Single Nouns مثل: Handy, Tisch, Lampe) يجب إلزامياً وضع الأداة فقط في correctArticle وتجريد frontText تماماً من أداة التعريف (اكتب في frontText كلمة 'Handy' وليس 'Das Handy'، واكتب 'Tisch' وليس 'der Tisch') مع وضع isArticleMode = true. أما الجمل والعبارات الكاملة (مثل 'Das Buch ist schön') فيجب إبقاؤها كاملة بأداتها داخل frontText مع وضع isArticleMode = false و correctArticle = '' فارغاً.";
       } else {
-        customRules += "\n- وضع قيمة isArticleMode = true فقط إذا كانت الكلمة الأمامية اسماً مفرداً في اللغة الألمانية (وليس جملة) ويملك أداة تعريف (der/die/das/die-plural).";
+        customRules += "\n- ممنوع تماماً استخدام وضع أدوات التعريف الألمانية. يجب وضع (isArticleMode = false) and (correctArticle = \"\") لجميع البطاقات دون استثناء.";
       }
 
-      if (germanPluralMode === "on") {
-        customRules += "\n- يجب تفعيل وضع صيغة الجمع (isPluralMode = true) لكل الأسماء الألمانية وتوفير الكلمة بصيغة الجمع في حقل pluralText (مثال: 'Tische' للكلمة 'Tisch').";
-      } else if (germanPluralMode === "off") {
-        customRules += "\n- ممنوع تماماً استخدام صيغة الجمع الألمانية. يجب وضع (isPluralMode = false) و (pluralText = \"\") لجميع البطاقات دون استثناء.";
+      if (germanPluralMode !== "off") {
+        customRules += "\n- 🚨 قاعدة صيغة الجمع الألمانية (pluralText و isPluralMode): لكل اسم ألماني مفرد (Single Noun) يجب حتماً توفير صيغة الجمع الصحيحة في حقل pluralText مجردة بدون أداة (مثل: 'Handys' أو 'Tische' أو 'Bücher') مع وضع isPluralMode = true، ولا تترك pluralText فارغاً لأي اسم مفرد! أما الجمل الكاملة فاجعل لها pluralText = \"\" و isPluralMode = false.";
       } else {
-        customRules += "\n- ضع قيمة isPluralMode = true فقط إذا كانت الكلمة الأمامية اسماً ألمانياً له صيغة جمع معروفة، ووفر الكلمة بصيغة الجمع في حقل pluralText (مثال: 'Tische').";
+        customRules += "\n- ممنوع تماماً استخدام صيغة الجمع الألمانية. يجب وضع (isPluralMode = false) و (pluralText = \"\") لجميع البطاقات دون استثناء.";
       }
 
       if (imagesMode === "off") {
@@ -5808,7 +5703,7 @@ ${transcriptText.trim()}
         let response: any;
         try {
           response = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: chosenGeminiModel,
             contents: prompt,
             config: {
               systemInstruction: systemInstruction,
@@ -5884,7 +5779,7 @@ ${transcriptText.trim()}
         }
 
         usageStats = {
-          model: "gemini-3.5-flash",
+          model: chosenGeminiModel,
           provider: "gemini",
           promptTokens: usageMetadata.promptTokenCount,
           completionTokens: usageMetadata.candidatesTokenCount,
@@ -5932,7 +5827,7 @@ ${transcriptText.trim()}
           candidateUrls: [] as string[]
         }));
 
-        await fetchBatchCardImages(cardItems, sendProgress, 8);
+        await fetchBatchCardImages(cardItems, sendProgress, 3);
 
         generatedData.cards = cardItems.map((item) => ({
           ...item.card,
@@ -5972,14 +5867,20 @@ ${transcriptText.trim()}
       germanArticlesMode,
       germanPluralMode,
       germanPluralInstruction,
-      aiProvider
+      aiProvider,
+      selectedModel: reqSelectedModel,
+      model: reqModel
     } = req.body;
 
     if (!cards || !Array.isArray(cards) || cards.length === 0) {
       return res.status(400).json({ error: "Cards array is required and cannot be empty" });
     }
 
-    const provider = aiProvider === "groq" ? "groq" : "gemini";
+    const userModel = ((reqSelectedModel || reqModel || "") as string).trim();
+    const provider = (aiProvider === "groq" || userModel.includes("groq") || userModel === "llama-3.3-70b-versatile") ? "groq" : "gemini";
+    const chosenGeminiModel = (userModel && !userModel.includes("groq") && !userModel.includes("grok"))
+      ? userModel
+      : "gemini-3.6-flash";
     let apiKey = "";
 
     const headerAuthRefine = req.headers.authorization?.startsWith("Bearer ")
@@ -6045,20 +5946,16 @@ ${transcriptText.trim()}
       let refinePrompt = `البطاقات الحالية المراد تعديلها:\n${JSON.stringify(cards, null, 2)}\n\n`;
       refinePrompt += `الرجاء تطبيق التعديلات التالية على جميع البطاقات بدون استثناء:\n`;
 
-      if (germanArticlesMode === "on") {
-        refinePrompt += `- يجب تفعيل وضع أدوات التعريف الألمانية (isArticleMode = true) لكل الأسماء الألمانية المفردة فقط (Single Nouns وليس الجمل الكاملة) وتحديد الأداة المناسبة (der/die/das/die-plural) في حقل correctArticle لجميع البطاقات. أما الجمل والعبارات الكاملة فاحتفظ بأداتها كاملة في frontText واجعل isArticleMode = false و correctArticle = "".\n`;
+      if (germanArticlesMode !== "off" && germanArticlesMode !== "keep") {
+        refinePrompt += `- 🚨 قاعدة أدوات التعريف الألمانية: للأسماء المفردة (Single Nouns مثل: Handy, Tisch) يجب وضع الأداة فقط في correctArticle وحذفها تماماً من frontText (اكتب "Handy" وليس "Das Handy"). أما الجمل الكاملة فتبقى بأداتها كاملة في frontText مع correctArticle = "" و isArticleMode = false.\n`;
       } else if (germanArticlesMode === "off") {
         refinePrompt += `- ممنوع تماماً استخدام وضع أدوات التعريف الألمانية. يجب وضع (isArticleMode = false) و (correctArticle = "") لجميع البطاقات دون استثناء.\n`;
-      } else if (germanArticlesMode === "auto") {
-        refinePrompt += `- وضع قيمة isArticleMode = true فقط إذا كانت الكلمة الأمامية اسماً مفرداً في اللغة الألمانية (وليس جملة) ويملك أداة تعريف (der/die/das/die-plural)، مع وضع correctArticle بالأداة المناسبة. أما الجمل فتبقى بأدواتها في frontText مع isArticleMode = false و correctArticle = "".\n`;
       }
 
-      if (germanPluralMode === "on") {
-        refinePrompt += `- يجب تفعيل وضع صيغة الجمع (isPluralMode = true) لكل الأسماء الألمانية وتوفير الكلمة بصيغة الجمع في حقل pluralText (مثال: 'Tische' للكلمة 'Tisch').\n`;
+      if (germanPluralMode !== "off" && germanPluralMode !== "keep") {
+        refinePrompt += `- 🚨 قاعدة صيغة الجمع الألمانية: لكل اسم ألماني مفرد (Single Noun) يجب توفير صيغة الجمع في pluralText مجردة بدون أداة (مثل: "Handys", "Tische") مع وضع isPluralMode = true، ولا تتركها فارغة لأي اسم مفرد! أما الجمل فتبقى فارغة "" و isPluralMode = false.\n`;
       } else if (germanPluralMode === "off") {
         refinePrompt += `- ممنوع تماماً استخدام صيغة الجمع الألمانية. يجب وضع (isPluralMode = false) و (pluralText = "") لجميع البطاقات دون استثناء.\n`;
-      } else if (germanPluralMode === "auto") {
-        refinePrompt += `- ضع قيمة isPluralMode = true فقط إذا كانت الكلمة الأمامية اسماً ألمانياً له صيغة جمع معروفة، ووفر الكلمة بصيغة الجمع في حقل pluralText (مثال: 'Tische').\n`;
       }
       if (germanPluralMode !== "keep" && germanPluralInstruction && germanPluralInstruction.trim()) {
         refinePrompt += `  * شروط وتوجيهات صيغة الجمع الإضافية: "${germanPluralInstruction.trim()}"\n`;
@@ -6182,7 +6079,7 @@ ${transcriptText.trim()}
         let response: any;
         try {
           response = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: chosenGeminiModel,
             contents: refinePrompt,
             config: {
               systemInstruction: systemInstruction,
@@ -6279,7 +6176,7 @@ ${transcriptText.trim()}
           };
         });
 
-        await fetchBatchCardImages(cardItems, sendProgress, 8);
+        await fetchBatchCardImages(cardItems, sendProgress, 3);
 
         generatedData.cards = cardItems.map((item) => ({
           ...item.card,
@@ -6334,6 +6231,25 @@ function cleanBrTagsFromObj<T>(obj: T): T {
   return obj;
 }
 
+function isGermanSentenceServer(text: string): boolean {
+  if (!text) return false;
+  const trimmed = text.trim();
+  if (/[.!?]$/.test(trimmed)) return true;
+  const clean = trimmed.replace(/\([^)]*\)/g, "").replace(/\s*\/.*$/, "").trim();
+  const tokens = clean.split(/\s+/).filter(Boolean);
+  if (tokens.length <= 1) return false;
+  const firstLower = tokens[0].toLowerCase();
+  const isFirstArticle = ["der", "die", "das", "ein", "eine", "einen", "einem", "einer", "eines"].includes(firstLower);
+  if (tokens.length === 2 && isFirstArticle) {
+    const secondLower = tokens[1].toLowerCase();
+    const commonVerbs = ["ist", "sind", "war", "waren", "hat", "haben", "wird", "werden", "geht", "kommt", "kann", "muss"];
+    if (!commonVerbs.includes(secondLower)) {
+      return false; // It's an article + single noun (e.g., "Das Handy", "Der Tisch")
+    }
+  }
+  return true;
+}
+
 function sanitizeCardArticleAndPlural(card: any): any {
   if (!card || typeof card !== "object") return card;
   let frontText = typeof card.frontText === "string" ? card.frontText.trim() : "";
@@ -6341,40 +6257,46 @@ function sanitizeCardArticleAndPlural(card: any): any {
   let correctArticle = typeof card.correctArticle === "string" ? card.correctArticle.trim() : "";
   let isArticleMode = !!card.isArticleMode;
   let isPluralMode = !!card.isPluralMode;
+  let imageSearchQuery = typeof card.imageSearchQuery === "string" ? card.imageSearchQuery.trim() : "";
 
-  // 1. Clean frontText if it starts with der / die / das / die-plural
-  const frontMatch = frontText.match(/^(der|die|das)\s+(.+)$/i);
-  if (frontMatch) {
-    const extractedArticle = frontMatch[1].toLowerCase();
-    const noun = frontMatch[2].trim();
-    const cleanCandidate = noun.replace(/\([^)]*\)/g, "").replace(/\s*\/.*$/, "").trim();
-    const isSingleNoun = cleanCandidate.split(/\s+/).length === 1 && !/[.!?]$/.test(cleanCandidate);
+  // Clean forced cartoon/vector keywords from imageSearchQuery unless user requested
+  if (imageSearchQuery) {
+    imageSearchQuery = imageSearchQuery
+      .replace(/\b(cartoon\s+illustration|flat\s+vector\s+illustration|vector\s+illustration|cartoon|vector|clipart|anime|illustration)\b/gi, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  }
 
-    if (isSingleNoun) {
-      // Single German noun: extract article into article field
-      frontText = noun;
-      isArticleMode = true;
+  const isSentence = isGermanSentenceServer(frontText);
+
+  if (isSentence) {
+    // SCENARIO 1: IT IS A SENTENCE (e.g., "Das Buch ist schön" or "Buch ist schön" with correctArticle="das")
+    // A sentence must NEVER have article mode, and the article is an integral part of the sentence!
+    if (correctArticle && ["der", "die", "das", "die-plural"].includes(correctArticle.toLowerCase())) {
+      const art = correctArticle.toLowerCase() === "die-plural" ? "Die" : (correctArticle.charAt(0).toUpperCase() + correctArticle.slice(1).toLowerCase());
+      if (!frontText.toLowerCase().startsWith(art.toLowerCase() + " ")) {
+        frontText = `${art} ${frontText}`;
+      }
+    }
+    // Sentence: article mode is always disabled, and correctArticle is empty
+    isArticleMode = false;
+    correctArticle = "";
+  } else {
+    // SCENARIO 2: IT IS A SINGLE NOUN / VOCABULARY (e.g., "Das Handy", "der Tisch", "Lampe")
+    // For single nouns: the article belongs in correctArticle ONLY, NOT inside frontText!
+    const match = frontText.match(/^(der|die|das)\s+(.+)$/i);
+    if (match) {
+      const extractedArticle = match[1].toLowerCase();
+      const cleanNoun = match[2].trim();
+      frontText = cleanNoun;
       if (!correctArticle || correctArticle === "") {
         correctArticle = extractedArticle;
       }
+      isArticleMode = true;
     } else {
-      // Sentence / Phrase: Keep the article as part of the full sentence!
-      isArticleMode = false;
-      correctArticle = "";
-    }
-  } else {
-    // If frontText is a sentence (multiple words) and the AI put an article in correctArticle,
-    // restore the article back to the sentence and disable article mode.
-    const cleanTokens = frontText.replace(/\([^)]*\)/g, "").replace(/\s*\/.*$/, "").trim().split(/\s+/);
-    const isSingleWord = cleanTokens.length === 1 && !/[.!?]$/.test(frontText);
-
-    if (!isSingleWord && correctArticle && ["der", "die", "das", "die-plural"].includes(correctArticle.toLowerCase())) {
-      const art = correctArticle.toLowerCase() === "die-plural" ? "die" : correctArticle.toLowerCase();
-      if (!frontText.toLowerCase().startsWith(art + " ")) {
-        frontText = `${art} ${frontText}`;
+      if (correctArticle && ["der", "die", "das", "die-plural"].includes(correctArticle.toLowerCase())) {
+        isArticleMode = true;
       }
-      isArticleMode = false;
-      correctArticle = "";
     }
   }
 
@@ -6396,7 +6318,8 @@ function sanitizeCardArticleAndPlural(card: any): any {
     pluralText,
     correctArticle,
     isArticleMode,
-    isPluralMode
+    isPluralMode,
+    imageSearchQuery: imageSearchQuery || undefined
   };
 }
 
@@ -8655,18 +8578,19 @@ ${structureDirective}
     return s || raw.trim();
   }
 
-  // Helper to fetch a single image with multi-tier query fallbacks and providers, returning top image URL and candidate list
-  async function fetchSingleImageWithFallbacks(query: string, round: number): Promise<{ imageUrl: string; candidateUrls: string[] }> {
+  // Helper to fetch images strictly from DuckDuckGo with query variations and return top image and candidate list
+  async function fetchSingleImageFromDuckDuckGo(query: string, round: number): Promise<{ imageUrl: string; candidateUrls: string[] }> {
     if (!query || !query.trim()) return { imageUrl: "", candidateUrls: [] };
     const qOriginal = query.trim();
-    const qClean = cleanQueryForSearch(qOriginal, round >= 3 ? 2 : 1);
+    // Round 1: Search exact original query. Round 2+: Clean articles and punctuation to improve recall
+    const searchTarget = round === 1 ? qOriginal : cleanQueryForSearch(qOriginal, round >= 2 ? 2 : 1);
 
     const candidates: string[] = [];
 
-    // Tier 1: DuckDuckGo with Original Query (if not cooldown)
+    // Strictly DuckDuckGo: No fallback engines to preserve search engine credibility and fidelity
     if (Date.now() >= ddgCooldownUntil) {
       try {
-        const { hits } = await searchDuckDuckGoImages(qOriginal, "1");
+        const { hits } = await searchDuckDuckGoImages(searchTarget, "1");
         if (hits && hits.length > 0) {
           hits.forEach((h: any) => {
             const u = h.largeImageURL || h.webformatURL || h.image || h.url;
@@ -8678,70 +8602,29 @@ ${structureDirective}
       } catch (e) {}
     }
 
-    // Tier 2: Wikimedia Commons (Highly reliable, educational, zero rate limits)
-    if (candidates.length < 5) {
-      try {
-        const wikiHits = await searchWikimediaImages(qClean || qOriginal);
-        if (wikiHits && wikiHits.length > 0) {
-          wikiHits.forEach((h: any) => {
-            const u = h.largeImageURL || h.webformatURL;
-            if (u && typeof u === "string" && u.startsWith("http") && !candidates.includes(u)) {
-              candidates.push(u);
-            }
-          });
-        }
-      } catch (e) {}
-    }
-
-    // Tier 3: Openverse Free Media Search
-    if (candidates.length < 5) {
-      try {
-        const ovUrl = `https://api.openverse.org/v1/images/?q=${encodeURIComponent(qClean || qOriginal)}&page_size=10`;
-        const ovRes = await fetch(ovUrl, { headers: { "User-Agent": "FlashcardsApp/1.0" }, signal: AbortSignal.timeout(4000) });
-        if (ovRes.ok) {
-          const ovData = await ovRes.json();
-          if (ovData?.results && Array.isArray(ovData.results)) {
-            ovData.results.forEach((r: any) => {
-              const u = r.url;
-              if (u && typeof u === "string" && u.startsWith("http") && !candidates.includes(u)) {
-                candidates.push(u);
-              }
-            });
-          }
-        }
-      } catch (e) {}
-    }
-
-    // Tier 4: Dynamic AI Pollinations Photo Fallback (Ensures every single card gets a valid high-quality photo)
-    if (candidates.length === 0) {
-      const fallbackQuery = encodeURIComponent(qClean || qOriginal);
-      const pollinationsUrl = `https://image.pollinations.ai/prompt/${fallbackQuery}%20clear%20photo%20isolated%20educational?width=512&height=512&nologo=true`;
-      candidates.push(pollinationsUrl);
-    }
-
     const imageUrl = candidates.length > 0 ? candidates[0] : "";
     return { imageUrl, candidateUrls: candidates.slice(0, 10) };
   }
 
-  // Array of modern realistic desktop User-Agents to prevent header fingerprinting
-  const DESKTOP_USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0"
-  ];
+  // Alias for backward compatibility
+  const fetchSingleImageWithFallbacks = fetchSingleImageFromDuckDuckGo;
 
+  // Realistic Desktop User-Agents for Image Proxy
+  const DESKTOP_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+  ];
   function getRandomUserAgent(): string {
     return DESKTOP_USER_AGENTS[Math.floor(Math.random() * DESKTOP_USER_AGENTS.length)];
   }
 
-  // Smart Batched Sequential/Gentle Parallel Image Fetcher with Controlled Concurrency and Candidate Lists
+  // Pure Sequential Queue with Realistic Jitter Delay for Image Fetching
   async function fetchBatchCardImages(
     cardItems: Array<{ index: number; card: any; query: string; imageUrl: string; candidateUrls?: string[] }>,
     sendProgress: (type: "status", data: { message: string }) => void,
-    maxRetryRounds: number = 8
+    maxRetryRounds: number = 3
   ) {
     // Pre-fill items that already have existing candidate image lists or existing frontImage to avoid re-querying
     cardItems.forEach((item) => {
@@ -8774,54 +8657,50 @@ ${structureDirective}
 
       if (retryRound === 1) {
         sendProgress("status", {
-          message: `بدء جلب قوائم الصور والتنزيل (تم جلب ${currentFetched} من ${totalCards} صورة) - الجولة ${retryRound}/${maxRetryRounds}...`
+          message: `بدء طابور جلب الصور المتسلسل لمحرك البحث (${currentFetched}/${totalCards} جاهزة)...`
         });
       } else {
-        // Adaptive cooldown duration between rounds to allow DuckDuckGo rate limits to clear
-        const cooldownSeconds = Math.min(2 + Math.floor((retryRound - 2) * 1.5), 6);
+        // Brief breather between retry rounds
+        const cooldownSeconds = 3;
         for (let sec = cooldownSeconds; sec > 0; sec--) {
           sendProgress("status", {
-            message: `مهلة تبريد لفك حظر الخادم (متبقي ${sec} ثوانٍ) - إعادة محاولة ${pendingIndices.length} صورة متبقية (تم جلب ${currentFetched} من ${totalCards}) - الجولة ${retryRound}/${maxRetryRounds}...`
+            message: `مهلة هدوء انسيابية (${sec} ثوانٍ) - إعادة محاولة للصور المتبقية (${pendingIndices.length} صورة) - الجولة ${retryRound}/${maxRetryRounds}...`
           });
           await new Promise((r) => setTimeout(r, 1000));
         }
       }
 
       const failedIndices: number[] = [];
-      // Controlled, gentle intra-round batch execution: 3 items in parallel with 150ms delay
-      const chunkSize = 3;
-      const interChunkDelay = 150;
 
-      for (let i = 0; i < pendingIndices.length; i += chunkSize) {
-        const chunk = pendingIndices.slice(i, i + chunkSize);
+      // STRICT SEQUENTIAL QUEUE: Process card by card with randomized jitter (380ms - 620ms)
+      for (let i = 0; i < pendingIndices.length; i++) {
+        const idx = pendingIndices[i];
+        const item = cardItems[idx];
+        if (!item.query || !item.query.trim()) {
+          continue;
+        }
 
-        await Promise.all(
-          chunk.map(async (idx) => {
-            const item = cardItems[idx];
-            if (!item.query || !item.query.trim()) return;
-
-            try {
-              const res = await fetchSingleImageWithFallbacks(item.query, retryRound);
-              if (res.imageUrl) {
-                item.imageUrl = res.imageUrl;
-                item.candidateUrls = res.candidateUrls;
-              } else {
-                failedIndices.push(idx);
-              }
-            } catch (err) {
-              console.error(`[AI Auto-Image Batch] Card #${idx + 1} ("${item.query}") fetch error:`, err);
-              failedIndices.push(idx);
-            }
-          })
-        );
-
-        const currentFetched = cardItems.filter((item) => Boolean(item.imageUrl)).length;
+        const nowFetched = cardItems.filter((it) => Boolean(it.imageUrl)).length;
         sendProgress("status", {
-          message: `جاري جلب القوائم وتحميل الصور (تم جلب ${currentFetched} من ${totalCards} صورة) - الجولة ${retryRound}/${maxRetryRounds}...`
+          message: `جلب صورة البطاقة ${idx + 1} من ${totalCards}: "${item.query}"... (${nowFetched}/${totalCards} مكتملة)`
         });
 
-        if (i + chunkSize < pendingIndices.length) {
-          await new Promise((r) => setTimeout(r, interChunkDelay));
+        try {
+          const res = await fetchSingleImageFromDuckDuckGo(item.query, retryRound);
+          if (res.imageUrl) {
+            item.imageUrl = res.imageUrl;
+            item.candidateUrls = res.candidateUrls;
+          } else {
+            failedIndices.push(idx);
+          }
+        } catch (err) {
+          failedIndices.push(idx);
+        }
+
+        // Apply realistic jitter delay between successive requests to prevent anti-bot detection
+        if (i < pendingIndices.length - 1) {
+          const jitterMs = Math.floor(Math.random() * 240) + 380; // 380ms - 620ms
+          await new Promise((r) => setTimeout(r, jitterMs));
         }
       }
 
@@ -8835,15 +8714,15 @@ ${structureDirective}
 
     const finalFetched = cardItems.filter((item) => Boolean(item.imageUrl)).length;
     sendProgress("status", {
-      message: `تم الانتهاء بنجاح! تم جلب وحفظ قوائم ${finalFetched} من ${totalCards} صورة (خلال ${retryRound} جولات).`
+      message: `تم الانتهاء! تم جلب وحفظ صور ${finalFetched} من ${totalCards} بطاقة من محرك البحث بدقة ومصداقية كاملة.`
     });
   }
 
-  // Helper to fetch keyless DuckDuckGo images with proper pagination, retries, and caching
+  // Helper to fetch keyless DuckDuckGo images with proper pagination, retries, realistic browser client-hints, and caching
   async function searchDuckDuckGoImages(q: string, page: string = "1", offsetParam?: string): Promise<{ hits: any[]; nextOffset?: number }> {
     if (!q || !q.trim()) return { hits: [] };
 
-    // If DuckDuckGo has been recently rate-limited or throttled, bypass quietly to allow fallbacks
+    // If DuckDuckGo has been recently rate-limited, bypass quietly
     if (Date.now() < ddgCooldownUntil) {
       return { hits: [] };
     }
@@ -8865,13 +8744,18 @@ ${structureDirective}
       const response = await fetch(searchUrl, {
         headers: {
           "User-Agent": userAgent,
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+          "Sec-Ch-Ua-Mobile": "?0",
+          "Sec-Ch-Ua-Platform": '"Windows"',
           "Sec-Fetch-Dest": "document",
           "Sec-Fetch-Mode": "navigate",
-          "Sec-Fetch-Site": "none"
+          "Sec-Fetch-Site": "none",
+          "Sec-Fetch-User": "?1",
+          "Upgrade-Insecure-Requests": "1"
         },
-        signal: AbortSignal.timeout(4000)
+        signal: AbortSignal.timeout(6000)
       });
       
       if (!response.ok) {
@@ -8896,13 +8780,18 @@ ${structureDirective}
       const apiResponse = await fetch(apiUrl, {
         headers: {
           "User-Agent": userAgent,
-          "Referer": "https://duckduckgo.com/",
           "Accept": "application/json, text/javascript, */*; q=0.01",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Referer": `https://duckduckgo.com/?q=${encodeURIComponent(q)}&iax=images&ia=images`,
+          "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+          "Sec-Ch-Ua-Mobile": "?0",
+          "Sec-Ch-Ua-Platform": '"Windows"',
           "Sec-Fetch-Dest": "empty",
           "Sec-Fetch-Mode": "cors",
-          "Sec-Fetch-Site": "same-origin"
+          "Sec-Fetch-Site": "same-origin",
+          "X-Requested-With": "XMLHttpRequest"
         },
-        signal: AbortSignal.timeout(4000)
+        signal: AbortSignal.timeout(6000)
       });
       
       if (!apiResponse.ok) {
@@ -8945,7 +8834,6 @@ ${structureDirective}
       
       return { hits: [] };
     } catch (err) {
-      // Quietly return empty hits so fallback providers take over
       return { hits: [] };
     }
   }
@@ -8986,47 +8874,29 @@ ${structureDirective}
         }
       }
 
-      // 2. DuckDuckGo Provider handling (if not cooldown)
-      if (Date.now() >= ddgCooldownUntil) {
-        const { hits, nextOffset } = await searchDuckDuckGoImages(q, page, offsetParam);
-        if (hits && hits.length > 0) {
-          return res.json({ hits: hits, totalHits: hits.length * 5, nextOffset });
-        }
-      }
-
-      // 3. Wikimedia Commons live query fallback (rate-limit free, high reliability)
-      const wikiHits = await searchWikimediaImages(q);
-      if (wikiHits && wikiHits.length > 0) {
-        return res.json({ hits: wikiHits, totalHits: wikiHits.length });
-      }
-
-      // 4. Openverse free media API search fallback
-      try {
-        const ovUrl = `https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&page_size=12`;
-        const ovRes = await fetch(ovUrl, { headers: { "User-Agent": "AnkiApp/1.0" } });
-        if (ovRes.ok) {
-          const ovData = await ovRes.json();
-          if (ovData?.results && Array.isArray(ovData.results) && ovData.results.length > 0) {
-            const ovHits = ovData.results.map((r: any, idx: number) => ({
-              id: `ov-${r.id || idx}`,
-              webformatURL: r.url,
-              largeImageURL: r.url,
-              tags: r.title || q
-            }));
-            return res.json({ hits: ovHits, totalHits: ovHits.length });
+      // 2. DuckDuckGo Provider handling (Strict: No fallbacks to preserve credibility)
+      if (provider === "duckduckgo") {
+        if (Date.now() >= ddgCooldownUntil) {
+          const { hits, nextOffset } = await searchDuckDuckGoImages(q, page, offsetParam);
+          if (hits && hits.length > 0) {
+            return res.json({ hits: hits, totalHits: hits.length * 5, nextOffset });
           }
         }
-      } catch (e) {}
+        // If DuckDuckGo returns no results or fails, return empty array directly without any fallback
+        return res.json({ hits: [], totalHits: 0 });
+      }
 
-      // 5. Pollinations AI dynamic high-quality photo generation fallback
-      const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(q)}%20clear%20photo%20isolated%20educational?width=512&height=512&nologo=true`;
-      const fallbackHit = [{
-        id: `poll-${Date.now()}`,
-        webformatURL: pollUrl,
-        largeImageURL: pollUrl,
-        tags: q
-      }];
-      return res.json({ hits: fallbackHit, totalHits: 1 });
+      // 3. Wikimedia Provider handling (only if user explicitly selected wikimedia)
+      if (provider === "wikimedia") {
+        const wikiHits = await searchWikimediaImages(q);
+        if (wikiHits && wikiHits.length > 0) {
+          return res.json({ hits: wikiHits, totalHits: wikiHits.length });
+        }
+        return res.json({ hits: [], totalHits: 0 });
+      }
+
+      // Default: Return empty results
+      return res.json({ hits: [], totalHits: 0 });
     } catch (err) {
       console.error("[API Images] Error in image route:", err);
       res.status(500).json({ error: "Failed to load images" });

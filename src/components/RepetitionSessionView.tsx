@@ -31,7 +31,7 @@ import {
   ChevronRight,
   Image as ImageIcon
 } from "lucide-react";
-import { Flashcard, getSafeImageStyle, getCardSearchQuery } from "../types";
+import { Flashcard, getSafeImageStyle, getCardSearchQuery, sanitizeCardArticleAndSentence, isGermanSentence } from "../types";
 import { preloadTTS, preloadImage, playPiperLocalWasm, fetchGradioAudioBlob, ttsCache, speakClient } from "./Modals";
 import { getSharedAudioContext, ImageWithSkeleton, brokenImagesSet, ddgImagesCache } from "./ReviewSession";
 import { ReviewChatModal } from "./ReviewChatModal";
@@ -1158,13 +1158,12 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
 
   // Article color detection
   const detectedArticle = useMemo(() => {
-    if (card.correctArticle && (card.correctArticle.toLowerCase() === "der" || card.correctArticle.toLowerCase() === "die" || card.correctArticle.toLowerCase() === "das")) {
-      return card.correctArticle.toLowerCase();
+    const isSentence = isGermanSentence(card.frontText || "");
+    if (isSentence) return null; // Sentences NEVER display an article badge
+    const sanitized = sanitizeCardArticleAndSentence(card);
+    if (sanitized.correctArticle && (sanitized.correctArticle.toLowerCase() === "der" || sanitized.correctArticle.toLowerCase() === "die" || sanitized.correctArticle.toLowerCase() === "das")) {
+      return sanitized.correctArticle.toLowerCase();
     }
-    const front = card.frontText?.trim().toLowerCase() || "";
-    if (front.startsWith("der ") || front === "der") return "der";
-    if (front.startsWith("die ") || front === "die") return "die";
-    if (front.startsWith("das ") || front === "das") return "das";
     return null;
   }, [card.frontText, card.correctArticle]);
 
@@ -1219,10 +1218,10 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
       )}
 
       {/* Main 50% / 50% Split Screen Layout */}
-      <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch min-h-[480px] lg:min-h-[540px]">
-        {/* HALF 1 (50%): Image Screen Container - strictly rounded-none with Auto-Skip on broken/blocked images & candidate carousel */}
+      <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4 items-start md:items-center justify-items-center min-h-[480px] lg:min-h-[540px]">
+        {/* HALF 1 (50%): Image Screen Container - strictly square aspect-ratio without variable stretching */}
         <div 
-          className="w-full h-full min-h-[300px] md:min-h-[480px] bg-slate-950 border-2 border-slate-800 rounded-none relative overflow-hidden flex flex-col justify-between p-4 group select-none cursor-grab active:cursor-grabbing"
+          className="w-full aspect-square max-w-[440px] lg:max-w-[500px] bg-slate-950 border-2 border-slate-800 rounded-none relative overflow-hidden flex flex-col justify-between p-4 group select-none cursor-grab active:cursor-grabbing mx-auto self-center shrink-0"
           onTouchStart={handleImgTouchStart}
           onTouchEnd={handleImgTouchEnd}
           onMouseDown={handleImgMouseDown}
@@ -1555,7 +1554,10 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
             {/* Prominent Front Text - strictly LTR (Left-to-Right) */}
             <div className="py-2 text-left" dir="ltr">
               <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black font-mono tracking-tight text-white leading-relaxed select-text text-left">
-                {card.frontText}
+                {(() => {
+                  const sanitized = sanitizeCardArticleAndSentence(card);
+                  return sanitized.frontText;
+                })()}
               </h2>
               {card.translationHint && (
                 <p className="text-xs text-slate-400 font-medium mt-1 text-right" dir="rtl">
