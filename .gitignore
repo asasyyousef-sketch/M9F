@@ -5,3 +5,4 @@ db.json
 tts_cache
 piper_bin
 piper_models
+active_sessions.json
