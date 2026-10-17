@@ -21,21 +21,21 @@ export const UnifiedNavigationTrack: React.FC<UnifiedNavigationTrackProps> = ({
 
   const buttonRef = useRef<HTMLDivElement | null>(null);
 
-  // Gesture & interaction states
+  // Interaction states - button remains 100% stationary and never moves
   const [hoverSide, setHoverSide] = useState<"prev" | "next" | null>(null);
   const [isPressed, setIsPressed] = useState(false);
-  const [dragOffset, setDragOffset] = useState(0);
 
   const startXRef = useRef<number | null>(null);
+  const totalDiffRef = useRef<number>(0);
   const hasSwipedRef = useRef(false);
 
   // Touch handlers
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     if (e.touches.length === 1) {
       startXRef.current = e.touches[0].clientX;
+      totalDiffRef.current = 0;
       hasSwipedRef.current = false;
       setIsPressed(true);
-      setDragOffset(0);
     }
   };
 
@@ -43,33 +43,27 @@ export const UnifiedNavigationTrack: React.FC<UnifiedNavigationTrackProps> = ({
     if (startXRef.current === null || e.touches.length !== 1) return;
     const currentX = e.touches[0].clientX;
     const diff = currentX - startXRef.current;
+    totalDiffRef.current = diff;
 
-    // Movement threshold to consider it a swipe rather than a tap
-    if (Math.abs(diff) > 8) {
+    if (Math.abs(diff) > 20) {
       hasSwipedRef.current = true;
     }
-
-    // Apply soft drag resistance
-    let effective = diff * 0.45;
-    if ((diff > 0 && isFirst) || (diff < 0 && isLast)) {
-      effective = diff * 0.2;
-    }
-    const clamped = Math.max(-28, Math.min(28, effective));
-    setDragOffset(clamped);
   };
 
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
     if (startXRef.current !== null) {
-      // Check if user swiped from anywhere on the button
-      if (hasSwipedRef.current && Math.abs(dragOffset) >= 12) {
+      const diff = totalDiffRef.current;
+
+      // If user swiped from anywhere on the button (threshold: 25px)
+      if (hasSwipedRef.current && Math.abs(diff) >= 25) {
         // In RTL Arabic: Swiping Left moves forward to Next, Swiping Right moves back to Prev
-        if (dragOffset < 0 && !isLast) {
+        if (diff < 0 && !isLast) {
           onNext();
-        } else if (dragOffset > 0 && !isFirst) {
+        } else if (diff > 0 && !isFirst) {
           onPrev();
         }
-      } else if (!hasSwipedRef.current) {
-        // It was a tap! Check which 50% half of the button was tapped
+      } else {
+        // Pure tap/click: check which 50% half was tapped
         const touch = e.changedTouches[0];
         if (buttonRef.current && touch) {
           const rect = buttonRef.current.getBoundingClientRect();
@@ -86,18 +80,18 @@ export const UnifiedNavigationTrack: React.FC<UnifiedNavigationTrackProps> = ({
     }
 
     startXRef.current = null;
+    totalDiffRef.current = 0;
     hasSwipedRef.current = false;
     setIsPressed(false);
-    setDragOffset(0);
   };
 
   // Mouse handlers for desktop
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     startXRef.current = e.clientX;
+    totalDiffRef.current = 0;
     hasSwipedRef.current = false;
     setIsPressed(true);
-    setDragOffset(0);
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -107,36 +101,30 @@ export const UnifiedNavigationTrack: React.FC<UnifiedNavigationTrackProps> = ({
         const rect = buttonRef.current.getBoundingClientRect();
         const cursorX = e.clientX - rect.left;
         const ratio = cursorX / rect.width;
-        // Right 50% = Prev (السابقة), Left 50% = Next (التالية)
         setHoverSide(ratio >= 0.5 ? "prev" : "next");
       }
       return;
     }
 
-    // Active drag tracking
+    // Tracking swipe motion
     const diff = e.clientX - startXRef.current;
-    if (Math.abs(diff) > 8) {
+    totalDiffRef.current = diff;
+    if (Math.abs(diff) > 20) {
       hasSwipedRef.current = true;
     }
-
-    let effective = diff * 0.45;
-    if ((diff > 0 && isFirst) || (diff < 0 && isLast)) {
-      effective = diff * 0.2;
-    }
-    const clamped = Math.max(-28, Math.min(28, effective));
-    setDragOffset(clamped);
   };
 
   const handleMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
     if (startXRef.current !== null) {
-      // Swiped from anywhere on the button
-      if (hasSwipedRef.current && Math.abs(dragOffset) >= 12) {
-        if (dragOffset < 0 && !isLast) {
+      const diff = totalDiffRef.current;
+
+      if (hasSwipedRef.current && Math.abs(diff) >= 25) {
+        if (diff < 0 && !isLast) {
           onNext();
-        } else if (dragOffset > 0 && !isFirst) {
+        } else if (diff > 0 && !isFirst) {
           onPrev();
         }
-      } else if (!hasSwipedRef.current) {
+      } else {
         // Click on 50% half
         if (buttonRef.current) {
           const rect = buttonRef.current.getBoundingClientRect();
@@ -152,16 +140,16 @@ export const UnifiedNavigationTrack: React.FC<UnifiedNavigationTrackProps> = ({
     }
 
     startXRef.current = null;
+    totalDiffRef.current = 0;
     hasSwipedRef.current = false;
     setIsPressed(false);
-    setDragOffset(0);
   };
 
   const handleMouseLeave = () => {
     startXRef.current = null;
+    totalDiffRef.current = 0;
     hasSwipedRef.current = false;
     setIsPressed(false);
-    setDragOffset(0);
     setHoverSide(null);
   };
 
@@ -177,10 +165,11 @@ export const UnifiedNavigationTrack: React.FC<UnifiedNavigationTrackProps> = ({
   return (
     <div className={`w-full max-w-sm sm:max-w-md mx-auto ${className}`} dir="rtl">
       {/* 
-        Single Long Smart Button (زر واحد ذكي موحد):
+        Single Long Smart Button (زر واحد ذكي موحد وثابت في مكانه تماماً):
+        - The button stays 100% stationary (لا يتحرك ولا يُسحب من مكانه).
         - Click on 50% right half -> Previous (السابقة)
         - Click on 50% left half -> Next (التالية)
-        - Swipe / Drag left or right anywhere on this button -> flips according to swipe direction!
+        - Swipe left or right anywhere on this button -> flips according to swipe direction!
       */}
       <div
         ref={buttonRef}
@@ -195,44 +184,33 @@ export const UnifiedNavigationTrack: React.FC<UnifiedNavigationTrackProps> = ({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
-        className={`w-full h-12 bg-white/95 dark:bg-slate-900/95 border border-slate-200/90 dark:border-slate-800 rounded-2xl shadow-xs relative overflow-hidden select-none cursor-pointer flex items-center transition-all ${
-          isPressed ? "scale-[0.99] ring-2 ring-primary/20 dark:ring-blue-500/20" : "hover:border-slate-300 dark:hover:border-slate-700"
+        className={`w-full h-12 bg-white/95 dark:bg-slate-900/95 border border-slate-200/90 dark:border-slate-800 rounded-2xl shadow-xs relative overflow-hidden select-none cursor-pointer flex items-center transition-colors ${
+          isPressed ? "bg-slate-50 dark:bg-slate-850" : "hover:border-slate-300 dark:hover:border-slate-700"
         }`}
         title="زر ذكي موحد: انقر على نصف التالية أو السابقة، أو اسحب يميناً ويساراً من أي مكان للتقليب"
       >
-        {/* Dynamic Interactive Backdrop: highlights active 50% half or swipe direction */}
-        {dragOffset !== 0 ? (
-          <div
-            className={`absolute inset-0 pointer-events-none transition-opacity duration-150 ${
-              dragOffset < 0
-                ? "bg-gradient-to-l from-transparent via-primary/5 to-primary/10 dark:to-blue-500/15"
-                : "bg-gradient-to-r from-transparent via-primary/5 to-primary/10 dark:to-blue-500/15"
-            }`}
-          />
-        ) : hoverSide ? (
+        {/* Soft highlight on the hovered 50% half without moving the button */}
+        {hoverSide && !isPressed && (
           <div
             className={`absolute inset-y-0 w-1/2 pointer-events-none transition-all duration-200 bg-slate-100/60 dark:bg-slate-800/50 ${
               hoverSide === "prev" ? "right-0 rounded-r-2xl" : "left-0 rounded-l-2xl"
             }`}
           />
-        ) : null}
+        )}
 
-        {/* Content of the Single Unified Button */}
-        <div
-          className="w-full h-full flex items-center justify-between px-4 sm:px-6 relative z-10 transition-transform duration-75 pointer-events-none"
-          style={{ transform: `translateX(${dragOffset}px)` }}
-        >
+        {/* Static content: perfectly fixed and stationary */}
+        <div className="w-full h-full flex items-center justify-between px-4 sm:px-6 relative z-10 pointer-events-none">
           {/* Right 50% Zone Content: السابقة */}
           <div
-            className={`flex items-center gap-1.5 transition-all duration-150 ${
+            className={`flex items-center gap-1.5 transition-colors duration-150 ${
               isFirst
                 ? "opacity-30 text-slate-400 dark:text-slate-600"
-                : hoverSide === "prev" || dragOffset > 5
-                ? "text-slate-900 dark:text-white font-black translate-x-0.5"
+                : hoverSide === "prev"
+                ? "text-slate-900 dark:text-white font-black"
                 : "text-slate-700 dark:text-slate-300 font-bold"
             }`}
           >
-            <ChevronRight className="w-4 h-4 shrink-0 transition-transform" />
+            <ChevronRight className="w-4 h-4 shrink-0" />
             <span className="text-xs sm:text-sm">السابقة</span>
           </div>
 
@@ -245,16 +223,16 @@ export const UnifiedNavigationTrack: React.FC<UnifiedNavigationTrackProps> = ({
 
           {/* Left 50% Zone Content: التالية */}
           <div
-            className={`flex items-center gap-1.5 transition-all duration-150 ${
+            className={`flex items-center gap-1.5 transition-colors duration-150 ${
               isLast
                 ? "opacity-30 text-slate-400 dark:text-slate-600"
-                : hoverSide === "next" || dragOffset < -5
-                ? "text-slate-900 dark:text-white font-black -translate-x-0.5"
+                : hoverSide === "next"
+                ? "text-slate-900 dark:text-white font-black"
                 : "text-slate-700 dark:text-slate-300 font-bold"
             }`}
           >
             <span className="text-xs sm:text-sm">التالية</span>
-            <ChevronLeft className="w-4 h-4 shrink-0 transition-transform" />
+            <ChevronLeft className="w-4 h-4 shrink-0" />
           </div>
         </div>
       </div>
