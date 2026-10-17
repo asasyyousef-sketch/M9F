@@ -5174,8 +5174,11 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
               {/* Action Bar (Shuffle & Settings & Night Mode & Autoplay & Edit) with expandable distraction-free toggle */}
               {/* Unified Action Bar (Settings & Auto Advance & Audio & Mode Controls & Night Mode) */}
               {currentCard && method !== "match" && method !== "spoken_challenge" && method !== "repetition" && (
-                <div className="flex flex-col items-center shrink-0 animate-fadeIn">
-                  <div className="flex items-center justify-center gap-1.5 bg-surface-container-low/90 dark:bg-slate-900/90 backdrop-blur-md p-1 rounded-2xl shadow-xs border-0">
+                <div className="w-full shrink-0 animate-fadeIn" dir="rtl">
+                  <div className="w-full max-w-sm sm:max-w-md mx-auto h-12 bg-white/95 dark:bg-slate-900/95 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-1 shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 select-none relative overflow-hidden transition-all backdrop-blur-xs">
+                    {/* Clean toolbar background without muddy pale tints */}
+                    <div className="absolute inset-0 pointer-events-none bg-transparent" />
+
                     {/* 1. Mode-specific Primary Controls */}
                     {method === "classic" && (
                       <>
@@ -5183,10 +5186,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           type="button"
                           onClick={handleToggleAutoPlay}
                           title={isAutoPlaying ? "إيقاف التشغيل التلقائي" : "بدء التشغيل التلقائي"}
-                          className={`w-8 h-8 rounded-xl transition-all cursor-pointer active:scale-95 flex items-center justify-center border-0 ${
+                          className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center select-none ${
                             isAutoPlaying 
-                              ? "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100" 
-                              : "bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-750 dark:text-slate-300"
+                              ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25" 
+                              : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 border border-transparent"
                           }`}
                         >
                           {isAutoPlaying ? (
@@ -5211,10 +5214,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                             setIsRepeatModalOpen(true);
                           }}
                           title={isRepeatAudioEnabled ? "إيقاف تكرار النطق المخصص (اضغط مطولاً للإعدادات)" : "تفعيل تكرار النطق المخصص (اضغط مطولاً للإعدادات)"}
-                          className={`w-8 h-8 rounded-xl transition-all cursor-pointer active:scale-95 flex items-center justify-center select-none border-0 ${
+                          className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center select-none ${
                             isRepeatAudioEnabled
-                              ? "bg-white text-slate-900 dark:bg-white dark:text-slate-900 shadow-xs ring-1 ring-slate-200/70 dark:ring-white/20 font-bold"
-                              : "bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-750 dark:text-slate-300"
+                              ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25"
+                              : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 border border-transparent"
                           }`}
                         >
                           <Repeat className="w-4 h-4" />
@@ -5234,7 +5237,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                             playPronunciation(t, l, true);
                           }}
                           title="استمع لنطق السؤال"
-                          className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-750 dark:text-slate-300 transition-all cursor-pointer active:scale-95 flex items-center justify-center border-0"
+                          className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 cursor-pointer active:scale-95 flex items-center justify-center border border-transparent"
                         >
                           <Volume2 className="w-4 h-4" />
                         </button>
@@ -5250,10 +5253,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                             });
                           }}
                           title={autoAdvance ? "إيقاف التقليب التلقائي بعد التحقق" : "تفعيل التقليب التلقائي بعد التحقق"}
-                          className={`w-8 h-8 rounded-xl transition-all cursor-pointer active:scale-95 flex items-center justify-center border-0 ${
+                          className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center ${
                             autoAdvance 
-                              ? "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100" 
-                              : "bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-750 dark:text-slate-300"
+                              ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25" 
+                              : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 border border-transparent"
                           }`}
                         >
                           <Timer className="w-4 h-4" />
@@ -5264,10 +5267,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           type="button"
                           onClick={() => setHidePromptText(prev => !prev)}
                           title={hidePromptText ? "إظهار النص الأمامي (وجه السؤال)" : "إخفاء النص الأمامي (وجه السؤال) لاختبار الذاكرة"}
-                          className={`w-8 h-8 rounded-xl transition-all cursor-pointer active:scale-95 flex items-center justify-center border-0 ${
+                          className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center ${
                             hidePromptText 
-                              ? "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100" 
-                              : "bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-750 dark:text-slate-300"
+                              ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25" 
+                              : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 border border-transparent"
                           }`}
                         >
                           {hidePromptText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -5283,7 +5286,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           type="button"
                           onClick={() => playPronunciation(currentCard.frontText, currentCard.frontLang || "de", true)}
                           title="إعادة نطق الكلمة المسموعة"
-                          className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-750 dark:text-slate-300 transition-all cursor-pointer active:scale-95 flex items-center justify-center border-0"
+                          className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 cursor-pointer active:scale-95 flex items-center justify-center border border-transparent"
                         >
                           <Volume2 className="w-4 h-4" />
                         </button>
@@ -5299,17 +5302,17 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                             });
                           }}
                           title={autoAdvance ? "إيقاف التقليب التلقائي بعد السماع" : "تفعيل التقليب التلقائي بعد السماع والاختيار"}
-                          className={`w-8 h-8 rounded-xl transition-all cursor-pointer active:scale-95 flex items-center justify-center border-0 ${
+                          className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center ${
                             autoAdvance 
-                              ? "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100" 
-                              : "bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-750 dark:text-slate-300"
+                              ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25" 
+                              : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 border border-transparent"
                           }`}
                         >
                           <Timer className="w-4 h-4" />
                         </button>
 
                         {/* Quick Choice Display Selector */}
-                        <div className="flex items-center bg-slate-200/60 dark:bg-slate-800 p-0.5 rounded-xl border-0">
+                        <div className="flex items-center bg-slate-100/80 dark:bg-slate-800/80 p-0.5 rounded-lg border border-slate-200/60 dark:border-slate-700/60">
                           <button
                             type="button"
                             onClick={() => {
@@ -5317,10 +5320,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                               localStorage.setItem("settings_listen_choice_type", "image");
                             }}
                             title="عرض الصور في خيارات الإجابة"
-                            className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                            className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer ${
                               listenChoiceType === "image"
-                                ? "bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-xs"
-                                : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                                ? "bg-sky-500/[0.12] dark:bg-sky-400/[0.16] text-sky-700 dark:text-sky-300 border border-sky-500/25 dark:border-sky-400/30"
+                                : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 border border-transparent"
                             }`}
                           >
                             🖼️ صور
@@ -5332,10 +5335,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                               localStorage.setItem("settings_listen_choice_type", "front");
                             }}
                             title="عرض النص الألماني في الخيارات"
-                            className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                            className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer ${
                               listenChoiceType === "front"
-                                ? "bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-xs"
-                                : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                                ? "bg-sky-500/[0.12] dark:bg-sky-400/[0.16] text-sky-700 dark:text-sky-300 border border-sky-500/25 dark:border-sky-400/30"
+                                : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 border border-transparent"
                             }`}
                           >
                             🇩🇪 ألماني
@@ -5347,10 +5350,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                               localStorage.setItem("settings_listen_choice_type", "back");
                             }}
                             title="عرض المعنى العربي في الخيارات"
-                            className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                            className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer ${
                               listenChoiceType === "back"
-                                ? "bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-xs"
-                                : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                                ? "bg-sky-500/[0.12] dark:bg-sky-400/[0.16] text-sky-700 dark:text-sky-300 border border-sky-500/25 dark:border-sky-400/30"
+                                : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 border border-transparent"
                             }`}
                           >
                             🇸🇦 عربي
@@ -5374,10 +5377,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                               setIsPronouncingCorrect(false);
                             }, true);
                           }}
-                          className={`w-8 h-8 rounded-xl transition-all cursor-pointer active:scale-95 flex items-center justify-center border-0 ${
+                          className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center ${
                             isPronouncingCorrect 
-                              ? "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100" 
-                              : "bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-850 dark:hover:bg-slate-800 dark:text-slate-300"
+                              ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25" 
+                              : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 border border-transparent"
                           }`}
                           title="نطق الكلمة مع أداة التعريف"
                         >
@@ -5392,10 +5395,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                               return next;
                             });
                           }}
-                          className={`w-8 h-8 rounded-xl transition-all cursor-pointer active:scale-95 flex items-center justify-center border-0 ${
+                          className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center ${
                             autoAdvance 
-                              ? "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100" 
-                              : "bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-850 dark:hover:bg-slate-800 dark:text-slate-300"
+                              ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25" 
+                              : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 border border-transparent"
                           }`}
                           title={autoAdvance ? "إيقاف التقليب التلقائي" : "تفعيل التقليب التلقائي بعد السماع"}
                         >
@@ -5409,7 +5412,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       type="button"
                       onClick={() => setIsReviewChatOpen(true)}
                       title="مناقشة واستفسار بالذكاء الاصطناعي والمصحح اللغوي"
-                      className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-750 dark:text-slate-300 transition-all cursor-pointer active:scale-95 flex items-center justify-center border-0"
+                      className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 cursor-pointer active:scale-95 flex items-center justify-center border border-transparent"
                     >
                       <Bot className="w-4 h-4" />
                     </button>
@@ -5427,7 +5430,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                         method === "match" ? "match" : "classic"
                       )}
                       title={`إعدادات وضع ${methodArabicLabels[method] || "المراجعة"}`}
-                      className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-850 dark:hover:bg-slate-800 dark:text-slate-300 transition-all cursor-pointer active:scale-95 flex items-center justify-center border-0"
+                      className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 cursor-pointer active:scale-95 flex items-center justify-center border border-transparent"
                     >
                       <Sliders className="w-4 h-4" />
                     </button>
@@ -5437,10 +5440,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       type="button"
                       onClick={() => setIsSoundEnabled(!isSoundEnabled)}
                       title={isSoundEnabled ? "كتم الصوت العام" : "تشغيل الصوت العام"}
-                      className={`w-8 h-8 rounded-xl transition-all cursor-pointer active:scale-95 flex items-center justify-center border-0 ${
+                      className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center ${
                         isSoundEnabled 
-                          ? "bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-750 dark:text-slate-300" 
-                          : "bg-slate-100 hover:bg-slate-200/90 text-slate-400 dark:bg-slate-800 dark:text-slate-500"
+                          ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25" 
+                          : "text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100/50 dark:hover:bg-slate-800/40 border border-transparent"
                       }`}
                     >
                       {isSoundEnabled ? (
@@ -5451,18 +5454,18 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     </button>
 
                     {/* Divider */}
-                    <div className="w-px h-4 bg-slate-300/40 dark:bg-slate-700/40 mx-0.5" />
+                    <div className="w-px h-5 bg-slate-200 dark:bg-slate-800 mx-0.5 shrink-0" />
 
                     {/* Expanded Items */}
                     {isToolbarExpanded && (
-                      <div className="flex items-center gap-1.5 animate-fadeIn">
+                      <div className="flex items-center gap-1 sm:gap-1.5 animate-fadeIn">
                         {/* Edit Card */}
                         {onEditCard && (
                           <button
                             type="button"
                             onClick={handleOpenEditCard}
                             title="تعديل البطاقة الحالية"
-                            className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-750 dark:text-slate-300 transition-all cursor-pointer active:scale-95 flex items-center justify-center border-0"
+                            className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 cursor-pointer active:scale-95 flex items-center justify-center border border-transparent"
                           >
                             <Pencil className="w-4 h-4" />
                           </button>
@@ -5473,7 +5476,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           id="shuffle-btn"
                           onClick={handleShuffleSessionCards}
                           title="خلط البطاقات عشوائياً"
-                          className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-750 dark:text-slate-300 transition-all cursor-pointer active:scale-95 flex items-center justify-center border-0"
+                          className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 cursor-pointer active:scale-95 flex items-center justify-center border border-transparent"
                         >
                           <Shuffle className="w-4 h-4" />
                         </button>
@@ -5482,22 +5485,22 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           type="button"
                           onClick={() => setIsDarkMode(prev => !prev)}
                           title={isDarkMode ? "الوضع النهاري" : "الوضع الليلي"}
-                          className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-750 dark:text-slate-300 transition-all cursor-pointer active:scale-95 flex items-center justify-center border-0"
+                          className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 cursor-pointer active:scale-95 flex items-center justify-center border border-transparent"
                         >
                           {isDarkMode ? <Sun className="w-4 h-4 text-slate-600 dark:text-slate-300" /> : <Moon className="w-4 h-4 text-slate-600 dark:text-slate-300" />}
                         </button>
                       </div>
                     )}
 
-                    {/* Expand / Collapse Button */}
+                    {/* Expand / Collapse Button (المزيد) */}
                     <button
                       type="button"
                       onClick={() => setIsToolbarExpanded(prev => !prev)}
                       title={isToolbarExpanded ? "إخفاء باقي الأدوات" : "إظهار كافة الأدوات"}
-                      className={`w-8 h-8 rounded-xl transition-all cursor-pointer active:scale-95 flex items-center justify-center border-0 ${
+                      className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center ${
                         isToolbarExpanded
-                          ? "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100"
-                          : "bg-slate-100 hover:bg-slate-200/90 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-750 dark:text-slate-300"
+                          ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25"
+                          : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 border border-transparent"
                       }`}
                     >
                       {isToolbarExpanded ? (
