@@ -4862,7 +4862,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
       )}
 
       {/* Main Container Area */}
-      <div className="flex-1 overflow-y-auto bg-surface-bright flex flex-col justify-center items-center px-3 sm:px-4 py-2 sm:py-4">
+      <div className="flex-1 overflow-y-auto bg-surface-bright flex flex-col items-center px-3 sm:px-4 py-2 sm:py-3.5">
         
         <AnimatePresence mode="wait">
           
@@ -5169,13 +5169,13 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="w-full max-w-[368px] sm:max-w-[392px] h-full flex flex-col items-center justify-center my-auto gap-2.5 sm:gap-4 md:gap-5"
+              className="w-full max-w-[370px] sm:max-w-[400px] md:max-w-[420px] my-auto flex flex-col items-center gap-3 sm:gap-3.5 md:gap-4 shrink-0"
             >
               {/* Action Bar (Shuffle & Settings & Night Mode & Autoplay & Edit) with expandable distraction-free toggle */}
               {/* Unified Action Bar (Settings & Auto Advance & Audio & Mode Controls & Night Mode) */}
               {currentCard && method !== "match" && method !== "spoken_challenge" && method !== "repetition" && (
                 <div className="w-full shrink-0 animate-fadeIn" dir="rtl">
-                  <div className="w-full max-w-sm sm:max-w-md mx-auto h-12 bg-white/95 dark:bg-slate-900/95 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-1 shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 select-none relative overflow-hidden transition-all backdrop-blur-xs">
+                  <div className="w-full h-12 bg-white/95 dark:bg-slate-900/95 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-1 shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 select-none relative overflow-hidden transition-all backdrop-blur-xs">
                     {/* Clean toolbar background without muddy pale tints */}
                     <div className="absolute inset-0 pointer-events-none bg-transparent" />
 
@@ -5561,12 +5561,12 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
               {/* 1. CLASSIC / 3D FLIP CARD MODE */}
               {method === "classic" && currentCard && (
-                <div className="w-full flex flex-col items-center gap-2.5 sm:gap-4 md:gap-5">
+                <div className="w-full flex flex-col items-center gap-3 sm:gap-3.5 md:gap-4">
 
                   {/* Stable Deck Container */}
                   <div className="relative w-full flex items-center justify-center">
                     {/* Active Card - strictly square 1:1, non-variable dimensions */}
-                    <div className="relative w-full aspect-square max-h-[min(410px,68vh)] select-none overflow-hidden rounded-[24px]">
+                    <div className="relative w-full aspect-square max-h-[min(420px,calc(100dvh-205px))] select-none overflow-hidden rounded-[24px] shadow-sm">
                       <AnimatePresence initial={false} custom={direction} mode="popLayout">
                         <motion.div
                           key={currentCard.id}
@@ -5659,7 +5659,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                   {/* Subtle autoplay indicator if enabled (no blinking circle) */}
                   {isAutoPlaying && (
                     <div className="w-full shrink-0">
-                      <div className="w-full py-2 bg-white/90 dark:bg-slate-850/90 border border-slate-200/80 dark:border-slate-800 rounded-xl text-center shadow-xs flex items-center justify-center gap-2">
+                      <div className="w-full py-1.5 bg-white/90 dark:bg-slate-850/90 border border-slate-200/80 dark:border-slate-800 rounded-xl text-center shadow-xs flex items-center justify-center gap-2">
                         <Play className="w-3.5 h-3.5 text-slate-600 fill-slate-600 dark:text-slate-300 dark:fill-slate-300" />
                         <span className="text-xs font-bold text-slate-600 dark:text-slate-300 font-mono">
                           تشغيل تلقائي...
@@ -6200,10 +6200,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     : "صيغة الجمع 👥";
 
                 return (
-                  <div className="w-full flex flex-col items-center gap-2.5 sm:gap-4 md:gap-5">
+                  <div className="w-full flex flex-col items-center gap-3 sm:gap-3.5 md:gap-4">
                     
                     {/* Main Card with beautiful countdown or revealed result - Styled EXACTLY like StudyCard */}
-                    <div className="relative w-full h-[clamp(350px,58vh,510px)] bg-surface-container-lowest rounded-[24px] border border-outline-variant/30 shadow-sm p-4 sm:p-5 flex flex-col justify-between select-none overflow-hidden">
+                    <div className="relative w-full h-[clamp(340px,56vh,480px)] max-h-[calc(100dvh-205px)] bg-surface-container-lowest rounded-[24px] border border-outline-variant/30 shadow-sm p-4 sm:p-5 flex flex-col justify-between select-none overflow-hidden">
                       <div className="absolute top-0 right-0 w-32 h-32 bg-primary/2.5 rounded-full blur-2xl pointer-events-none" />
 
                       {/* If ready to start, show a blurred overlay over the whole card with a green start button */}
