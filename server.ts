@@ -9052,7 +9052,25 @@ ${structureDirective}
   // Setup Vite development middleware
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        watch: {
+          ignored: [
+            '**/*.json',
+            '**/media_files.json',
+            '**/media_folders.json',
+            '**/active_sessions.json',
+            '**/db.json',
+            '**/shared_decks.json',
+            '**/token_usage_log.json',
+            '**/users.json',
+            '**/voice_profiles.json',
+            '**/uploads/**',
+            '**/piper/**',
+            '**/runtime_voices/**'
+          ]
+        }
+      },
       appType: "spa"
     });
     app.use(vite.middlewares);
