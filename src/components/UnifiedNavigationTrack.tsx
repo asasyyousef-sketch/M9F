@@ -175,7 +175,7 @@ export const UnifiedNavigationTrack: React.FC<UnifiedNavigationTrackProps> = ({
   };
 
   return (
-    <div className={`w-full max-w-sm sm:max-w-md mx-auto ${className}`} dir="rtl">
+    <div className={`w-full ${className}`} dir="rtl">
       {/* 
         Single Long Smart Button (زر واحد ذكي موحد):
         - Click on 50% right half -> Previous (السابقة)

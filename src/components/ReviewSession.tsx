@@ -1237,10 +1237,10 @@ const StudyCard: React.FC<StudyCardProps> = ({
                       if (localFlipped) return;
                       onPlayPronunciation(getFrontSpeechText(localCard, speakFrontArticle), localCard.frontLang);
                     }}
-                    className="w-8 h-8 rounded-xl bg-black/40 hover:bg-black/65 backdrop-blur-md transition-all shadow-sm cursor-pointer flex items-center justify-center active:scale-95 border border-white/25 hover:border-white/50 text-white disabled:pointer-events-none disabled:opacity-0"
+                    className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl bg-black/40 hover:bg-black/65 backdrop-blur-md transition-all shadow-sm cursor-pointer flex items-center justify-center active:scale-95 border border-white/25 hover:border-white/50 text-white disabled:pointer-events-none disabled:opacity-0"
                     title={reviewVoiceTarget === "secondary" ? "استمع للنطق المعتمد: الصوت الثانوي" : "استمع للنطق المعتمد: الصوت الأساسي"}
                   >
-                    <Volume2 className="w-4 h-4" />
+                    <Volume2 className="w-4.5 h-4.5" />
                   </button>
                   {onPlaySecondaryPronunciation && (
                     <button
@@ -1251,10 +1251,10 @@ const StudyCard: React.FC<StudyCardProps> = ({
                         if (localFlipped) return;
                         onPlaySecondaryPronunciation(getFrontSpeechText(localCard, speakFrontArticle), localCard.frontLang);
                       }}
-                      className="w-8 h-8 rounded-xl bg-black/40 hover:bg-black/65 backdrop-blur-md transition-all shadow-sm cursor-pointer flex items-center justify-center active:scale-95 border border-white/25 hover:border-white/50 text-white disabled:pointer-events-none disabled:opacity-0"
+                      className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl bg-black/40 hover:bg-black/65 backdrop-blur-md transition-all shadow-sm cursor-pointer flex items-center justify-center active:scale-95 border border-white/25 hover:border-white/50 text-white disabled:pointer-events-none disabled:opacity-0"
                       title={reviewVoiceTarget === "secondary" ? "استمع للصوت الأساسي" : "استمع للصوت الثانوي"}
                     >
-                      <Volume2 className="w-4 h-4" />
+                      <Volume2 className="w-4.5 h-4.5" />
                     </button>
                   )}
                 </div>
@@ -1343,7 +1343,7 @@ const StudyCard: React.FC<StudyCardProps> = ({
                     if (localFlipped) return;
                     onPlayPronunciation(getFrontSpeechText(localCard, speakFrontArticle), localCard.frontLang);
                   }}
-                  className="w-9 h-9 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 shadow-3xs"
+                  className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 shadow-3xs"
                   title={reviewVoiceTarget === "secondary" ? "استمع للنطق المعتمد: الصوت الثانوي" : "استمع للنطق المعتمد: الصوت الأساسي"}
                 >
                   <Volume2 className="w-4.5 h-4.5" />
@@ -1357,7 +1357,7 @@ const StudyCard: React.FC<StudyCardProps> = ({
                       if (localFlipped) return;
                       onPlaySecondaryPronunciation(getFrontSpeechText(localCard, speakFrontArticle), localCard.frontLang);
                     }}
-                    className="w-9 h-9 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 shadow-3xs"
+                    className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 shadow-3xs"
                     title={reviewVoiceTarget === "secondary" ? "استمع للصوت الأساسي" : "استمع للصوت الثانوي"}
                   >
                     <Volume2 className="w-4.5 h-4.5" />
@@ -1481,10 +1481,10 @@ const StudyCard: React.FC<StudyCardProps> = ({
                           onPlayPronunciation(localCard.backText, localCard.backLang || "ar");
                         }
                       }}
-                      className="w-8.5 h-8.5 rounded-xl bg-black/40 hover:bg-black/65 backdrop-blur-md transition-all shadow-sm cursor-pointer flex items-center justify-center active:scale-95 border border-white/25 hover:border-white/50 text-white disabled:pointer-events-none disabled:opacity-0 preserve-bg"
+                      className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl bg-black/40 hover:bg-black/65 backdrop-blur-md transition-all shadow-sm cursor-pointer flex items-center justify-center active:scale-95 border border-white/25 hover:border-white/50 text-white disabled:pointer-events-none disabled:opacity-0 preserve-bg"
                       title={reviewVoiceTarget === "secondary" ? "استمع للنطق المعتمد: الصوت الثانوي" : "استمع للنطق المعتمد: الصوت الأساسي"}
                     >
-                      <Volume2 className="w-4 h-4" />
+                      <Volume2 className="w-4.5 h-4.5" />
                     </button>
 
                     {onPlaySecondaryPronunciation && (
@@ -1500,10 +1500,10 @@ const StudyCard: React.FC<StudyCardProps> = ({
                             onPlaySecondaryPronunciation(localCard.backText, localCard.backLang || "ar");
                           }
                         }}
-                        className="w-8.5 h-8.5 rounded-xl bg-black/40 hover:bg-black/65 backdrop-blur-md transition-all shadow-sm cursor-pointer flex items-center justify-center active:scale-95 border border-white/25 hover:border-white/50 text-white disabled:pointer-events-none disabled:opacity-0 preserve-bg"
+                        className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl bg-black/40 hover:bg-black/65 backdrop-blur-md transition-all shadow-sm cursor-pointer flex items-center justify-center active:scale-95 border border-white/25 hover:border-white/50 text-white disabled:pointer-events-none disabled:opacity-0 preserve-bg"
                         title={reviewVoiceTarget === "secondary" ? "استمع للصوت الأساسي" : "استمع للصوت الثانوي"}
                       >
-                        <Volume2 className="w-4 h-4" />
+                        <Volume2 className="w-4.5 h-4.5" />
                       </button>
                     )}
 
@@ -1521,14 +1521,14 @@ const StudyCard: React.FC<StudyCardProps> = ({
                             onPlayPronunciation(localCard.pluralText!, localCard.pluralLang || "de");
                           }
                         }}
-                        className={`w-8.5 h-8.5 rounded-xl flex items-center justify-center transition-all cursor-pointer border active:scale-95 preserve-bg ${
+                        className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl flex items-center justify-center transition-all cursor-pointer border active:scale-95 preserve-bg ${
                           showPlural 
                             ? "bg-purple-600 text-white shadow-sm border-purple-500" 
                             : "bg-black/40 hover:bg-black/65 backdrop-blur-md text-white border-white/25"
                         }`}
                         title={showPlural ? "العودة للترجمة" : "عرض صيغة الجمع للكلمة (+)"}
                       >
-                        <Plus className="w-4 h-4" />
+                        <Plus className="w-4.5 h-4.5" />
                       </button>
                     )}
                   </div>
@@ -1627,7 +1627,7 @@ const StudyCard: React.FC<StudyCardProps> = ({
                       onPlayPronunciation(localCard.backText, localCard.backLang || "ar");
                     }
                   }}
-                  className="w-9 h-9 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 shadow-3xs disabled:pointer-events-none disabled:opacity-0"
+                  className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 shadow-3xs disabled:pointer-events-none disabled:opacity-0"
                   title={reviewVoiceTarget === "secondary" ? "استمع للنطق المعتمد: الصوت الثانوي" : "استمع للنطق المعتمد: الصوت الأساسي"}
                 >
                   <Volume2 className="w-4.5 h-4.5" />
@@ -1646,7 +1646,7 @@ const StudyCard: React.FC<StudyCardProps> = ({
                         onPlaySecondaryPronunciation(localCard.backText, localCard.backLang || "ar");
                       }
                     }}
-                    className="w-9 h-9 rounded-xl transition-all cursor-pointer flex items-center justify-center relative active:scale-95 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 shadow-3xs disabled:pointer-events-none disabled:opacity-0"
+                    className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl transition-all cursor-pointer flex items-center justify-center relative active:scale-95 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 shadow-3xs disabled:pointer-events-none disabled:opacity-0"
                     title={reviewVoiceTarget === "secondary" ? "استمع للصوت الأساسي" : "استمع للصوت الثانوي"}
                   >
                     <Volume2 className="w-4.5 h-4.5" />
@@ -1667,7 +1667,7 @@ const StudyCard: React.FC<StudyCardProps> = ({
                         onPlayPronunciation(localCard.pluralText!, localCard.pluralLang || "de");
                       }
                     }}
-                    className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer border active:scale-95 ${
+                    className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl flex items-center justify-center transition-all cursor-pointer border active:scale-95 ${
                       showPlural 
                         ? "bg-purple-600 text-white shadow-xs border-purple-600" 
                         : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border-slate-200/60 dark:border-slate-700"
@@ -4862,7 +4862,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
       )}
 
       {/* Main Container Area */}
-      <div className="flex-1 overflow-y-auto bg-surface-bright flex flex-col items-center px-3 sm:px-4 py-2 sm:py-3.5 md:py-4">
+      <div className="flex-1 overflow-y-auto bg-surface-bright flex flex-col items-center px-3 sm:px-4 pt-5 pb-3 sm:pt-6 sm:pb-4 md:pt-7 md:pb-5">
         
         <AnimatePresence mode="wait">
           
@@ -5169,7 +5169,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="w-full max-w-[390px] sm:max-w-[440px] md:max-w-[480px] h-full flex-1 flex flex-col justify-between items-center py-1 sm:py-2 md:py-3 min-h-0"
+              className="w-full max-w-[min(420px,calc(100dvh-250px))] flex flex-col items-center gap-6 sm:gap-7 shrink-0"
             >
               {/* Action Bar (Shuffle & Settings & Night Mode & Autoplay & Edit) with expandable distraction-free toggle */}
               {/* Unified Action Bar (Settings & Auto Advance & Audio & Mode Controls & Night Mode) */}
@@ -5561,12 +5561,12 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
               {/* 1. CLASSIC / 3D FLIP CARD MODE */}
               {method === "classic" && currentCard && (
-                <div className="w-full flex-1 flex flex-col justify-between items-center min-h-0 gap-3 sm:gap-4 md:gap-5">
+                <div className="w-full flex flex-col items-center gap-6 sm:gap-7">
 
                   {/* Stable Deck Container */}
-                  <div className="relative w-full flex-1 flex items-center justify-center min-h-0 py-1 sm:py-2">
-                    {/* Active Card - strictly square 1:1, non-variable dimensions */}
-                    <div className="relative w-full aspect-square max-h-[min(480px,calc(100dvh-200px))] max-w-[min(480px,calc(100dvh-200px))] select-none overflow-hidden rounded-[26px] shadow-sm">
+                  <div className="w-full flex items-center justify-center">
+                    {/* Active Card - strictly square 1:1, matching toolbar and nav width */}
+                    <div className="relative w-full aspect-square select-none overflow-hidden rounded-[26px] shadow-sm">
                       <AnimatePresence initial={false} custom={direction} mode="popLayout">
                         <motion.div
                           key={currentCard.id}
@@ -6200,10 +6200,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     : "صيغة الجمع 👥";
 
                 return (
-                  <div className="w-full flex-1 flex flex-col justify-between items-center min-h-0 gap-3 sm:gap-4 md:gap-5">
+                  <div className="w-full flex flex-col items-center gap-6 sm:gap-7">
                     
                     {/* Main Card with beautiful countdown or revealed result - Styled EXACTLY like StudyCard */}
-                    <div className="relative w-full flex-1 h-[clamp(340px,58vh,500px)] max-h-[calc(100dvh-200px)] bg-surface-container-lowest rounded-[26px] border border-outline-variant/30 shadow-sm p-4 sm:p-5 flex flex-col justify-between select-none overflow-hidden my-auto">
+                    <div className="relative w-full aspect-square bg-surface-container-lowest rounded-[26px] border border-outline-variant/30 shadow-sm p-4 sm:p-5 flex flex-col justify-between select-none overflow-hidden">
                       <div className="absolute top-0 right-0 w-32 h-32 bg-primary/2.5 rounded-full blur-2xl pointer-events-none" />
 
                       {/* If ready to start, show a blurred overlay over the whole card with a green start button */}
