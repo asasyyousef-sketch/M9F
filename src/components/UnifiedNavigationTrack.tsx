@@ -236,9 +236,9 @@ export const UnifiedNavigationTrack: React.FC<UnifiedNavigationTrackProps> = ({
             <span className="text-xs sm:text-sm">السابقة</span>
           </div>
 
-          {/* Center Counter Pill */}
-          <div className="shrink-0 px-2.5 py-1 bg-slate-100/90 dark:bg-slate-800/90 border border-slate-200/70 dark:border-slate-700/60 rounded-xl flex items-center justify-center shadow-2xs pointer-events-none select-none">
-            <span className="text-[11px] sm:text-xs font-bold font-mono text-slate-600 dark:text-slate-300">
+          {/* Center Counter */}
+          <div className="shrink-0 flex items-center justify-center pointer-events-none select-none">
+            <span className="text-xs sm:text-sm font-semibold font-mono text-slate-500 dark:text-slate-400">
               {currentIndex + 1} من {totalCards}
             </span>
           </div>

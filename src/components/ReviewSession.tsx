@@ -4841,7 +4841,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
           {/* Right: Timer */}
           <div className="w-16 flex items-center justify-end">
-            <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 font-mono text-xs font-semibold bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1.5 rounded-xl border border-slate-200/50 dark:border-slate-700/50">
+            <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 font-mono text-xs font-semibold">
               <Timer className="w-3.5 h-3.5 text-slate-400" />
               <span>{formatTimer(time)}</span>
             </div>
@@ -5655,18 +5655,6 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       onNext={handleNextCard}
                     />
                   </div>
-
-                  {/* Subtle autoplay indicator if enabled (no blinking circle) */}
-                  {isAutoPlaying && (
-                    <div className="w-full shrink-0">
-                      <div className="w-full py-1.5 bg-white/90 dark:bg-slate-850/90 border border-slate-200/80 dark:border-slate-800 rounded-xl text-center shadow-xs flex items-center justify-center gap-2">
-                        <Play className="w-3.5 h-3.5 text-slate-600 fill-slate-600 dark:text-slate-300 dark:fill-slate-300" />
-                        <span className="text-xs font-bold text-slate-600 dark:text-slate-300 font-mono">
-                          تشغيل تلقائي...
-                        </span>
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
 
