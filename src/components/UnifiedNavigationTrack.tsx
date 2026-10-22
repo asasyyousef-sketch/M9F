@@ -238,8 +238,8 @@ export const UnifiedNavigationTrack: React.FC<UnifiedNavigationTrackProps> = ({
 
           {/* Center Counter */}
           <div className="shrink-0 flex items-center justify-center pointer-events-none select-none">
-            <span className="text-xs sm:text-sm font-semibold font-mono text-slate-500 dark:text-slate-400">
-              {currentIndex + 1} من {totalCards}
+            <span className="text-xs sm:text-sm font-semibold font-mono text-slate-500 dark:text-slate-400" dir="ltr">
+              {currentIndex + 1} / {totalCards}
             </span>
           </div>
 

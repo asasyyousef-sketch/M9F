@@ -2966,6 +2966,16 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     const saved = localStorage.getItem("settings_write_auto_listen_success");
     return saved === null ? true : saved === "true";
   });
+  const [writeSpeakArticle, setWriteSpeakArticle] = useState<boolean>(() => {
+    const saved = localStorage.getItem("settings_write_speak_article");
+    if (saved !== null) return saved === "true";
+    const classicSaved = localStorage.getItem("settings_speak_front_article");
+    return classicSaved !== null ? classicSaved === "true" : true;
+  });
+  const [writeAllowOptionalArticle, setWriteAllowOptionalArticle] = useState<boolean>(() => {
+    const saved = localStorage.getItem("settings_write_allow_optional_article");
+    return saved !== null ? saved === "true" : true;
+  });
 
   const [listenAutoListenPrompt, setListenAutoListenPrompt] = useState(() => {
     const saved = localStorage.getItem("settings_listen_auto_listen_prompt");
@@ -3122,6 +3132,14 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   useEffect(() => {
     localStorage.setItem("settings_write_auto_listen_success", String(writeAutoListenSuccess));
   }, [writeAutoListenSuccess]);
+
+  useEffect(() => {
+    localStorage.setItem("settings_write_speak_article", String(writeSpeakArticle));
+  }, [writeSpeakArticle]);
+
+  useEffect(() => {
+    localStorage.setItem("settings_write_allow_optional_article", String(writeAllowOptionalArticle));
+  }, [writeAllowOptionalArticle]);
 
   useEffect(() => {
     localStorage.setItem("settings_listen_auto_listen_prompt", String(listenAutoListenPrompt));
@@ -4026,7 +4044,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
       } else if (method === "write") {
         if (writeAutoListenQuestion) {
           if (writeQuestionFace === "front") {
-            playPronunciation(currentCard.frontText, currentCard.frontLang);
+            const speechText = getFrontSpeechText(currentCard, writeSpeakArticle);
+            playPronunciation(speechText, currentCard.frontLang);
           } else {
             playPronunciation(currentCard.backText, currentCard.backLang);
           }
@@ -4040,6 +4059,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     currentCard,
     method,
     writeQuestionFace,
+    writeSpeakArticle,
     listenAutoListenPrompt,
     articleAutoListenQuestion,
     writeAutoListenQuestion,
@@ -4161,8 +4181,13 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     return `${mins}:${seconds}`;
   };
 
-  // Smart check for translation answers (fuzzy & synonyms-aware)
-  const checkAnswer = (userAns: string, correctAns: string): boolean => {
+  // Smart check for translation answers (fuzzy & synonyms-aware & optional article for German)
+  const checkAnswer = (
+    userAns: string, 
+    correctAns: string, 
+    cardArticle?: string, 
+    isGerman: boolean = false
+  ): boolean => {
     const clean = (s: string) => s.trim().toLowerCase()
       .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "") // remove common punctuations
       .replace(/\s+/g, " "); // collapse double spaces
@@ -4175,9 +4200,51 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     if (u === c) return true;
 
     // Support comma, semicolon, or slash separated multiple synonyms
-    const synonyms = correctAns.split(/[,;\/]/).map(syn => clean(syn));
-    if (synonyms.some(s => s === u && s.length > 0)) {
+    const synonyms = correctAns.split(/[,;\/]/).map(syn => syn.trim()).filter(Boolean);
+    if (synonyms.some(s => clean(s) === u && clean(s).length > 0)) {
       return true;
+    }
+
+    // Special German article handling: accept with or without article (e.g. "saft" or "der saft")
+    if (isGerman && writeAllowOptionalArticle) {
+      const extractArtAndNoun = (str: string, fallbackArt?: string) => {
+        const cleaned = clean(str);
+        const m = cleaned.match(/^(der|die|das)\s+(.+)$/i);
+        if (m) {
+          return { art: m[1].toLowerCase(), noun: m[2].trim() };
+        }
+        const cleanFallback = fallbackArt ? clean(fallbackArt).replace("die-plural", "die") : "";
+        if (["der", "die", "das"].includes(cleanFallback)) {
+          return { art: cleanFallback, noun: cleaned };
+        }
+        return { art: "", noun: cleaned };
+      };
+
+      const userParts = extractArtAndNoun(userAns);
+      const targets = synonyms.length > 0 ? synonyms : [correctAns];
+
+      for (const syn of targets) {
+        const targetParts = extractArtAndNoun(syn, cardArticle);
+
+        // 1. If base nouns match (e.g., user typed "saft" and target noun is "saft"):
+        if (targetParts.noun && (u === targetParts.noun || userParts.noun === targetParts.noun)) {
+          // If user didn't write an article (e.g. "saft" while target is "der saft")
+          if (!userParts.art) {
+            return true;
+          }
+          // If user provided an article and it matches target article
+          if (targetParts.art && userParts.art === targetParts.art) {
+            return true;
+          }
+        }
+
+        // 2. If user typed "der saft" and target was "saft" with cardArticle="der"
+        if (targetParts.art && targetParts.noun) {
+          if (u === `${targetParts.art} ${targetParts.noun}`) {
+            return true;
+          }
+        }
+      }
     }
 
     return false;
@@ -4211,10 +4278,14 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     if (!writeAnswer.trim()) return;
     
     // Check target: front text (German) or back text (Arabic)
-    const correctTarget = method === "listen" 
-      ? currentCard.frontText 
-      : (writeTestTarget === "front" ? currentCard.frontText : currentCard.backText);
-    const isCorrect = checkAnswer(writeAnswer, correctTarget);
+    const isGermanTarget = method === "listen" || writeTestTarget === "front";
+    const correctTarget = isGermanTarget ? currentCard.frontText : currentCard.backText;
+    const isCorrect = checkAnswer(
+      writeAnswer, 
+      correctTarget, 
+      isGermanTarget ? currentCard.correctArticle : undefined, 
+      isGermanTarget
+    );
     
     if (isCorrect) {
       setWriteResult("correct");
@@ -4226,10 +4297,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
       setIncorrectIds(prev => [...prev, currentCard.id]);
     }
 
-    const spokenText = method === "listen" || writeTestTarget === "front"
-      ? currentCard.frontText
+    const spokenText = isGermanTarget
+      ? getFrontSpeechText(currentCard, writeSpeakArticle)
       : currentCard.backText;
-    const spokenLang = method === "listen" || writeTestTarget === "front"
+    const spokenLang = isGermanTarget
       ? (currentCard.frontLang || "de")
       : (currentCard.backLang || "ar");
 
@@ -4796,8 +4867,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
           {/* Right: Timer */}
           <div className="w-16 flex items-center justify-end">
-            <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400 font-mono text-xs font-semibold">
-              <Timer className="w-3.5 h-3.5" />
+            <div className="text-slate-500 dark:text-slate-400 font-mono text-xs font-semibold">
               <span>{formatTimer(time)}</span>
             </div>
           </div>
@@ -4841,8 +4911,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
           {/* Right: Timer */}
           <div className="w-16 flex items-center justify-end">
-            <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 font-mono text-xs font-semibold">
-              <Timer className="w-3.5 h-3.5 text-slate-400" />
+            <div className="text-slate-500 dark:text-slate-400 font-mono text-xs font-semibold">
               <span>{formatTimer(time)}</span>
             </div>
           </div>
@@ -5661,112 +5730,156 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
               {/* 2. WRITING / DICTATION MODE */}
               {(method === "write" || method === "listen") && currentCard && (
                 <div className="w-full flex flex-col items-center gap-5">
-                  {/* Core display card styled exactly like the Article Review standard */}
-                  <div className="w-full bg-surface-container-lowest rounded-xl shadow-elevation-3 border border-outline-variant/30 overflow-hidden flex flex-col h-[260px]">
-                    <div className="w-full h-3/5 relative bg-surface-container-high border-b border-outline-variant/20 flex items-center justify-center p-2">
-                      
-                      {/* Audio Pronunciation Button */}
+                  {/* Core display card styled beautifully like the Classic StudyCard */}
+                  <div className="relative w-full aspect-[4/3] sm:aspect-square max-h-[min(380px,calc(100dvh-300px))] min-h-[220px] rounded-[26px] overflow-hidden shadow-sm border border-outline-variant/30 select-none bg-surface-container-lowest dark:bg-slate-900 flex flex-col justify-between p-4 sm:p-5">
+                    
+                    {/* Edge-to-edge ambient photo background if image exists and is visible */}
+                    {Boolean(
+                      currentCard.frontImage && 
+                      (
+                        (method !== "listen" && (!hideImage || writeResult === "correct")) ||
+                        (method === "listen" && writeResult !== null)
+                      )
+                    ) && (
+                      <div className="absolute inset-0 w-full h-full pointer-events-none select-none overflow-hidden">
+                        <ImageWithSkeleton
+                          src={currentCard.frontImage!}
+                          alt="visual illustration"
+                          className="absolute inset-0 w-full h-full object-cover"
+                          style={getSafeImageStyle(currentCard.frontImagePosition)}
+                          referrerPolicy="no-referrer"
+                          loading="eager"
+                          fetchPriority="high"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-black/30" />
+                      </div>
+                    )}
+
+                    {/* Top Bar: Floating Audio Button + Target Mode Indicator Badge */}
+                    <div className="w-full flex items-center justify-between relative z-20 select-none pointer-events-auto">
                       <button
+                        type="button"
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={(e) => {
                           e.stopPropagation();
-                          const t = writeQuestionFace === "front" || method === "listen" ? currentCard.frontText : currentCard.backText;
-                          const l = writeQuestionFace === "front" || method === "listen" ? currentCard.frontLang || "de" : currentCard.backLang || "ar";
+                          const t = writeQuestionFace === "front" || method === "listen" 
+                            ? getFrontSpeechText(currentCard, writeSpeakArticle) 
+                            : currentCard.backText;
+                          const l = writeQuestionFace === "front" || method === "listen" 
+                            ? currentCard.frontLang || "de" 
+                            : currentCard.backLang || "ar";
                           playPronunciation(t, l, true);
                         }}
-                        className="absolute top-3 left-3 p-2.5 rounded-lg bg-white/95 text-slate-700 hover:bg-primary hover:text-white transition-all shadow-sm cursor-pointer z-10 border border-slate-100"
+                        className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 shadow-sm ${
+                          Boolean(
+                            currentCard.frontImage && 
+                            (
+                              (method !== "listen" && (!hideImage || writeResult === "correct")) ||
+                              (method === "listen" && writeResult !== null)
+                            )
+                          )
+                            ? "bg-black/40 hover:bg-black/65 backdrop-blur-md border border-white/25 text-white"
+                            : "border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750"
+                        }`}
                         title="استمع للكلمة"
                       >
                         <Volume2 className="w-4.5 h-4.5" />
                       </button>
 
-                      {currentCard.frontImage && 
-                       ((method !== "listen" && writeQuestionFace === "front" && (!hideImage || writeResult === "correct")) || 
-                        (method === "listen" && writeResult !== null)) ? (
-                        <div className="h-full aspect-square relative rounded-lg overflow-hidden border border-outline-variant/10 animate-scaleUp">
-                          <ImageWithSkeleton
-                            src={currentCard.frontImage}
-                            alt="visual illustration"
-                            className="absolute inset-0 w-full h-full object-cover"
-                            style={getSafeImageStyle(currentCard.frontImagePosition)}
-                            referrerPolicy="no-referrer"
-                            loading="eager"
-                            fetchPriority="high"
-                          />
-                        </div>
-                      ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-primary text-xs font-bold bg-primary/5">
-                          {method === "listen" ? (
-                            <div className="flex flex-col items-center gap-2">
-                              {/* Pulse wave visualizers */}
-                              <div className="flex gap-1.5 items-end justify-center h-10">
-                                <span className="w-1.5 h-5 bg-primary rounded-full animate-bounce" />
-                                <span className="w-1.5 h-9 bg-primary rounded-full animate-bounce [animation-delay:0.15s]" />
-                                <span className="w-1.5 h-12 bg-primary rounded-full animate-bounce [animation-delay:0.3s]" />
-                                <span className="w-1.5 h-7 bg-primary rounded-full animate-bounce [animation-delay:0.45s]" />
-                                <span className="w-1.5 h-4 bg-primary rounded-full animate-bounce [animation-delay:0.6s]" />
-                              </div>
-                              <span className="text-[10px] text-primary/80 font-bold tracking-wider uppercase mt-1">Dictation Mode</span>
-                            </div>
-                          ) : (
-                            <div className="flex flex-col items-center gap-2">
-                              <span className="material-symbols-outlined text-4xl text-primary/30">
-                                {writeTestTarget === "front" ? "translate" : "edit_note"}
-                              </span>
-                              <span className="text-[10px] text-slate-400 font-bold">
-                                {writeTestTarget === "front" ? "ترجم واكتب بالألمانية" : "اكتب المعنى بالعربية"}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      )}
+                      <div className={`px-3 py-1.5 rounded-xl text-xs font-bold select-none ${
+                        Boolean(
+                          currentCard.frontImage && 
+                          (
+                            (method !== "listen" && (!hideImage || writeResult === "correct")) ||
+                            (method === "listen" && writeResult !== null)
+                          )
+                        )
+                          ? "bg-black/40 backdrop-blur-md border border-white/25 text-white/95"
+                          : "bg-slate-100 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                      }`}>
+                        {method === "listen" 
+                          ? "تحدي الاستماع 🎧" 
+                          : writeTestTarget === "front" 
+                          ? "اكتب بالألمانية 🇩🇪" 
+                          : "اكتب بالعربية 🇸🇦"}
+                      </div>
                     </div>
 
-                    <div className="flex-1 p-4 flex flex-col items-center justify-center text-center">
-
-
+                    {/* Center / Prompt Text Content with beautiful typography */}
+                    <div className="relative z-20 flex-1 flex flex-col items-center justify-center text-center px-2 py-4 pointer-events-auto">
                       {method === "listen" ? (
                         writeResult !== null ? (
-                          <div className="flex flex-col items-center gap-1 animate-scaleUp">
-                            <h2 className="text-2xl font-bold text-on-surface" dir="ltr">
+                          <div className="flex flex-col items-center gap-1.5 animate-scaleUp">
+                            <h2 className={`text-2xl sm:text-3xl font-black ${
+                              Boolean(currentCard.frontImage) ? "text-white drop-shadow-md" : "text-on-surface"
+                            }`} dir="ltr">
                               {currentCard.frontText}
                             </h2>
-                            <p className="text-xs text-slate-400 font-bold" dir="rtl">
+                            <p className={`text-sm sm:text-base font-bold ${
+                              Boolean(currentCard.frontImage) ? "text-white/80" : "text-slate-500 dark:text-slate-400"
+                            }`} dir="rtl">
                               {currentCard.backText}
                             </p>
                           </div>
                         ) : (
-                          <div className="text-xs font-semibold text-primary/80 flex items-center justify-center gap-1.5 bg-primary/5 px-4 py-2 rounded-full w-fit mx-auto shadow-sm">
-                            <span>استمع جيداً واختر الإجابة الصحيحة من الخيارات بالأسفل</span>
+                          <div className="flex flex-col items-center gap-3">
+                            {/* Pulse wave visualizers */}
+                            <div className="flex gap-1.5 items-end justify-center h-10">
+                              <span className={`w-1.5 h-5 rounded-full animate-bounce ${Boolean(currentCard.frontImage) ? "bg-white" : "bg-primary"}`} />
+                              <span className={`w-1.5 h-9 rounded-full animate-bounce [animation-delay:0.15s] ${Boolean(currentCard.frontImage) ? "bg-white" : "bg-primary"}`} />
+                              <span className={`w-1.5 h-12 rounded-full animate-bounce [animation-delay:0.3s] ${Boolean(currentCard.frontImage) ? "bg-white" : "bg-primary"}`} />
+                              <span className={`w-1.5 h-7 rounded-full animate-bounce [animation-delay:0.45s] ${Boolean(currentCard.frontImage) ? "bg-white" : "bg-primary"}`} />
+                              <span className={`w-1.5 h-4 rounded-full animate-bounce [animation-delay:0.6s] ${Boolean(currentCard.frontImage) ? "bg-white" : "bg-primary"}`} />
+                            </div>
+                            <span className={`text-xs font-semibold px-4 py-1.5 rounded-full ${
+                              Boolean(currentCard.frontImage)
+                                ? "bg-black/40 backdrop-blur-md text-white/90 border border-white/20" 
+                                : "bg-primary/10 text-primary dark:bg-primary/20"
+                            }`}>
+                              استمع جيداً واختر الإجابة الصحيحة بالأسفل
+                            </span>
                           </div>
                         )
                       ) : (
-                        // Writing Mode
+                        // Writing Mode Question Content
                         hidePromptText && !revealPromptTemp && writeResult === null ? (
                           <div 
                             onMouseDown={(e) => e.preventDefault()}
                             onClick={() => setRevealPromptTemp(true)}
-                            className="py-3 px-6 bg-slate-50/50 hover:bg-slate-100/80 rounded-2xl border border-dashed border-slate-200 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 duration-200 mx-auto w-fit"
+                            className={`py-3 px-6 rounded-2xl border flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 duration-200 mx-auto w-fit shadow-md ${
+                              Boolean(currentCard.frontImage && !hideImage)
+                                ? "bg-black/60 hover:bg-black/80 backdrop-blur-md border-white/25 text-white"
+                                : "bg-slate-50/80 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-750 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200"
+                            }`}
                           >
-                            <EyeOff className="w-4.5 h-4.5 text-slate-400" />
-                            <span className="text-[11px] text-slate-500 font-medium">وجه السؤال مخفي • انقر للكشف</span>
+                            <EyeOff className="w-4.5 h-4.5" />
+                            <span className="text-xs sm:text-sm font-semibold">وجه السؤال مخفي • انقر للكشف</span>
                           </div>
                         ) : (
                           <div className="flex flex-col items-center gap-2">
                             {writeQuestionFace === "back" ? (
-                              <h2 className="text-xl font-bold text-on-surface animate-scaleUp" dir="rtl">
+                              <h2 className={`text-2xl sm:text-3xl font-black animate-scaleUp ${
+                                Boolean(currentCard.frontImage && !hideImage) ? "text-white drop-shadow-md" : "text-on-surface"
+                              }`} dir="rtl">
                                 {currentCard.backText}
                               </h2>
                             ) : (
-                              <h2 className="text-2xl font-bold text-on-surface animate-scaleUp" dir="ltr">
+                              <h2 className={`text-2xl sm:text-3xl font-black animate-scaleUp ${
+                                Boolean(currentCard.frontImage && !hideImage) ? "text-white drop-shadow-md" : "text-on-surface"
+                              }`} dir="ltr">
                                 {currentCard.frontText}
                               </h2>
                             )}
                             {hidePromptText && writeResult === null && (
                               <button
+                                type="button"
                                 onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => setRevealPromptTemp(false)}
-                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-500 text-[10px] font-bold rounded-lg cursor-pointer transition-colors flex items-center gap-1"
+                                className={`px-3 py-1 text-xs font-bold rounded-xl cursor-pointer transition-colors flex items-center gap-1.5 mt-1 border ${
+                                  Boolean(currentCard.frontImage && !hideImage)
+                                    ? "bg-black/40 hover:bg-black/60 text-white/90 border-white/20"
+                                    : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200/80 dark:border-slate-700"
+                                }`}
                                 title="إخفاء النص مجدداً"
                               >
                                 <EyeOff className="w-3.5 h-3.5" /> إخفاء وجه السؤال
@@ -5776,6 +5889,9 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                         )
                       )}
                     </div>
+
+                    {/* Bottom visual anchor spacer */}
+                    <div className="w-full flex items-center justify-center relative z-20 pointer-events-none select-none h-2" />
                   </div>
 
                   {/* Input and Actions form or Listening Choices */}
@@ -5893,26 +6009,26 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                               ? "اكتب الكلمة الألمانية المقابلة..."
                               : "اكتب الترجمة العربية المطلوبة..."
                           }
-                          className={`w-full h-[72px] bg-white border-2 rounded-xl text-center font-black text-lg text-on-surface focus:outline-none focus:ring-4 focus:ring-primary/10 shadow-sm transition-all duration-300 px-4 ${
+                          className={`w-full h-14 sm:h-15 bg-white dark:bg-slate-900 border-2 rounded-2xl text-center font-bold text-base sm:text-lg text-on-surface focus:outline-none focus:ring-4 focus:ring-primary/10 shadow-xs transition-all duration-200 px-4 ${
                             writeResult === "correct"
-                              ? "border-green-500 bg-green-50/20"
+                              ? "border-green-500 bg-green-50/20 text-green-700 dark:text-green-300"
                               : writeResult === "incorrect"
-                              ? "border-red-500 bg-red-50/20"
-                              : "border-slate-200 hover:border-slate-300 focus:border-primary"
+                              ? "border-red-500 bg-red-50/20 text-red-700 dark:text-red-300"
+                              : "border-slate-200 dark:border-slate-700 hover:border-slate-300 focus:border-primary"
                           }`}
                         />
                       </div>
 
-                      {/* Unified button with stable h-[72px] height and full width, matching Article Review standard */}
+                      {/* Unified button with modern rounded-2xl styling */}
                       <div className="w-full">
                         {writeResult !== "correct" ? (
                           <button
                             onClick={handleCheckWrite}
                             disabled={!writeAnswer.trim()}
-                            className={`w-full h-[72px] rounded-xl font-black text-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                            className={`w-full h-14 sm:h-15 rounded-2xl font-black text-base sm:text-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
                               !writeAnswer.trim()
-                                ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-50"
-                                : "bg-primary text-white hover:opacity-90 shadow-md"
+                                ? "bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                                : "bg-primary text-white hover:opacity-95 shadow-sm active:scale-[0.99]"
                             }`}
                           >
                             <span>التحقق</span>
@@ -5920,13 +6036,13 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                         ) : !autoAdvance ? (
                           <button
                             onClick={handleNextCard}
-                            className="w-full h-[72px] rounded-xl font-black text-lg bg-primary text-white hover:opacity-90 shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer animate-scaleUp"
+                            className="w-full h-14 sm:h-15 rounded-2xl font-black text-base sm:text-lg bg-primary text-white hover:opacity-95 shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
                           >
                             <span>التالي</span>
                             <ChevronRight className="w-5 h-5" />
                           </button>
                         ) : (
-                          <div className="w-full h-[72px] flex items-center justify-center text-green-600 font-bold bg-green-50/50 rounded-xl border border-green-200">
+                          <div className="w-full h-14 sm:h-15 flex items-center justify-center text-green-600 dark:text-green-400 font-bold bg-green-50/50 dark:bg-green-950/20 rounded-2xl border border-green-200 dark:border-green-800">
                             <span>إجابة صحيحة! جاري الانتقال تلقائياً... ✨</span>
                           </div>
                         )}
@@ -5940,57 +6056,75 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
               {method === "article" && currentCard && (
                 <div className="w-full flex flex-col items-center gap-5">
                   {/* Core Card */}
-                  <div className="w-full bg-surface-container-lowest rounded-2xl shadow-elevation-3 border border-outline-variant/30 overflow-hidden flex flex-col h-[260px]">
-                    <div className="w-full h-3/5 relative bg-surface-container-high border-b border-outline-variant/20 flex items-center justify-center p-2">
-                      {/* زر الاستماع الافتراضي للكلمة فقط بدون أداة التعريف */}
+                  <div className="relative w-full aspect-[4/3] sm:aspect-square max-h-[min(380px,calc(100dvh-300px))] min-h-[220px] rounded-[26px] overflow-hidden shadow-sm border border-outline-variant/30 select-none bg-surface-container-lowest dark:bg-slate-900 flex flex-col justify-between p-4 sm:p-5">
+                    {/* Edge-to-edge photo background if image exists */}
+                    {currentCard.frontImage && (
+                      <div className="absolute inset-0 w-full h-full pointer-events-none select-none overflow-hidden">
+                        <ImageWithSkeleton
+                          src={currentCard.frontImage}
+                          alt="Word illustration"
+                          className="absolute inset-0 w-full h-full object-cover"
+                          style={getSafeImageStyle(currentCard.frontImagePosition)}
+                          referrerPolicy="no-referrer"
+                          loading="eager"
+                          fetchPriority="high"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-black/30" />
+                      </div>
+                    )}
+
+                    {/* Top Bar: Floating Audio Button + Rules Badge */}
+                    <div className="w-full flex items-center justify-between relative z-20 select-none pointer-events-auto">
                       <button
+                        type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           playPronunciation(currentCard.frontText, currentCard.frontLang || "de", true);
                         }}
-                        className="absolute top-3 left-3 p-2.5 rounded-full bg-white/95 text-slate-700 hover:bg-primary hover:text-white transition-all shadow-sm cursor-pointer z-10 border border-slate-100"
+                        className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 shadow-sm ${
+                          currentCard.frontImage
+                            ? "bg-black/40 hover:bg-black/65 backdrop-blur-md border border-white/25 text-white"
+                            : "border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750"
+                        }`}
                         title="استمع لنطق الكلمة فقط بدون أداة التعريف"
                       >
                         <Volume2 className="w-4.5 h-4.5" />
                       </button>
 
-                      {currentCard.frontImage ? (
-                        <div className="h-full aspect-square relative rounded-lg overflow-hidden border border-outline-variant/10">
-                          <ImageWithSkeleton
-                            src={currentCard.frontImage}
-                            alt="Word illustration"
-                            className="absolute inset-0 w-full h-full object-cover"
-                            style={getSafeImageStyle(currentCard.frontImagePosition)}
-                            referrerPolicy="no-referrer"
-                            loading="eager"
-                            fetchPriority="high"
-                          />
-                        </div>
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-primary text-xs font-bold bg-primary/5">
-                          تعلم قواعد اللغة الألمانية
-                        </div>
-                      )}
+                      <div className={`px-3 py-1.5 rounded-xl text-xs font-bold select-none ${
+                        currentCard.frontImage
+                          ? "bg-black/40 backdrop-blur-md border border-white/25 text-white/95"
+                          : "bg-slate-100 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                      }`}>
+                        اختر أداة التعريف الصحيحة 🎯
+                      </div>
                     </div>
- 
-                     <div className="flex-1 p-4 flex flex-col items-center justify-center text-center">
-                       {/* خط لونه أبيض غير ظاهر لا يحتوي على كلام ولكن يظهر بلون أداة التعريف الصحيحة عند الإجابة الخاطئة بالتزامن مع النطق */}
-                       <div 
-                         className={`w-24 h-1.5 rounded-full transition-all duration-500 mb-2.5 mx-auto ${
-                           articleResult === "incorrect" && isPronouncingCorrect
-                             ? currentCard.correctArticle === "der"
-                               ? "bg-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.8)] scale-110"
-                               : currentCard.correctArticle === "die"
-                               ? "bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.8)] scale-110"
-                               : currentCard.correctArticle === "das"
-                               ? "bg-green-500 shadow-[0_0_12px_rgba(34,197,94,0.8)] scale-110"
-                               : "bg-yellow-500 shadow-[0_0_12px_rgba(234,179,8,0.8)] scale-110"
-                             : "bg-white"
-                         }`}
-                       />
-                       <h2 className="text-2xl sm:text-3xl font-extrabold text-on-surface tracking-tight" dir="ltr">{currentCard.frontText}</h2>
-                     </div>
-                   </div>
+                    {/* Center: Glowing article clue indicator & Word */}
+                    <div className="relative z-20 flex-1 flex flex-col items-center justify-center text-center px-2 py-4 pointer-events-auto">
+                      {/* خط يظهر بلون أداة التعريف الصحيحة عند الإجابة الخاطئة */}
+                      <div 
+                        className={`w-24 h-1.5 rounded-full transition-all duration-500 mb-2.5 mx-auto ${
+                          articleResult === "incorrect" && isPronouncingCorrect
+                            ? currentCard.correctArticle === "der"
+                              ? "bg-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.8)] scale-110"
+                              : currentCard.correctArticle === "die"
+                              ? "bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.8)] scale-110"
+                              : currentCard.correctArticle === "das"
+                              ? "bg-green-500 shadow-[0_0_12px_rgba(34,197,94,0.8)] scale-110"
+                              : "bg-yellow-500 shadow-[0_0_12px_rgba(234,179,8,0.8)] scale-110"
+                            : "bg-transparent"
+                        }`}
+                      />
+                      <h2 className={`text-2xl sm:text-3xl font-black tracking-tight ${
+                        currentCard.frontImage ? "text-white drop-shadow-md" : "text-on-surface"
+                      }`} dir="ltr">
+                        {currentCard.frontText}
+                      </h2>
+                    </div>
+
+                    {/* Bottom visual spacer */}
+                    <div className="w-full h-2 relative z-20 pointer-events-none select-none" />
+                  </div>
  
                    {/* Tactile interactive article choices */}
                    <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -7013,6 +7147,38 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${writeAutoListenSuccess ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}
                     >
                       <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${writeAutoListenSuccess ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+
+                  {/* Toggle: Speak Article in Writing Mode */}
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50 dark:border-slate-800">
+                    <div className="flex flex-col gap-0.5 text-right">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-200">قراءة أداة التعريف (der / die / das)</span>
+                      <span className="text-[10px] text-slate-400">نطق الأداة مع الكلمة الألمانية عند الاستماع أو التحقق في وضع الكتابة</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setWriteSpeakArticle(!writeSpeakArticle)}
+                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${writeSpeakArticle ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}
+                      title={writeSpeakArticle ? "مفعل (يقرأ الأرتيكل)" : "معطل (لا يقرأ الأرتيكل)"}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${writeSpeakArticle ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+
+                  {/* Toggle: Allow writing with or without article */}
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50 dark:border-slate-800">
+                    <div className="flex flex-col gap-0.5 text-right">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-200">قبول الكلمة مع الأداة أو بدونها</span>
+                      <span className="text-[10px] text-slate-400">اعتبار الإجابة صحيحة سواء كتبت بالأداة أو بدونها (مثلاً: saft أو der saft)</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setWriteAllowOptionalArticle(!writeAllowOptionalArticle)}
+                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${writeAllowOptionalArticle ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}
+                      title={writeAllowOptionalArticle ? "مفعل (يقبل بالأداة وبدونها)" : "معطل (مطابقة تامة فقط)"}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${writeAllowOptionalArticle ? 'translate-x-5' : 'translate-x-0'}`} />
                     </button>
                   </div>
 
