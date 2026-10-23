@@ -2628,7 +2628,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   }, [swipeSensitivity]);
 
   const [listenChoiceType, setListenChoiceType] = useState<"image" | "front" | "back">(() => {
-    return (localStorage.getItem("settings_listen_choice_type") as any) || "front";
+    return (localStorage.getItem("settings_listen_choice_type") as any) || "image";
   });
 
   const [listenChoices, setListenChoices] = useState<Flashcard[]>([]);
@@ -3841,8 +3841,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   const playPronunciationWithEnd = (text: string, lang: string, onEnd?: () => void, bypassMute = false, voiceOverride?: string) => {
     stopCurrentAudio();
 
-    // When in writing mode, repetition patterns are strictly disabled
-    if (isRepeatAudioEnabled && method !== "write") {
+    // When in writing or listening mode, repetition patterns are strictly disabled
+    if (isRepeatAudioEnabled && method !== "write" && method !== "listen") {
       executeSequenceSteps(repeatSequence, text, lang, onEnd, bypassMute);
     } else {
       playPronunciationSingle(text, lang, onEnd, bypassMute, voiceOverride);
@@ -4446,21 +4446,21 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     }
 
     setIsPronouncingCorrect(true);
-    if (listenAutoListenSuccess) {
-      playPronunciationWithEnd(currentCard.frontText, currentCard.frontLang || "de", () => {
+    if (listenAutoListenSuccess && isCorrect) {
+      playPronunciationSingle(currentCard.frontText, currentCard.frontLang || "de", () => {
         setIsPronouncingCorrect(false);
-        if (autoAdvanceRef.current && isCorrect) {
+        if (autoAdvanceRef.current) {
           setTimeout(() => {
             handleNextCard();
-          }, 1200);
+          }, 1000);
         }
-      });
+      }, true);
     } else {
       setIsPronouncingCorrect(false);
       if (autoAdvanceRef.current && isCorrect) {
         setTimeout(() => {
           handleNextCard();
-        }, 1200);
+        }, 1000);
       }
     }
   };
@@ -4647,11 +4647,15 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
           break;
         case "Enter": // Enter to submit or next
           e.preventDefault();
-          if (method === "write" || method === "listen") {
+          if (method === "write") {
             if (writeResult === "correct") {
               handleNextCard();
             } else {
               handleCheckWrite();
+            }
+          } else if (method === "listen") {
+            if (writeResult !== null) {
+              handleNextCard();
             }
           } else if (method === "article") {
             if (articleResult !== null) {
@@ -5459,7 +5463,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                         {/* Replay audio */}
                         <button
                           type="button"
-                          onClick={() => playPronunciation(currentCard.frontText, currentCard.frontLang || "de", true)}
+                          onClick={() => playPronunciationSingle(currentCard.frontText, currentCard.frontLang || "de", undefined, true)}
                           title="إعادة نطق الكلمة المسموعة"
                           className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 cursor-pointer active:scale-95 flex items-center justify-center border border-transparent"
                         >
@@ -5485,55 +5489,6 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                         >
                           <Timer className="w-4 h-4" />
                         </button>
-
-                        {/* Quick Choice Display Selector */}
-                        <div className="flex items-center bg-slate-100/80 dark:bg-slate-800/80 p-0.5 rounded-lg border border-slate-200/60 dark:border-slate-700/60">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setListenChoiceType("image");
-                              localStorage.setItem("settings_listen_choice_type", "image");
-                            }}
-                            title="عرض الصور في خيارات الإجابة"
-                            className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer ${
-                              listenChoiceType === "image"
-                                ? "bg-sky-500/[0.12] dark:bg-sky-400/[0.16] text-sky-700 dark:text-sky-300 border border-sky-500/25 dark:border-sky-400/30"
-                                : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 border border-transparent"
-                            }`}
-                          >
-                            🖼️ صور
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setListenChoiceType("front");
-                              localStorage.setItem("settings_listen_choice_type", "front");
-                            }}
-                            title="عرض النص الألماني في الخيارات"
-                            className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer ${
-                              listenChoiceType === "front"
-                                ? "bg-sky-500/[0.12] dark:bg-sky-400/[0.16] text-sky-700 dark:text-sky-300 border border-sky-500/25 dark:border-sky-400/30"
-                                : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 border border-transparent"
-                            }`}
-                          >
-                            🇩🇪 ألماني
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setListenChoiceType("back");
-                              localStorage.setItem("settings_listen_choice_type", "back");
-                            }}
-                            title="عرض المعنى العربي في الخيارات"
-                            className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer ${
-                              listenChoiceType === "back"
-                                ? "bg-sky-500/[0.12] dark:bg-sky-400/[0.16] text-sky-700 dark:text-sky-300 border border-sky-500/25 dark:border-sky-400/30"
-                                : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 border border-transparent"
-                            }`}
-                          >
-                            🇸🇦 عربي
-                          </button>
-                        </div>
                       </>
                     )}
 
@@ -5834,24 +5789,18 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
               )}
 
               {/* 2. WRITING / DICTATION MODE */}
-              {(method === "write" || method === "listen") && currentCard && (
+              {method === "write" && currentCard && (
                 <div className="w-full flex flex-col items-center gap-5">
                   {/* Core display card styled strictly square like the Classic StudyCard */}
                   <div className="relative w-full aspect-square select-none overflow-hidden rounded-[26px] shadow-sm border border-outline-variant/30 bg-surface-container-lowest dark:bg-slate-900 flex flex-col justify-between p-4 sm:p-5">
                     
                     {/* Edge-to-edge ambient photo background if image exists and is visible */}
-                    {Boolean(
-                      currentCard.frontImage && 
-                      (
-                        (method !== "listen" && (!hideImage || writeResult === "correct")) ||
-                        (method === "listen" && writeResult !== null)
-                      )
-                    ) && (
+                    {Boolean(currentCard.frontImage && (!hideImage || writeResult === "correct")) && (
                       <div className="absolute inset-0 w-full h-full pointer-events-none select-none overflow-hidden">
                         <ImageWithSkeleton
                           src={currentCard.frontImage!}
                           alt="visual illustration"
-                          className="absolute inset-0 w-full h-full object-cover"
+                          className="w-full h-full object-cover"
                           style={getSafeImageStyle(currentCard.frontImagePosition)}
                           referrerPolicy="no-referrer"
                           loading="eager"
@@ -5861,29 +5810,23 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       </div>
                     )}
 
-                    {/* Top Bar: Floating Audio Button only (top badge removed) */}
+                    {/* Top Bar: Floating Audio Button only */}
                     <div className="w-full flex items-center justify-start relative z-20 select-none pointer-events-auto">
                       <button
                         type="button"
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={(e) => {
                           e.stopPropagation();
-                          const t = writeQuestionFace === "front" || method === "listen" 
+                          const t = writeQuestionFace === "front" 
                             ? getFrontSpeechText(currentCard, writeSpeakArticle) 
                             : currentCard.backText;
-                          const l = writeQuestionFace === "front" || method === "listen" 
+                          const l = writeQuestionFace === "front" 
                             ? currentCard.frontLang || "de" 
                             : currentCard.backLang || "ar";
                           playPronunciation(t, l, true);
                         }}
                         className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 shadow-sm ${
-                          Boolean(
-                            currentCard.frontImage && 
-                            (
-                              (method !== "listen" && (!hideImage || writeResult === "correct")) ||
-                              (method === "listen" && writeResult !== null)
-                            )
-                          )
+                          Boolean(currentCard.frontImage && (!hideImage || writeResult === "correct"))
                             ? "bg-black/40 hover:bg-black/65 backdrop-blur-md border border-white/25 text-white"
                             : "border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750"
                         }`}
@@ -5895,44 +5838,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
                     {/* Center / Prompt Text Content with beautiful typography */}
                     <div className="relative z-20 flex-1 flex flex-col items-center justify-center text-center px-2 py-4 pointer-events-auto">
-                      {method === "listen" ? (
-                        writeResult !== null ? (
-                          <div className="flex flex-col items-center gap-1.5 animate-scaleUp">
-                            <h2 className={`text-2xl sm:text-3xl font-black ${
-                              Boolean(currentCard.frontImage) ? "text-white drop-shadow-md" : "text-on-surface"
-                            }`} dir="ltr">
-                              {currentCard.frontText}
-                            </h2>
-                            <p className={`text-sm sm:text-base font-bold ${
-                              Boolean(currentCard.frontImage) ? "text-white/80" : "text-slate-500 dark:text-slate-400"
-                            }`} dir="rtl">
-                              {currentCard.backText}
-                            </p>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col items-center gap-3">
-                            {/* Pulse wave visualizers */}
-                            <div className="flex gap-1.5 items-end justify-center h-10">
-                              <span className={`w-1.5 h-5 rounded-full animate-bounce ${Boolean(currentCard.frontImage) ? "bg-white" : "bg-primary"}`} />
-                              <span className={`w-1.5 h-9 rounded-full animate-bounce [animation-delay:0.15s] ${Boolean(currentCard.frontImage) ? "bg-white" : "bg-primary"}`} />
-                              <span className={`w-1.5 h-12 rounded-full animate-bounce [animation-delay:0.3s] ${Boolean(currentCard.frontImage) ? "bg-white" : "bg-primary"}`} />
-                              <span className={`w-1.5 h-7 rounded-full animate-bounce [animation-delay:0.45s] ${Boolean(currentCard.frontImage) ? "bg-white" : "bg-primary"}`} />
-                              <span className={`w-1.5 h-4 rounded-full animate-bounce [animation-delay:0.6s] ${Boolean(currentCard.frontImage) ? "bg-white" : "bg-primary"}`} />
-                            </div>
-                            <span className={`text-xs font-semibold px-4 py-1.5 rounded-full ${
-                              Boolean(currentCard.frontImage)
-                                ? "bg-black/40 backdrop-blur-md text-white/90 border border-white/20" 
-                                : "bg-primary/10 text-primary dark:bg-primary/20"
-                            }`}>
-                              استمع جيداً واختر الإجابة الصحيحة بالأسفل
-                            </span>
-                          </div>
-                        )
-                      ) : (() => {
+                      {(() => {
                         const writeArticleDot = getCardArticleDotInfo(currentCard);
                         const isPromptHidden = hidePromptText && !revealPromptTemp && !(writeShowWordOnCheck && writeResult !== null);
                         return (
-                          // Writing Mode Question Content with modern lightweight blur effect when hidden
                           <div className="flex flex-col items-center gap-2">
                             {isPromptHidden ? (
                               <div
@@ -5991,167 +5900,205 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     <div className="w-full flex items-center justify-center relative z-20 pointer-events-none select-none h-2" />
                   </div>
 
-                  {/* Input and Actions form or Listening Choices */}
-                  {method === "listen" ? (
-                    <div className="w-full flex flex-col gap-4">
-                      {/* 4 grid options */}
-                      <div className="w-full grid grid-cols-2 gap-3">
-                        {listenChoices.map((choice) => {
-                          const isSelected = selectedListenCardId === choice.id;
-                          const isCorrect = choice.id === currentCard.id;
-                          
-                          let btnStyle = "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300";
-                          
-                          if (writeResult !== null) {
-                            if (isSelected) {
-                              btnStyle = isCorrect
-                                ? "border-green-600 bg-green-600 text-white shadow-md scale-95"
-                                : "border-red-600 bg-red-600 text-white shadow-md scale-95";
-                            } else if (isCorrect) {
-                              btnStyle = "border-green-600 bg-green-50 text-green-700 border-dashed ring-2 ring-green-500/30";
-                            } else {
-                              btnStyle = "opacity-30 border-slate-100 bg-slate-50 text-slate-400";
-                            }
-                          } else {
-                            if (isSelected) {
-                              btnStyle = "border-primary bg-primary/10 text-primary";
-                            }
-                          }
-                          
-                          return (
-                            <button
-                              key={choice.id}
-                              disabled={writeResult !== null}
-                              onClick={() => handleCheckListenChoice(choice)}
-                              className={`rounded-2xl border-2 transition-all flex flex-col items-center justify-center text-center cursor-pointer min-h-[140px] relative overflow-hidden shadow-sm hover:shadow-md ${
-                                listenChoiceType === "image" && choice.frontImage ? "p-0" : "p-4"
-                              } ${btnStyle}`}
-                            >
-                              {listenChoiceType === "image" ? (
-                                choice.frontImage ? (
-                                  <div className="absolute inset-0 w-full h-full">
-                                    <ImageWithSkeleton
-                                      src={imageCache[choice.frontImage] || choice.frontImage}
-                                      alt="Illustration"
-                                      className="w-full h-full object-cover"
-                                      style={getSafeImageStyle(choice.frontImagePosition)}
-                                      referrerPolicy="no-referrer"
-                                      loading="eager"
-                                      fetchPriority="low"
-                                    />
-                                  </div>
-                                ) : (
-                                  <div className="flex flex-col items-center gap-1">
-                                    <span className="material-symbols-outlined text-2xl text-slate-300">image_not_supported</span>
-                                    <span className="text-xs font-bold leading-tight text-slate-500" dir="ltr">{choice.frontText}</span>
-                                  </div>
-                                )
-                              ) : listenChoiceType === "back" ? (
-                                <span className="text-sm font-extrabold leading-relaxed text-slate-800" dir="rtl">
-                                  {choice.backText}
-                                </span>
-                              ) : (
-                                <span className="text-base font-black leading-relaxed text-slate-800" dir="ltr">
-                                  {choice.frontText}
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {/* Unified button/feedback container with stable h-[72px] height */}
-                      <div className="w-full h-[72px] mt-2">
-                        {writeResult === "correct" && autoAdvance ? (
-                          <div className="w-full h-full flex items-center justify-center text-green-600 font-bold bg-green-50/50 rounded-xl border border-green-200">
-                            <span>إجابة صحيحة! جاري الانتقال تلقائياً... ✨</span>
-                          </div>
-                        ) : writeResult !== null ? (
-                          <button
-                            onClick={handleNextCard}
-                            className="w-full h-full rounded-xl font-black text-lg bg-primary text-white hover:opacity-90 shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer animate-scaleUp"
-                          >
-                            <span>التالي</span>
-                            <ChevronRight className="w-5 h-5" />
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="w-full flex flex-col gap-3">
-                      <input
-                        ref={writeInputRef}
-                        type="text"
-                        dir={writeTestTarget === "back" ? "rtl" : "ltr"}
-                        value={writeAnswer}
-                        disabled={writeResult === "correct"}
-                        onChange={(e) => {
-                          setWriteAnswer(e.target.value);
-                          if (writeResult === "incorrect") {
-                            setWriteResult(null);
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.stopPropagation();
-                            if (writeResult === "correct") {
-                              handleNextCard();
-                            } else {
-                              handleCheckWrite();
-                            }
-                          }
-                        }}
-                        placeholder={
-                          writeTestTarget === "front"
-                            ? "اكتب الكلمة الألمانية المقابلة..."
-                            : "اكتب الترجمة العربية المطلوبة..."
+                  {/* Input and Actions form */}
+                  <div className="w-full flex flex-col gap-3">
+                    <input
+                      ref={writeInputRef}
+                      type="text"
+                      dir={writeTestTarget === "back" ? "rtl" : "ltr"}
+                      value={writeAnswer}
+                      disabled={writeResult === "correct"}
+                      onChange={(e) => {
+                        setWriteAnswer(e.target.value);
+                        if (writeResult === "incorrect") {
+                          setWriteResult(null);
                         }
-                        className={`w-full h-14 sm:h-15 bg-white dark:bg-slate-900 border-2 rounded-2xl text-center font-bold text-base sm:text-lg text-on-surface focus:outline-none focus:ring-4 focus:ring-primary/10 shadow-xs transition-all duration-200 px-4 ${
-                          writeResult === "correct"
-                            ? "border-emerald-500 bg-emerald-50/20 text-emerald-700 dark:text-emerald-300"
-                            : writeResult === "incorrect"
-                            ? "border-rose-500 bg-rose-50/20 text-rose-700 dark:text-rose-300"
-                            : "border-slate-200 dark:border-slate-700 hover:border-slate-300 focus:border-primary"
-                        }`}
-                      />
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.stopPropagation();
+                          if (writeResult === "correct") {
+                            handleNextCard();
+                          } else {
+                            handleCheckWrite();
+                          }
+                        }
+                      }}
+                      placeholder={
+                        writeTestTarget === "front"
+                          ? "اكتب الكلمة الألمانية المقابلة..."
+                          : "اكتب الترجمة العربية المطلوبة..."
+                      }
+                      className={`w-full h-14 sm:h-15 bg-white dark:bg-slate-900 border-2 rounded-2xl text-center font-bold text-base sm:text-lg text-on-surface focus:outline-none focus:ring-4 focus:ring-primary/10 shadow-xs transition-all duration-200 px-4 ${
+                        writeResult === "correct"
+                          ? "border-emerald-500 bg-emerald-50/20 text-emerald-700 dark:text-emerald-300"
+                          : writeResult === "incorrect"
+                          ? "border-rose-500 bg-rose-50/20 text-rose-700 dark:text-rose-300"
+                          : "border-slate-200 dark:border-slate-700 hover:border-slate-300 focus:border-primary"
+                      }`}
+                    />
 
-                      {/* Verification Button: Checkmark on Correct, X mark on Incorrect, Check text when idle */}
-                      <div className="w-full">
-                        {writeResult === "correct" ? (
+                    {/* Verification Button: Checkmark on Correct, X mark on Incorrect, Check text when idle */}
+                    <div className="w-full">
+                      {writeResult === "correct" ? (
+                        <button
+                          type="button"
+                          onClick={handleNextCard}
+                          className="w-full h-14 sm:h-15 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
+                          title="إجابة صحيحة (التالي)"
+                        >
+                          <Check className="w-7 h-7 stroke-[3]" />
+                        </button>
+                      ) : writeResult === "incorrect" ? (
+                        <button
+                          type="button"
+                          onClick={handleCheckWrite}
+                          className="w-full h-14 sm:h-15 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
+                          title="إجابة خاطئة (تحقق مجدداً)"
+                        >
+                          <X className="w-7 h-7 stroke-[3]" />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleCheckWrite}
+                          disabled={!writeAnswer.trim()}
+                          className={`w-full h-14 sm:h-15 rounded-2xl font-black text-base sm:text-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                            !writeAnswer.trim()
+                              ? "bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                              : "bg-primary text-white hover:opacity-95 shadow-sm active:scale-[0.99]"
+                          }`}
+                        >
+                          <span>التحقق</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 2.5 LISTENING MODE (نمط الاستماع التفاعلي النظيف) */}
+              {method === "listen" && currentCard && (
+                <div className="w-full flex flex-col items-center gap-5">
+                  {/* Master 1:1 Square Card containing 4 quadrants directly without external margins */}
+                  <div className="relative w-full aspect-square select-none overflow-hidden rounded-[26px] shadow-sm border border-outline-variant/30 bg-surface-container-lowest dark:bg-slate-900">
+                    
+                    {/* 2x2 Quadrants Grid */}
+                    <div className="w-full h-full grid grid-cols-2 grid-rows-2 divide-x divide-y divide-slate-200/80 dark:divide-slate-800/80">
+                      {listenChoices.map((choice, idx) => {
+                        const isSelected = selectedListenCardId === choice.id;
+                        const isCorrect = choice.id === currentCard.id;
+                        const isAnswered = writeResult !== null;
+
+                        return (
                           <button
+                            key={choice.id || idx}
                             type="button"
-                            onClick={handleNextCard}
-                            className="w-full h-14 sm:h-15 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
-                            title="إجابة صحيحة (التالي)"
-                          >
-                            <Check className="w-7 h-7 stroke-[3]" />
-                          </button>
-                        ) : writeResult === "incorrect" ? (
-                          <button
-                            type="button"
-                            onClick={handleCheckWrite}
-                            className="w-full h-14 sm:h-15 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
-                            title="إجابة خاطئة (تحقق مجدداً)"
-                          >
-                            <X className="w-7 h-7 stroke-[3]" />
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={handleCheckWrite}
-                            disabled={!writeAnswer.trim()}
-                            className={`w-full h-14 sm:h-15 rounded-2xl font-black text-base sm:text-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                              !writeAnswer.trim()
-                                ? "bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
-                                : "bg-primary text-white hover:opacity-95 shadow-sm active:scale-[0.99]"
+                            disabled={isAnswered}
+                            onClick={() => handleCheckListenChoice(choice)}
+                            className={`relative w-full h-full overflow-hidden transition-all duration-200 flex items-center justify-center select-none cursor-pointer group text-center ${
+                              isAnswered
+                                ? isCorrect
+                                  ? "bg-emerald-500/15 dark:bg-emerald-500/25 ring-4 ring-inset ring-emerald-500 z-10"
+                                  : isSelected
+                                  ? "bg-rose-500/20 dark:bg-rose-500/30 ring-4 ring-inset ring-rose-500 z-10"
+                                  : "opacity-35 grayscale-[50%] pointer-events-none"
+                                : "hover:bg-slate-50 dark:hover:bg-slate-800/60 active:scale-[0.98] bg-white dark:bg-slate-900"
                             }`}
                           >
-                            <span>التحقق</span>
+                            {listenChoiceType === "image" ? (
+                              choice.frontImage ? (
+                                <div className="relative w-full h-full">
+                                  <ImageWithSkeleton
+                                    src={imageCache[choice.frontImage] || choice.frontImage}
+                                    alt="Illustration"
+                                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                    style={getSafeImageStyle(choice.frontImagePosition)}
+                                    referrerPolicy="no-referrer"
+                                    loading="eager"
+                                    fetchPriority="low"
+                                  />
+                                </div>
+                              ) : (
+                                <div className="w-full h-full flex flex-col items-center justify-center p-3 text-center bg-slate-50 dark:bg-slate-850">
+                                  <span className="material-symbols-outlined text-2xl text-slate-300 dark:text-slate-600 mb-1">image_not_supported</span>
+                                  <span className="text-xs sm:text-sm font-extrabold leading-tight text-slate-700 dark:text-slate-200" dir="ltr">
+                                    {choice.frontText}
+                                  </span>
+                                </div>
+                              )
+                            ) : listenChoiceType === "back" ? (
+                              <div className="w-full h-full flex items-center justify-center p-3 sm:p-4 text-center bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800 transition-colors">
+                                <span className="text-sm sm:text-base font-extrabold text-slate-800 dark:text-slate-100 leading-relaxed" dir="rtl">
+                                  {choice.backText}
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center p-3 sm:p-4 text-center bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800 transition-colors">
+                                <span className="text-base sm:text-lg font-black text-slate-800 dark:text-slate-100 leading-relaxed" dir="ltr">
+                                  {choice.frontText}
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Status corner badge when answered */}
+                            {isAnswered && isCorrect && (
+                              <div className="absolute top-2.5 start-2.5 bg-emerald-500 text-white rounded-full p-1 shadow-md z-20 animate-scaleUp">
+                                <Check className="w-4 h-4 stroke-[3]" />
+                              </div>
+                            )}
+                            {isAnswered && isSelected && !isCorrect && (
+                              <div className="absolute top-2.5 start-2.5 bg-rose-500 text-white rounded-full p-1 shadow-md z-20 animate-scaleUp">
+                                <X className="w-4 h-4 stroke-[3]" />
+                              </div>
+                            )}
                           </button>
-                        )}
-                      </div>
+                        );
+                      })}
                     </div>
-                  )}
+
+                    {/* Centered Floating Audio Button on top of the 4 quadrants */}
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 pointer-events-auto">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          playPronunciationSingle(currentCard.frontText, currentCard.frontLang || "de", undefined, true);
+                        }}
+                        className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/95 dark:bg-slate-800/95 backdrop-blur-md text-primary dark:text-sky-400 shadow-xl border-2 border-primary/20 dark:border-sky-500/30 flex items-center justify-center hover:scale-105 active:scale-95 transition-all cursor-pointer group"
+                        title="استمع للكلمة"
+                      >
+                        <Volume2 className="w-6 h-6 sm:w-7 sm:h-7 group-hover:scale-110 transition-transform" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Verification / Result Action Bar: identical to writing mode */}
+                  <div className="w-full">
+                    {writeResult === "correct" ? (
+                      <button
+                        type="button"
+                        onClick={handleNextCard}
+                        className="w-full h-14 sm:h-15 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
+                        title="إجابة صحيحة (التالي)"
+                      >
+                        <Check className="w-7 h-7 sm:w-8 sm:h-8 stroke-[3]" />
+                      </button>
+                    ) : writeResult === "incorrect" ? (
+                      <button
+                        type="button"
+                        onClick={handleNextCard}
+                        className="w-full h-14 sm:h-15 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
+                        title="إجابة خاطئة (التالي)"
+                      >
+                        <X className="w-7 h-7 sm:w-8 sm:h-8 stroke-[3]" />
+                      </button>
+                    ) : (
+                      <div className="w-full h-14 sm:h-15 rounded-2xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 flex items-center justify-center text-slate-400 dark:text-slate-500 text-sm font-bold select-none">
+                        <span>اختر المربع المطابق لما تسمعه</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
