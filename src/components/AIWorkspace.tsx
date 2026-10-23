@@ -548,6 +548,18 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
       "imageSearchQuery": "modern smartphone photo"
     },
     {
+      "frontText": "Kinder",
+      "backText": "أطفال / أولاد",
+      "isArticleMode": true,
+      "correctArticle": "die-plural",
+      "isPluralMode": true,
+      "pluralText": "Kinder",
+      "pluralLang": "de",
+      "translationHint": "اسم جمع: دي كيندر (أداة الجمع die-plural)",
+      "difficulty": "easy",
+      "imageSearchQuery": "group of happy children playing"
+    },
+    {
       "frontText": "Das Buch ist sehr schön.",
       "backText": "الكتاب جميل جداً.",
       "isArticleMode": false,
@@ -579,9 +591,13 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
 
     if (germanArticlesMode !== "off") {
       promptText += `\n🚨 قواعد إلزامية صارمة لأدوات التعريف الألمانية (der / die / das / die-plural):
-1. للأسماء والمفردات المفردة (Single Nouns مثل: Das Handy, Der Tisch, Die Katze):
-   - الأداة (der/die/das/die-plural) توضع حصراً وبشكل منفرد في حقل "correctArticle" مع "isArticleMode": true.
-   - حقل "frontText": يجب أن يحتوي فقط على الاسم مجرداً تماماً بدون أداة التعريف (اكتب "Handy" فقط وليس "Das Handy"، واكتب "Tisch" فقط وليس "der Tisch"). يمنع منعاً باتاً كتابة الأداة داخل frontText للأسماء والمفردات!
+1. للأسماء والمفردات المفردة والجمع (Nouns مثل: Das Handy, Der Tisch, Die Katze, Die Kinder):
+   - الأداة (der / die / das / die-plural) توضع حصراً وبشكل منفرد في حقل "correctArticle" مع "isArticleMode": true.
+   - حقل "frontText": يجب أن يحتوي فقط على الاسم مجرداً تماماً بدون أداة التعريف (اكتب "Handy" فقط وليس "Das Handy"، واكتب "Tisch" فقط وليس "der Tisch"، واكتب "Kinder" فقط وليس "die Kinder"). يمنع منعاً باتاً كتابة الأداة داخل frontText للأسماء والمفردات!
+   - ⚠️ قاعدة حاسمة جداً للتمييز بين المؤنث (die) والجمع (die-plural):
+     * أداة الاسم المفرد المؤنث (Feminine مثل Katze, Frau, Sonne): هي دائماً "die".
+     * أداة الاسم الجمع (Plural Noun مثل Kinder, Eltern, Leute, Bücher, Autos) أو بطاقة مخصصة لاسم جمع: هي إلزامياً وحتماً "die-plural".
+     * يمنع منعاً باتاً كتابة "die" لأسماء الجمع لأن النظام سيعتبرها خطأً كمؤنث! اكتب دائماً "die-plural" لأسماء الجمع.
 2. للجمل والعبارات الكاملة (Sentences & Phrases مثل: "Das Buch ist schön", "Die Kinder spielen"):
    - الجملة يجب أن تبقى كاملة بجميع كلماتها وأداتها الطبيعية مدمجة داخل "frontText" (مثال: "Das Buch ist schön").
    - ممنوع منعاً باتاً عزل الأداة من الجملة أو تفكيكها! يجب إلزامياً وضع "isArticleMode": false و "correctArticle": "" كفارغ تماماً.\n`;
@@ -715,9 +731,13 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
           ? (c.pluralText || c.plural || c.plural_de || c.plural_text || c.germanPlural || c.pluralForm).trim()
           : "";
 
+        const rawFront = String(c.frontText || c.front || c.question || c.word || c.german || "").trim();
+        const rawBack = String(c.backText || c.back || c.answer || c.arabic || c.translation || "").trim();
+        const rawHint = String(c.translationHint || c.hint || "").trim();
+        const hintCombined = `${rawHint} ${rawBack}`;
+
         if (!plText) {
           // Check if plural was embedded in hint or back text
-          const hintCombined = `${c.translationHint || c.hint || ""} ${c.backText || c.back || ""}`;
           const plMatch = hintCombined.match(/(?:plural|pl\.|الجمع|جمع)\s*[:=\-–]\s*([A-Za-zÄÖÜäöüß]+)/i);
           if (plMatch) {
             plText = plMatch[1].trim();
@@ -727,22 +747,60 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
           plText = plText.slice(4).trim();
         }
 
-        const isPlural = Boolean(c.isPluralMode || (plText && plText.length > 0));
-        const art = typeof (c.correctArticle || c.article || c.gender || c.art) === "string"
-          ? (c.correctArticle || c.article || c.gender || c.art).trim().toLowerCase()
-          : "";
+        // Comprehensive gender, article, and plural detection from external formats
+        const rawGender = String(c.gender || c.type || c.category || c.number || "").trim().toLowerCase();
+        let rawArt = String(c.correctArticle || c.article || c.art || "").trim().toLowerCase();
+
+        // Check if card indicates plural (explicit tag in frontText, hint, gender, or article)
+        const hasPluralMarkerInFront = /\s*[\(\[]\s*(?:pl\.|plural|جمع)\s*[\)\]]/i.test(rawFront);
+        const hasPluralMarkerInHint = /\b(?:pl\.|plural|اسم جمع|صيغة جمع|\(جمع\))\b/i.test(hintCombined);
+        const isPluralCardExplicit = Boolean(
+          c.isPluralMode ||
+          c.isPlural ||
+          c.isPluralCard ||
+          c.isPluralNoun ||
+          c.is_plural ||
+          rawGender === "plural" ||
+          rawGender === "pl" ||
+          rawGender === "die-plural" ||
+          rawArt.includes("plural") ||
+          rawArt.includes("die-plural") ||
+          rawArt === "die (جمع)" ||
+          rawArt === "die (pl)" ||
+          rawArt === "die pl" ||
+          hasPluralMarkerInFront ||
+          hasPluralMarkerInHint
+        );
+
+        let cleanFront = rawFront.replace(/\s*[\(\[]\s*(?:pl\.|plural|جمع)\s*[\)\]]/i, "").trim();
+
+        // Determine correctArticle
+        let art = "";
+        if (isPluralCardExplicit) {
+          art = "die-plural";
+        } else if (rawArt === "der" || rawGender === "m" || rawGender === "masculine" || rawGender === "maskulin") {
+          art = "der";
+        } else if (rawArt === "das" || rawGender === "n" || rawGender === "neuter" || rawGender === "neutral") {
+          art = "das";
+        } else if (rawArt === "die" || rawGender === "f" || rawGender === "feminine" || rawGender === "feminin") {
+          art = "die";
+        } else if (rawArt) {
+          art = rawArt;
+        }
+
+        const isPlural = Boolean(isPluralCardExplicit || (plText && plText.length > 0));
 
         const rawCard: AICard = {
           id: `ai-card-${Date.now()}-${index}`,
           folderId: folderId,
-          frontText: c.frontText || c.front || c.question || c.word || c.german || "",
-          backText: c.backText || c.back || c.answer || c.arabic || c.translation || "",
+          frontText: cleanFront || rawFront,
+          backText: rawBack,
           isArticleMode: Boolean(c.isArticleMode || art),
           correctArticle: art,
           isPluralMode: isPlural,
-          pluralText: plText || "",
+          pluralText: plText || (isPluralCardExplicit ? cleanFront : ""),
           pluralLang: c.pluralLang || "de",
-          translationHint: c.translationHint || c.hint || "",
+          translationHint: rawHint,
           difficulty: c.difficulty || "medium",
           imageSearchQuery: cleanImageSearchQuery(c.imageSearchQuery || "", imageInstructions) || undefined,
           frontImage: frontImg,

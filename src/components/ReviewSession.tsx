@@ -235,6 +235,75 @@ export const formatTextForArticleMode = (
   return text;
 };
 
+export interface CardArticleDotInfo {
+  type: "masculine" | "feminine" | "neuter" | "plural";
+  article: "der" | "die" | "das" | "die-plural";
+  label: string;
+  dotClass: string;
+}
+
+export const getCardArticleDotInfo = (card?: Flashcard | null): CardArticleDotInfo | null => {
+  if (!card) return null;
+  let art = (card.correctArticle || "").toLowerCase().trim();
+  if (!art) {
+    const m = (card.frontText || "").match(/^(der|die|das)\b/i);
+    if (m) art = m[1].toLowerCase();
+  }
+  if (!art) return null;
+
+  // Check for plural indicators first
+  const isPlural =
+    art === "die-plural" ||
+    art === "plural" ||
+    art === "pl" ||
+    art.includes("plural") ||
+    art === "die (جمع)" ||
+    art === "die (plural)" ||
+    (art === "die" && (
+      (card.frontText && /\((?:pl\.|plural|جمع)\)/i.test(card.frontText)) ||
+      (card.translationHint && /(?:جمع|plural)/i.test(card.translationHint)) ||
+      (card.backText && /(?:جمع|plural)/i.test(card.backText))
+    ));
+
+  if (isPlural) {
+    return {
+      type: "plural",
+      article: "die-plural",
+      label: "أداة الجمع (die) - أصفر",
+      dotClass: "bg-amber-400 border border-amber-500/80 shadow-xs shadow-amber-400/50"
+    };
+  }
+
+  if (art === "der" || art === "m" || art === "masculine") {
+    return {
+      type: "masculine",
+      article: "der",
+      label: "أداة المذكر (der) - أزرق",
+      dotClass: "bg-blue-500 border border-blue-600/80 shadow-xs shadow-blue-500/50"
+    };
+  }
+
+  if (art === "die" || art === "f" || art === "feminine") {
+    return {
+      type: "feminine",
+      article: "die",
+      label: "أداة المؤنث (die) - أحمر",
+      dotClass: "bg-rose-500 border border-rose-600/80 shadow-xs shadow-rose-500/50"
+    };
+  }
+
+  if (art === "das" || art === "n" || art === "neuter") {
+    return {
+      type: "neuter",
+      article: "das",
+      label: "أداة المحايد (das) - أخضر",
+      dotClass: "bg-emerald-500 border border-emerald-600/80 shadow-xs shadow-emerald-500/50"
+    };
+  }
+
+  return null;
+};
+
 export interface SavedCustomRepeatPlan {
   id: string;
   name: string;
@@ -1261,51 +1330,62 @@ const StudyCard: React.FC<StudyCardProps> = ({
 
                 {/* Bottom Overlay with Word, Article Badge, and Hint */}
                 <div className="absolute bottom-0 inset-x-0 z-20 bg-gradient-to-t from-black/90 via-black/55 to-transparent pt-14 pb-4 px-4 sm:px-5 flex flex-col items-center justify-center text-center pointer-events-auto">
-                  {hideFront && !revealFrontTemp ? (
-                    <div 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setRevealFrontTemp(true);
-                      }}
-                      className="py-2.5 px-5 bg-black/60 hover:bg-black/80 backdrop-blur-md rounded-2xl border border-white/25 text-white flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 duration-200 mx-auto w-fit shadow-md"
-                    >
-                      <EyeOff className="w-4 h-4 text-white/80" />
-                      <span className="text-xs text-white font-medium">مخفي • انقر للكشف</span>
-                    </div>
-                  ) : (
-                    <div className="space-y-1.5 w-full">
-                      {(() => {
-                        const sanitized = sanitizeCardArticleAndSentence(localCard);
-                        const isSentence = isGermanSentence(localCard.frontText || "");
+                  <div className="space-y-1.5 w-full">
+                    {(() => {
+                      const sanitized = sanitizeCardArticleAndSentence(localCard);
+                      const isSentence = isGermanSentence(localCard.frontText || "");
+                      const isHidden = hideFront && !revealFrontTemp;
+
+                      if (isHidden) {
                         return (
-                          <h3 className="text-2xl sm:text-3xl font-black text-white break-words whitespace-pre-wrap leading-snug px-2 flex flex-row items-center justify-center gap-2.5 drop-shadow-md" dir="ltr">
-                            {!isSentence && sanitized.correctArticle && (
-                              <span className={`text-xs sm:text-sm px-2.5 py-0.5 rounded-lg font-black shrink-0 ${
-                                sanitized.correctArticle === "der" ? "bg-blue-600 text-white shadow-sm" :
-                                sanitized.correctArticle === "die" ? "bg-rose-600 text-white shadow-sm" :
-                                sanitized.correctArticle === "das" ? "bg-emerald-600 text-white shadow-sm" :
-                                sanitized.correctArticle === "die-plural" ? "bg-amber-500 text-white shadow-sm" :
-                                "bg-primary text-white"
-                              }`}>
-                                {sanitized.correctArticle === "die-plural" ? "die" : sanitized.correctArticle}
-                              </span>
-                            )}
-                            <span className="whitespace-pre-wrap tracking-normal">{sanitized.frontText}</span>
-                            {hideFront && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setRevealFrontTemp(false);
-                                }}
-                                className="p-1 rounded-lg bg-black/50 hover:bg-black/70 backdrop-blur-md text-white/80 cursor-pointer transition-colors border border-white/20"
-                                title="إخفاء النص مجدداً"
-                              >
-                                <EyeOff className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </h3>
+                          <div 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRevealFrontTemp(true);
+                            }}
+                            className="relative inline-flex items-center justify-center cursor-pointer select-none group py-1.5 px-4 rounded-xl transition-all active:scale-95"
+                            title="انقر للكشف"
+                          >
+                            <h3 className="text-2xl sm:text-3xl font-black text-white filter blur-lg opacity-25 select-none pointer-events-none drop-shadow-md" dir="ltr">
+                              {!isSentence && sanitized.correctArticle && (
+                                <span className="mr-2">{sanitized.correctArticle === "die-plural" ? "die" : sanitized.correctArticle}</span>
+                              )}
+                              <span>{sanitized.frontText}</span>
+                            </h3>
+                            <EyeOff className="absolute w-5 h-5 text-white/80 group-hover:text-white transition-all drop-shadow-sm" />
+                          </div>
                         );
-                      })()}
+                      }
+
+                      return (
+                        <h3 className="text-2xl sm:text-3xl font-black text-white break-words whitespace-pre-wrap leading-snug px-2 flex flex-row items-center justify-center gap-2.5 drop-shadow-md" dir="ltr">
+                          {!isSentence && sanitized.correctArticle && (
+                            <span className={`text-xs sm:text-sm px-2.5 py-0.5 rounded-lg font-black shrink-0 ${
+                              sanitized.correctArticle === "der" ? "bg-blue-600 text-white shadow-sm" :
+                              sanitized.correctArticle === "die" ? "bg-rose-600 text-white shadow-sm" :
+                              sanitized.correctArticle === "das" ? "bg-emerald-600 text-white shadow-sm" :
+                              sanitized.correctArticle === "die-plural" ? "bg-amber-500 text-white shadow-sm" :
+                              "bg-primary text-white"
+                            }`}>
+                              {sanitized.correctArticle === "die-plural" ? "die" : sanitized.correctArticle}
+                            </span>
+                          )}
+                          <span className="whitespace-pre-wrap tracking-normal">{sanitized.frontText}</span>
+                          {hideFront && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRevealFrontTemp(false);
+                              }}
+                              className="p-1 rounded-lg opacity-60 hover:opacity-100 backdrop-blur-md text-white cursor-pointer transition-opacity"
+                              title="إخفاء مجدداً"
+                            >
+                              <EyeOff className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </h3>
+                      );
+                    })()}
                       {localCard.translationHint && (
                         <p
                           onClick={handleDescriptionClick}
@@ -1322,9 +1402,8 @@ const StudyCard: React.FC<StudyCardProps> = ({
                         </p>
                       )}
                     </div>
-                  )}
+                  </div>
                 </div>
-              </div>
             );
           }
 
@@ -1367,51 +1446,63 @@ const StudyCard: React.FC<StudyCardProps> = ({
 
               {/* Centered Word and Article */}
               <div className="flex-1 flex flex-col justify-center items-center text-center px-2">
-                {hideFront && !revealFrontTemp ? (
-                  <div 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setRevealFrontTemp(true);
-                    }}
-                    className="py-3 px-5 bg-slate-50/50 hover:bg-slate-100/80 rounded-2xl border border-dashed border-slate-200 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 duration-200 mx-auto w-fit"
-                  >
-                    <EyeOff className="w-4 h-4 text-slate-400" />
-                    <span className="text-[11px] text-slate-500 font-medium">مخفي • انقر للكشف</span>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {(() => {
-                      const sanitized = sanitizeCardArticleAndSentence(localCard);
-                      const isSentence = isGermanSentence(localCard.frontText || "");
-                      return (
-                        <h3 className="text-3xl sm:text-4xl font-extrabold text-on-surface break-words whitespace-pre-wrap leading-snug px-2 flex flex-row items-center justify-center gap-3" dir="ltr">
+                {(() => {
+                  const sanitized = sanitizeCardArticleAndSentence(localCard);
+                  const isSentence = isGermanSentence(localCard.frontText || "");
+                  const isHidden = hideFront && !revealFrontTemp;
+
+                  if (isHidden) {
+                    return (
+                      <div 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRevealFrontTemp(true);
+                        }}
+                        className="relative inline-flex items-center justify-center cursor-pointer select-none group py-2 px-4 rounded-xl transition-all active:scale-95"
+                        title="انقر للكشف"
+                      >
+                        <h3 className="text-3xl sm:text-4xl font-extrabold text-on-surface filter blur-lg opacity-20 dark:opacity-25 select-none pointer-events-none" dir="ltr">
                           {!isSentence && sanitized.correctArticle && (
-                            <span className={`text-sm sm:text-base px-3 py-1 rounded-xl font-black shrink-0 ${
-                              sanitized.correctArticle === "der" ? "bg-blue-600 text-white shadow-xs" :
-                              sanitized.correctArticle === "die" ? "bg-rose-600 text-white shadow-xs" :
-                              sanitized.correctArticle === "das" ? "bg-emerald-600 text-white shadow-xs" :
-                              sanitized.correctArticle === "die-plural" ? "bg-amber-500 text-white shadow-xs" :
-                              "bg-primary text-white"
-                            }`}>
-                              {sanitized.correctArticle === "die-plural" ? "die" : sanitized.correctArticle}
-                            </span>
+                            <span className="mr-2">{sanitized.correctArticle === "die-plural" ? "die" : sanitized.correctArticle}</span>
                           )}
-                          <span className="whitespace-pre-wrap tracking-normal">{sanitized.frontText}</span>
-                          {hideFront && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setRevealFrontTemp(false);
-                              }}
-                              className="p-1.5 rounded-lg bg-slate-100/80 hover:bg-slate-200/80 text-slate-500 cursor-pointer transition-colors"
-                              title="إخفاء النص مجدداً"
-                            >
-                              <EyeOff className="w-4 h-4" />
-                            </button>
-                          )}
+                          <span>{sanitized.frontText}</span>
                         </h3>
-                      );
-                    })()}
+                        <EyeOff className="absolute w-5 h-5 text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors" />
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-3">
+                      <h3 className="text-3xl sm:text-4xl font-extrabold text-on-surface break-words whitespace-pre-wrap leading-snug px-2 flex flex-row items-center justify-center gap-3" dir="ltr">
+                        {!isSentence && sanitized.correctArticle && (
+                          <span className={`text-sm sm:text-base px-3 py-1 rounded-xl font-black shrink-0 ${
+                            sanitized.correctArticle === "der" ? "bg-blue-600 text-white shadow-xs" :
+                            sanitized.correctArticle === "die" ? "bg-rose-600 text-white shadow-xs" :
+                            sanitized.correctArticle === "das" ? "bg-emerald-600 text-white shadow-xs" :
+                            sanitized.correctArticle === "die-plural" ? "bg-amber-500 text-white shadow-xs" :
+                            "bg-primary text-white"
+                          }`}>
+                            {sanitized.correctArticle === "die-plural" ? "die" : sanitized.correctArticle}
+                          </span>
+                        )}
+                        <span className="whitespace-pre-wrap tracking-normal">{sanitized.frontText}</span>
+                        {hideFront && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRevealFrontTemp(false);
+                            }}
+                            className="p-1 rounded-lg opacity-50 hover:opacity-100 text-slate-500 cursor-pointer transition-opacity"
+                            title="إخفاء مجدداً"
+                          >
+                            <EyeOff className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </h3>
+                    </div>
+                  );
+                })()}
                     {localCard.translationHint && (
                       <p
                         onClick={handleDescriptionClick}
@@ -1428,8 +1519,6 @@ const StudyCard: React.FC<StudyCardProps> = ({
                       </p>
                     )}
                   </div>
-                )}
-              </div>
 
               <div className="h-4" />
             </div>
@@ -1541,10 +1630,13 @@ const StudyCard: React.FC<StudyCardProps> = ({
                           e.stopPropagation();
                           setRevealBackTemp(true);
                         }}
-                        className="py-3 px-6 bg-black/60 hover:bg-black/80 backdrop-blur-md rounded-2xl border border-white/25 text-white flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 duration-200 mx-auto w-fit shadow-md preserve-bg"
+                        className="relative inline-flex items-center justify-center cursor-pointer select-none group py-1.5 px-4 rounded-xl transition-all active:scale-95"
+                        title="انقر للكشف"
                       >
-                        <EyeOff className="w-4 h-4 text-white/80" />
-                        <span className="text-xs text-white font-medium">مخفي • انقر للكشف</span>
+                        <h3 className="text-2xl sm:text-4xl font-black text-white filter blur-lg opacity-25 select-none pointer-events-none drop-shadow-md text-center" dir="rtl">
+                          {localCard.backText}
+                        </h3>
+                        <EyeOff className="absolute w-5 h-5 text-white/80 group-hover:text-white transition-all drop-shadow-sm" />
                       </div>
                     ) : (
                       <div className="flex flex-col items-center gap-3 w-full">
@@ -1565,8 +1657,8 @@ const StudyCard: React.FC<StudyCardProps> = ({
                                     e.stopPropagation();
                                     setRevealBackTemp(false);
                                   }}
-                                  className="p-1 rounded-lg bg-black/50 hover:bg-black/70 backdrop-blur-md text-white/80 cursor-pointer transition-colors border border-white/20"
-                                  title="إخفاء النص مجدداً"
+                                  className="p-1 rounded-lg opacity-60 hover:opacity-100 text-white/80 cursor-pointer transition-opacity"
+                                  title="إخفاء مجدداً"
                                 >
                                   <EyeOff className="w-3.5 h-3.5" />
                                 </button>
@@ -1687,10 +1779,13 @@ const StudyCard: React.FC<StudyCardProps> = ({
                       e.stopPropagation();
                       setRevealBackTemp(true);
                     }}
-                    className="py-3 px-5 bg-slate-50/50 hover:bg-slate-100/80 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 duration-200"
+                    className="relative inline-flex items-center justify-center cursor-pointer select-none group py-2 px-4 rounded-xl transition-all active:scale-95"
+                    title="انقر للكشف"
                   >
-                    <EyeOff className="w-4 h-4 text-slate-400" />
-                    <span className="text-[11px] text-slate-500 font-medium">مخفي • انقر للكشف</span>
+                    <h3 className="text-2xl sm:text-4xl font-extrabold text-on-surface filter blur-lg opacity-20 dark:opacity-25 select-none pointer-events-none text-center" dir="rtl">
+                      {localCard.backText}
+                    </h3>
+                    <EyeOff className="absolute w-5 h-5 text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors" />
                   </div>
                 ) : (
                   <div className="flex flex-col items-center gap-3 w-full">
@@ -1711,8 +1806,8 @@ const StudyCard: React.FC<StudyCardProps> = ({
                                 e.stopPropagation();
                                 setRevealBackTemp(false);
                               }}
-                              className="p-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-500 cursor-pointer transition-colors"
-                              title="إخفاء النص مجدداً"
+                              className="p-1 rounded-lg opacity-50 hover:opacity-100 text-slate-500 cursor-pointer transition-opacity"
+                              title="إخفاء مجدداً"
                             >
                               <EyeOff className="w-3.5 h-3.5" />
                             </button>
@@ -2139,6 +2234,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     return localStorage.getItem("settings_hide_prompt_text") === "true";
   });
 
+  const [writeShowWordOnCheck, setWriteShowWordOnCheck] = useState(() => {
+    return localStorage.getItem("settings_write_show_word_on_check") !== "false";
+  });
+
   const [hideImage, setHideImage] = useState(() => {
     return localStorage.getItem("settings_hide_image") === "true";
   });
@@ -2154,6 +2253,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   useEffect(() => {
     localStorage.setItem("settings_hide_prompt_text", String(hidePromptText));
   }, [hidePromptText]);
+
+  useEffect(() => {
+    localStorage.setItem("settings_write_show_word_on_check", String(writeShowWordOnCheck));
+  }, [writeShowWordOnCheck]);
 
   useEffect(() => {
     localStorage.setItem("settings_hide_image", String(hideImage));
@@ -3738,7 +3841,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   const playPronunciationWithEnd = (text: string, lang: string, onEnd?: () => void, bypassMute = false, voiceOverride?: string) => {
     stopCurrentAudio();
 
-    if (isRepeatAudioEnabled) {
+    // When in writing mode, repetition patterns are strictly disabled
+    if (isRepeatAudioEnabled && method !== "write") {
       executeSequenceSteps(repeatSequence, text, lang, onEnd, bypassMute);
     } else {
       playPronunciationSingle(text, lang, onEnd, bypassMute, voiceOverride);
@@ -4291,36 +4395,36 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
       setWriteResult("correct");
       onUpdateStreak(currentCard.id, true);
       setCorrectIds(prev => [...prev, currentCard.id]);
-    } else {
-      setWriteResult("incorrect");
-      onUpdateStreak(currentCard.id, false);
-      setIncorrectIds(prev => [...prev, currentCard.id]);
-    }
 
-    const spokenText = isGermanTarget
-      ? getFrontSpeechText(currentCard, writeSpeakArticle)
-      : currentCard.backText;
-    const spokenLang = isGermanTarget
-      ? (currentCard.frontLang || "de")
-      : (currentCard.backLang || "ar");
+      // When answering correctly in writing review:
+      // Repetition pattern is disabled; pronounce the word with article if found, and strictly only that once.
+      const hasGermanArticle = Boolean(
+        currentCard.correctArticle || 
+        /^(der|die|das)\s+/i.test(currentCard.frontText || "")
+      );
+      const spokenText = (isGermanTarget || hasGermanArticle)
+        ? getFrontSpeechText(currentCard, true)
+        : currentCard.backText;
+      const spokenLang = (isGermanTarget || hasGermanArticle)
+        ? (currentCard.frontLang || "de")
+        : (currentCard.backLang || "ar");
 
-    setIsPronouncingCorrect(true);
-    if (writeAutoListenSuccess) {
-      playPronunciationWithEnd(spokenText, spokenLang, () => {
+      stopCurrentAudio();
+      setIsPronouncingCorrect(true);
+      playPronunciationSingle(spokenText, spokenLang, () => {
         setIsPronouncingCorrect(false);
-        if (autoAdvanceRef.current && isCorrect) {
+        if (autoAdvanceRef.current) {
           setTimeout(() => {
             handleNextCard();
           }, 800);
         }
-      });
+      }, true);
     } else {
+      setWriteResult("incorrect");
+      onUpdateStreak(currentCard.id, false);
+      setIncorrectIds(prev => [...prev, currentCard.id]);
       setIsPronouncingCorrect(false);
-      if (autoAdvanceRef.current && isCorrect) {
-        setTimeout(() => {
-          handleNextCard();
-        }, 800);
-      }
+      stopCurrentAudio();
     }
   };
 
@@ -5331,11 +5435,13 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           <Timer className="w-4 h-4" />
                         </button>
 
-                        {/* Toggle Front Text / Question Visibility */}
+                        {/* Toggle Front Text / Question Visibility (Writing mode only) */}
                         <button
                           type="button"
-                          onClick={() => setHidePromptText(prev => !prev)}
-                          title={hidePromptText ? "إظهار النص الأمامي (وجه السؤال)" : "إخفاء النص الأمامي (وجه السؤال) لاختبار الذاكرة"}
+                          onClick={() => {
+                            setHidePromptText(prev => !prev);
+                          }}
+                          title={hidePromptText ? "إظهار نص السؤال" : "إخفاء نص السؤال (خاص بالكتابة)"}
                           className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center ${
                             hidePromptText 
                               ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25" 
@@ -5682,8 +5788,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                               if (isTransitioning) return;
                               setFlipped(!flipped);
                             }}
-                            hideFront={hideFront}
-                            hideBack={hideBack}
+                            hideFront={false}
+                            hideBack={false}
                             onPlayPronunciation={(t, l) => {
                               if (reviewVoiceTarget === "secondary") {
                                 playSecondaryPronunciation(t, l);
@@ -5730,8 +5836,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
               {/* 2. WRITING / DICTATION MODE */}
               {(method === "write" || method === "listen") && currentCard && (
                 <div className="w-full flex flex-col items-center gap-5">
-                  {/* Core display card styled beautifully like the Classic StudyCard */}
-                  <div className="relative w-full aspect-[4/3] sm:aspect-square max-h-[min(380px,calc(100dvh-300px))] min-h-[220px] rounded-[26px] overflow-hidden shadow-sm border border-outline-variant/30 select-none bg-surface-container-lowest dark:bg-slate-900 flex flex-col justify-between p-4 sm:p-5">
+                  {/* Core display card styled strictly square like the Classic StudyCard */}
+                  <div className="relative w-full aspect-square select-none overflow-hidden rounded-[26px] shadow-sm border border-outline-variant/30 bg-surface-container-lowest dark:bg-slate-900 flex flex-col justify-between p-4 sm:p-5">
                     
                     {/* Edge-to-edge ambient photo background if image exists and is visible */}
                     {Boolean(
@@ -5755,8 +5861,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       </div>
                     )}
 
-                    {/* Top Bar: Floating Audio Button + Target Mode Indicator Badge */}
-                    <div className="w-full flex items-center justify-between relative z-20 select-none pointer-events-auto">
+                    {/* Top Bar: Floating Audio Button only (top badge removed) */}
+                    <div className="w-full flex items-center justify-start relative z-20 select-none pointer-events-auto">
                       <button
                         type="button"
                         onMouseDown={(e) => e.preventDefault()}
@@ -5785,24 +5891,6 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       >
                         <Volume2 className="w-4.5 h-4.5" />
                       </button>
-
-                      <div className={`px-3 py-1.5 rounded-xl text-xs font-bold select-none ${
-                        Boolean(
-                          currentCard.frontImage && 
-                          (
-                            (method !== "listen" && (!hideImage || writeResult === "correct")) ||
-                            (method === "listen" && writeResult !== null)
-                          )
-                        )
-                          ? "bg-black/40 backdrop-blur-md border border-white/25 text-white/95"
-                          : "bg-slate-100 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700 text-slate-600 dark:text-slate-300"
-                      }`}>
-                        {method === "listen" 
-                          ? "تحدي الاستماع 🎧" 
-                          : writeTestTarget === "front" 
-                          ? "اكتب بالألمانية 🇩🇪" 
-                          : "اكتب بالعربية 🇸🇦"}
-                      </div>
                     </div>
 
                     {/* Center / Prompt Text Content with beautiful typography */}
@@ -5840,54 +5928,63 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                             </span>
                           </div>
                         )
-                      ) : (
-                        // Writing Mode Question Content
-                        hidePromptText && !revealPromptTemp && writeResult === null ? (
-                          <div 
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => setRevealPromptTemp(true)}
-                            className={`py-3 px-6 rounded-2xl border flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 duration-200 mx-auto w-fit shadow-md ${
-                              Boolean(currentCard.frontImage && !hideImage)
-                                ? "bg-black/60 hover:bg-black/80 backdrop-blur-md border-white/25 text-white"
-                                : "bg-slate-50/80 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-750 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200"
-                            }`}
-                          >
-                            <EyeOff className="w-4.5 h-4.5" />
-                            <span className="text-xs sm:text-sm font-semibold">وجه السؤال مخفي • انقر للكشف</span>
-                          </div>
-                        ) : (
+                      ) : (() => {
+                        const writeArticleDot = getCardArticleDotInfo(currentCard);
+                        const isPromptHidden = hidePromptText && !revealPromptTemp && !(writeShowWordOnCheck && writeResult !== null);
+                        return (
+                          // Writing Mode Question Content with modern lightweight blur effect when hidden
                           <div className="flex flex-col items-center gap-2">
-                            {writeQuestionFace === "back" ? (
-                              <h2 className={`text-2xl sm:text-3xl font-black animate-scaleUp ${
-                                Boolean(currentCard.frontImage && !hideImage) ? "text-white drop-shadow-md" : "text-on-surface"
-                              }`} dir="rtl">
-                                {currentCard.backText}
-                              </h2>
-                            ) : (
-                              <h2 className={`text-2xl sm:text-3xl font-black animate-scaleUp ${
-                                Boolean(currentCard.frontImage && !hideImage) ? "text-white drop-shadow-md" : "text-on-surface"
-                              }`} dir="ltr">
-                                {currentCard.frontText}
-                              </h2>
-                            )}
-                            {hidePromptText && writeResult === null && (
-                              <button
-                                type="button"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => setRevealPromptTemp(false)}
-                                className={`px-3 py-1 text-xs font-bold rounded-xl cursor-pointer transition-colors flex items-center gap-1.5 mt-1 border ${
-                                  Boolean(currentCard.frontImage && !hideImage)
-                                    ? "bg-black/40 hover:bg-black/60 text-white/90 border-white/20"
-                                    : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200/80 dark:border-slate-700"
-                                }`}
-                                title="إخفاء النص مجدداً"
+                            {isPromptHidden ? (
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setRevealPromptTemp(true);
+                                }}
+                                className="relative inline-flex items-center justify-center cursor-pointer select-none group py-2 px-4 rounded-xl transition-all active:scale-95"
+                                title="انقر للكشف"
                               >
-                                <EyeOff className="w-3.5 h-3.5" /> إخفاء وجه السؤال
-                              </button>
+                                <h2 className={`text-2xl sm:text-3xl font-black filter blur-lg opacity-25 select-none pointer-events-none ${
+                                  Boolean(currentCard.frontImage && !hideImage) ? "text-white drop-shadow-md" : "text-on-surface"
+                                }`} dir={writeQuestionFace === "back" ? "rtl" : "ltr"}>
+                                  {writeQuestionFace === "back" ? currentCard.backText : currentCard.frontText}
+                                </h2>
+                                <EyeOff className={`absolute w-5 h-5 ${
+                                  Boolean(currentCard.frontImage && !hideImage) ? "text-white/80 group-hover:text-white" : "text-slate-400 group-hover:text-slate-600 dark:text-slate-500 dark:group-hover:text-slate-300"
+                                } transition-colors`} />
+                              </div>
+                            ) : (
+                              <div className="relative inline-flex items-center justify-center gap-2.5" dir="ltr">
+                                {writeArticleDot && (
+                                  <span
+                                    className={`w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full shrink-0 ${writeArticleDot.dotClass}`}
+                                    title={writeArticleDot.label}
+                                  />
+                                )}
+                                <h2 className={`text-2xl sm:text-3xl font-black animate-scaleUp ${
+                                  Boolean(currentCard.frontImage && !hideImage) ? "text-white drop-shadow-md" : "text-on-surface"
+                                }`} dir={writeQuestionFace === "back" ? "rtl" : "ltr"}>
+                                  {writeQuestionFace === "back" ? currentCard.backText : currentCard.frontText}
+                                </h2>
+                                {hidePromptText && !isPromptHidden && !(writeShowWordOnCheck && writeResult !== null) && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setRevealPromptTemp(false);
+                                    }}
+                                    className={`p-1 rounded-lg opacity-60 hover:opacity-100 cursor-pointer transition-opacity ${
+                                      Boolean(currentCard.frontImage && !hideImage) ? "text-white" : "text-slate-500"
+                                    }`}
+                                    title="إخفاء مجدداً"
+                                  >
+                                    <EyeOff className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
-                        )
-                      )}
+                        );
+                      })()}
                     </div>
 
                     {/* Bottom visual anchor spacer */}
@@ -5982,47 +6079,65 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     </div>
                   ) : (
                     <div className="w-full flex flex-col gap-3">
-                      <div className="relative w-full">
-                        <input
-                          ref={writeInputRef}
-                          type="text"
-                          value={writeAnswer}
-                          disabled={writeResult === "correct"}
-                          onChange={(e) => {
-                            setWriteAnswer(e.target.value);
-                            if (writeResult === "incorrect") {
-                              setWriteResult(null);
-                            }
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.stopPropagation();
-                              if (writeResult === "correct") {
-                                handleNextCard();
-                              } else {
-                                handleCheckWrite();
-                              }
-                            }
-                          }}
-                          placeholder={
-                            writeTestTarget === "front"
-                              ? "اكتب الكلمة الألمانية المقابلة..."
-                              : "اكتب الترجمة العربية المطلوبة..."
+                      <input
+                        ref={writeInputRef}
+                        type="text"
+                        dir={writeTestTarget === "back" ? "rtl" : "ltr"}
+                        value={writeAnswer}
+                        disabled={writeResult === "correct"}
+                        onChange={(e) => {
+                          setWriteAnswer(e.target.value);
+                          if (writeResult === "incorrect") {
+                            setWriteResult(null);
                           }
-                          className={`w-full h-14 sm:h-15 bg-white dark:bg-slate-900 border-2 rounded-2xl text-center font-bold text-base sm:text-lg text-on-surface focus:outline-none focus:ring-4 focus:ring-primary/10 shadow-xs transition-all duration-200 px-4 ${
-                            writeResult === "correct"
-                              ? "border-green-500 bg-green-50/20 text-green-700 dark:text-green-300"
-                              : writeResult === "incorrect"
-                              ? "border-red-500 bg-red-50/20 text-red-700 dark:text-red-300"
-                              : "border-slate-200 dark:border-slate-700 hover:border-slate-300 focus:border-primary"
-                          }`}
-                        />
-                      </div>
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.stopPropagation();
+                            if (writeResult === "correct") {
+                              handleNextCard();
+                            } else {
+                              handleCheckWrite();
+                            }
+                          }
+                        }}
+                        placeholder={
+                          writeTestTarget === "front"
+                            ? "اكتب الكلمة الألمانية المقابلة..."
+                            : "اكتب الترجمة العربية المطلوبة..."
+                        }
+                        className={`w-full h-14 sm:h-15 bg-white dark:bg-slate-900 border-2 rounded-2xl text-center font-bold text-base sm:text-lg text-on-surface focus:outline-none focus:ring-4 focus:ring-primary/10 shadow-xs transition-all duration-200 px-4 ${
+                          writeResult === "correct"
+                            ? "border-emerald-500 bg-emerald-50/20 text-emerald-700 dark:text-emerald-300"
+                            : writeResult === "incorrect"
+                            ? "border-rose-500 bg-rose-50/20 text-rose-700 dark:text-rose-300"
+                            : "border-slate-200 dark:border-slate-700 hover:border-slate-300 focus:border-primary"
+                        }`}
+                      />
 
-                      {/* Unified button with modern rounded-2xl styling */}
+                      {/* Verification Button: Checkmark on Correct, X mark on Incorrect, Check text when idle */}
                       <div className="w-full">
-                        {writeResult !== "correct" ? (
+                        {writeResult === "correct" ? (
                           <button
+                            type="button"
+                            onClick={handleNextCard}
+                            className="w-full h-14 sm:h-15 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
+                            title="إجابة صحيحة (التالي)"
+                          >
+                            <Check className="w-7 h-7 stroke-[3]" />
+                          </button>
+                        ) : writeResult === "incorrect" ? (
+                          <button
+                            type="button"
+                            onClick={handleCheckWrite}
+                            className="w-full h-14 sm:h-15 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
+                            title="إجابة خاطئة (تحقق مجدداً)"
+                          >
+                            <X className="w-7 h-7 stroke-[3]" />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
                             onClick={handleCheckWrite}
                             disabled={!writeAnswer.trim()}
                             className={`w-full h-14 sm:h-15 rounded-2xl font-black text-base sm:text-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
@@ -6033,18 +6148,6 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           >
                             <span>التحقق</span>
                           </button>
-                        ) : !autoAdvance ? (
-                          <button
-                            onClick={handleNextCard}
-                            className="w-full h-14 sm:h-15 rounded-2xl font-black text-base sm:text-lg bg-primary text-white hover:opacity-95 shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
-                          >
-                            <span>التالي</span>
-                            <ChevronRight className="w-5 h-5" />
-                          </button>
-                        ) : (
-                          <div className="w-full h-14 sm:h-15 flex items-center justify-center text-green-600 dark:text-green-400 font-bold bg-green-50/50 dark:bg-green-950/20 rounded-2xl border border-green-200 dark:border-green-800">
-                            <span>إجابة صحيحة! جاري الانتقال تلقائياً... ✨</span>
-                          </div>
                         )}
                       </div>
                     </div>
@@ -7091,18 +7194,40 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     </button>
                   </div>
 
-                  {/* Switch 1: Show Front Text / Question (عرض النص الأمامي) */}
+                  {/* Switch 1: Hide Question Front Text (إخفاء النص الأمامي - حصري لمود الكتابة) */}
                   <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
                     <div className="flex flex-col gap-0.5 text-right">
-                      <span className="text-xs font-bold text-slate-700 dark:text-slate-200">عرض النص الأمامي (وجه السؤال)</span>
-                      <span className="text-[10px] text-slate-400">إظهار نص السؤال أو إخفاؤه للاختبار بالاعتماد على الصوت والذاكرة فقط</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-200">إخفاء نص السؤال الأمامي</span>
+                        <span className="text-[9px] bg-sky-500/10 text-sky-700 dark:text-sky-300 font-extrabold px-1.5 py-0.5 rounded-full">حصري بالكتابة فقط</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400">إخفاء نص السؤال أثناء الكتابة لاختبار الذاكرة دون التأثير نهائياً على مراجعة الوجه والخلف</span>
                     </div>
                     <button
                       type="button"
                       onClick={() => setHidePromptText(!hidePromptText)}
-                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${!hidePromptText ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}
+                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${hidePromptText ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}
                     >
-                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${!hidePromptText ? 'translate-x-5' : 'translate-x-0'}`} />
+                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${hidePromptText ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+
+                  {/* Switch: Show Word on Verification (عرض الكلمة عند التحقق) */}
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50 dark:border-slate-800">
+                    <div className="flex flex-col gap-0.5 text-right">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-200">عرض الكلمة عند التحقق</span>
+                        <span className="text-[9px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-extrabold px-1.5 py-0.5 rounded-full">حصري بالكتابة</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400">إظهار الكلمة وكشفها تلقائياً بمجرد الضغط على زر التحقق</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setWriteShowWordOnCheck(!writeShowWordOnCheck)}
+                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${writeShowWordOnCheck ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}
+                      title={writeShowWordOnCheck ? "مفعل (يعرض الكلمة عند التحقق)" : "معطل"}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${writeShowWordOnCheck ? 'translate-x-5' : 'translate-x-0'}`} />
                     </button>
                   </div>
 
@@ -7492,17 +7617,6 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${hideBack ? 'bg-emerald-500' : 'bg-slate-200'}`}
                     >
                       <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${hideBack ? 'translate-x-5' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between py-1">
-                    <span className="text-xs font-bold text-slate-700">إخفاء وجه السؤال بالكامل</span>
-                    <button
-                      type="button"
-                      onClick={() => setHidePromptText(!hidePromptText)}
-                      className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${hidePromptText ? 'bg-emerald-500' : 'bg-slate-200'}`}
-                    >
-                      <span className={`absolute top-0.5 left-0.5 bg-white w-5 h-5 rounded-full transition-transform duration-200 ${hidePromptText ? 'translate-x-5' : 'translate-x-0'}`} />
                     </button>
                   </div>
                 </div>

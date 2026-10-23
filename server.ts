@@ -5539,8 +5539,9 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
 
       let customRules = "\n\n⚠️ قواعد التخصيص الإضافية التي حددها المستخدم ويجب الالتزام بها:";
       customRules += "\n- 🚨 قاعدة إلزامية هامة جداً لأدوات التعريف وصيغ الجمع الألمانية:";
-      customRules += "\n  * ميزة أدوات التعريف (isArticleMode و correctArticle) تُفعّل وتُطبق فقط وحصراً على الكلمات والأسماء المفردة (Single Nouns مثل: Tisch, Auto, Lampe).";
-      customRules += "\n  * في حال كانت الكلمة اسماً مفرداً: يجب تجريد الأداة من frontText ووضعها حصراً في correctArticle (اكتب \"Tisch\" وليس \"der Tisch\"، واكتب \"Auto\" وليس \"das Auto\").";
+      customRules += "\n  * ميزة أدوات التعريف (isArticleMode و correctArticle) تُفعّل وتُطبق فقط وحصراً على الكلمات والأسماء المفردة والجمع (Nouns مثل: Tisch, Auto, Lampe, Kinder).";
+      customRules += "\n  * في حال كانت الكلمة اسماً: يجب تجريد الأداة من frontText ووضعها حصراً في correctArticle (اكتب \"Tisch\" وليس \"der Tisch\"، واكتب \"Kinder\" وليس \"die Kinder\").";
+      customRules += "\n  * 🚨 تفريق حاسم وإلزامي بين المؤنث المفرد والجمع: أداة المؤنث المفرد هي \"die\". بينما أداة الجمع لجميع أسماء الجمع هي إلزامياً \"die-plural\". يمنع منعاً باتاً كتابة \"die\" لأسماء الجمع (مثل Kinder, Eltern, Leute, Bücher) لأنها ستُصنف كمؤنث، بل اكتب حتماً \"die-plural\"!";
       customRules += "\n  * في حال كانت البطاقة عبارة عن جملة كاملة أو عبارة أو سؤال (مثل: \"Das Auto ist groß\" أو \"Die Katze schläft\"): ممنوع تماماً عزل الأداة أو تفعيل وضع الأداة! يجب إبقاء الجملة كاملة بأداتها داخل frontText، ويجب إلزامياً وضع (isArticleMode = false) و (correctArticle = \"\").";
       customRules += "\n  * صيغة الجمع في (pluralText) توضع مجردة تماماً بدون أداة التعريف أيضاً (اكتب \"Tische\" وليس \"die Tische\").";
       if (!isAuto) {
@@ -6259,6 +6260,42 @@ function sanitizeCardArticleAndPlural(card: any): any {
   let isPluralMode = !!card.isPluralMode;
   let imageSearchQuery = typeof card.imageSearchQuery === "string" ? card.imageSearchQuery.trim() : "";
 
+  // 1. Normalize correctArticle input variations (e.g. from LLMs or imports)
+  const rawArtLower = correctArticle.toLowerCase().trim();
+  if (
+    [
+      "die-plural", "die_plural", "plural", "pl", "pl.", "die (plural)",
+      "die (pl)", "die (pl.)", "die pl", "die plural", "die (جمع)", "جمع"
+    ].includes(rawArtLower)
+  ) {
+    correctArticle = "die-plural";
+    isPluralMode = true;
+  } else if (["der", "m", "masculine", "maskulin"].includes(rawArtLower)) {
+    correctArticle = "der";
+  } else if (["das", "n", "neuter", "neutral"].includes(rawArtLower)) {
+    correctArticle = "das";
+  } else if (["die", "f", "feminine", "feminin"].includes(rawArtLower)) {
+    correctArticle = "die";
+  }
+
+  // 2. Check for explicit plural markers in frontText (e.g., "Kinder (Pl.)" or "(die) Kinder (Plural)")
+  const plMarkerRegex = /\s*[\(\[]\s*(?:pl\.|plural|جمع)\s*[\)\]]/i;
+  if (plMarkerRegex.test(frontText)) {
+    frontText = frontText.replace(plMarkerRegex, "").trim();
+    if (!correctArticle || correctArticle === "die" || correctArticle === "") {
+      correctArticle = "die-plural";
+    }
+    isPluralMode = true;
+  }
+
+  // 3. Check for plural hints in translationHint or backText when article is "die" or empty
+  const hintOrBack = `${card.translationHint || ""} ${card.backText || ""}`;
+  const isPluralByHint = /\b(?:pl\.|plural|اسم جمع|صيغة جمع|\(جمع\))\b/i.test(hintOrBack);
+  if (isPluralByHint && (!correctArticle || correctArticle === "die")) {
+    correctArticle = "die-plural";
+    isPluralMode = true;
+  }
+
   // Clean forced cartoon/vector keywords from imageSearchQuery unless user requested
   if (imageSearchQuery) {
     imageSearchQuery = imageSearchQuery
@@ -6282,7 +6319,7 @@ function sanitizeCardArticleAndPlural(card: any): any {
     isArticleMode = false;
     correctArticle = "";
   } else {
-    // SCENARIO 2: IT IS A SINGLE NOUN / VOCABULARY (e.g., "Das Handy", "der Tisch", "Lampe")
+    // SCENARIO 2: IT IS A SINGLE NOUN / VOCABULARY (e.g., "Das Handy", "der Tisch", "Lampe", "die Kinder")
     // For single nouns: the article belongs in correctArticle ONLY, NOT inside frontText!
     const match = frontText.match(/^(der|die|das)\s+(.+)$/i);
     if (match) {
@@ -6290,7 +6327,11 @@ function sanitizeCardArticleAndPlural(card: any): any {
       const cleanNoun = match[2].trim();
       frontText = cleanNoun;
       if (!correctArticle || correctArticle === "") {
-        correctArticle = extractedArticle;
+        if (extractedArticle === "die" && (isPluralMode || isPluralByHint)) {
+          correctArticle = "die-plural";
+        } else {
+          correctArticle = extractedArticle;
+        }
       }
       isArticleMode = true;
     } else {
@@ -6298,9 +6339,15 @@ function sanitizeCardArticleAndPlural(card: any): any {
         isArticleMode = true;
       }
     }
+
+    // Safety: If frontText equals pluralText and article was "die", it's a plural card!
+    if (correctArticle === "die" && pluralText && frontText.toLowerCase() === pluralText.toLowerCase()) {
+      correctArticle = "die-plural";
+      isPluralMode = true;
+    }
   }
 
-  // 2. Clean pluralText if it starts with der / die / das
+  // Clean pluralText if it starts with der / die / das
   const pluralMatch = pluralText.match(/^(der|die|das)\s+(.+)$/i);
   if (pluralMatch) {
     const plNoun = pluralMatch[2].trim();
