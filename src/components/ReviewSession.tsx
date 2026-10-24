@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, Flag, Volume2, HelpCircle, RefreshCw, CheckCircle, AlertCircle, Timer, Award, Trophy, ArrowLeft, ArrowRight, Play, Pause, Eye, RotateCcw, ThumbsUp, ThumbsDown, Sparkles, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, MoreHorizontal, Sliders, Shuffle, EyeOff, VolumeX, Clock, Layers, Pencil, Plus, Check, Moon, Sun, DownloadCloud, Image as ImageIcon, CheckCircle2, Loader2, Download, Minimize2, Maximize2, Repeat, Trash2, ArrowUp, ArrowDown, Music, Mic, Save, Square, Bot, MessageSquare, Activity } from "lucide-react";
+import { X, Flag, Volume2, HelpCircle, RefreshCw, CheckCircle, AlertCircle, Timer, Award, Trophy, ArrowLeft, ArrowRight, Play, Pause, Eye, RotateCcw, ThumbsUp, ThumbsDown, Sparkles, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, MoreHorizontal, Sliders, Shuffle, EyeOff, VolumeX, Clock, Layers, Pencil, Plus, Check, DownloadCloud, Image as ImageIcon, CheckCircle2, Loader2, Download, Minimize2, Maximize2, Repeat, Trash2, ArrowUp, ArrowDown, Music, Mic, Save, Square, Bot, MessageSquare, Activity } from "lucide-react";
 import { Flashcard, Folder, ReviewMethod, getSafeImageStyle, getCardSearchQuery, SpeakingChallengeItem, sanitizeCardArticleAndSentence, isGermanSentence } from "../types";
 import { speakClient, preloadTTS, ttsCache, stopActiveAudio, fadeAndStopAudio, preloadImage, imageCache, invalidateImageCache, playPiperLocalWasm, playGradioClientAudio } from "./Modals";
 import { motion, AnimatePresence, MotionConfig } from "motion/react";
@@ -724,12 +724,8 @@ const StudyCard: React.FC<StudyCardProps> = ({
     setIsDescriptionModalOpen(true);
   };
 
-  // Check if night mode is enabled
-  const isDark = (typeof window !== "undefined" && (
-    localStorage.getItem("settings_review_night_mode") === "true" || 
-    document.documentElement.classList.contains("dark") ||
-    document.querySelector(".review-night-mode") !== null
-  ));
+  // Review sessions are permanently in night/dark mode
+  const isDark = true;
 
   const handleCacheThisCardImages = async () => {
     if (isCachingCard) return;
@@ -2143,7 +2139,9 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
           setFlipped(false);
           setWriteAnswer("");
           setWriteResult(null);
+          setWriteResultCardId("");
           setArticleResult(null);
+          setArticleResultCardId("");
           setSelectedArticle("");
         } else {
           // A different card was deleted. Adjust to keep the current card selected.
@@ -2166,7 +2164,9 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
       setIncorrectIds([]);
       setWriteAnswer("");
       setWriteResult(null);
+      setWriteResultCardId("");
       setArticleResult(null);
+      setArticleResultCardId("");
       setSelectedArticle("");
       setSelectedListenCardId("");
       setIsCompleted(false);
@@ -2184,6 +2184,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   const [classicShowPlural, setClassicShowPlural] = useState(false);
   const [writeAnswer, setWriteAnswer] = useState("");
   const [writeResult, setWriteResult] = useState<"correct" | "incorrect" | null>(null);
+  const [writeResultCardId, setWriteResultCardId] = useState<string>("");
 
   // Reset classicShowPlural on card index or flip change
   useEffect(() => {
@@ -2631,7 +2632,6 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     return (localStorage.getItem("settings_listen_choice_type") as any) || "image";
   });
 
-  const [listenChoices, setListenChoices] = useState<Flashcard[]>([]);
   const [selectedListenCardId, setSelectedListenCardId] = useState<string>("");
   
   const [revealPromptTemp, setRevealPromptTemp] = useState(false);
@@ -2804,14 +2804,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     return saved === null ? true : saved === "true";
   });
 
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem("settings_review_night_mode");
-    return saved === "true";
-  });
-
-  useEffect(() => {
-    localStorage.setItem("settings_review_night_mode", String(isDarkMode));
-  }, [isDarkMode]);
+  // Review sessions are permanently dark mode
+  const isDarkMode = true;
 
   const [isAudioPreloadEnabled, setIsAudioPreloadEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem("settings_preload_audio_review");
@@ -3136,6 +3130,18 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
       ? (autoFlipMode === "back_only") 
       : (manualStartFace === "back");
     setFlipped(nextFlipped);
+
+    // Synchronously clear all answer/result states BEFORE changing index so no leak/flash occurs!
+    setWriteAnswer("");
+    setWriteResult(null);
+    setWriteResultCardId("");
+    setSelectedListenCardId("");
+    setArticleResult(null);
+    setArticleResultCardId("");
+    setSelectedArticle("");
+    setRevealPromptTemp(false);
+    setRevealBrowseFront(false);
+    setRevealBrowseBack(false);
     
     onIndexChange();
     
@@ -3841,8 +3847,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   const playPronunciationWithEnd = (text: string, lang: string, onEnd?: () => void, bypassMute = false, voiceOverride?: string) => {
     stopCurrentAudio();
 
-    // When in writing or listening mode, repetition patterns are strictly disabled
-    if (isRepeatAudioEnabled && method !== "write" && method !== "listen") {
+    // Repetition patterns are strictly exclusive to classic face/back review mode
+    if (isRepeatAudioEnabled && method === "classic") {
       executeSequenceSteps(repeatSequence, text, lang, onEnd, bypassMute);
     } else {
       playPronunciationSingle(text, lang, onEnd, bypassMute, voiceOverride);
@@ -4011,6 +4017,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
   // German Article Game Selection
   const [articleResult, setArticleResult] = useState<"correct" | "incorrect" | null>(null);
+  const [articleResultCardId, setArticleResultCardId] = useState<string>("");
   const [selectedArticle, setSelectedArticle] = useState<string>("");
   const [isPronouncingCorrect, setIsPronouncingCorrect] = useState(false);
   const [autoAdvance, setAutoAdvance] = useState(() => {
@@ -4112,7 +4119,9 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     }
     setWriteAnswer("");
     setWriteResult(null);
+    setWriteResultCardId("");
     setArticleResult(null);
+    setArticleResultCardId("");
     setSelectedArticle("");
     setIsPronouncingCorrect(false);
     setSelectedListenCardId("");
@@ -4129,7 +4138,9 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     if (chainMethods && chainIndex !== undefined && !hasStartedStep) return;
     if (!currentCard || isCompleted || isAutoPlaying) return;
 
-    const targetText = method === "write" && writeQuestionFace === "back" ? currentCard.backText : currentCard.frontText;
+    const targetText = method === "write" && writeQuestionFace === "back" 
+      ? currentCard.backText 
+      : (method === "listen" ? getFrontSpeechText(currentCard, true) : currentCard.frontText);
     const currentKey = `${currentCard.id}_${method}_${targetText ? targetText.trim() : ""}`;
 
     if (lastSpokenKeyRef.current === currentKey) {
@@ -4139,7 +4150,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     const timer = setTimeout(() => {
       if (method === "listen") {
         if (listenAutoListenPrompt) {
-          playPronunciation(currentCard.frontText, currentCard.frontLang);
+          playPronunciation(getFrontSpeechText(currentCard, true), currentCard.frontLang);
         }
       } else if (method === "article") {
         if (articleAutoListenQuestion) {
@@ -4172,9 +4183,9 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     hasStartedStep
   ]);
 
-  // Generate 4 multiple choice options for listening review
-  useEffect(() => {
-    if (method !== "listen" || !currentCard) return;
+  // Generate 4 multiple choice options for listening review synchronously on every card change
+  const listenChoices = React.useMemo(() => {
+    if (method !== "listen" || !currentCard) return [];
 
     // High-quality Fisher-Yates shuffle to guarantee pure randomness and avoid repetition bias
     const shuffleArray = <T,>(array: T[]): T[] => {
@@ -4200,10 +4211,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     }
 
     const selectedAlts = alternatives.slice(0, 3);
-    const combined = shuffleArray([...selectedAlts, currentCard]);
-
-    setListenChoices(combined);
-  }, [currentIndex, currentCard, sessionCards, cards, method, listenChoiceType]);
+    return shuffleArray([...selectedAlts, currentCard]);
+  }, [currentCard?.id, sessionCards, cards, method, listenChoiceType]);
 
   // Initialize matching game
   useEffect(() => {
@@ -4393,6 +4402,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     
     if (isCorrect) {
       setWriteResult("correct");
+      setWriteResultCardId(currentCard.id);
       onUpdateStreak(currentCard.id, true);
       setCorrectIds(prev => [...prev, currentCard.id]);
 
@@ -4421,6 +4431,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
       }, true);
     } else {
       setWriteResult("incorrect");
+      setWriteResultCardId(currentCard.id);
       onUpdateStreak(currentCard.id, false);
       setIncorrectIds(prev => [...prev, currentCard.id]);
       setIsPronouncingCorrect(false);
@@ -4430,24 +4441,26 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
   // Handle choice selection in listening review
   const handleCheckListenChoice = (card: Flashcard) => {
-    if (writeResult !== null) return; // Already checked
+    if (writeResult !== null && writeResultCardId === currentCard.id) return; // Already checked
     
     setSelectedListenCardId(card.id);
     
     const isCorrect = card.id === currentCard.id;
     if (isCorrect) {
       setWriteResult("correct");
+      setWriteResultCardId(currentCard.id);
       onUpdateStreak(currentCard.id, true);
       setCorrectIds(prev => [...prev, currentCard.id]);
     } else {
       setWriteResult("incorrect");
+      setWriteResultCardId(currentCard.id);
       onUpdateStreak(currentCard.id, false);
       setIncorrectIds(prev => [...prev, currentCard.id]);
     }
 
     setIsPronouncingCorrect(true);
     if (listenAutoListenSuccess && isCorrect) {
-      playPronunciationSingle(currentCard.frontText, currentCard.frontLang || "de", () => {
+      playPronunciationSingle(getFrontSpeechText(currentCard, true), currentCard.frontLang || "de", () => {
         setIsPronouncingCorrect(false);
         if (autoAdvanceRef.current) {
           setTimeout(() => {
@@ -4468,6 +4481,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   // German Article - Option Selected Check
   const handleCheckArticle = (article: "der" | "die" | "das" | "die-plural") => {
     setSelectedArticle(article);
+    setArticleResultCardId(currentCard.id);
     const isCorrect = currentCard.correctArticle === article;
 
     if (isCorrect) {
@@ -4594,7 +4608,9 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
       setFlipped(false);
       setWriteAnswer("");
       setWriteResult(null);
+      setWriteResultCardId("");
       setArticleResult(null);
+      setArticleResultCardId("");
       setSelectedArticle("");
       setSelectedListenCardId("");
       setIsCompleted(false);
@@ -4613,7 +4629,9 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     setFlipped(false);
     setWriteAnswer("");
     setWriteResult(null);
+    setWriteResultCardId("");
     setArticleResult(null);
+    setArticleResultCardId("");
     setSelectedArticle("");
     setSelectedListenCardId("");
     setIsCompleted(false);
@@ -4952,17 +4970,17 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
   return (
     <MotionConfig reducedMotion={ultraLightMode ? "always" : "user"}>
-      <div className={`fixed inset-0 z-50 flex flex-col font-sans select-none transition-colors duration-300 ${ultraLightMode ? "ultra-light-mode" : ""} ${isDarkMode ? "review-night-mode bg-slate-950 text-slate-100" : "bg-surface text-on-surface"}`} dir="rtl">
+      <div className={`fixed inset-0 z-50 flex flex-col font-sans select-none transition-colors duration-300 ${ultraLightMode ? "ultra-light-mode" : ""} dark review-night-mode bg-slate-950 text-slate-100`} dir="rtl">
       
       {/* Top Navigation Bar */}
       {isCompleted ? (
-        <header className="relative w-full h-14 bg-white/85 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between px-4 sm:px-6 z-10 shrink-0 select-none">
+        <header className="relative w-full h-14 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-4 sm:px-6 z-10 shrink-0 select-none">
           {/* Left: Close Button */}
           <div className="w-16 flex items-center justify-start">
             <button 
               onClick={onClose} 
               aria-label="Close" 
-              className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 transition-all cursor-pointer flex items-center justify-center"
+              className="p-1.5 rounded-full text-slate-400 hover:text-slate-200 hover:bg-slate-800 active:scale-95 transition-all cursor-pointer flex items-center justify-center"
             >
               <X className="w-5 h-5" />
             </button>
@@ -4970,24 +4988,24 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
           
           {/* Center: Title */}
           <div className="flex-1 flex justify-center">
-            <span className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">اكتملت المراجعة 🎉</span>
+            <span className="text-xs sm:text-sm font-black text-white">اكتملت المراجعة 🎉</span>
           </div>
 
           {/* Right: Timer */}
           <div className="w-16 flex items-center justify-end">
-            <div className="text-slate-500 dark:text-slate-400 font-mono text-xs font-semibold">
+            <div className="text-slate-400 font-mono text-xs font-semibold">
               <span>{formatTimer(time)}</span>
             </div>
           </div>
         </header>
       ) : (chainMethods && chainIndex !== undefined && !hasStartedStep) ? (
-        <header className="relative w-full h-14 bg-white/85 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between px-4 sm:px-6 z-10 shrink-0 select-none">
+        <header className="relative w-full h-14 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-4 sm:px-6 z-10 shrink-0 select-none">
           {/* Left: Close Button */}
           <div className="w-16 flex items-center justify-start">
             <button 
               onClick={onClose} 
               aria-label="Close" 
-              className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 transition-all cursor-pointer flex items-center justify-center"
+              className="p-1.5 rounded-full text-slate-400 hover:text-slate-200 hover:bg-slate-800 active:scale-95 transition-all cursor-pointer flex items-center justify-center"
             >
               <X className="w-5 h-5" />
             </button>
@@ -4995,38 +5013,44 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
           
           {/* Center: Title */}
           <div className="flex-1 flex justify-center">
-            <span className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">خريطة مسار المراجعة المتسلسلة 🗺️</span>
+            <span className="text-xs sm:text-sm font-black text-white">خريطة مسار المراجعة المتسلسلة 🗺️</span>
           </div>
 
           {/* Right: Empty */}
           <div className="w-16" />
         </header>
       ) : (
-        <header className="relative w-full h-14 bg-white/85 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between px-4 sm:px-6 z-10 shrink-0 select-none">
+        <header className="relative w-full h-14 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-4 sm:px-6 z-10 shrink-0 select-none">
           {/* Left: Close Button */}
           <div className="w-16 flex items-center justify-start">
             <button 
               onClick={onClose} 
               aria-label="Close" 
-              className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 transition-all cursor-pointer flex items-center justify-center"
+              className="p-1.5 rounded-full text-slate-400 hover:text-slate-200 hover:bg-slate-800 active:scale-95 transition-all cursor-pointer flex items-center justify-center"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
           
-          {/* Center: Empty */}
-          <div className="flex-1" />
+          {/* Center: Card Position Counter in Top Progress Header */}
+          <div className="flex-1 flex justify-center items-center">
+            {sessionCards.length > 0 && (
+              <span className="text-xs sm:text-sm font-bold font-mono text-slate-300 select-none" dir="ltr">
+                {currentIndex + 1} / {sessionCards.length}
+              </span>
+            )}
+          </div>
 
           {/* Right: Timer */}
           <div className="w-16 flex items-center justify-end">
-            <div className="text-slate-500 dark:text-slate-400 font-mono text-xs font-semibold">
+            <div className="text-slate-400 font-mono text-xs font-semibold">
               <span>{formatTimer(time)}</span>
             </div>
           </div>
 
           {/* Integrated thin progress line at the absolute bottom (acts as border) */}
           {method !== "match" && sessionCards.length > 0 && (
-            <div className="absolute bottom-0 right-0 left-0 h-[2.5px] bg-slate-200/60 dark:bg-slate-800/80 overflow-hidden">
+            <div className="absolute bottom-0 right-0 left-0 h-[2.5px] bg-slate-800/80 overflow-hidden">
               <motion.div 
                 className="absolute right-0 top-0 h-full bg-emerald-500 rounded-full"
                 initial={{ width: 0 }}
@@ -5182,12 +5206,12 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     <span className="text-[11px] font-bold text-blue-700 dark:text-blue-300 uppercase block mb-1">نسبة الدقة</span>
                     <div className="relative w-16 h-16 flex items-center justify-center my-1">
                       <svg className="w-16 h-16 -rotate-90 overflow-visible" viewBox="0 0 80 80">
-                        <circle cx="40" cy="40" r="32" stroke={isDarkMode ? "#1e3a8a" : "#dbeafe"} strokeWidth="7" fill="transparent" />
+                        <circle cx="40" cy="40" r="32" stroke="#1e3a8a" strokeWidth="7" fill="transparent" />
                         <circle 
                           cx="40" 
                           cy="40" 
                           r="32" 
-                          stroke={isDarkMode ? "#60a5fa" : "#2563eb"} 
+                          stroke="#60a5fa" 
                           strokeWidth="7" 
                           fill="transparent" 
                           strokeDasharray={2 * Math.PI * 32}
@@ -5405,20 +5429,6 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     {/* Writing Mode Controls */}
                     {method === "write" && (
                       <>
-                        {/* Audio Pronunciation */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const t = writeQuestionFace === "front" ? currentCard.frontText : currentCard.backText;
-                            const l = writeQuestionFace === "front" ? currentCard.frontLang || "de" : currentCard.backLang || "ar";
-                            playPronunciation(t, l, true);
-                          }}
-                          title="استمع لنطق السؤال"
-                          className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 cursor-pointer active:scale-95 flex items-center justify-center border border-transparent"
-                        >
-                          <Volume2 className="w-4 h-4" />
-                        </button>
-
                         {/* Auto Advance Toggle */}
                         <button
                           type="button"
@@ -5460,16 +5470,6 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     {/* Listening Mode Controls */}
                     {method === "listen" && (
                       <>
-                        {/* Replay audio */}
-                        <button
-                          type="button"
-                          onClick={() => playPronunciationSingle(currentCard.frontText, currentCard.frontLang || "de", undefined, true)}
-                          title="إعادة نطق الكلمة المسموعة"
-                          className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 cursor-pointer active:scale-95 flex items-center justify-center border border-transparent"
-                        >
-                          <Volume2 className="w-4 h-4" />
-                        </button>
-
                         {/* Auto Advance Toggle */}
                         <button
                           type="button"
@@ -5495,27 +5495,6 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     {/* Article Mode Controls */}
                     {method === "article" && (
                       <>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const correctArt = currentCard.correctArticle;
-                            const spokenText = correctArt 
-                              ? `${correctArt === "die-plural" ? "die" : correctArt} ${currentCard.frontText}`
-                              : currentCard.frontText;
-                            setIsPronouncingCorrect(true);
-                            playPronunciationWithEnd(spokenText, currentCard.frontLang || "de", () => {
-                              setIsPronouncingCorrect(false);
-                            }, true);
-                          }}
-                          className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center ${
-                            isPronouncingCorrect 
-                              ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25" 
-                              : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 border border-transparent"
-                          }`}
-                          title="نطق الكلمة مع أداة التعريف"
-                        >
-                          <Volume2 className="w-4 h-4" />
-                        </button>
                         <button
                           type="button"
                           onClick={() => {
@@ -5609,15 +5588,6 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 cursor-pointer active:scale-95 flex items-center justify-center border border-transparent"
                         >
                           <Shuffle className="w-4 h-4" />
-                        </button>
-                        {/* Night Mode toggle */}
-                        <button
-                          type="button"
-                          onClick={() => setIsDarkMode(prev => !prev)}
-                          title={isDarkMode ? "الوضع النهاري" : "الوضع الليلي"}
-                          className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 cursor-pointer active:scale-95 flex items-center justify-center border border-transparent"
-                        >
-                          {isDarkMode ? <Sun className="w-4 h-4 text-slate-600 dark:text-slate-300" /> : <Moon className="w-4 h-4 text-slate-600 dark:text-slate-300" />}
                         </button>
                       </div>
                     )}
@@ -5826,7 +5796,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           playPronunciation(t, l, true);
                         }}
                         className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 shadow-sm ${
-                          Boolean(currentCard.frontImage && (!hideImage || writeResult === "correct"))
+                          Boolean(currentCard.frontImage && (!hideImage || (writeResult === "correct" && writeResultCardId === currentCard.id)))
                             ? "bg-black/40 hover:bg-black/65 backdrop-blur-md border border-white/25 text-white"
                             : "border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750"
                         }`}
@@ -5840,7 +5810,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     <div className="relative z-20 flex-1 flex flex-col items-center justify-center text-center px-2 py-4 pointer-events-auto">
                       {(() => {
                         const writeArticleDot = getCardArticleDotInfo(currentCard);
-                        const isPromptHidden = hidePromptText && !revealPromptTemp && !(writeShowWordOnCheck && writeResult !== null);
+                        const isCardAnswered = writeResult !== null && writeResultCardId === currentCard.id;
+                        const isPromptHidden = hidePromptText && !revealPromptTemp && !(writeShowWordOnCheck && isCardAnswered);
                         return (
                           <div className="flex flex-col items-center gap-2">
                             {isPromptHidden ? (
@@ -5874,7 +5845,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                                 }`} dir={writeQuestionFace === "back" ? "rtl" : "ltr"}>
                                   {writeQuestionFace === "back" ? currentCard.backText : currentCard.frontText}
                                 </h2>
-                                {hidePromptText && !isPromptHidden && !(writeShowWordOnCheck && writeResult !== null) && (
+                                {hidePromptText && !isPromptHidden && !(writeShowWordOnCheck && isCardAnswered) && (
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -5902,77 +5873,87 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
                   {/* Input and Actions form */}
                   <div className="w-full flex flex-col gap-3">
-                    <input
-                      ref={writeInputRef}
-                      type="text"
-                      dir={writeTestTarget === "back" ? "rtl" : "ltr"}
-                      value={writeAnswer}
-                      disabled={writeResult === "correct"}
-                      onChange={(e) => {
-                        setWriteAnswer(e.target.value);
-                        if (writeResult === "incorrect") {
-                          setWriteResult(null);
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.stopPropagation();
-                          if (writeResult === "correct") {
-                            handleNextCard();
-                          } else {
-                            handleCheckWrite();
-                          }
-                        }
-                      }}
-                      placeholder={
-                        writeTestTarget === "front"
-                          ? "اكتب الكلمة الألمانية المقابلة..."
-                          : "اكتب الترجمة العربية المطلوبة..."
-                      }
-                      className={`w-full h-14 sm:h-15 bg-white dark:bg-slate-900 border-2 rounded-2xl text-center font-bold text-base sm:text-lg text-on-surface focus:outline-none focus:ring-4 focus:ring-primary/10 shadow-xs transition-all duration-200 px-4 ${
-                        writeResult === "correct"
-                          ? "border-emerald-500 bg-emerald-50/20 text-emerald-700 dark:text-emerald-300"
-                          : writeResult === "incorrect"
-                          ? "border-rose-500 bg-rose-50/20 text-rose-700 dark:text-rose-300"
-                          : "border-slate-200 dark:border-slate-700 hover:border-slate-300 focus:border-primary"
-                      }`}
-                    />
+                    {(() => {
+                      const isWriteAnswered = writeResult !== null && writeResultCardId === currentCard.id;
+                      const isWriteCorrect = writeResult === "correct" && writeResultCardId === currentCard.id;
+                      const isWriteIncorrect = writeResult === "incorrect" && writeResultCardId === currentCard.id;
+                      return (
+                        <>
+                          <input
+                            ref={writeInputRef}
+                            type="text"
+                            dir={writeTestTarget === "back" ? "rtl" : "ltr"}
+                            value={writeAnswer}
+                            disabled={isWriteCorrect}
+                            onChange={(e) => {
+                              setWriteAnswer(e.target.value);
+                              if (isWriteIncorrect) {
+                                setWriteResult(null);
+                                setWriteResultCardId("");
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.stopPropagation();
+                                if (isWriteCorrect) {
+                                  handleNextCard();
+                                } else {
+                                  handleCheckWrite();
+                                }
+                              }
+                            }}
+                            placeholder={
+                              writeTestTarget === "front"
+                                ? "اكتب الكلمة الألمانية المقابلة..."
+                                : "اكتب الترجمة العربية المطلوبة..."
+                            }
+                            className={`w-full h-14 sm:h-15 bg-white dark:bg-slate-900 border-2 rounded-2xl text-center font-bold text-base sm:text-lg text-on-surface focus:outline-none focus:ring-4 focus:ring-primary/10 shadow-xs transition-all duration-200 px-4 ${
+                              isWriteCorrect
+                                ? "border-emerald-500 bg-emerald-50/20 text-emerald-700 dark:text-emerald-300"
+                                : isWriteIncorrect
+                                ? "border-rose-500 bg-rose-50/20 text-rose-700 dark:text-rose-300"
+                                : "border-slate-200 dark:border-slate-700 hover:border-slate-300 focus:border-primary"
+                            }`}
+                          />
 
-                    {/* Verification Button: Checkmark on Correct, X mark on Incorrect, Check text when idle */}
-                    <div className="w-full">
-                      {writeResult === "correct" ? (
-                        <button
-                          type="button"
-                          onClick={handleNextCard}
-                          className="w-full h-14 sm:h-15 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
-                          title="إجابة صحيحة (التالي)"
-                        >
-                          <Check className="w-7 h-7 stroke-[3]" />
-                        </button>
-                      ) : writeResult === "incorrect" ? (
-                        <button
-                          type="button"
-                          onClick={handleCheckWrite}
-                          className="w-full h-14 sm:h-15 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
-                          title="إجابة خاطئة (تحقق مجدداً)"
-                        >
-                          <X className="w-7 h-7 stroke-[3]" />
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={handleCheckWrite}
-                          disabled={!writeAnswer.trim()}
-                          className={`w-full h-14 sm:h-15 rounded-2xl font-black text-base sm:text-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                            !writeAnswer.trim()
-                              ? "bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
-                              : "bg-primary text-white hover:opacity-95 shadow-sm active:scale-[0.99]"
-                          }`}
-                        >
-                          <span>التحقق</span>
-                        </button>
-                      )}
-                    </div>
+                          {/* Verification Button: Checkmark on Correct, X mark on Incorrect, Check text when idle */}
+                          <div className="w-full">
+                            {isWriteCorrect ? (
+                              <button
+                                type="button"
+                                onClick={handleNextCard}
+                                className="w-full h-14 sm:h-15 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
+                                title="إجابة صحيحة (التالي)"
+                              >
+                                <Check className="w-7 h-7 stroke-[3]" />
+                              </button>
+                            ) : isWriteIncorrect ? (
+                              <button
+                                type="button"
+                                onClick={handleCheckWrite}
+                                className="w-full h-14 sm:h-15 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
+                                title="إجابة خاطئة (تحقق مجدداً)"
+                              >
+                                <X className="w-7 h-7 stroke-[3]" />
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={handleCheckWrite}
+                                disabled={!writeAnswer.trim()}
+                                className={`w-full h-14 sm:h-15 rounded-2xl font-black text-base sm:text-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                                  !writeAnswer.trim()
+                                    ? "bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-50"
+                                    : "bg-primary text-white hover:opacity-95 shadow-sm active:scale-[0.99]"
+                                }`}
+                              >
+                                <span>التحقق</span>
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               )}
@@ -5986,9 +5967,23 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     {/* 2x2 Quadrants Grid */}
                     <div className="w-full h-full grid grid-cols-2 grid-rows-2 divide-x divide-y divide-slate-200/80 dark:divide-slate-800/80">
                       {listenChoices.map((choice, idx) => {
-                        const isSelected = selectedListenCardId === choice.id;
+                        const isAnswered = writeResult !== null && writeResultCardId === currentCard.id;
+                        const isSelected = isAnswered && selectedListenCardId === choice.id;
                         const isCorrect = choice.id === currentCard.id;
-                        const isAnswered = writeResult !== null;
+
+                        // Furthest outer corners away from the center audio button:
+                        // idx 0 (top-left) -> top-2.5 left-2.5
+                        // idx 1 (top-right) -> top-2.5 right-2.5
+                        // idx 2 (bottom-left) -> bottom-2.5 left-2.5
+                        // idx 3 (bottom-right) -> bottom-2.5 right-2.5
+                        const outerCornerPos =
+                          idx === 0
+                            ? "top-2.5 left-2.5"
+                            : idx === 1
+                            ? "top-2.5 right-2.5"
+                            : idx === 2
+                            ? "bottom-2.5 left-2.5"
+                            : "bottom-2.5 right-2.5";
 
                         return (
                           <button
@@ -6041,14 +6036,14 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                               </div>
                             )}
 
-                            {/* Status corner badge when answered */}
+                            {/* Status corner badge when answered - exact original shape and size */}
                             {isAnswered && isCorrect && (
-                              <div className="absolute top-2.5 start-2.5 bg-emerald-500 text-white rounded-full p-1 shadow-md z-20 animate-scaleUp">
+                              <div className={`absolute ${outerCornerPos} bg-emerald-500 text-white rounded-full p-1 shadow-md z-20 animate-scaleUp`}>
                                 <Check className="w-4 h-4 stroke-[3]" />
                               </div>
                             )}
                             {isAnswered && isSelected && !isCorrect && (
-                              <div className="absolute top-2.5 start-2.5 bg-rose-500 text-white rounded-full p-1 shadow-md z-20 animate-scaleUp">
+                              <div className={`absolute ${outerCornerPos} bg-rose-500 text-white rounded-full p-1 shadow-md z-20 animate-scaleUp`}>
                                 <X className="w-4 h-4 stroke-[3]" />
                               </div>
                             )}
@@ -6057,41 +6052,41 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       })}
                     </div>
 
-                    {/* Centered Floating Audio Button on top of the 4 quadrants */}
+                    {/* Centered Floating Audio Button on top of the 4 quadrants (Frosted glass / شفاف بلور) */}
                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 pointer-events-auto">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          playPronunciationSingle(currentCard.frontText, currentCard.frontLang || "de", undefined, true);
+                          playPronunciationSingle(getFrontSpeechText(currentCard, true), currentCard.frontLang || "de", undefined, true);
                         }}
-                        className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/95 dark:bg-slate-800/95 backdrop-blur-md text-primary dark:text-sky-400 shadow-xl border-2 border-primary/20 dark:border-sky-500/30 flex items-center justify-center hover:scale-105 active:scale-95 transition-all cursor-pointer group"
-                        title="استمع للكلمة"
+                        className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/45 dark:bg-slate-900/45 backdrop-blur-xl border border-white/60 dark:border-white/20 text-slate-800 dark:text-white shadow-xl shadow-black/15 flex items-center justify-center hover:scale-105 active:scale-95 hover:bg-white/60 dark:hover:bg-slate-900/60 transition-all cursor-pointer group ring-1 ring-black/5 dark:ring-white/10"
+                        title="استمع للكلمة مع الأداة"
                       >
-                        <Volume2 className="w-6 h-6 sm:w-7 sm:h-7 group-hover:scale-110 transition-transform" />
+                        <Volume2 className="w-6 h-6 sm:w-7 sm:h-7 group-hover:scale-110 transition-transform drop-shadow-xs" />
                       </button>
                     </div>
                   </div>
 
                   {/* Verification / Result Action Bar: identical to writing mode */}
                   <div className="w-full">
-                    {writeResult === "correct" ? (
+                    {writeResult === "correct" && writeResultCardId === currentCard.id ? (
                       <button
                         type="button"
                         onClick={handleNextCard}
                         className="w-full h-14 sm:h-15 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
                         title="إجابة صحيحة (التالي)"
                       >
-                        <Check className="w-7 h-7 sm:w-8 sm:h-8 stroke-[3]" />
+                        <Check className="w-7 h-7 stroke-[3]" />
                       </button>
-                    ) : writeResult === "incorrect" ? (
+                    ) : writeResult === "incorrect" && writeResultCardId === currentCard.id ? (
                       <button
                         type="button"
                         onClick={handleNextCard}
                         className="w-full h-14 sm:h-15 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
                         title="إجابة خاطئة (التالي)"
                       >
-                        <X className="w-7 h-7 sm:w-8 sm:h-8 stroke-[3]" />
+                        <X className="w-7 h-7 stroke-[3]" />
                       </button>
                     ) : (
                       <div className="w-full h-14 sm:h-15 rounded-2xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 flex items-center justify-center text-slate-400 dark:text-slate-500 text-sm font-bold select-none">
@@ -6123,8 +6118,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       </div>
                     )}
 
-                    {/* Top Bar: Floating Audio Button + Rules Badge */}
-                    <div className="w-full flex items-center justify-between relative z-20 select-none pointer-events-auto">
+                    {/* Top Bar: Floating Audio Button only */}
+                    <div className="w-full flex items-center justify-start relative z-20 select-none pointer-events-auto">
                       <button
                         type="button"
                         onClick={(e) => {
@@ -6140,128 +6135,108 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       >
                         <Volume2 className="w-4.5 h-4.5" />
                       </button>
+                    </div>
 
-                      <div className={`px-3 py-1.5 rounded-xl text-xs font-bold select-none ${
-                        currentCard.frontImage
-                          ? "bg-black/40 backdrop-blur-md border border-white/25 text-white/95"
-                          : "bg-slate-100 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700 text-slate-600 dark:text-slate-300"
-                      }`}>
-                        اختر أداة التعريف الصحيحة 🎯
-                      </div>
-                    </div>
-                    {/* Center: Glowing article clue indicator & Word */}
-                    <div className="relative z-20 flex-1 flex flex-col items-center justify-center text-center px-2 py-4 pointer-events-auto">
-                      {/* خط يظهر بلون أداة التعريف الصحيحة عند الإجابة الخاطئة */}
-                      <div 
-                        className={`w-24 h-1.5 rounded-full transition-all duration-500 mb-2.5 mx-auto ${
-                          articleResult === "incorrect" && isPronouncingCorrect
-                            ? currentCard.correctArticle === "der"
-                              ? "bg-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.8)] scale-110"
-                              : currentCard.correctArticle === "die"
-                              ? "bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.8)] scale-110"
-                              : currentCard.correctArticle === "das"
-                              ? "bg-green-500 shadow-[0_0_12px_rgba(34,197,94,0.8)] scale-110"
-                              : "bg-yellow-500 shadow-[0_0_12px_rgba(234,179,8,0.8)] scale-110"
-                            : "bg-transparent"
-                        }`}
-                      />
-                      <h2 className={`text-2xl sm:text-3xl font-black tracking-tight ${
-                        currentCard.frontImage ? "text-white drop-shadow-md" : "text-on-surface"
-                      }`} dir="ltr">
-                        {currentCard.frontText}
-                      </h2>
-                    </div>
+                    {/* Center: Word with Article Dot (neutral gray initially, revealed in color on answer) */}
+                    {(() => {
+                      const isArticleAnswered = articleResult !== null && articleResultCardId === currentCard.id;
+                      const articleDot = getCardArticleDotInfo(currentCard);
+                      return (
+                        <div className="relative z-20 flex-1 flex flex-col items-center justify-center text-center px-2 py-4 pointer-events-auto">
+                          <div className="relative inline-flex items-center justify-center gap-3" dir="ltr">
+                            {isArticleAnswered && articleDot ? (
+                              <span
+                                className={`w-4 h-4 rounded-full shrink-0 ${articleDot.dotClass} animate-scaleUp transition-all duration-200 self-center translate-y-[1px]`}
+                                title={articleDot.label}
+                              />
+                            ) : (
+                              <span
+                                className="w-4 h-4 rounded-full shrink-0 bg-slate-300 dark:bg-slate-600 ring-2 ring-white/30 dark:ring-slate-700/50 transition-all duration-200 self-center translate-y-[1px]"
+                                title="أداة التعريف"
+                              />
+                            )}
+                            <h2 className={`text-2xl sm:text-3xl font-black tracking-tight leading-none flex items-center ${
+                              currentCard.frontImage ? "text-white drop-shadow-md" : "text-on-surface"
+                            }`} dir="ltr">
+                              {currentCard.frontText}
+                            </h2>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Bottom visual spacer */}
                     <div className="w-full h-2 relative z-20 pointer-events-none select-none" />
                   </div>
  
-                   {/* Tactile interactive article choices */}
-                   <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-3">
-                     {([
-                       { value: "der", label: "der", subLabel: "مذكر (1)", activeCls: "border-blue-500 bg-blue-500 text-white shadow-sm", normalCls: "border-blue-100 bg-blue-50/40 text-blue-700 hover:bg-blue-50 hover:border-blue-300" },
-                       { value: "die", label: "die", subLabel: "مؤنث (2)", activeCls: "border-rose-500 bg-rose-500 text-white shadow-sm", normalCls: "border-rose-100 bg-rose-50/40 text-rose-700 hover:bg-rose-50 hover:border-rose-300" },
-                       { value: "das", label: "das", subLabel: "محايد (3)", activeCls: "border-emerald-500 bg-emerald-500 text-white shadow-sm", normalCls: "border-emerald-100 bg-emerald-50/40 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300" },
-                       { value: "die-plural", label: "die (جمع)", subLabel: "جمع (4)", activeCls: "border-amber-500 bg-amber-500 text-white shadow-sm", normalCls: "border-amber-100 bg-amber-50/40 text-amber-700 hover:bg-amber-50 hover:border-amber-300" }
-                     ] as const).map((opt) => {
-                       const art = opt.value;
-                       const isSelected = selectedArticle === art;
-                       const isCorrect = currentCard.correctArticle === art;
-                       let btnStyle: string = opt.normalCls;
-                       
-                       if (articleResult !== null) {
-                         if (isSelected) {
-                           btnStyle = isCorrect
-                             ? "border-green-600 bg-green-600 text-white shadow-md scale-95"
-                             : "border-red-600 bg-red-600 text-white shadow-md scale-95";
-                         } else if (isCorrect) {
-                           btnStyle = "border-green-600 bg-green-50 text-green-700 border-dashed";
-                         } else {
-                           btnStyle = "opacity-30 border-outline-variant/20 bg-surface-container-lowest text-on-surface-variant";
-                         }
-                       } else {
-                         if (isSelected) {
-                           btnStyle = opt.activeCls;
-                         }
-                       }
- 
-                       // Apply extra premium glow highlight while pronouncing the correct article!
-                       if (isPronouncingCorrect && isCorrect) {
-                         btnStyle = "border-emerald-500 bg-emerald-50 text-emerald-800 ring-4 ring-emerald-400 ring-offset-2 scale-105 shadow-xl z-10 transition-all duration-300";
-                       }
- 
-                       return (
-                         <button
+                  {/* Clean tactile article choices: pure article name, established colors, zero sub-labels */}
+                  <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {([
+                      { value: "der", label: "der", dotColor: "bg-blue-500", borderIdle: "border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-300 hover:bg-blue-500/20 hover:border-blue-500" },
+                      { value: "die", label: "die", dotColor: "bg-rose-500", borderIdle: "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300 hover:bg-rose-500/20 hover:border-rose-500" },
+                      { value: "das", label: "das", dotColor: "bg-emerald-500", borderIdle: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 hover:border-emerald-500" },
+                      { value: "die-plural", label: "die", dotColor: "bg-amber-400", borderIdle: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 hover:border-amber-500" }
+                    ] as const).map((opt) => {
+                      const art = opt.value;
+                      const isSelected = selectedArticle === art;
+                      const isCorrect = currentCard.correctArticle === art;
+                      const isAnswered = articleResult !== null && articleResultCardId === currentCard.id;
+
+                      let btnStyle: string = opt.borderIdle;
+                      if (isAnswered) {
+                        if (isCorrect) {
+                          // الصحيحة هي التي تبقى بدون تخفيف
+                          btnStyle = "border-emerald-500 bg-emerald-500 text-white shadow-md opacity-100 ring-2 ring-emerald-500/20 z-10 scale-[1.01]";
+                        } else if (isSelected) {
+                          // الإجابة الخطأ تخف بنسبة أقل
+                          btnStyle = "border-rose-500 bg-rose-500 text-white shadow-sm opacity-70";
+                        } else {
+                          // يخف كل الأدوات بالنسبة الموجودة حالياً
+                          btnStyle = "opacity-20 border-slate-200 dark:border-slate-800 bg-transparent text-slate-400 dark:text-slate-600 pointer-events-none";
+                        }
+                      }
+
+                      return (
+                        <button
                           key={art}
+                          type="button"
                           onClick={() => handleCheckArticle(art)}
-                          disabled={articleResult !== null}
-                          className={`h-[72px] rounded-xl border-2 text-base font-black transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${btnStyle}`}
+                          disabled={isAnswered}
+                          className={`h-14 sm:h-15 rounded-2xl border-2 font-black text-xl sm:text-2xl transition-all flex items-center justify-center gap-2.5 cursor-pointer active:scale-98 select-none ${btnStyle}`}
                         >
-                          <span className="text-lg font-black">{opt.label}</span>
-                          <span className="text-[10px] opacity-80 font-bold">{opt.subLabel}</span>
+                          <span className={`w-3 h-3 rounded-full ${opt.dotColor} shrink-0 self-center translate-y-[1px] shadow-2xs`} />
+                          <span className="leading-none flex items-center" dir="ltr">{opt.label}</span>
                         </button>
                       );
                     })}
                   </div>
 
-                  {/* Actions under selection */}
-                  <div className="flex justify-center w-full items-center px-1">
-                    <button
-                      onClick={() => alert(`تلميح: هذه الكلمة تعني "${currentCard.translationHint || currentCard.backText}" ولها جنس نحوي محدد بالألمانية.`)}
-                      className="hidden"
-                    >
-                      <HelpCircle className="w-4 h-4" /> تلميح
-                    </button>
-
-                    {!autoAdvance && (
+                  {/* Verification / Result Action Bar: identical to writing and listening modes */}
+                  <div className="w-full">
+                    {articleResult === "correct" && articleResultCardId === currentCard.id ? (
                       <button
+                        type="button"
                         onClick={handleNextCard}
-                        className={`w-full h-[72px] rounded-xl font-black text-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                          articleResult === null
-                            ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-50"
-                            : "bg-primary text-white hover:opacity-90 shadow-md"
-                        }`}
-                        disabled={articleResult === null}
+                        className="w-full h-14 sm:h-15 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
+                        title="إجابة صحيحة (التالي)"
                       >
-                        <span>التالي</span>
-                        <ChevronRight className="w-5 h-5" />
+                        <Check className="w-7 h-7 stroke-[3]" />
                       </button>
+                    ) : articleResult === "incorrect" && articleResultCardId === currentCard.id ? (
+                      <button
+                        type="button"
+                        onClick={handleNextCard}
+                        className="w-full h-14 sm:h-15 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
+                        title="إجابة خاطئة (التالي)"
+                      >
+                        <X className="w-7 h-7 stroke-[3]" />
+                      </button>
+                    ) : (
+                      <div className="w-full h-14 sm:h-15 rounded-2xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 flex items-center justify-center text-slate-400 dark:text-slate-500 text-sm font-bold select-none">
+                        <span>اختر أداة التعريف المناسبة للكلمة</span>
+                      </div>
                     )}
                   </div>
-
-                  {/* Result alerts */}
-                  {false && articleResult === "correct" && (
-                    <div className="p-3 bg-green-50 border border-green-200 rounded-xl text-green-800 text-xs font-bold text-center w-full flex items-center justify-center gap-2 shadow-sm animate-scaleUp">
-                      <CheckCircle className="w-5 h-5 text-green-600 shrink-0" />
-                      أحسنت! إجابة صحيحة: <span className="font-extrabold" dir="ltr">{currentCard.correctArticle === "die-plural" ? "die" : currentCard.correctArticle} {currentCard.frontText}</span>
-                    </div>
-                  )}
-                  {false && articleResult === "incorrect" && (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-800 text-xs font-bold text-center w-full flex items-center justify-center gap-2 shadow-sm animate-scaleUp">
-                      <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />
-                      أداة التعريف الصحيحة هي: <span className="font-extrabold" dir="ltr">{currentCard.correctArticle === "die-plural" ? "die" : currentCard.correctArticle}</span>
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -8317,9 +8292,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.18 }}
-              className={`fixed inset-0 backdrop-blur-xs z-[9999] flex items-center justify-center p-3 sm:p-5 select-none overflow-y-auto ${
-                isDarkMode ? "bg-slate-950/85 review-night-mode dark" : "bg-slate-900/65"
-              }`}
+              className="fixed inset-0 backdrop-blur-xs z-[9999] flex items-center justify-center p-3 sm:p-5 select-none overflow-y-auto bg-slate-950/85 review-night-mode dark"
               dir="rtl"
               onClick={(e) => {
                 e.stopPropagation();
@@ -8331,11 +8304,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 1, y: 0 }}
                 transition={{ duration: 0.2, ease: "easeOut" }}
-                className={`w-full max-w-xl rounded-3xl p-5 sm:p-6 flex flex-col gap-4 relative overflow-hidden transition-colors max-h-[92vh] ${
-                  isDarkMode
-                    ? "bg-slate-900 text-slate-100 border border-slate-800 shadow-2xl"
-                    : "bg-white text-slate-800 border border-slate-200/80 shadow-2xl"
-                }`}
+                className="w-full max-w-xl rounded-3xl p-5 sm:p-6 flex flex-col gap-4 relative overflow-hidden transition-colors max-h-[92vh] bg-slate-900 text-slate-100 border border-slate-800 shadow-2xl"
                 onClick={(e) => e.stopPropagation()}
               >
                 {/* Modal Header */}
@@ -8621,11 +8590,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
                                 exit={{ opacity: 0, scale: 0.9, y: -4 }}
                                 transition={{ duration: 0.15 }}
-                                className={`flex items-center justify-center gap-1.5 p-1.5 rounded-full shadow-2xl backdrop-blur-md z-20 my-1 border ${
-                                  isDarkMode
-                                    ? "bg-slate-900/95 text-slate-100 border-slate-700/90 shadow-black/60"
-                                    : "bg-slate-900/95 text-white border-slate-800 shadow-slate-900/30"
-                                }`}
+                                className="flex items-center justify-center gap-1.5 p-1.5 rounded-full shadow-2xl backdrop-blur-md z-20 my-1 border bg-slate-900/95 text-slate-100 border-slate-700/90 shadow-black/60"
                               >
                                 <button
                                   type="button"
@@ -8668,15 +8633,11 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                               </motion.div>
                             ) : (
                               <div className="w-full flex items-center justify-center relative group/divider py-0.5">
-                                <div className="absolute inset-x-8 h-[1px] bg-slate-200/50 dark:bg-slate-800/80 group-hover/divider:bg-indigo-300 dark:group-hover/divider:bg-indigo-800 transition-colors" />
+                                <div className="absolute inset-x-8 h-[1px] bg-slate-800/80 group-hover/divider:bg-indigo-800 transition-colors" />
                                 <button
                                   type="button"
                                   onClick={() => setInsertingStepAtIndex(0)}
-                                  className={`relative z-10 w-6 h-6 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-xs group-hover/divider:scale-110 active:scale-95 ${
-                                    isDarkMode
-                                      ? "bg-slate-800 text-slate-400 group-hover/divider:bg-indigo-600 group-hover/divider:text-white border border-slate-700"
-                                      : "bg-slate-100 text-slate-400 group-hover/divider:bg-indigo-600 group-hover/divider:text-white border border-slate-200"
-                                  }`}
+                                  className="relative z-10 w-6 h-6 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-xs group-hover/divider:scale-110 active:scale-95 bg-slate-800 text-slate-400 group-hover/divider:bg-indigo-600 group-hover/divider:text-white border border-slate-700"
                                   title="إضافة خطوة في بداية التسلسل (+)"
                                 >
                                   <Plus className="w-3.5 h-3.5" />
