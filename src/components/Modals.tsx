@@ -4020,7 +4020,7 @@ export const ReviewSetupModal: React.FC<ReviewSetupModalProps> = ({
     { value: "write", label: "كتابة", icon: "edit_note", desc: "اكتب الترجمة أو الإجابة باليد" },
     { value: "listen", label: "استماع", icon: "headphones", desc: "استمع إلى النطق ثم خمن واكتب" },
     { value: "article", label: "ال أرتيكل (der/die/das)", icon: "category", desc: "ممارسة أدوات التعريف للغة الألمانية" },
-    { value: "match", label: "ربط المصطلحات", icon: "grid_view", desc: "لعبة تفاعلية لتوصيل الكلمة بمعناها" },
+    { value: "match", label: "المربعات", icon: "grid_view", desc: "شبكة مربعات ناطقة وتفاعلية لمطابقة المفردات وسماعها" },
     { value: "challenge", label: "وضع التحدي", icon: "timer", desc: "تحدَّ نفسك مع مؤقت تنازلي ونطق الإجابة تلقائياً" }
   ];
 
@@ -4070,9 +4070,9 @@ export const ReviewSetupModal: React.FC<ReviewSetupModalProps> = ({
     },
     {
       value: "match",
-      label: "ربط المفردات",
-      iconElement: <Layers className="w-4 h-4 text-on-surface-variant group-hover:text-primary shrink-0 transition-colors" />,
-      desc: "لعبة تفاعلية لتوصيل الكلمة بمعناها"
+      label: "المربعات",
+      iconElement: <Square className="w-4 h-4 text-on-surface-variant group-hover:text-primary shrink-0 transition-colors" />,
+      desc: "شبكة مربعات ناطقة وتفاعلية لمطابقة المفردات وسماعها"
     },
     {
       value: "classic",

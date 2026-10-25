@@ -66,6 +66,7 @@ import {
   FolderPlus,
   FolderOpen,
   ChevronLeft,
+  ChevronRight,
   FolderInput,
   FolderArchive,
   FileSpreadsheet,
@@ -4328,124 +4329,60 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         onChange={handleSubtitleFileSelect}
       />
 
-      {/* Top Header Bar */}
-      <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 flex items-center justify-between shadow-xs shrink-0">
-        <div className="flex items-center gap-3">
-          {onToggleSidebar && (
-            <button
-              onClick={onToggleSidebar}
-              className="md:hidden p-2 rounded-xl text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
-              title="القائمة"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-          )}
-
-          {onBackToLibrary && (
-            <button
-              onClick={onBackToLibrary}
-              className="p-2 rounded-xl text-slate-600 hover:bg-slate-100 hover:text-[#0056f6] transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-bold"
-              title="العودة للمكتبة"
-            >
-              <ArrowRight className="w-4 h-4" />
-              <span className="hidden sm:inline">المكتبة</span>
-            </button>
-          )}
-
-          {isPlayerOpen && currentFile ? (
-            /* Player Mode Header Title & Back to Manager */
-            <div className="flex items-center gap-2.5">
+      {/* Top Header Bar (Shown in Player Mode for direct back to manager & panel controls) */}
+      {isPlayerOpen && currentFile && (
+        <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-2.5 flex items-center justify-between shadow-xs shrink-0">
+          <div className="flex items-center gap-3">
+            {onToggleSidebar && (
               <button
-                onClick={handleBackToFileManager}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold text-xs transition-colors cursor-pointer"
-                title="العودة لمدير الملفات والمجلدات"
+                onClick={onToggleSidebar}
+                className="md:hidden p-2 rounded-xl text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                title="القائمة"
               >
-                <ChevronLeft className="w-4 h-4" />
-                <span>مدير الملفات والمجلدات 📁</span>
+                <Menu className="w-5 h-5" />
               </button>
+            )}
 
-              <div className="hidden sm:flex items-center border-r border-slate-200 pr-3 mr-1">
-                <h1 className="text-xs sm:text-sm font-black text-slate-900 truncate max-w-[200px] md:max-w-xs">
-                  {currentFile.title}
-                </h1>
-              </div>
-            </div>
-          ) : (
-            /* File Manager Mode Header Title */
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-xs">
-                <Folder className="w-4 h-4" />
-              </div>
-              <h1 className="text-sm sm:text-base font-black text-slate-900">
-                مدير الملفات
+            {/* Back to Media Manager Button */}
+            <button
+              onClick={handleBackToFileManager}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold text-xs transition-colors cursor-pointer"
+              title="العودة لمكتبة الوسائط"
+            >
+              <ChevronRight className="w-4 h-4" />
+              <span>مكتبة الوسائط</span>
+            </button>
+
+            <div className="hidden sm:flex items-center border-r border-slate-200 pr-3 mr-1">
+              <h1 className="text-xs sm:text-sm font-black text-slate-900 truncate max-w-[200px] md:max-w-xs">
+                {currentFile.title}
               </h1>
             </div>
-          )}
-        </div>
+          </div>
 
-        {/* Header Actions */}
-        <div className="flex items-center gap-2">
-          {isPlayerOpen && currentFile ? (
-            /* Actions in Player Mode: Clean and focused on active media */
-            <>
-              {/* Side Panel (Transcript / Subtitles) Toggle */}
-              <button
-                onClick={() => {
-                  setShowTranscriptPanel(!showTranscriptPanel);
-                  if (!showTranscriptPanel) setSidePanelView("transcript");
-                }}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-medium text-xs transition-colors cursor-pointer border ${
-                  showTranscriptPanel
-                    ? "bg-blue-50 text-blue-700 border-blue-300 shadow-2xs"
-                    : "bg-white hover:bg-slate-100 text-slate-700 border-slate-200"
-                }`}
-                title={showTranscriptPanel ? "إخفاء لوحة الجمل والترجمة" : "إظهار لوحة الجمل والترجمة"}
-              >
-                <FileText className="w-3.5 h-3.5 text-blue-600" />
-                <span>لوحة الجمل</span>
-              </button>
-            </>
-          ) : (
-            /* Actions in File Manager Mode: Clean stats summary (Actions live in Explorer Command Bar) */
-            <div className="flex items-center gap-2">
-              {/* Stats pill */}
-              <div className="flex items-center gap-2.5 px-3 py-1.5 bg-slate-100/90 rounded-xl text-[11px] font-semibold text-slate-600 border border-slate-200/80">
-                <div className="flex items-center gap-1">
-                  <Film className="w-3.5 h-3.5 text-blue-600" />
-                  <span>{totalVideos} فيديو</span>
-                </div>
-                <span className="text-slate-300">|</span>
-                <div className="flex items-center gap-1">
-                  <Music className="w-3.5 h-3.5 text-violet-600" />
-                  <span>{totalAudios} صوتيات</span>
-                </div>
-                <span className="text-slate-300 hidden sm:inline">|</span>
-                <div className="hidden sm:flex items-center gap-1">
-                  <Folder className="w-3.5 h-3.5 text-amber-500" />
-                  <span>{folders.length} مجلد</span>
-                </div>
-                <span className="text-slate-300 hidden md:inline">|</span>
-                <div className="hidden md:flex items-center gap-1">
-                  <HardDrive className="w-3.5 h-3.5 text-slate-500" />
-                  <span>{formatFileSize(totalSize)}</span>
-                </div>
-              </div>
-
-              {/* Quick Refresh */}
-              <button
-                onClick={fetchMediaFiles}
-                className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-                title="تحديث قائمة الملفات"
-              >
-                <RefreshCw className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-        </div>
-      </header>
+          {/* Header Actions */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setShowTranscriptPanel(!showTranscriptPanel);
+                if (!showTranscriptPanel) setSidePanelView("transcript");
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-colors cursor-pointer border ${
+                showTranscriptPanel
+                  ? "bg-blue-50 text-[#0056f6] border-blue-300 shadow-2xs"
+                  : "bg-white hover:bg-slate-100 text-slate-700 border-slate-200"
+              }`}
+              title={showTranscriptPanel ? "إخفاء لوحة الجمل والترجمة" : "إظهار لوحة الجمل والترجمة"}
+            >
+              <FileText className="w-3.5 h-3.5 text-[#0056f6]" />
+              <span>لوحة الجمل</span>
+            </button>
+          </div>
+        </header>
+      )}
 
       {/* Main Workspace Body */}
-      <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-5">
+      <div className={`flex-1 overflow-y-auto ${isPlayerOpen && currentFile ? "p-3 sm:p-6 space-y-5" : "flex flex-col p-0"}`}>
         {/* Real-time Upload Progress Banner when Player is active */}
         {uploading && currentFile && (
           <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 text-white rounded-2xl p-3.5 shadow-lg border border-blue-400/30 animate-fadeIn">
@@ -6204,6 +6141,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
               fileFolderMap={fileFolderMap}
               activeFolderId={activeFolderId}
               currentFile={currentFile}
+              onBackToLibrary={onBackToLibrary}
               loading={loading}
               uploading={uploading}
               uploadProgress={uploadProgress}

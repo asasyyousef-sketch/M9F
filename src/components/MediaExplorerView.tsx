@@ -18,6 +18,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ArrowUp,
+  ArrowRight,
   RefreshCw,
   FolderInput,
   CheckSquare,
@@ -42,7 +43,8 @@ import {
   Mic,
   AlertTriangle,
   FileText,
-  MoreVertical
+  MoreVertical,
+  Plus
 } from "lucide-react";
 import { MediaFile, MediaFolder, MediaSubtitleTrack, SubtitleCue } from "../types";
 import { exportCuesToSrt, exportCuesToVtt, exportCuesToPlainText } from "../utils/subtitleParser";
@@ -81,6 +83,7 @@ export interface MediaExplorerViewProps {
   onOpenSubtitleOptionsForFile: (file: MediaFile) => void;
   onRefreshFiles: () => void;
   onToggleSidebar?: () => void;
+  onBackToLibrary?: () => void;
 }
 
 // Global in-memory cache for generated video thumbnails and audio metadata
@@ -133,7 +136,8 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
   onOpenGradioModalForFile,
   onOpenSubtitleOptionsForFile,
   onRefreshFiles,
-  onToggleSidebar
+  onToggleSidebar,
+  onBackToLibrary
 }) => {
   // Navigation History
   const [navHistory, setNavHistory] = useState<(string | null)[]>([activeFolderId]);
@@ -145,10 +149,24 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
   const [sortField, setSortField] = useState<"name" | "date" | "size" | "type" | "subtitles" | "duration">("date");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
-  // Dropdown menus states for command bar
-  const [showFilterDropdown, setShowFilterDropdown] = useState(false);
-  const [showSortDropdown, setShowSortDropdown] = useState(false);
-  const [showViewDropdown, setShowViewDropdown] = useState(false);
+  // Unified Library-Style Dropdown menus states
+  const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
+  const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement | null>(null);
+  const optionsMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
+        setIsAddMenuOpen(false);
+      }
+      if (optionsMenuRef.current && !optionsMenuRef.current.contains(e.target as Node)) {
+        setIsOptionsMenuOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", handleClickOutside);
+    return () => window.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // View Modes: "details" | "large_grid" | "medium_grid" | "list"
   const [viewMode, setViewMode] = useState<"details" | "large_grid" | "medium_grid" | "list">(() => {
@@ -210,34 +228,6 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
   // Explicitly inspected file or folder (Single click selection for preview pane)
   const [inspectedFile, setInspectedFile] = useState<MediaFile | null>(null);
   const [inspectedFolder, setInspectedFolder] = useState<MediaFolder | null>(null);
-
-  // Preview / Details Pane toggle (Windows 11 Right Side Inspector)
-  const [showPreviewPane, setShowPreviewPane] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem("media_explorer_preview_pane");
-      return saved !== null ? JSON.parse(saved) : true;
-    } catch {
-      return true;
-    }
-  });
-
-  const handleTogglePreviewPane = () => {
-    setShowPreviewPane((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem("media_explorer_preview_pane", JSON.stringify(next));
-      } catch (e) {
-        console.error(e);
-      }
-      return next;
-    });
-  };
-
-  // Preview Pane Active Playing Element & Subtitle Sync
-  const previewMediaRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
-  const [previewCurrentTime, setPreviewCurrentTime] = useState<number>(0);
-  const [previewDuration, setPreviewDuration] = useState<number>(0);
-  const [previewResolution, setPreviewResolution] = useState<{ width: number; height: number } | null>(null);
 
   // Video Thumbnails state tracker to force re-render when a thumbnail finishes generating
   const [thumbnailVersion, setThumbnailVersion] = useState<number>(0);
@@ -368,13 +358,10 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
     }
   };
 
-  // Close dropdowns and context menu on global click
+  // Close context menu on global click
   useEffect(() => {
     const handleGlobalClick = () => {
       setContextMenu(null);
-      setShowFilterDropdown(false);
-      setShowSortDropdown(false);
-      setShowViewDropdown(false);
     };
     window.addEventListener("click", handleGlobalClick);
     return () => window.removeEventListener("click", handleGlobalClick);
@@ -556,30 +543,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
     return null;
   }, [inspectedFile, selectedFileIds, inspectedFolder, selectedFolderIds, currentFile, files, filteredFiles]);
 
-  // Preview Pane Target Folder (when a folder is clicked/inspected)
-  const previewTargetFolder = useMemo(() => {
-    if (inspectedFolder && folders.some((f) => f.id === inspectedFolder.id)) {
-      return folders.find((f) => f.id === inspectedFolder.id) || inspectedFolder;
-    }
-    if (selectedFolderIds.size === 1) {
-      const singleId = Array.from(selectedFolderIds)[0];
-      return folders.find((f) => f.id === singleId) || null;
-    }
-    return null;
-  }, [inspectedFolder, selectedFolderIds, folders]);
 
-  // Active Subtitle for Preview Mini Player
-  const activePreviewSubtitleTrack = useMemo(() => {
-    if (!previewTargetFile?.subtitles || previewTargetFile.subtitles.length === 0) return null;
-    return previewTargetFile.subtitles[0];
-  }, [previewTargetFile]);
-
-  const activePreviewCue = useMemo(() => {
-    if (!activePreviewSubtitleTrack || !activePreviewSubtitleTrack.cues) return null;
-    return activePreviewSubtitleTrack.cues.find(
-      (cue) => previewCurrentTime >= cue.startTime && previewCurrentTime <= cue.endTime
-    );
-  }, [activePreviewSubtitleTrack, previewCurrentTime]);
 
   // Click handler for files (Opens directly on single click unless in selection mode)
   const handleClickFile = (file: MediaFile, e: React.MouseEvent) => {
@@ -825,548 +789,428 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
   return (
     <div className="flex-1 flex flex-col h-full bg-[#f8fafc] text-slate-900 overflow-hidden select-none font-sans" dir="rtl">
       {/* ======================================================== */}
-      {/* 1. TOP NAVIGATION & ADDRESS BREADCRUMB BAR               */}
+      {/* 1. TOP BREADCRUMBS & SEARCH BAR (Clean & Unified like Library) */}
       {/* ======================================================== */}
-      <div className="bg-white border-b border-slate-200/90 px-3 py-2 flex flex-wrap items-center justify-between gap-2 shadow-xs shrink-0">
-        {/* Left: Navigation Buttons & Breadcrumbs */}
-        <div className="flex items-center gap-1.5 flex-1 min-w-[260px]">
-          {/* Mobile Main App Sidebar Toggle Button */}
+      <div className="bg-white border-b border-slate-200/90 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2.5 shadow-xs shrink-0">
+        {/* Right side in RTL: Breadcrumbs */}
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           {onToggleSidebar && (
             <button
               onClick={onToggleSidebar}
-              className="lg:hidden p-1.5 hover:bg-slate-100 text-slate-600 rounded-lg transition-colors cursor-pointer"
+              className="lg:hidden p-1.5 hover:bg-slate-100 text-slate-600 rounded-xl transition-colors cursor-pointer"
               title="القائمة الرئيسية"
             >
               <SlidersHorizontal className="w-4 h-4" />
             </button>
           )}
 
-          {/* Navigation Buttons (Back, Forward, Up, Refresh) */}
-          <div className="flex items-center gap-0.5 bg-slate-100/80 p-0.5 rounded-lg border border-slate-200/60">
-            <button
-              onClick={handleGoBack}
-              disabled={historyIndex === 0}
-              className="p-1 rounded-md hover:bg-white text-slate-700 disabled:opacity-30 transition-all cursor-pointer disabled:cursor-not-allowed"
-              title="الرجوع للخلف"
-            >
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleGoForward}
-              disabled={historyIndex >= navHistory.length - 1}
-              className="p-1 rounded-md hover:bg-white text-slate-700 disabled:opacity-30 transition-all cursor-pointer disabled:cursor-not-allowed"
-              title="التقدم للأمام"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleGoUp}
-              disabled={activeFolderId === null}
-              className="p-1 rounded-md hover:bg-white text-slate-700 disabled:opacity-30 transition-all cursor-pointer disabled:cursor-not-allowed"
-              title="المجلد الأعلى"
-            >
-              <ArrowUp className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={onRefreshFiles}
-              className="p-1 rounded-md hover:bg-white text-slate-700 transition-all cursor-pointer"
-              title="تحديث القائمة"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-blue-600" : ""}`} />
-            </button>
-          </div>
+          {/* Clean Breadcrumb Navigation */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/70 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-700 min-w-0 shadow-3xs overflow-x-auto no-scrollbar">
+            {onBackToLibrary && (
+              <>
+                <button
+                  onClick={onBackToLibrary}
+                  className="p-1 rounded-lg text-slate-600 hover:bg-white hover:text-[#0056f6] transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold shrink-0"
+                  title="العودة للمكتبة التعليمية"
+                >
+                  <ArrowRight className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">المكتبة</span>
+                </button>
+                <ChevronLeft className="w-3 h-3 text-slate-300 shrink-0" />
+              </>
+            )}
 
-          {/* Interactive Address Breadcrumb Bar */}
-          <div className="flex-1 flex items-center bg-slate-50/80 border border-slate-200/90 rounded-lg px-2.5 py-1 text-xs text-slate-700 min-w-0 shadow-2xs hover:border-slate-300 transition-colors">
-            <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-x-auto no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            {activeFolderId !== null && (
               <button
-                onClick={() => navigateToFolder(null)}
-                className="text-xs font-bold text-slate-700 hover:text-blue-600 transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 py-0.5"
-                title="الرجوع إلى مكتبة الوسائط الرئيسية"
+                onClick={handleGoBack}
+                disabled={historyIndex === 0}
+                className="p-1 rounded-lg hover:bg-white text-slate-500 hover:text-slate-900 disabled:opacity-30 transition-all cursor-pointer disabled:cursor-not-allowed"
+                title="الرجوع"
               >
-                <Film className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                <span>مكتبة الوسائط</span>
+                <ChevronRight className="w-3.5 h-3.5" />
               </button>
+            )}
 
-              {folderBreadcrumbs.map((crumb, idx) => {
-                const isLast = idx === folderBreadcrumbs.length - 1;
-                return (
-                  <React.Fragment key={crumb.id}>
-                    <span className="text-slate-300 font-bold select-none shrink-0">/</span>
-                    {isLast ? (
-                      <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 shrink-0 py-0.5">
-                        <Folder className="w-3.5 h-3.5 text-amber-500 fill-current shrink-0" />
-                        <span className="truncate max-w-[180px]">{crumb.name}</span>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => navigateToFolder(crumb.id)}
-                        className="text-xs font-bold text-slate-700 hover:text-blue-600 transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 py-0.5"
-                        title={`الانتقال إلى ${crumb.name}`}
-                      >
-                        <Folder className="w-3.5 h-3.5 text-amber-500 fill-current shrink-0" />
-                        <span className="truncate max-w-[140px]">{crumb.name}</span>
-                      </button>
-                    )}
-                  </React.Fragment>
-                );
-              })}
+            <button
+              onClick={() => navigateToFolder(null)}
+              className="flex items-center gap-1.5 text-slate-700 hover:text-[#0056f6] transition-colors cursor-pointer shrink-0"
+              title="مكتبة الوسائط الرئيسية"
+            >
+              <Film className="w-3.5 h-3.5 text-[#0056f6]" />
+              <span>مكتبة الوسائط</span>
+            </button>
 
-              {activeFolderId === "uncategorized" && (
-                <>
-                  <span className="text-slate-300 font-bold select-none shrink-0">/</span>
-                  <span className="text-xs font-bold text-slate-700 shrink-0 py-0.5">
-                    غير مصنفة
-                  </span>
-                </>
-              )}
-            </div>
+            {folderBreadcrumbs.map((crumb, idx) => {
+              const isLast = idx === folderBreadcrumbs.length - 1;
+              return (
+                <React.Fragment key={crumb.id}>
+                  <ChevronLeft className="w-3 h-3 text-slate-300 shrink-0" />
+                  {isLast ? (
+                    <span className="text-slate-900 font-black truncate max-w-[160px] sm:max-w-[200px]" title={crumb.name}>
+                      {crumb.name}
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => navigateToFolder(crumb.id)}
+                      className="text-slate-600 hover:text-[#0056f6] transition-colors cursor-pointer truncate max-w-[120px]"
+                      title={crumb.name}
+                    >
+                      {crumb.name}
+                    </button>
+                  )}
+                </React.Fragment>
+              );
+            })}
+
+            {activeFolderId === "uncategorized" && (
+              <>
+                <ChevronLeft className="w-3 h-3 text-slate-300 shrink-0" />
+                <span className="text-slate-900 font-black">غير مصنفة</span>
+              </>
+            )}
           </div>
         </div>
 
-        {/* Right: Search Box */}
-        <div className="relative w-full sm:w-60">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2" />
+        {/* Left side in RTL: Search Input */}
+        <div className="relative w-full sm:w-64">
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             placeholder="بحث في الوسائط والترجمات..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-7 pr-8 py-1 text-xs bg-slate-50 focus:bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-400 transition-all placeholder:text-slate-400"
+            className="w-full pl-8 pr-8 py-1.5 text-xs bg-slate-50 focus:bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:border-[#0056f6] focus:ring-1 focus:ring-blue-400 transition-all placeholder:text-slate-400"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery("")}
-              className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
             >
-              <X className="w-3 h-3" />
+              <X className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
       </div>
 
       {/* ======================================================== */}
-      {/* 2. REFINED STANDARD COMMAND BAR                          */}
+      {/* 2. LIBRARY-STYLE ACTION & COMMAND BAR (Clean, 3-Buttons) */}
       {/* ======================================================== */}
-      <div className="bg-slate-50/90 border-b border-slate-200 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 shrink-0">
-        {/* Left Side: Creation, Import & Management Operations */}
-        <div className="flex flex-wrap items-center gap-1">
-          {/* Group 1: Creation & Import (Standard Clean Buttons) */}
-          <div className="flex items-center gap-1">
-            {/* Primary Upload Button */}
-            <button
-              onClick={onUploadClick}
-              disabled={uploading}
-              className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-75"
-              title="رفع ملفات وسائط (فيديو / صوت)"
-            >
-              {uploading ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span className="text-[11px] font-medium">{uploadProgress}%</span>
-                </>
-              ) : (
-                <>
-                  <Film className="w-3.5 h-3.5" />
-                  <span>رفع وسائط</span>
-                </>
+      <div className="bg-white border-b border-slate-200/80 px-3.5 py-2 flex items-center justify-between gap-2 shrink-0">
+        {/* Right side in RTL: Item Count & Active Filter Indicator */}
+        <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+          <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-xl text-[11px] font-mono shadow-3xs">
+            {displayedFolders.length + filteredFiles.length} عنصر
+          </span>
+          {filterType !== "all" && (
+            <span className="text-[10px] bg-blue-50 text-[#0056f6] px-2 py-0.5 rounded-lg font-bold border border-blue-200/60">
+              تصفية: {filterType === "video" ? "فيديو" : filterType === "audio" ? "صوت" : filterType === "with_sub" ? "مترجم" : "بدون ترجمة"}
+            </span>
+          )}
+        </div>
+
+        {/* Left side in RTL: The 3 Core Tools (Like Library: Add, Options, Select) */}
+        <div className="flex items-center gap-1.5">
+          {/* Quick Refresh */}
+          <button
+            onClick={onRefreshFiles}
+            className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 border border-slate-200/70 transition-all cursor-pointer active:scale-95 shadow-3xs"
+            title="تحديث القائمة"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#0056f6]" : ""}`} />
+          </button>
+
+          {/* 1. SELECTION MODE BUTTON & BATCH TOOLS */}
+          {isSelectionMode ? (
+            <div className="flex items-center gap-1 bg-slate-50 p-0.5 rounded-xl border border-slate-200/70 animate-fadeIn">
+              {/* Select All */}
+              <button
+                onClick={handleSelectAll}
+                className="h-7 px-2 rounded-lg bg-white text-slate-700 border border-slate-200/60 shadow-3xs text-[11px] font-bold flex items-center gap-1 cursor-pointer hover:bg-slate-100"
+                title="تحديد الكل"
+              >
+                {selectedFileIds.size === filteredFiles.length && selectedFolderIds.size === displayedFolders.length && (filteredFiles.length > 0 || displayedFolders.length > 0) ? (
+                  <CheckSquare className="w-3.5 h-3.5 text-[#0056f6]" />
+                ) : (
+                  <Square className="w-3.5 h-3.5 text-slate-400" />
+                )}
+                <span>الكل</span>
+              </button>
+
+              {/* Batch Move */}
+              {selectedFileIds.size > 0 && (
+                <button
+                  onClick={() => setShowBulkMoveModal(true)}
+                  className="h-7 px-2 rounded-lg bg-white text-amber-700 border border-slate-200/60 shadow-3xs text-[11px] font-bold flex items-center gap-1 cursor-pointer hover:bg-amber-50"
+                  title="نقل العناصر المحددة"
+                >
+                  <FolderInput className="w-3.5 h-3.5 text-amber-600" />
+                  <span className="hidden sm:inline">نقل</span>
+                </button>
               )}
-            </button>
 
-            {/* Upload Entire Folder */}
-            {onUploadFolderClick && (
+              {/* Batch Subtitle Export */}
+              {selectedFileIds.size > 0 && (
+                <button
+                  onClick={() => setShowBatchSubtitleModal(true)}
+                  className="h-7 px-2 rounded-lg bg-white text-indigo-700 border border-slate-200/60 shadow-3xs text-[11px] font-bold flex items-center gap-1 cursor-pointer hover:bg-indigo-50"
+                  title="تصدير ترجمات العناصر المحددة"
+                >
+                  <DownloadCloud className="w-3.5 h-3.5 text-indigo-600" />
+                  <span className="hidden sm:inline">تصدير</span>
+                </button>
+              )}
+
+              {/* Batch Delete */}
               <button
-                onClick={onUploadFolderClick}
-                disabled={uploading}
-                className="p-1.5 sm:px-2 sm:py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-75"
-                title="رفع مجلد كامل"
+                onClick={triggerBulkDelete}
+                disabled={selectedFileIds.size === 0 && selectedFolderIds.size === 0}
+                className="h-7 px-2 rounded-lg bg-white text-rose-600 border border-slate-200/60 shadow-3xs text-[11px] font-bold flex items-center gap-1 cursor-pointer hover:bg-rose-50 disabled:opacity-40"
+                title="حذف العناصر المحددة"
               >
-                <FolderInput className="w-3.5 h-3.5 text-blue-600" />
-                <span className="hidden md:inline">رفع مجلد</span>
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span className="hidden sm:inline">حذف ({selectedFileIds.size + selectedFolderIds.size})</span>
               </button>
-            )}
 
-            {/* YouTube Download */}
-            {onOpenYouTubeDownload && (
+              {/* Cancel Selection */}
               <button
-                onClick={onOpenYouTubeDownload}
-                className="p-1.5 sm:px-2 sm:py-1.5 bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 rounded-lg text-xs font-medium transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95"
-                title="تنزيل وتفريغ من يوتيوب"
+                onClick={handleToggleSelectionMode}
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-rose-600 hover:bg-rose-100 transition-colors cursor-pointer"
+                title="إلغاء التحديد"
               >
-                <Tv className="w-3.5 h-3.5 text-rose-600" />
-                <span className="hidden md:inline">يوتيوب</span>
+                <X className="w-3.5 h-3.5" />
               </button>
-            )}
-
-            {/* New Folder Button */}
-            <button
-              onClick={onOpenCreateFolder}
-              className="p-1.5 sm:px-2 sm:py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
-              title="إنشاء مجلد جديد"
-            >
-              <FolderPlus className="w-3.5 h-3.5 text-amber-600" />
-              <span className="hidden md:inline">مجلد جديد</span>
-            </button>
-          </div>
-
-          <div className="h-4 w-px bg-slate-200 mx-0.5" />
-
-          {/* Group 2: Selection Mode & Batch Actions */}
-          <div className="flex items-center gap-1">
+            </div>
+          ) : (
             <button
               onClick={handleToggleSelectionMode}
-              className={`p-1.5 sm:px-2 sm:py-1.5 rounded-lg text-xs font-medium transition-all border flex items-center gap-1.5 cursor-pointer ${
-                isSelectionMode
-                  ? "bg-blue-50 text-blue-700 border-blue-300 shadow-2xs"
-                  : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
-              }`}
-              title={isSelectionMode ? "إلغاء وضع التحديد" : "تفعيل وضع التحديد المتعدد"}
+              className="h-8 px-2.5 rounded-xl text-xs font-bold transition-all border border-slate-200/70 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-3xs"
+              title="تفعيل وضع التحديد"
             >
-              <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
-              <span className="hidden sm:inline">{isSelectionMode ? "إلغاء التحديد" : "تحديد"}</span>
+              <CheckSquare className="w-3.5 h-3.5 text-[#0056f6]" />
+              <span className="hidden sm:inline">تحديد</span>
+            </button>
+          )}
+
+          {/* 2. OPTIONS DROPDOWN MENU (خيارات) Like Library */}
+          <div className="relative" ref={optionsMenuRef}>
+            <button
+              onClick={() => {
+                setIsOptionsMenuOpen(!isOptionsMenuOpen);
+                setIsAddMenuOpen(false);
+              }}
+              className={`h-8 px-2.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-3xs ${
+                isOptionsMenuOpen
+                  ? "bg-blue-50 text-[#0056f6] border-blue-200"
+                  : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200/70"
+              }`}
+              title="خيارات العرض والترتيب والتصفية"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-[#0056f6]" />
+              <span className="hidden sm:inline">خيارات</span>
+              <ChevronDown className="w-3 h-3 text-slate-400" />
             </button>
 
-            {/* Contextual Actions & Select All (Shown ONLY when Selection Mode is active) */}
-            {isSelectionMode && (
-              <div className="flex items-center gap-1 animate-fadeIn">
-                {/* Select All Toggle */}
+            {isOptionsMenuOpen && (
+              <div
+                className="absolute left-0 mt-1.5 w-60 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-50 text-xs font-bold text-slate-700 animate-scaleUp"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Section A: View Modes */}
+                <div className="px-3 py-1 text-[10px] text-slate-400 uppercase font-black tracking-wider">
+                  طريقة العرض
+                </div>
                 <button
-                  onClick={handleSelectAll}
-                  className={`p-1.5 sm:px-2 sm:py-1.5 rounded-lg text-xs font-medium transition-all border flex items-center gap-1.5 cursor-pointer ${
-                    (selectedFileIds.size > 0 || selectedFolderIds.size > 0)
-                      ? "bg-blue-50 text-blue-700 border-blue-200"
-                      : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                  onClick={() => {
+                    handleSetViewMode("large_grid");
+                    setIsOptionsMenuOpen(false);
+                  }}
+                  className={`w-full px-3 py-2 text-right flex items-center justify-between hover:bg-slate-50 cursor-pointer ${
+                    viewMode === "large_grid" ? "text-[#0056f6] bg-blue-50/50" : ""
                   }`}
-                  title="تحديد كافة العناصر"
                 >
-                  {selectedFileIds.size === filteredFiles.length && selectedFolderIds.size === displayedFolders.length && (filteredFiles.length > 0 || displayedFolders.length > 0) ? (
-                    <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
-                  ) : (
-                    <Square className="w-3.5 h-3.5 text-slate-400" />
-                  )}
-                  <span className="hidden sm:inline">الكل</span>
+                  <span className="flex items-center gap-2">
+                    <Grid className="w-3.5 h-3.5 text-blue-500" />
+                    <span>شبكة البطاقات</span>
+                  </span>
+                  {viewMode === "large_grid" && <Check className="w-3.5 h-3.5 text-[#0056f6]" />}
+                </button>
+                <button
+                  onClick={() => {
+                    handleSetViewMode("details");
+                    setIsOptionsMenuOpen(false);
+                  }}
+                  className={`w-full px-3 py-2 text-right flex items-center justify-between hover:bg-slate-50 cursor-pointer ${
+                    viewMode === "details" ? "text-[#0056f6] bg-blue-50/50" : ""
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <List className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>جدول تفصيلي</span>
+                  </span>
+                  {viewMode === "details" && <Check className="w-3.5 h-3.5 text-[#0056f6]" />}
+                </button>
+                <button
+                  onClick={() => {
+                    handleSetViewMode("list");
+                    setIsOptionsMenuOpen(false);
+                  }}
+                  className={`w-full px-3 py-2 text-right flex items-center justify-between hover:bg-slate-50 cursor-pointer ${
+                    viewMode === "list" ? "text-[#0056f6] bg-blue-50/50" : ""
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <Layers className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>قائمة مدمجة</span>
+                  </span>
+                  {viewMode === "list" && <Check className="w-3.5 h-3.5 text-[#0056f6]" />}
                 </button>
 
-                {(selectedFileIds.size > 0 || selectedFolderIds.size > 0) && (
-                  <div className="flex items-center gap-1 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-lg text-xs animate-fadeIn">
-                    <span className="font-bold text-blue-800 text-[11px] px-1">
-                      {selectedFileIds.size + selectedFolderIds.size}
-                    </span>
+                <div className="h-px bg-slate-100 my-1" />
 
-                    <div className="h-3 w-px bg-blue-200 mx-0.5" />
+                {/* Section B: Filter */}
+                <div className="px-3 py-1 text-[10px] text-slate-400 uppercase font-black tracking-wider">
+                  تصفية الوسائط
+                </div>
+                {[
+                  { id: "all", label: "جميع الوسائط", icon: Film },
+                  { id: "video", label: "مقاطع الفيديو فقط", icon: FileVideo },
+                  { id: "audio", label: "التسجيلات الصوتية فقط", icon: Music },
+                  { id: "with_sub", label: "تحتوي على ترجمة", icon: Subtitles },
+                  { id: "no_sub", label: "بدون ترجمة", icon: Clock },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setFilterType(item.id as any);
+                      setIsOptionsMenuOpen(false);
+                    }}
+                    className={`w-full px-3 py-1.5 text-right flex items-center justify-between hover:bg-slate-50 cursor-pointer ${
+                      filterType === item.id ? "text-[#0056f6] bg-blue-50/50 font-black" : ""
+                    }`}
+                  >
+                    <span>{item.label}</span>
+                    {filterType === item.id && <Check className="w-3.5 h-3.5 text-[#0056f6]" />}
+                  </button>
+                ))}
 
-                    {/* Bulk Move */}
-                    {selectedFileIds.size > 0 && (
-                      <button
-                        onClick={() => setShowBulkMoveModal(true)}
-                        className="p-1 sm:px-1.5 sm:py-0.5 bg-white hover:bg-amber-50 text-amber-700 border border-amber-200 rounded text-[11px] font-medium transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
-                        title="نقل العناصر المحددة"
-                      >
-                        <FolderInput className="w-3 h-3 text-amber-600" />
-                        <span className="hidden md:inline">نقل</span>
-                      </button>
-                    )}
+                <div className="h-px bg-slate-100 my-1" />
 
-                    {/* Bulk Subtitle Exporter */}
-                    {selectedFileIds.size > 0 && (
-                      <button
-                        onClick={() => setShowBatchSubtitleModal(true)}
-                        className="p-1 sm:px-1.5 sm:py-0.5 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded text-[11px] font-medium transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
-                        title="تصدير ترجمات العناصر المحددة"
-                      >
-                        <DownloadCloud className="w-3 h-3 text-indigo-600" />
-                        <span className="hidden md:inline">تصدير</span>
-                      </button>
-                    )}
+                {/* Section C: Sort */}
+                <div className="px-3 py-1 text-[10px] text-slate-400 uppercase font-black tracking-wider flex items-center justify-between">
+                  <span>الترتيب</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+                    }}
+                    className="text-[#0056f6] hover:underline cursor-pointer flex items-center gap-1 font-bold text-[10px]"
+                  >
+                    <ArrowUpDown className="w-3 h-3" />
+                    <span>{sortDirection === "asc" ? "تصاعدي (A-Z)" : "تنازلي (Z-A)"}</span>
+                  </button>
+                </div>
+                {[
+                  { id: "date", label: "تاريخ الإضافة" },
+                  { id: "name", label: "الاسم أبجدياً" },
+                  { id: "size", label: "حجم الملف" },
+                  { id: "duration", label: "المدة الزمنية" },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setSortField(item.id as any);
+                      setIsOptionsMenuOpen(false);
+                    }}
+                    className={`w-full px-3 py-1.5 text-right flex items-center justify-between hover:bg-slate-50 cursor-pointer ${
+                      sortField === item.id ? "text-[#0056f6] bg-blue-50/50 font-black" : ""
+                    }`}
+                  >
+                    <span>{item.label}</span>
+                    {sortField === item.id && <Check className="w-3.5 h-3.5 text-[#0056f6]" />}
+                  </button>
+                ))}
 
-                    {/* Bulk Delete */}
-                    <button
-                      onClick={triggerBulkDelete}
-                      className="p-1 sm:px-1.5 sm:py-0.5 bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 rounded text-[11px] font-medium transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
-                      title="حذف العناصر المحددة"
-                    >
-                      <Trash2 className="w-3 h-3 text-rose-600" />
-                      <span className="hidden md:inline">حذف</span>
-                    </button>
+              </div>
+            )}
+          </div>
 
-                    {/* Clear Selection */}
-                    <button
-                      onClick={() => {
-                        setSelectedFileIds(new Set());
-                        setSelectedFolderIds(new Set());
-                      }}
-                      className="p-1 hover:bg-blue-100 text-blue-600 rounded transition-colors cursor-pointer"
-                      title="إلغاء التحديد"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
+          {/* 3. ADD DROPDOWN MENU (+ إضافة) Like Library */}
+          <div className="relative" ref={addMenuRef}>
+            <button
+              onClick={() => {
+                setIsAddMenuOpen(!isAddMenuOpen);
+                setIsOptionsMenuOpen(false);
+              }}
+              className="h-8 px-3 rounded-xl text-xs font-bold transition-all bg-[#0056f6] hover:bg-[#0047d1] text-white flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-xs"
+              title="إضافة أو رفع وسائط ومجلدات"
+            >
+              <Plus className="w-4 h-4" />
+              <span>إضافة</span>
+              <ChevronDown className="w-3 h-3 text-white/80" />
+            </button>
+
+            {isAddMenuOpen && (
+              <div
+                className="absolute left-0 mt-1.5 w-52 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-50 text-xs font-bold text-slate-700 animate-scaleUp"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Option 1: New Folder */}
+                <button
+                  onClick={() => {
+                    setIsAddMenuOpen(false);
+                    onOpenCreateFolder();
+                  }}
+                  className="w-full px-3 py-2 text-right flex items-center gap-2.5 hover:bg-amber-50 hover:text-amber-800 cursor-pointer transition-colors"
+                >
+                  <FolderPlus className="w-4 h-4 text-amber-500" />
+                  <span>إنشاء مجلد جديد</span>
+                </button>
+
+                {/* Option 2: Upload Media Files */}
+                <button
+                  onClick={() => {
+                    setIsAddMenuOpen(false);
+                    onUploadClick();
+                  }}
+                  disabled={uploading}
+                  className="w-full px-3 py-2 text-right flex items-center gap-2.5 hover:bg-blue-50 hover:text-blue-800 cursor-pointer transition-colors disabled:opacity-50"
+                >
+                  <Film className="w-4 h-4 text-blue-500" />
+                  <span>رفع ملفات وسائط</span>
+                </button>
+
+                {/* Option 3: Upload Folder */}
+                {onUploadFolderClick && (
+                  <button
+                    onClick={() => {
+                      setIsAddMenuOpen(false);
+                      onUploadFolderClick();
+                    }}
+                    disabled={uploading}
+                    className="w-full px-3 py-2 text-right flex items-center gap-2.5 hover:bg-blue-50 hover:text-blue-800 cursor-pointer transition-colors disabled:opacity-50"
+                  >
+                    <FolderInput className="w-4 h-4 text-blue-500" />
+                    <span>رفع مجلد كامل</span>
+                  </button>
+                )}
+
+                {/* Option 4: YouTube Import */}
+                {onOpenYouTubeDownload && (
+                  <button
+                    onClick={() => {
+                      setIsAddMenuOpen(false);
+                      onOpenYouTubeDownload();
+                    }}
+                    className="w-full px-3 py-2 text-right flex items-center gap-2.5 hover:bg-rose-50 hover:text-rose-800 cursor-pointer transition-colors"
+                  >
+                    <Tv className="w-4 h-4 text-rose-500" />
+                    <span>استيراد وتفريغ من يوتيوب</span>
+                  </button>
                 )}
               </div>
             )}
           </div>
-        </div>
-
-        {/* Right Side: Standard Filter, Sort, View Modes & Inspector */}
-        <div className="flex items-center gap-1">
-          {/* 1. Filter Dropdown */}
-          <div className="relative">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowFilterDropdown((p) => !p);
-                setShowSortDropdown(false);
-                setShowViewDropdown(false);
-              }}
-              className={`p-1.5 sm:px-2 sm:py-1.5 rounded-lg border text-xs font-medium transition-all flex items-center gap-1 cursor-pointer ${
-                filterType !== "all"
-                  ? "bg-blue-50 text-blue-700 border-blue-300"
-                  : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
-              }`}
-              title="تصفية حسب النوع"
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5 text-slate-500" />
-              <span className="hidden sm:inline">
-                {filterType === "all"
-                  ? "الكل"
-                  : filterType === "video"
-                  ? "فيديو"
-                  : filterType === "audio"
-                  ? "صوت"
-                  : filterType === "with_sub"
-                  ? "مترجم"
-                  : "بدون ترجمة"}
-              </span>
-              <ChevronDown className="w-3 h-3 text-slate-400" />
-            </button>
-
-            {showFilterDropdown && (
-              <div
-                onClick={(e) => e.stopPropagation()}
-                className="absolute left-0 mt-1 w-44 bg-white rounded-xl shadow-xl border border-slate-200 py-1 z-50 text-xs font-bold text-slate-700 animate-scaleUp"
-              >
-                <button
-                  onClick={() => {
-                    setFilterType("all");
-                    setShowFilterDropdown(false);
-                  }}
-                  className={`w-full px-3 py-1.5 text-right flex items-center justify-between hover:bg-slate-50 cursor-pointer ${
-                    filterType === "all" ? "text-blue-600 bg-blue-50/50" : ""
-                  }`}
-                >
-                  <span>جميع الوسائط</span>
-                  {filterType === "all" && <Check className="w-3.5 h-3.5 text-blue-600" />}
-                </button>
-                <button
-                  onClick={() => {
-                    setFilterType("video");
-                    setShowFilterDropdown(false);
-                  }}
-                  className={`w-full px-3 py-1.5 text-right flex items-center justify-between hover:bg-slate-50 cursor-pointer ${
-                    filterType === "video" ? "text-blue-600 bg-blue-50/50" : ""
-                  }`}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <Film className="w-3.5 h-3.5 text-blue-500" />
-                    <span>مقاطع الفيديو</span>
-                  </span>
-                  {filterType === "video" && <Check className="w-3.5 h-3.5 text-blue-600" />}
-                </button>
-                <button
-                  onClick={() => {
-                    setFilterType("audio");
-                    setShowFilterDropdown(false);
-                  }}
-                  className={`w-full px-3 py-1.5 text-right flex items-center justify-between hover:bg-slate-50 cursor-pointer ${
-                    filterType === "audio" ? "text-purple-600 bg-purple-50/50" : ""
-                  }`}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <Music className="w-3.5 h-3.5 text-purple-500" />
-                    <span>التسجيلات الصوتية</span>
-                  </span>
-                  {filterType === "audio" && <Check className="w-3.5 h-3.5 text-purple-600" />}
-                </button>
-                <div className="h-px bg-slate-100 my-1" />
-                <button
-                  onClick={() => {
-                    setFilterType("with_sub");
-                    setShowFilterDropdown(false);
-                  }}
-                  className={`w-full px-3 py-1.5 text-right flex items-center justify-between hover:bg-slate-50 cursor-pointer ${
-                    filterType === "with_sub" ? "text-indigo-600 bg-indigo-50/50" : ""
-                  }`}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <Subtitles className="w-3.5 h-3.5 text-indigo-500" />
-                    <span>تحتوي على ترجمة</span>
-                  </span>
-                  {filterType === "with_sub" && <Check className="w-3.5 h-3.5 text-indigo-600" />}
-                </button>
-                <button
-                  onClick={() => {
-                    setFilterType("no_sub");
-                    setShowFilterDropdown(false);
-                  }}
-                  className={`w-full px-3 py-1.5 text-right flex items-center justify-between hover:bg-slate-50 cursor-pointer ${
-                    filterType === "no_sub" ? "text-slate-900 bg-slate-100" : ""
-                  }`}
-                >
-                  <span>بدون ترجمة</span>
-                  {filterType === "no_sub" && <Check className="w-3.5 h-3.5 text-slate-800" />}
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* 2. Sort Dropdown */}
-          <div className="relative flex items-center bg-white border border-slate-200 rounded-lg p-0.5 text-xs">
-            <button
-              onClick={() => setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"))}
-              className="p-1 hover:bg-slate-100 text-slate-600 rounded-md transition-colors cursor-pointer"
-              title={sortDirection === "asc" ? "تصاعدي (A-Z)" : "تنازلي (Z-A)"}
-            >
-              <ArrowUpDown className="w-3.5 h-3.5" />
-            </button>
-
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowSortDropdown((p) => !p);
-                setShowFilterDropdown(false);
-                setShowViewDropdown(false);
-              }}
-              className="px-2 py-0.5 text-slate-700 font-bold flex items-center gap-1 cursor-pointer hover:bg-slate-50 rounded-md"
-            >
-              <span>
-                {sortField === "date"
-                  ? "التاريخ"
-                  : sortField === "name"
-                  ? "الاسم"
-                  : sortField === "size"
-                  ? "الحجم"
-                  : sortField === "type"
-                  ? "النوع"
-                  : sortField === "duration"
-                  ? "المدة"
-                  : "الترجمات"}
-              </span>
-              <ChevronDown className="w-3 h-3 text-slate-400" />
-            </button>
-
-            {showSortDropdown && (
-              <div
-                onClick={(e) => e.stopPropagation()}
-                className="absolute left-0 mt-8 w-36 bg-white rounded-xl shadow-xl border border-slate-200 py-1 z-50 text-xs font-bold text-slate-700 animate-scaleUp"
-              >
-                <button
-                  onClick={() => {
-                    setSortField("date");
-                    setShowSortDropdown(false);
-                  }}
-                  className={`w-full px-3 py-1.5 text-right flex items-center justify-between hover:bg-slate-50 cursor-pointer ${
-                    sortField === "date" ? "text-blue-600 bg-blue-50/50" : ""
-                  }`}
-                >
-                  <span>تاريخ الإضافة</span>
-                  {sortField === "date" && <Check className="w-3.5 h-3.5 text-blue-600" />}
-                </button>
-                <button
-                  onClick={() => {
-                    setSortField("name");
-                    setShowSortDropdown(false);
-                  }}
-                  className={`w-full px-3 py-1.5 text-right flex items-center justify-between hover:bg-slate-50 cursor-pointer ${
-                    sortField === "name" ? "text-blue-600 bg-blue-50/50" : ""
-                  }`}
-                >
-                  <span>الاسم أبجدياً</span>
-                  {sortField === "name" && <Check className="w-3.5 h-3.5 text-blue-600" />}
-                </button>
-                <button
-                  onClick={() => {
-                    setSortField("size");
-                    setShowSortDropdown(false);
-                  }}
-                  className={`w-full px-3 py-1.5 text-right flex items-center justify-between hover:bg-slate-50 cursor-pointer ${
-                    sortField === "size" ? "text-blue-600 bg-blue-50/50" : ""
-                  }`}
-                >
-                  <span>حجم الملف</span>
-                  {sortField === "size" && <Check className="w-3.5 h-3.5 text-blue-600" />}
-                </button>
-                <button
-                  onClick={() => {
-                    setSortField("duration");
-                    setShowSortDropdown(false);
-                  }}
-                  className={`w-full px-3 py-1.5 text-right flex items-center justify-between hover:bg-slate-50 cursor-pointer ${
-                    sortField === "duration" ? "text-blue-600 bg-blue-50/50" : ""
-                  }`}
-                >
-                  <span>المدة الزمنية</span>
-                  {sortField === "duration" && <Check className="w-3.5 h-3.5 text-blue-600" />}
-                </button>
-                <button
-                  onClick={() => {
-                    setSortField("subtitles");
-                    setShowSortDropdown(false);
-                  }}
-                  className={`w-full px-3 py-1.5 text-right flex items-center justify-between hover:bg-slate-50 cursor-pointer ${
-                    sortField === "subtitles" ? "text-blue-600 bg-blue-50/50" : ""
-                  }`}
-                >
-                  <span>عدد مسارات الترجمة</span>
-                  {sortField === "subtitles" && <Check className="w-3.5 h-3.5 text-blue-600" />}
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* 3. View Modes Segmented Control */}
-          <div className="flex items-center bg-white border border-slate-200 rounded-lg p-0.5">
-            <button
-              onClick={() => handleSetViewMode("details")}
-              className={`p-1.5 rounded-md transition-all cursor-pointer ${
-                viewMode === "details" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-500 hover:bg-slate-100"
-              }`}
-              title="عرض التفاصيل (Details View)"
-            >
-              <List className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => handleSetViewMode("large_grid")}
-              className={`p-1.5 rounded-md transition-all cursor-pointer ${
-                viewMode === "large_grid" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-500 hover:bg-slate-100"
-              }`}
-              title="شبكة البطاقات المصغرة (Grid View)"
-            >
-              <Grid className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => handleSetViewMode("list")}
-              className={`p-1.5 rounded-md transition-all cursor-pointer ${
-                viewMode === "list" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-500 hover:bg-slate-100"
-              }`}
-              title="قائمة مدمجة (Compact List)"
-            >
-              <Layers className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {/* 4. Toggle Inspector Preview Pane */}
-          <button
-            onClick={handleTogglePreviewPane}
-            className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
-              showPreviewPane
-                ? "bg-blue-50 text-blue-700 border-blue-300 shadow-2xs"
-                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-            }`}
-            title="لوحة المعاينة والتفاصيل الجانبية"
-          >
-            <Info className="w-3.5 h-3.5" />
-            <span className="text-[11px] font-bold hidden lg:inline">معاينة</span>
-          </button>
         </div>
       </div>
 
@@ -1429,56 +1273,6 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
             <div className="py-20 flex flex-col items-center justify-center text-slate-400 gap-2">
               <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
               <p className="text-xs font-bold">جاري تحميل المحتويات والوسائط...</p>
-            </div>
-          ) : filteredFiles.length === 0 && displayedFolders.length === 0 ? (
-            <div className="py-20 flex flex-col items-center justify-center text-center text-slate-400 gap-2 border-2 border-dashed border-slate-200 rounded-2xl p-6 my-auto">
-              <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                <Film className="w-7 h-7" />
-              </div>
-              <p className="text-sm font-bold text-slate-700">
-                {activeFolder ? "هذا المجلد فارغ حالياً" : "لا توجد عناصر مضافة حتى الآن"}
-              </p>
-              <p className="text-xs text-slate-500 max-w-sm">
-                {activeFolder
-                  ? "قم بسحب وإفلات الوسائط داخل هذا المجلد أو انقر على زر الرفع أدناه"
-                  : "قم بسحب وإفلات مقاطع الفيديو أو الصوت أو إنشاء مجلد جديد لتنظيم المحتوى"}
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
-                <button
-                  onClick={onUploadClick}
-                  disabled={uploading}
-                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-75"
-                >
-                  <Film className="w-4 h-4" />
-                  <span>رفع وسائط</span>
-                </button>
-                {onUploadFolderClick && (
-                  <button
-                    onClick={onUploadFolderClick}
-                    disabled={uploading}
-                    className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-75"
-                  >
-                    <FolderInput className="w-4 h-4 text-blue-600" />
-                    <span>رفع مجلد</span>
-                  </button>
-                )}
-                {onOpenYouTubeDownload && (
-                  <button
-                    onClick={onOpenYouTubeDownload}
-                    className="px-3.5 py-2 bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 rounded-lg text-xs font-medium transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Tv className="w-4 h-4 text-rose-600" />
-                    <span>يوتيوب</span>
-                  </button>
-                )}
-                <button
-                  onClick={onOpenCreateFolder}
-                  className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
-                >
-                  <FolderPlus className="w-4 h-4 text-amber-600" />
-                  <span>مجلد جديد</span>
-                </button>
-              </div>
             </div>
           ) : viewMode === "details" ? (
             /* ======================================================== */
@@ -1668,7 +1462,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                                 e.stopPropagation();
                                 navigateToFolder(folder.id);
                               }}
-                              className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[11px] font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
+                              className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[11px] font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
                               title="فتح المجلد"
                             >
                               <Folder className="w-3 h-3 fill-current" />
@@ -1677,19 +1471,13 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onOpenEditFolder(folder);
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setContextMenu({ x: rect.left, y: rect.bottom + 4, folder });
                               }}
-                              className="p-1 hover:bg-amber-50 text-slate-500 hover:text-amber-600 rounded-lg transition-colors cursor-pointer"
-                              title="تعديل المجلد"
+                              className="p-1 text-slate-400 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                              title="خيارات المجلد"
                             >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={(e) => triggerDeleteSingleFolder(folder, e)}
-                              className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
-                              title="حذف المجلد"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <MoreVertical className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </td>
@@ -1848,44 +1636,24 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                                 e.stopPropagation();
                                 onSelectFile(file, true);
                               }}
-                              className="px-2 py-1 bg-[#0056f6] hover:bg-[#0047d1] text-white rounded-lg text-[11px] font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
+                              className="px-2.5 py-1 bg-[#0056f6] hover:bg-[#0047d1] text-white rounded-lg text-[11px] font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
                               title="تشغيل في المشغل"
                             >
                               <Play className="w-3 h-3 fill-current" />
                               <span className="hidden sm:inline">تشغيل</span>
                             </button>
 
-                            {/* AI Transcribe Shortcut */}
+                            {/* More Options Menu */}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onOpenGradioModalForFile(file);
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setContextMenu({ x: rect.left, y: rect.bottom + 4, file });
                               }}
-                              className="p-1 hover:bg-emerald-50 text-slate-500 hover:text-emerald-600 rounded-lg transition-colors cursor-pointer"
-                              title="تفريغ صوتي بالذكاء الاصطناعي (Gradio STT)"
+                              className="p-1 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                              title="خيارات العنصر"
                             >
-                              <Sparkles className="w-3.5 h-3.5" />
-                            </button>
-
-                            {/* Subtitle Options Shortcut */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onOpenSubtitleOptionsForFile(file);
-                              }}
-                              className="p-1 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600 rounded-lg transition-colors cursor-pointer"
-                              title="إدارة مسارات الترجمة"
-                            >
-                              <Subtitles className="w-3.5 h-3.5" />
-                            </button>
-
-                            {/* Delete */}
-                            <button
-                              onClick={(e) => triggerDeleteSingleFile(file, e)}
-                              className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
-                              title="حذف"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <MoreVertical className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </td>
@@ -1930,31 +1698,43 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                     }`}
                     title={`انقر لفتح مجلد ${folder.name}`}
                   >
-                    {/* Top Header: Checkbox (shown only in selection mode) + Folder Badge */}
+                    {/* Top Header: Checkbox (shown only in selection mode) + Folder Badge + More */}
                     <div className="flex items-center justify-between mb-2">
-                      {isSelectionMode ? (
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            setSelectedFolderIds((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(folder.id)) next.delete(folder.id);
-                              else next.add(folder.id);
-                              return next;
-                            });
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                          className="rounded-sm text-amber-600 cursor-pointer"
-                        />
-                      ) : (
-                        <div />
-                      )}
-                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-800 flex items-center gap-1 border border-amber-200/50">
-                        <Folder className="w-3 h-3 fill-current" />
-                        <span>مجلد</span>
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {isSelectionMode && (
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              setSelectedFolderIds((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(folder.id)) next.delete(folder.id);
+                                else next.add(folder.id);
+                                return next;
+                              });
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="rounded-sm text-amber-600 cursor-pointer"
+                          />
+                        )}
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-800 flex items-center gap-1 border border-amber-200/50">
+                          <Folder className="w-3 h-3 fill-current" />
+                          <span>مجلد</span>
+                        </span>
+                      </div>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setContextMenu({ x: rect.left, y: rect.bottom + 4, folder });
+                        }}
+                        className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
+                        title="خيارات المجلد"
+                      >
+                        <MoreVertical className="w-3.5 h-3.5" />
+                      </button>
                     </div>
 
                     {/* Big Folder Icon Banner */}
@@ -2009,21 +1789,19 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                         : "bg-white border-slate-200/70 hover:border-slate-300 hover:shadow-xs"
                     }`}
                   >
-                    {/* Top Header: Checkbox (shown only in selection mode) + Badges */}
+                    {/* Top Header: Checkbox (shown only in selection mode) + Badges + More */}
                     <div className="flex items-center justify-between mb-2">
-                      {isSelectionMode ? (
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={(e) => handleToggleSelectFile(file.id, e as any)}
-                          onClick={(e) => e.stopPropagation()}
-                          className="rounded-sm text-blue-600 cursor-pointer"
-                        />
-                      ) : (
-                        <div />
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        {isSelectionMode && (
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => handleToggleSelectFile(file.id, e as any)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="rounded-sm text-blue-600 cursor-pointer"
+                          />
+                        )}
 
-                      <div className="flex items-center gap-1">
                         <span
                           className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
                             file.type === "video" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
@@ -2038,6 +1816,18 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                           </span>
                         )}
                       </div>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setContextMenu({ x: rect.left, y: rect.bottom + 4, file });
+                        }}
+                        className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
+                        title="خيارات الملف"
+                      >
+                        <MoreVertical className="w-3.5 h-3.5" />
+                      </button>
                     </div>
 
                     {/* Media Card Thumbnail Banner with Video Snapshot or Waveform */}
@@ -2181,8 +1971,8 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="text-[10px] text-slate-400 hidden sm:inline">
+                    <div className="flex items-center gap-1 text-xs">
+                      <span className="text-[10px] text-slate-400 hidden sm:inline ml-1">
                         {folderFilesCount} ملف {subfoldersCount > 0 ? `• ${subfoldersCount} مجلد` : ""}
                       </span>
                       <button
@@ -2190,9 +1980,20 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                           e.stopPropagation();
                           navigateToFolder(folder.id);
                         }}
-                        className="px-2 py-0.5 bg-amber-500 hover:bg-amber-600 text-white rounded text-[10px] font-bold cursor-pointer"
+                        className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-md text-[10px] font-bold cursor-pointer"
                       >
                         فتح
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setContextMenu({ x: rect.left, y: rect.bottom + 4, folder });
+                        }}
+                        className="p-1 text-slate-400 hover:text-slate-800 hover:bg-slate-200/60 rounded-md transition-colors cursor-pointer"
+                        title="خيارات المجلد"
+                      >
+                        <MoreVertical className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
@@ -2247,16 +2048,28 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2 text-[10px] text-slate-400 shrink-0">
+                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 shrink-0">
                       <span>{formatFileSize(file.size)}</span>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           onSelectFile(file, true);
                         }}
-                        className="px-2 py-1 bg-[#0056f6] hover:bg-[#0047d1] text-white rounded-md text-[10px] font-bold cursor-pointer"
+                        className="px-2.5 py-1 bg-[#0056f6] hover:bg-[#0047d1] text-white rounded-md text-[10px] font-bold cursor-pointer flex items-center gap-1"
                       >
-                        تشغيل
+                        <Play className="w-2.5 h-2.5 fill-current" />
+                        <span>تشغيل</span>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setContextMenu({ x: rect.left, y: rect.bottom + 4, file });
+                        }}
+                        className="p-1 text-slate-400 hover:text-slate-800 hover:bg-slate-200/60 rounded-md transition-colors cursor-pointer"
+                        title="خيارات الملف"
+                      >
+                        <MoreVertical className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
@@ -2266,343 +2079,28 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
           )}
         </main>
 
-        {/* ======================================================== */}
-        {/* WINDOWS 11 INSPECTOR / PREVIEW PANE (WITH METADATA & SUBS) */}
-        {/* ======================================================== */}
-        {showPreviewPane && (
-          <aside className="w-80 border-r border-slate-200 bg-white flex flex-col justify-between shrink-0 overflow-y-auto hidden xl:flex shadow-xs animate-fadeIn">
-            {previewTargetFolder && !previewTargetFile ? (
-              /* FOLDER PREVIEW PANE */
-              <div className="p-4 space-y-4">
-                {/* Header Title */}
-                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                  <p className="text-xs font-black text-amber-600 uppercase tracking-wider flex items-center gap-1">
-                    <Folder className="w-3.5 h-3.5 text-amber-500 fill-current" />
-                    <span>معاينة وتفاصيل المجلد</span>
-                  </p>
-                  <button
-                    onClick={handleTogglePreviewPane}
-                    className="p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-md cursor-pointer"
-                    title="إغلاق لوحة المعاينة"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* Folder Banner */}
-                <div
-                  className="w-full h-36 rounded-xl flex flex-col items-center justify-center border shadow-xs transition-all"
-                  style={{
-                    backgroundColor: `${previewTargetFolder.color || "#f59e0b"}15`,
-                    borderColor: `${previewTargetFolder.color || "#f59e0b"}35`,
-                    color: previewTargetFolder.color || "#b45309"
-                  }}
-                >
-                  <Folder className="w-16 h-16 fill-current drop-shadow-sm" />
-                </div>
-
-                {/* Metadata */}
-                <div className="space-y-2">
-                  <h4 className="text-xs font-black text-slate-900 leading-snug break-words">
-                    {previewTargetFolder.name}
-                  </h4>
-
-                  <div className="bg-slate-50 rounded-xl p-3 border border-slate-200/70 text-xs space-y-1.5">
-                    <div className="flex items-center justify-between text-slate-600">
-                      <span className="text-slate-400">النوع:</span>
-                      <span className="font-bold text-amber-800">مجلد ملفات</span>
-                    </div>
-
-                    <div className="flex items-center justify-between text-slate-600">
-                      <span className="text-slate-400">المحتويات:</span>
-                      <span className="font-bold font-mono">
-                        {files.filter((f) => fileFolderMap[f.id] === previewTargetFolder.id).length} ملف • {folders.filter((f) => f.parentId === previewTargetFolder.id).length} مجلد فرعي
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between text-slate-600">
-                      <span className="text-slate-400">الحجم الإجمالي:</span>
-                      <span className="font-bold font-mono text-slate-700">
-                        {formatFileSize(
-                          files
-                            .filter((f) => fileFolderMap[f.id] === previewTargetFolder.id)
-                            .reduce((acc, curr) => acc + (curr.size || 0), 0)
-                        )}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between text-slate-600">
-                      <span className="text-slate-400">تاريخ الإنشاء:</span>
-                      <span className="font-bold">
-                        {previewTargetFolder.createdAt
-                          ? new Date(previewTargetFolder.createdAt).toLocaleDateString("ar-EG")
-                          : "—"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="pt-2 space-y-2">
-                  <button
-                    onClick={() => navigateToFolder(previewTargetFolder.id)}
-                    className="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-                  >
-                    <Folder className="w-3.5 h-3.5 fill-current" />
-                    <span>فتح هذا المجلد 📂</span>
-                  </button>
-
-                  <button
-                    onClick={() => onOpenEditFolder(previewTargetFolder)}
-                    className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                    <span>تعديل الاسم واللون</span>
-                  </button>
-                </div>
-              </div>
-            ) : previewTargetFile ? (
-              /* FILE PREVIEW PANE */
-              <div className="p-4 space-y-4">
-                {/* Header Title */}
-                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                  <p className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                    <Info className="w-3.5 h-3.5 text-blue-600" />
-                    <span>معاينة وتفاصيل المقطع</span>
-                  </p>
-                  <button
-                    onClick={handleTogglePreviewPane}
-                    className="p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-md cursor-pointer"
-                    title="إغلاق لوحة المعاينة"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* Mini Preview Player with Real-Time Subtitle Synchronization */}
-                <div className="w-full bg-slate-950 rounded-xl overflow-hidden border border-slate-800 shadow-md relative group">
-                  {previewTargetFile.type === "video" ? (
-                    <div className="relative w-full h-44 bg-black flex items-center justify-center">
-                      <video
-                        ref={previewMediaRef as any}
-                        src={resolveMediaFileUrl(previewTargetFile)}
-                        controls
-                        onTimeUpdate={(e) => {
-                          const target = e.currentTarget;
-                          setPreviewCurrentTime(target.currentTime);
-                        }}
-                        onLoadedMetadata={(e) => {
-                          const target = e.currentTarget;
-                          setPreviewDuration(target.duration || 0);
-                          setPreviewResolution({
-                            width: target.videoWidth || 0,
-                            height: target.videoHeight || 0
-                          });
-                        }}
-                        className="w-full h-full object-contain bg-black"
-                      />
-
-                      {/* Live Subtitle Overlay on Video */}
-                      {activePreviewCue && (
-                        <div className="absolute bottom-10 inset-x-2 pointer-events-none flex justify-center text-center">
-                          <span className="bg-black/80 backdrop-blur-xs text-amber-300 px-2.5 py-1 rounded-lg text-xs font-bold leading-relaxed shadow-lg max-w-[95%]">
-                            {activePreviewCue.text}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="p-4 flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-purple-950 to-slate-900 text-white relative">
-                      <div className="w-12 h-12 rounded-full bg-purple-600/30 border border-purple-400/40 flex items-center justify-center mb-1">
-                        <Music className="w-6 h-6 text-purple-300" />
-                      </div>
-                      <audio
-                        ref={previewMediaRef as any}
-                        src={resolveMediaFileUrl(previewTargetFile)}
-                        controls
-                        onTimeUpdate={(e) => {
-                          const target = e.currentTarget;
-                          setPreviewCurrentTime(target.currentTime);
-                        }}
-                        onLoadedMetadata={(e) => {
-                          const target = e.currentTarget;
-                          setPreviewDuration(target.duration || 0);
-                        }}
-                        className="w-full h-8"
-                      />
-
-                      {/* Live Subtitle Overlay for Audio */}
-                      {activePreviewCue && (
-                        <div className="w-full text-center bg-black/60 backdrop-blur-xs text-amber-300 px-2 py-1 rounded-lg text-xs font-bold mt-1">
-                          {activePreviewCue.text}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Complete Extended Metadata Table */}
-                <div className="space-y-2">
-                  <h4 className="text-xs font-black text-slate-900 leading-snug break-words">
-                    {previewTargetFile.title}
-                  </h4>
-
-                  <div className="bg-slate-50 rounded-xl p-3 border border-slate-200/70 text-xs space-y-1.5">
-                    <div className="flex items-center justify-between text-slate-600">
-                      <span className="text-slate-400">النوع:</span>
-                      <span className="font-bold">{previewTargetFile.type === "video" ? "فيديو" : "صوت"}</span>
-                    </div>
-
-                    <div className="flex items-center justify-between text-slate-600">
-                      <span className="text-slate-400">الحجم:</span>
-                      <span className="font-bold font-mono">{formatFileSize(previewTargetFile.size)}</span>
-                    </div>
-
-                    {previewDuration > 0 && (
-                      <div className="flex items-center justify-between text-slate-600">
-                        <span className="text-slate-400">المدة الزمنية:</span>
-                        <span className="font-bold font-mono text-blue-700">{formatDuration(previewDuration)}</span>
-                      </div>
-                    )}
-
-                    {previewResolution && previewResolution.width > 0 && (
-                      <div className="flex items-center justify-between text-slate-600">
-                        <span className="text-slate-400">الدقة والأبعاد:</span>
-                        <span className="font-bold font-mono text-emerald-700">
-                          {previewResolution.width} × {previewResolution.height} (
-                          {previewResolution.height >= 1080
-                            ? "1080p FHD"
-                            : previewResolution.height >= 720
-                            ? "720p HD"
-                            : "SD"}
-                          )
-                        </span>
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between text-slate-600">
-                      <span className="text-slate-400">تاريخ الرفع:</span>
-                      <span className="font-bold">
-                        {new Date(previewTargetFile.uploadedAt).toLocaleDateString("ar-EG")}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Subtitle Tracks Summary */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                      <Subtitles className="w-3.5 h-3.5 text-indigo-600" />
-                      <span>مسارات الترجمة ({previewTargetFile.subtitles?.length || 0})</span>
-                    </p>
-                    <button
-                      onClick={() => onOpenSubtitleOptionsForFile(previewTargetFile)}
-                      className="text-[11px] text-[#0056f6] font-bold hover:underline cursor-pointer"
-                    >
-                      إدارة
-                    </button>
-                  </div>
-
-                  {previewTargetFile.subtitles && previewTargetFile.subtitles.length > 0 ? (
-                    <div className="space-y-1.5">
-                      {previewTargetFile.subtitles.map((track) => (
-                        <div
-                          key={track.id}
-                          className="p-2 rounded-lg bg-indigo-50/70 border border-indigo-100 flex items-center justify-between text-xs font-bold text-indigo-900"
-                        >
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <Subtitles className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                            <span className="truncate">{track.label}</span>
-                          </div>
-                          <span className="text-[10px] text-indigo-600 font-mono">
-                            {track.cues?.length || 0} جملة
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="p-3 bg-slate-50 rounded-xl text-center text-slate-400 text-xs border border-dashed border-slate-200">
-                      <p>لا توجد ترجمة مرفقة بعد</p>
-                      <button
-                        onClick={() => onOpenGradioModalForFile(previewTargetFile)}
-                        className="mt-1 text-[11px] font-bold text-emerald-600 hover:underline flex items-center justify-center gap-1 w-full cursor-pointer"
-                      >
-                        <Sparkles className="w-3 h-3" />
-                        <span>تفريغ بالذكاء الاصطناعي الآن</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Direct Action Buttons */}
-                <div className="pt-2 space-y-2">
-                  <button
-                    onClick={() => onSelectFile(previewTargetFile, true)}
-                    className="w-full py-2 bg-[#0056f6] hover:bg-[#0047d1] text-white rounded-xl text-xs font-black transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-                  >
-                    <Play className="w-3.5 h-3.5 fill-current" />
-                    <span>تشغيل في المشغل الكامل ⚡</span>
-                  </button>
-
-                  <button
-                    onClick={() => onOpenGradioModalForFile(previewTargetFile)}
-                    className="w-full py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl text-xs font-bold border border-emerald-200 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>تفريغ صوتي بالذكاء الاصطناعي</span>
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="p-8 text-center text-slate-400 text-xs flex flex-col items-center justify-center h-full gap-2">
-                <Info className="w-8 h-8 text-slate-300" />
-                <p className="font-bold text-slate-600">حدد عنصراً لمعاينته</p>
-                <p className="text-[11px]">ستظهر هنا تفاصيل المجلد أو الملف ومسارات الترجمة ومشغل المعاينة</p>
-              </div>
-            )}
-          </aside>
-        )}
       </div>
 
       {/* ======================================================== */}
-      {/* 4. WINDOWS 11 STATUS BAR (BOTTOM) */}
+      {/* 4. CLEAN STATUS BAR (BOTTOM) */}
       {/* ======================================================== */}
-      <footer className="bg-slate-100/95 border-t border-slate-200 px-3 py-1 text-[11px] font-bold text-slate-600 flex items-center justify-between shrink-0 select-none">
-        <div className="flex items-center gap-3">
-          <span>{displayedFolders.length + filteredFiles.length} عنصراً</span>
+      <footer className="bg-slate-50 border-t border-slate-200/80 px-4 py-1.5 text-[11px] font-bold text-slate-500 flex items-center justify-between shrink-0 select-none">
+        <div className="flex items-center gap-2">
+          <span>{displayedFolders.length + filteredFiles.length} عنصر</span>
+          <span>•</span>
+          <span className="font-mono text-slate-600">{formatFileSize(totalStorageBytes)}</span>
           {(selectedFileIds.size > 0 || selectedFolderIds.size > 0) && (
             <>
               <span>•</span>
-              <span className="text-blue-600">
+              <span className="text-[#0056f6] font-bold">
                 {selectedFileIds.size + selectedFolderIds.size} عنصر محدد {selectedFileIds.size > 0 ? `(${formatFileSize(selectedTotalBytes)})` : ""}
               </span>
             </>
           )}
-          <span>•</span>
-          <span className="text-slate-400">
-            {activeFolder ? `المجلد: ${activeFolder.name}` : "المجلد الرئيسي"}
-          </span>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-slate-400 hidden sm:inline">Windows Media Explorer</span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => handleSetViewMode("details")}
-              className={`p-0.5 rounded cursor-pointer ${viewMode === "details" ? "text-blue-600" : "text-slate-400"}`}
-              title="تفاصيل"
-            >
-              <List className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => handleSetViewMode("large_grid")}
-              className={`p-0.5 rounded cursor-pointer ${viewMode === "large_grid" ? "text-blue-600" : "text-slate-400"}`}
-              title="أيقونات"
-            >
-              <Grid className="w-3.5 h-3.5" />
-            </button>
-          </div>
+        <div className="flex items-center gap-2 text-slate-400 text-[10px]">
+          <span>{activeFolder ? `📁 ${activeFolder.name}` : "📁 المجلد الرئيسي"}</span>
         </div>
       </footer>
 

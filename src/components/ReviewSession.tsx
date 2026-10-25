@@ -2013,7 +2013,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     write: "كتابة",
     listen: "استماع",
     article: "ال أرتيكل",
-    match: "ربط",
+    match: "المربعات",
     challenge: "تحدي",
     puzzles: "تركيب الكلمات"
   };
@@ -3466,11 +3466,13 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     }
   }, [isCompleted, chainIndex, chainMethods]);
 
-  // For Matching game
-  const [matchingCards, setMatchingCards] = useState<any[]>([]);
-  const [selectedMatch, setSelectedMatch] = useState<{ id: string; pairId: string; text: string; type: string } | null>(null);
-  const [matchedIds, setMatchedIds] = useState<string[]>([]);
-  const [errorIds, setErrorIds] = useState<string[]>([]);
+  // Visual Squares Grid Mode (وضع المربعات)
+  const [squaresCards, setSquaresCards] = useState<Flashcard[]>([]);
+  const [speakingSquareCardId, setSpeakingSquareCardId] = useState<string | null>(null);
+  const [squaresSearchQuery, setSquaresSearchQuery] = useState<string>("");
+  const [isSquaresSequentialPlaying, setIsSquaresSequentialPlaying] = useState<boolean>(false);
+  const squaresSeqRef = useRef<boolean>(false);
+  squaresSeqRef.current = isSquaresSequentialPlaying;
 
   // Timer Ref
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -4214,79 +4216,93 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     return shuffleArray([...selectedAlts, currentCard]);
   }, [currentCard?.id, sessionCards, cards, method, listenChoiceType]);
 
-  // Initialize matching game
+  // Initialize Visual Squares Grid
   useEffect(() => {
     if (method === "match" && sessionCards.length > 0) {
-      resetMatchingGame();
+      setSquaresCards(sessionCards);
+      setSpeakingSquareCardId(null);
+      setIsSquaresSequentialPlaying(false);
     }
   }, [method, sessionCards]);
 
-  const resetMatchingGame = () => {
-    const list: any[] = [];
-    // Shuffle and pick up to 6 cards for an engaging grid round
-    const shuffledSource = [...sessionCards].sort(() => Math.random() - 0.5);
-    const batch = shuffledSource.slice(0, 6);
-    
-    batch.forEach((c) => {
-      list.push({ id: `term-${c.id}`, pairId: c.id, text: c.frontText, type: "term", lang: c.frontLang });
-      list.push({ id: `def-${c.id}`, pairId: c.id, text: c.backText, type: "def", lang: c.backLang });
-    });
-
-    setMatchingCards(list.sort(() => Math.random() - 0.5));
-    setMatchedIds([]);
-    setErrorIds([]);
-    setSelectedMatch(null);
-  };
-
-  const handleMatchClick = (item: any) => {
-    if (matchedIds.includes(item.id) || errorIds.includes(item.id)) return;
-
-    if (matchAutoListenSelect) {
-      playPronunciation(item.text, item.lang || "de");
+  // Click on a square: immediately pronounce the vocabulary item
+  const handleSquareClick = (card: Flashcard) => {
+    if (isSquaresSequentialPlaying) {
+      setIsSquaresSequentialPlaying(false);
     }
+    setSpeakingSquareCardId(card.id);
+    const speechText = getFrontSpeechText(card, speakFrontArticle);
+    const speechLang = card.frontLang || "de";
 
-    if (!selectedMatch) {
-      setSelectedMatch(item);
-      return;
-    }
-
-    if (selectedMatch.id === item.id) {
-      setSelectedMatch(null);
-      return;
-    }
-
-    // Checking match pair
-    if (selectedMatch.pairId === item.pairId && selectedMatch.type !== item.type) {
-      const nextMatched = [...matchedIds, selectedMatch.id, item.id];
-      setMatchedIds(nextMatched);
-      setSelectedMatch(null);
-      onUpdateStreak(item.pairId, true);
-
-      // Add to correct list
-      if (!correctIds.includes(item.pairId)) {
-        setCorrectIds((prev) => [...prev, item.pairId]);
-      }
-
-      // Check if all matched
-      if (nextMatched.length === matchingCards.length) {
-        // Delay completion screen slightly for delightful visual feedback
-        setTimeout(() => {
-          setIsCompleted(true);
-        }, 1200);
-      }
+    if (reviewVoiceTarget === "secondary") {
+      playSecondaryPronunciation(speechText, speechLang, true);
     } else {
-      // Mismatch
-      setErrorIds([selectedMatch.id, item.id]);
-      setSelectedMatch(null);
-      onUpdateStreak(item.pairId, false);
-      if (!incorrectIds.includes(item.pairId)) {
-        setIncorrectIds((prev) => [...prev, item.pairId]);
-      }
-      setTimeout(() => {
-        setErrorIds([]);
-      }, 800);
+      playPrimaryPronunciation(speechText, speechLang, true);
     }
+
+    setTimeout(() => {
+      setSpeakingSquareCardId((curr) => (curr === card.id ? null : curr));
+    }, 1600);
   };
+
+  // Shuffle squares randomly
+  const handleShuffleSquares = () => {
+    setSquaresCards((prev) => [...prev].sort(() => Math.random() - 0.5));
+  };
+
+  // Sequential autoplay for all squares in the grid
+  const handleToggleSquaresSequential = () => {
+    if (isSquaresSequentialPlaying) {
+      setIsSquaresSequentialPlaying(false);
+      stopCurrentAudio();
+      setSpeakingSquareCardId(null);
+      return;
+    }
+
+    setIsSquaresSequentialPlaying(true);
+    let idx = 0;
+    const cardsToPlay = squaresCards.length > 0 ? squaresCards : sessionCards;
+
+    const playStep = () => {
+      if (!squaresSeqRef.current || idx >= cardsToPlay.length) {
+        setIsSquaresSequentialPlaying(false);
+        setSpeakingSquareCardId(null);
+        return;
+      }
+      const c = cardsToPlay[idx];
+      setSpeakingSquareCardId(c.id);
+      const text = getFrontSpeechText(c, speakFrontArticle);
+      const lang = c.frontLang || "de";
+
+      playPronunciationSingle(
+        text,
+        lang,
+        () => {
+          if (!squaresSeqRef.current) return;
+          setTimeout(() => {
+            if (!squaresSeqRef.current) return;
+            idx++;
+            playStep();
+          }, 350);
+        },
+        true
+      );
+    };
+
+    playStep();
+  };
+
+  // Filtered squares based on search query
+  const displayedSquares = React.useMemo(() => {
+    const source = squaresCards.length > 0 ? squaresCards : sessionCards;
+    if (!squaresSearchQuery.trim()) return source;
+    const q = squaresSearchQuery.trim().toLowerCase();
+    return source.filter((c) =>
+      (c.frontText && c.frontText.toLowerCase().includes(q)) ||
+      (c.backText && c.backText.toLowerCase().includes(q)) ||
+      (c.correctArticle && c.correctArticle.toLowerCase().includes(q))
+    );
+  }, [squaresCards, sessionCards, squaresSearchQuery]);
 
   const formatTimer = (secs: number) => {
     const mins = Math.floor(secs / 60).toString().padStart(2, "0");
@@ -4639,7 +4655,9 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     setIsAutoPlaying(false);
     setHasStartedStep(true);
     if (method === "match") {
-      resetMatchingGame();
+      setSquaresCards(sessionCards);
+      setSpeakingSquareCardId(null);
+      setIsSquaresSequentialPlaying(false);
     }
   };
 
@@ -5035,8 +5053,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
           {/* Center: Card Position Counter in Top Progress Header */}
           <div className="flex-1 flex justify-center items-center">
             {sessionCards.length > 0 && (
-              <span className="text-xs sm:text-sm font-bold font-mono text-slate-300 select-none" dir="ltr">
-                {currentIndex + 1} / {sessionCards.length}
+              <span className="text-xs sm:text-sm font-bold font-mono text-slate-300 select-none" dir="rtl">
+                {method === "match" ? `${sessionCards.length} مفردة` : `${currentIndex + 1} / ${sessionCards.length}`}
               </span>
             )}
           </div>
@@ -5370,7 +5388,11 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="w-full max-w-[min(420px,calc(100dvh-250px))] flex flex-col items-center gap-6 sm:gap-7 shrink-0"
+              className={`w-full flex flex-col items-center gap-6 sm:gap-7 shrink-0 ${
+                method === "match" 
+                  ? "max-w-4xl px-1 sm:px-2" 
+                  : "max-w-[min(420px,calc(100dvh-250px))]"
+              }`}
             >
               {/* Action Bar (Shuffle & Settings & Night Mode & Autoplay & Edit) with expandable distraction-free toggle */}
               {/* Unified Action Bar (Settings & Auto Advance & Audio & Mode Controls & Night Mode) */}
@@ -6240,67 +6262,182 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                 </div>
               )}
 
-              {/* 4. MATCHING GAME MODE (تحدي الربط التفاعلي) */}
+              {/* 4. SQUARES MODE / وضع المربعات */}
               {method === "match" && (
-                <div className="w-full max-w-2xl flex flex-col gap-5">
-                  {/* Game grid board */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 bg-surface-container-low/50 rounded-2xl border border-outline-variant/30 min-h-[220px]">
-                    {matchingCards.map((item) => {
-                      const isMatched = matchedIds.includes(item.id);
-                      const isError = errorIds.includes(item.id);
-                      const isSelected = selectedMatch?.id === item.id;
+                <div className="w-full flex flex-col items-center gap-4 animate-fadeIn">
+                  {/* Top Squares Toolbar: Search & Actions */}
+                  <div className="w-full bg-slate-900/90 border border-slate-800 rounded-2xl p-2 sm:p-2.5 flex flex-wrap items-center justify-between gap-2 shadow-xs backdrop-blur-md">
+                    {/* Search filter input */}
+                    <div className="flex-1 min-w-[180px] relative">
+                      <input
+                        type="text"
+                        placeholder="ابحث في مفردات المربعات..."
+                        value={squaresSearchQuery}
+                        onChange={(e) => setSquaresSearchQuery(e.target.value)}
+                        className="w-full text-xs font-bold px-3 py-2 pr-8 rounded-xl bg-slate-950/70 border border-slate-800 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 transition-colors"
+                      />
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none text-xs">
+                        🔍
+                      </span>
+                      {squaresSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setSquaresSearchQuery("")}
+                          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5 rounded cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
 
-                      let cardStyle = "bg-surface-container-lowest border-transparent shadow-elevation-1 hover:shadow-md hover:-translate-y-0.5";
-                      if (isMatched) {
-                        cardStyle = "opacity-0 scale-90 pointer-events-none transition-all duration-700";
-                      } else if (isError) {
-                        cardStyle = "border-red-500 bg-red-100 text-red-700 animate-shake";
-                      } else if (isSelected) {
-                        cardStyle = "border-primary bg-primary/10 text-primary scale-[0.98] ring-2 ring-primary/20";
-                      }
+                    {/* Action buttons */}
+                    <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                      {/* Play all sequentially */}
+                      <button
+                        type="button"
+                        onClick={handleToggleSquaresSequential}
+                        className={`h-9 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 border ${
+                          isSquaresSequentialPlaying
+                            ? "bg-sky-500/20 text-sky-300 border-sky-500/40 animate-pulse"
+                            : "bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-700/60"
+                        }`}
+                        title={isSquaresSequentialPlaying ? "إيقاف الاستماع المتسلسل" : "تشغيل ونطق كل المربعات بالتتابع"}
+                      >
+                        {isSquaresSequentialPlaying ? (
+                          <>
+                            <Pause className="w-3.5 h-3.5" />
+                            <span>إيقاف</span>
+                          </>
+                        ) : (
+                          <>
+                            <Play className="w-3.5 h-3.5" />
+                            <span>استماع متتابع</span>
+                          </>
+                        )}
+                      </button>
+
+                      {/* Shuffle */}
+                      <button
+                        type="button"
+                        onClick={handleShuffleSquares}
+                        className="h-9 px-3 rounded-xl text-xs font-bold bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/60 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95"
+                        title="خلط وتوزيع ترتيب المربعات"
+                      >
+                        <Shuffle className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">خلط الترتيب</span>
+                      </button>
+
+                      {/* Complete / Finish Session */}
+                      <button
+                        type="button"
+                        onClick={() => setIsCompleted(true)}
+                        className="h-9 px-3.5 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-500 text-white transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 shadow-sm"
+                        title="إنهاء وعرض ملخص المراجعة"
+                      >
+                        <Check className="w-4 h-4 stroke-[3]" />
+                        <span>إكمال</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* The Visual Squares Grid (شبكة صور المفردات) */}
+                  <div className="w-full grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4 p-2 sm:p-3 bg-slate-900/40 rounded-3xl border border-slate-800/80 backdrop-blur-md">
+                    {displayedSquares.map((c, idx) => {
+                      const isSpeaking = speakingSquareCardId === c.id;
+                      const sanitized = sanitizeCardArticleAndSentence(c);
+                      const hasImage = Boolean(c.frontImage || c.backImage);
+                      const imageSrc = c.frontImage || c.backImage;
+                      const imagePos = c.frontImage ? c.frontImagePosition : c.backImagePosition;
 
                       return (
                         <div
-                          key={item.id}
-                          onClick={() => handleMatchClick(item)}
-                          className={`h-24 rounded-xl border-2 p-3.5 flex items-center justify-center cursor-pointer text-center select-none font-bold text-xs sm:text-sm transition-all duration-300 ${cardStyle}`}
+                          key={c.id}
+                          onClick={() => handleSquareClick(c)}
+                          className={`group relative aspect-square rounded-2xl overflow-hidden border transition-all duration-200 cursor-pointer select-none bg-slate-900 ${
+                            isSpeaking
+                              ? "border-sky-400 ring-2 ring-sky-400/50 shadow-lg shadow-sky-500/25 scale-[1.03] z-10"
+                              : "border-slate-800 hover:border-slate-700 hover:scale-[1.02] active:scale-95 shadow-sm"
+                          }`}
+                          title={`انقر لنطق المفردة: ${c.frontText}`}
                         >
-                          <span dir={item.type === "def" && item.lang === "en" ? "ltr" : "rtl"}>
-                            {item.text}
-                          </span>
+                          {/* Image or fallback */}
+                          {hasImage ? (
+                            <ImageWithSkeleton
+                              src={imageSrc!}
+                              alt={c.frontText}
+                              className="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                              style={getSafeImageStyle(imagePos)}
+                              referrerPolicy="no-referrer"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center p-3 bg-gradient-to-br from-slate-900 via-slate-850 to-slate-950 text-slate-400">
+                              <div className="w-10 h-10 rounded-xl bg-slate-800/80 border border-slate-700/60 flex items-center justify-center mb-1 text-slate-400 group-hover:text-sky-400 transition-colors">
+                                <ImageIcon className="w-5 h-5 opacity-70" />
+                              </div>
+                              <span className="text-[11px] font-semibold text-slate-400 line-clamp-1">{c.backText || "مفردة"}</span>
+                            </div>
+                          )}
+
+                          {/* Top Speaker Indicator */}
+                          <div className={`absolute top-2.5 left-2.5 z-20 transition-all ${
+                            isSpeaking
+                              ? "px-2 py-1 rounded-full bg-sky-500 text-white flex items-center gap-1 shadow-md shadow-sky-500/30 animate-pulse text-[10px] font-bold"
+                              : "w-7 h-7 rounded-full bg-black/50 backdrop-blur-xs text-white/70 group-hover:text-white group-hover:bg-black/70 flex items-center justify-center opacity-80 group-hover:opacity-100"
+                          }`}>
+                            <Volume2 className="w-3.5 h-3.5" />
+                            {isSpeaking && <span className="hidden sm:inline">جاري النطق</span>}
+                          </div>
+
+                          {/* Top-right card index chip */}
+                          <div className="absolute top-2.5 right-2.5 z-20 px-1.5 py-0.5 rounded-md bg-black/50 backdrop-blur-xs text-slate-300 text-[10px] font-mono font-bold select-none opacity-70 group-hover:opacity-100 transition-opacity">
+                            #{idx + 1}
+                          </div>
+
+                          {/* Bottom Word & Article Overlay */}
+                          <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/95 via-black/60 to-transparent pt-10 pb-2.5 px-2.5 flex flex-col items-center justify-end text-center pointer-events-none">
+                            <div className="flex items-center justify-center gap-1.5 max-w-full">
+                              {sanitized.correctArticle && (
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-black shrink-0 ${
+                                  sanitized.correctArticle === "der" ? "bg-blue-600 text-white shadow-xs" :
+                                  sanitized.correctArticle === "die" ? "bg-rose-600 text-white shadow-xs" :
+                                  sanitized.correctArticle === "das" ? "bg-emerald-600 text-white shadow-xs" :
+                                  sanitized.correctArticle === "die-plural" ? "bg-amber-500 text-white shadow-xs" :
+                                  "bg-sky-600 text-white"
+                                }`}>
+                                  {sanitized.correctArticle === "die-plural" ? "die" : sanitized.correctArticle}
+                                </span>
+                              )}
+                              <span className="font-black text-xs sm:text-sm text-white drop-shadow-md truncate max-w-full" dir="ltr">
+                                {sanitized.frontText}
+                              </span>
+                            </div>
+
+                            {c.backText && (
+                              <span className="text-[10px] sm:text-[11px] font-medium text-slate-300 drop-shadow-xs truncate max-w-full mt-0.5" dir="rtl">
+                                {c.backText}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
                   </div>
 
-                  {/* Complete state check */}
-                  {matchedIds.length === matchingCards.length && matchingCards.length > 0 && (
-                    <div className="p-6 bg-green-50/80 border border-green-200 rounded-2xl flex flex-col items-center justify-center text-center gap-3 animate-scaleUp">
-                      <Award className="w-12 h-12 text-green-600 animate-bounce" />
-                      <div>
-                        <h2 className="text-base font-extrabold text-green-800">عمل رائع! تم إنجاز التوصيل</h2>
-                        <p className="text-xs font-semibold text-green-700 mt-1">
-                          لقد قمت بربط جميع المصطلحات بنجاح في غضون <span className="font-mono font-bold text-sm bg-green-100 px-2 py-0.5 rounded text-green-800">{time} ثانية!</span>
-                        </p>
-                      </div>
+                  {/* Empty search results fallback */}
+                  {displayedSquares.length === 0 && (
+                    <div className="w-full py-12 flex flex-col items-center justify-center gap-2 text-center bg-slate-900/40 rounded-2xl border border-slate-800">
+                      <HelpCircle className="w-8 h-8 text-slate-500" />
+                      <p className="text-xs font-bold text-slate-400">لا توجد مفردات مطابقة للبحث "{squaresSearchQuery}"</p>
                       <button
-                        onClick={resetMatchingGame}
-                        className="px-5 py-2 rounded-full bg-green-600 text-white font-bold text-xs hover:bg-green-700 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+                        type="button"
+                        onClick={() => setSquaresSearchQuery("")}
+                        className="text-xs text-sky-400 hover:underline font-bold mt-1 cursor-pointer"
                       >
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin-slow" /> لعب مجدداً مع مجموعة أخرى
+                        إلغاء البحث
                       </button>
                     </div>
                   )}
-
-                  {/* Manual trigger retry */}
-                  <div className="flex justify-center gap-3">
-                    <button
-                      onClick={resetMatchingGame}
-                      className="px-5 py-2.5 rounded-full border border-primary/20 text-primary font-bold text-[11px] bg-surface-container-lowest hover:bg-primary/5 transition-all flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" /> إعادة خلط وتوزيع البطاقات
-                    </button>
-                  </div>
                 </div>
               )}
 
@@ -6617,7 +6754,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                 { id: "article", label: "الأداة 🇩🇪" },
                 { id: "challenge", label: "التحدي ⏱️" },
                 { id: "puzzles", label: "الألغاز 🧩" },
-                { id: "match", label: "التوصيل 🔗" },
+                { id: "match", label: "المربعات 🔲" },
                 { id: "sound", label: "الصوت والأداء ⚙️" }
               ].map((tab) => (
                 <button
@@ -7489,15 +7626,15 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                 <div className="space-y-4 animate-fadeIn">
                   <div className="flex items-center gap-1.5 border-b border-slate-100 pb-1">
                     <span className="w-1.5 h-3.5 bg-primary rounded-full" />
-                    <span className="font-bold text-[11px] text-slate-700 uppercase tracking-wider block">إعدادات وضع لعبة التوصيل</span>
+                    <span className="font-bold text-[11px] text-slate-700 uppercase tracking-wider block">إعدادات وضع المربعات</span>
                   </div>
 
-                  {renderVoiceTargetSelector("وضع لعبة التوصيل")}
+                  {renderVoiceTargetSelector("وضع المربعات")}
 
                   <div className="flex items-center justify-between py-1 border-b border-slate-50">
                     <div className="flex flex-col gap-0.5 text-right">
-                      <span className="text-xs font-bold text-slate-700">نطق الكلمة عند النقر عليها للتوصيل</span>
-                      <span className="text-[10px] text-slate-400">سماع صوت الكلمة بمجرد اختيار البطاقة المبعثرة</span>
+                      <span className="text-xs font-bold text-slate-700">نطق الكلمة فوراً عند النقر على المربع</span>
+                      <span className="text-[10px] text-slate-400">سماع صوت الكلمة بمجرد اختيار المربع</span>
                     </div>
                     <button
                       type="button"
