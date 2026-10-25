@@ -236,11 +236,11 @@ export const UnifiedNavigationTrack: React.FC<UnifiedNavigationTrackProps> = ({
           <span className="text-xs sm:text-sm hidden xs:inline">السابقة</span>
         </div>
 
-        {/* Central Sliding Pill (المقبض الأملس العريض في المنتصف) */}
+        {/* Central Sliding Pill (المقبض الأملس العريض في المنتصف - توسيط عامودي دقيق ومثالي) */}
         <div
-          className="absolute top-1/2 left-1/2 -translate-y-1/2 w-[52%] max-w-[260px] h-[calc(100%-14px)] bg-white/[0.04] group-hover:bg-white/[0.07] border border-white/[0.07] group-hover:border-white/[0.12] rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 z-20 pointer-events-none shadow-xs"
+          className="absolute inset-y-0 my-auto left-1/2 w-[52%] max-w-[260px] h-9 sm:h-10.5 bg-white/[0.04] group-hover:bg-white/[0.07] border border-white/[0.07] group-hover:border-white/[0.12] rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 z-20 pointer-events-none shadow-xs"
           style={{
-            transform: `translate(calc(-50% + ${dragOffset}px), -50%)`,
+            transform: `translateX(calc(-50% + ${dragOffset}px))`,
             transition: isDragging ? "none" : "transform 0.24s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s ease, border-color 0.2s ease"
           }}
         >
