@@ -50,7 +50,7 @@ import {
   CheckCircle2,
   Search
 } from "lucide-react";
-import { Folder as FolderType, Flashcard, getSafeImageStyle, TranscriptDocument, getCardSearchQuery, sanitizeCardArticleAndSentence, cleanImageSearchQuery, isGermanSentence, ALL_AVAILABLE_MODELS } from "../types";
+import { Folder as FolderType, Flashcard, getSafeImageStyle, TranscriptDocument, getCardSearchQuery, sanitizeCardArticleAndSentence, cleanImageSearchQuery, isGermanSentence } from "../types";
 import { ImageWithSkeleton } from "./ReviewSession";
 import { speakClient, EditCardModal, ImagePickerModal, preloadImage } from "./Modals";
 import { BrowseCard } from "./BrowseCard";
@@ -872,45 +872,17 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
       setExternalImportProgress("");
     }
   };
-  const [selectedModel, setSelectedModel] = useState<string>(() => {
-    try {
-      return localStorage.getItem("ai_workspace_selected_model") || "gemini-3.6-flash";
-    } catch {
-      return "gemini-3.6-flash";
-    }
-  });
-  const [showModelSelectModal, setShowModelSelectModal] = useState<boolean>(false);
-
   const [aiProvider, setAiProvider] = useState<"gemini" | "groq">(() => {
     try {
-      const saved = localStorage.getItem("ai_workspace_selected_model");
-      if (saved && (saved.includes("groq") || saved === "groq-llama-3.3-70b")) {
-        return "groq";
-      }
       return (localStorage.getItem("settings_ai_provider") as any) || "gemini";
     } catch {
       return "gemini";
     }
   });
 
-  const handleModelChange = (modelKey: string) => {
-    setSelectedModel(modelKey);
-    localStorage.setItem("ai_workspace_selected_model", modelKey);
-    const provider = (modelKey.includes("groq") || modelKey === "groq-llama-3.3-70b") ? "groq" : "gemini";
-    setAiProvider(provider);
-    localStorage.setItem("settings_ai_provider", provider);
-  };
-
   const handleProviderChange = (provider: "gemini" | "groq") => {
     setAiProvider(provider);
     localStorage.setItem("settings_ai_provider", provider);
-    if (provider === "groq") {
-      setSelectedModel("groq-llama-3.3-70b");
-      localStorage.setItem("ai_workspace_selected_model", "groq-llama-3.3-70b");
-    } else {
-      setSelectedModel("gemini-3.6-flash");
-      localStorage.setItem("ai_workspace_selected_model", "gemini-3.6-flash");
-    }
   };
 
   const [loading, setLoading] = useState(false);
@@ -1503,8 +1475,6 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
         germanPluralMode,
         germanPluralInstruction: germanPluralInstruction.trim() || undefined,
         aiProvider: activeProvider,
-        selectedModel: selectedModel,
-        model: selectedModel,
         customFolderName: customFolderName.trim() || undefined,
         customFolderDesc: customFolderDesc.trim() || undefined,
         folderDescMode,
@@ -1611,7 +1581,7 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
           rawPrompt: finalPromptToSend,
           response: responseSummary,
           provider: activeProvider,
-          model: selectedModel,
+          model: activeProvider === "groq" ? "llama-3.3-70b-versatile" : "gemini-3.5-flash",
           cardsCount: cardsCount,
           status: "success",
           usage: usage || undefined,
@@ -1643,7 +1613,7 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
         prompt: targetPrompt,
         rawPrompt: finalPromptToSend,
         provider: aiProvider,
-        model: selectedModel,
+        model: aiProvider === "groq" ? "llama-3.3-70b-versatile" : "gemini-3.5-flash",
         cardsCount: cardsCount,
         status: "failed",
         error: errMsg,
@@ -1711,8 +1681,6 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
         germanPluralMode: activeAiFolder.germanPluralMode || "auto",
         germanPluralInstruction: activeAiFolder.germanPluralInstruction || undefined,
         aiProvider: activeProvider,
-        selectedModel: selectedModel,
-        model: selectedModel,
         cardsCount: cardsCount
       };
       rawReqBody = JSON.stringify(requestPayload, null, 2);
@@ -1782,7 +1750,7 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
           rawPrompt: finalPromptToSend,
           response: responseSummary,
           provider: activeProvider,
-          model: selectedModel,
+          model: activeProvider === "groq" ? "llama-3.3-70b-versatile" : "gemini-3.5-flash",
           cardsCount: cardsCount,
           status: "success",
           usage: usage || undefined,
@@ -1813,7 +1781,7 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
         prompt: `${activeAiFolder.prompt} (وجبة إضافية)`,
         rawPrompt: finalPromptToSend,
         provider: nextBatchAiProvider,
-        model: selectedModel,
+        model: nextBatchAiProvider === "groq" ? "llama-3.3-70b-versatile" : "gemini-3.5-flash",
         cardsCount: cardsCount,
         status: "failed",
         error: errMsg,
@@ -2205,9 +2173,7 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
         germanArticlesMode: refineGermanArticlesMode,
         germanPluralMode: refineGermanPluralMode,
         germanPluralInstruction: refineGermanPluralInstruction,
-        aiProvider: activeProvider,
-        selectedModel: selectedModel,
-        model: selectedModel
+        aiProvider: activeProvider
       };
       rawReqBody = JSON.stringify(requestPayload, null, 2);
 
@@ -2280,7 +2246,7 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
           rawPrompt: refinePromptSummary,
           response: responseSummary,
           provider: activeProvider,
-          model: selectedModel,
+          model: activeProvider === "groq" ? "llama-3.3-70b-versatile" : "gemini-3.5-flash",
           cardsCount: folderCards.length,
           status: "success",
           usage: usage || undefined,
@@ -2307,7 +2273,7 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
         prompt: `تعديل وتحسين البطاقات للمجلد "${activeAiFolder.name}"`,
         rawPrompt: refinePromptSummary,
         provider: refineAiProvider,
-        model: selectedModel,
+        model: refineAiProvider === "groq" ? "llama-3.3-70b-versatile" : "gemini-3.5-flash",
         cardsCount: folderCards.length,
         status: "failed",
         error: errMsg,
@@ -3650,43 +3616,31 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
               </div>
 
               <div className="flex flex-col sm:flex-row justify-end items-stretch sm:items-center gap-3 pt-1">
-                {/* Advanced Model Selector matching AICorrectorWorkspace */}
-                <div className="flex items-center gap-1.5 bg-slate-50 p-1.5 rounded-2xl border border-slate-200/90 shadow-3xs" dir="rtl">
-                  <div className="flex items-center gap-1 text-[11px] font-black text-slate-700 px-1">
-                    <Sparkles className="w-3.5 h-3.5 text-[#0056f6]" />
-                    <span className="hidden md:inline">النموذج:</span>
-                  </div>
-
-                  <select
-                    value={selectedModel}
-                    onChange={(e) => handleModelChange(e.target.value)}
-                    className="bg-white border border-slate-200 font-extrabold text-[11px] text-slate-800 py-1 px-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0056f6]/20 cursor-pointer shadow-3xs max-w-[210px] truncate"
-                  >
-                    <optgroup label="🔥 الموديلات ذات الطلبات الكثيرة (500 RPD)">
-                      <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite ⚡ (500 RPD)</option>
-                      <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite ⚡ (500 RPD)</option>
-                    </optgroup>
-                    <optgroup label="✨ النماذج العامة والمتقدمة">
-                      <option value="gemini-3.6-flash">Gemini 3.6 Flash ⚡ (موصى به)</option>
-                      <option value="gemini-3.5-flash">Gemini 3.5 Flash ⚡ (مستقر)</option>
-                      <option value="gemini-3.7-flash">Gemini 3.7 Flash ⚡ (تفكير متقدم)</option>
-                      <option value="groq-llama-3.3-70b">Groq Llama 3.3 70B 🚀 (فائق السرعة)</option>
-                      <option value="grok-2">Grok 2 🤖 (تفاعلي)</option>
-                      <option value="gemini-2.5-flash">Gemini 2.5 Flash ⚡ (خفيف وسريع)</option>
-                      <option value="gemini-2.5-pro">Gemini 2.5 Pro 💎 (تحليل عميق)</option>
-                      <option value="gemini-1.5-pro">Gemini 1.5 Pro 💎 (تحليل أكاديمي)</option>
-                      <option value="gemini-1.5-flash">Gemini 1.5 Flash ⚡ (كلاسيكي)</option>
-                    </optgroup>
-                  </select>
-
+                {/* Sleek Segmented Model Selector next to the generation button */}
+                <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200/80 shadow-3xs" dir="rtl">
                   <button
                     type="button"
-                    onClick={() => setShowModelSelectModal(true)}
-                    className="px-2 py-1 bg-white hover:bg-slate-100 text-slate-600 rounded-xl border border-slate-200 text-[10px] font-extrabold transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
-                    title="استعراض وتفاصيل جميع نماذج الذكاء الاصطناعي"
+                    onClick={() => handleProviderChange("gemini")}
+                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                      aiProvider === "gemini"
+                        ? "bg-white text-[#0056f6] shadow-3xs border border-slate-100"
+                        : "text-slate-400 hover:text-slate-700"
+                    }`}
                   >
-                    <SlidersHorizontal className="w-3 h-3 text-[#0056f6]" />
-                    <span className="hidden sm:inline">الموديلات</span>
+                    <Sparkles className="w-3 h-3" />
+                    <span>Gemini</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleProviderChange("groq")}
+                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                      aiProvider === "groq"
+                        ? "bg-white text-orange-600 shadow-3xs border border-slate-100"
+                        : "text-slate-400 hover:text-slate-700"
+                    }`}
+                  >
+                    <Activity className="w-3 h-3" />
+                    <span>Groq</span>
                   </button>
                 </div>
 
@@ -5741,148 +5695,6 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                 className="flex-1 py-2.5 px-4 bg-slate-100 text-slate-700 font-black text-xs rounded-xl border border-slate-200 hover:bg-slate-200 active:scale-95 transition-all cursor-pointer"
               >
                 إلغاء
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Dedicated Interactive Model Selection Modal (Matching AICorrectorWorkspace) */}
-      {showModelSelectModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-fade-in" dir="rtl">
-          <div className="bg-white border border-slate-200 rounded-3xl max-w-xl w-full p-6 shadow-2xl space-y-4 text-right animate-scale-up max-h-[90vh] flex flex-col overflow-hidden">
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3 shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-[#0056f6]">
-                  <Sparkles className="w-5 h-5 stroke-[2.2]" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-slate-900">اختيار نموذج الذكاء الاصطناعي</h3>
-                  <p className="text-[11px] text-slate-500 font-medium">النموذج المختار وحده هو من ينفذ بدون أي تبديل أو موديل احتياطي</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowModelSelectModal(false)}
-                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Content List */}
-            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-              {/* Group A: 500 RPD */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-1.5 px-1">
-                  <span className="text-xs">🔥</span>
-                  <span className="font-black text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200/60">
-                    الموديلات ذات الطلبات الكثيرة (أعلى سعة للطلبات 500 RPD)
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 gap-2">
-                  {[
-                    { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite ⚡", desc: "500 طلب/يومياً (500 RPD) و 15/دقيقة - أقصى سعة للعمل المكثف المستمر", tag: "500 RPD" },
-                    { id: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite ⚡", desc: "500 طلب/يومياً (500 RPD) و 15/دقيقة - نموذج خفيف مستقر دون انقطاع", tag: "500 RPD" },
-                  ].map((m) => {
-                    const isSelected = selectedModel === m.id;
-                    return (
-                      <div
-                        key={m.id}
-                        onClick={() => handleModelChange(m.id)}
-                        className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex items-center justify-between ${
-                          isSelected
-                            ? "bg-amber-50/80 border-amber-500 text-slate-900 shadow-sm"
-                            : "bg-slate-50 hover:bg-slate-100/80 border-slate-200/80 text-slate-700"
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                            isSelected ? "border-amber-500 bg-amber-500" : "border-slate-300"
-                          }`}>
-                            {isSelected && <Check className="w-3 h-3 text-white stroke-[3]" />}
-                          </div>
-                          <div>
-                            <div className="font-extrabold text-sm text-slate-900">{m.name}</div>
-                            <div className="text-[11px] text-slate-500 font-medium">{m.desc}</div>
-                          </div>
-                        </div>
-                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
-                          isSelected ? "bg-amber-500 text-white border-amber-600" : "bg-amber-100/60 text-amber-800 border-amber-200/60"
-                        }`}>
-                          {m.tag}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Group B: General & Advanced Models */}
-              <div className="space-y-2 pt-1">
-                <div className="flex items-center gap-1.5 px-1">
-                  <span className="text-xs">✨</span>
-                  <span className="font-black text-xs text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
-                    النماذج العامة والمتقدمة
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 gap-2">
-                  {[
-                    { id: "gemini-3.6-flash", name: "Gemini 3.6 Flash ⚡", desc: "النموذج الأساسي - أسرع وأحدث معالجة ذكية من جوجل (250K TPM)", tag: "موصى به" },
-                    { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash ⚡", desc: "نموذج توليد البطاقات المستقر والسريع بمرونة عالية (250K TPM)", tag: "مستقر" },
-                    { id: "gemini-3.7-flash", name: "Gemini 3.7 Flash ⚡", desc: "نموذج التفكير والتحليل المتقدم (Thinking Mode)", tag: "تفكير متقدم" },
-                    { id: "groq-llama-3.3-70b", name: "Groq Llama 3.3 70B 🚀", desc: "خوادم Groq الفائقة (أداء عالي وسريع جداً بدون قيود شحن مجاني)", tag: "فائق السرعة" },
-                    { id: "grok-2", name: "Grok 2 🤖", desc: "نموذج جروك التفاعلي للمحادثة والبلاغة اللغوية", tag: "تفاعلي" },
-                    { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash ⚡", desc: "نموذج تصحيح وتوليد سريع ومباشر وخفيف", tag: "خفيف" },
-                    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro 💎", desc: "تحليل لغوي وبلاغي عميق جداً", tag: "تحليل عميق" },
-                    { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro 💎", desc: "تحليل أكاديمي عميق للنصوص المعقدة والإنشاء", tag: "احترافي" },
-                    { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash ⚡", desc: "نموذج فلاش القياسي الكلاسيكي", tag: "كلاسيكي" },
-                  ].map((m) => {
-                    const isSelected = selectedModel === m.id;
-                    return (
-                      <div
-                        key={m.id}
-                        onClick={() => handleModelChange(m.id)}
-                        className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex items-center justify-between ${
-                          isSelected
-                            ? "bg-blue-50/70 border-[#0056f6] text-slate-900 shadow-sm"
-                            : "bg-slate-50 hover:bg-slate-100/80 border-slate-200/80 text-slate-700"
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                            isSelected ? "border-[#0056f6] bg-[#0056f6]" : "border-slate-300"
-                          }`}>
-                            {isSelected && <Check className="w-3 h-3 text-white stroke-[3]" />}
-                          </div>
-                          <div>
-                            <div className="font-extrabold text-sm text-slate-900">{m.name}</div>
-                            <div className="text-[11px] text-slate-500 font-medium">{m.desc}</div>
-                          </div>
-                        </div>
-                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
-                          isSelected ? "bg-[#0056f6] text-white border-blue-600" : "bg-slate-200/60 text-slate-600 border-slate-300/60"
-                        }`}>
-                          {m.tag}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-end">
-              <button
-                type="button"
-                onClick={() => setShowModelSelectModal(false)}
-                className="px-6 py-2.5 rounded-xl bg-[#0056f6] hover:bg-[#0047cc] text-white font-extrabold text-xs transition-all cursor-pointer shadow-sm active:scale-95"
-              >
-                تطبيق واعتماد النموذج
               </button>
             </div>
           </div>

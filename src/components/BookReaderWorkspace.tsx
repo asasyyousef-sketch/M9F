@@ -1,43 +1,22 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
-  BookOpen,
-  Upload,
-  ArrowRight,
-  ChevronLeft,
+  ArrowLeft,
   ChevronRight,
+  Search,
   Play,
   Pause,
-  Volume2,
-  VolumeX,
-  RotateCcw,
-  ZoomIn,
-  ZoomOut,
-  Maximize2,
-  Trash2,
-  Edit2,
-  Search,
-  Music,
-  Film,
-  Layers,
-  Sparkles,
-  ExternalLink,
-  Check,
+  Video as VideoIcon,
+  Pencil,
+  Info,
   X,
-  AlertCircle,
-  FileText,
-  Clock,
-  Radio
+  Volume2,
+  ChevronLeft,
+  Loader2
 } from "lucide-react";
 import { InteractiveBook, BookPage, BookPageMedia, MediaFile } from "../types";
-import {
-  fetchAllBooks,
-  uploadBookArchive,
-  deleteBookFromServer,
-  updateBookMetadata
-} from "../utils/bookStorage";
 
 interface BookReaderWorkspaceProps {
-  onPlayMediaInStudio?: (mediaInfo: Partial<MediaFile>) => void;
+  onPlayMediaInStudio?: (file: Partial<MediaFile>) => void;
   onBackToMediaExplorer?: () => void;
 }
 
@@ -45,1065 +24,737 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   onPlayMediaInStudio,
   onBackToMediaExplorer
 }) => {
-  // Books library state
+  // Navigation View: "shelf" (My Books - Image 1) vs "reader" (Book reader - Image 2)
+  const [viewMode, setViewMode] = useState<"shelf" | "reader">("shelf");
+
+  // Books State (Fetched from Server)
   const [books, setBooks] = useState<InteractiveBook[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
   const [selectedBook, setSelectedBook] = useState<InteractiveBook | null>(null);
   const [currentPageIndex, setCurrentPageIndex] = useState<number>(0);
-  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [isLoadingBooks, setIsLoadingBooks] = useState<boolean>(true);
+  const [isUploadingZip, setIsUploadingZip] = useState<boolean>(false);
+  const [uploadMessage, setUploadMessage] = useState<string>("");
 
-  // Upload modal state
-  const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadTitle, setUploadTitle] = useState<string>("");
-  const [uploading, setUploading] = useState<boolean>(false);
-  const [uploadProgress, setUploadProgress] = useState<number>(0);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  // Search State in Reader
+  const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
+  const [searchPageInput, setSearchPageInput] = useState<string>("");
 
-  // Edit / Delete modal state
-  const [editingBook, setEditingBook] = useState<InteractiveBook | null>(null);
-  const [editTitle, setEditTitle] = useState<string>("");
-  const [deletingBookId, setDeletingBookId] = useState<string | null>(null);
+  // Info Modal for Book Shelf
+  const [infoBook, setInfoBook] = useState<InteractiveBook | null>(null);
 
-  // Reader state
-  const [zoomLevel, setZoomLevel] = useState<number>(100);
-  const [showMediaDrawer, setShowMediaDrawer] = useState<boolean>(true);
-  const [showThumbnails, setShowThumbnails] = useState<boolean>(false);
-  const [pageFit, setPageFit] = useState<"contain" | "width">("contain");
-
-  // Audio playback state
-  const [currentMedia, setCurrentMedia] = useState<BookPageMedia | null>(null);
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [currentTime, setCurrentTime] = useState<number>(0);
-  const [duration, setDuration] = useState<number>(0);
-  const [playbackRate, setPlaybackRate] = useState<number>(1.0);
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  // Audio Playback State
+  const [activeAudioMedia, setActiveAudioMedia] = useState<BookPageMedia | null>(null);
+  const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
+  const [audioCurrentTime, setAudioCurrentTime] = useState<number>(0);
+  const [audioDuration, setAudioDuration] = useState<number>(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Video Modal State
+  const [activeVideoMedia, setActiveVideoMedia] = useState<BookPageMedia | null>(null);
+
+  // ZIP File Input
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Load books on mount
-  useEffect(() => {
-    loadBooks();
-  }, []);
-
-  const loadBooks = async () => {
-    setLoading(true);
+  // 1. Fetch books from server on mount
+  const fetchBooksFromServer = async () => {
     try {
-      const list = await fetchAllBooks();
-      setBooks(list);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Filter books
-  const filteredBooks = useMemo(() => {
-    if (!searchQuery.trim()) return books;
-    const q = searchQuery.toLowerCase().trim();
-    return books.filter(
-      (b) =>
-        b.title.toLowerCase().includes(q) ||
-        (b.subtitle && b.subtitle.toLowerCase().includes(q)) ||
-        (b.author && b.author.toLowerCase().includes(q))
-    );
-  }, [books, searchQuery]);
-
-  // Current page object
-  const currentPage: BookPage | undefined = selectedBook?.pages?.[currentPageIndex];
-
-  // Media tracks for current page
-  const currentPageMedia = useMemo(() => {
-    if (!selectedBook) return [];
-    const all = selectedBook.allMedia || [];
-    const pageNum = currentPageIndex + 1;
-    return all.filter((m) => m.pageNumber === pageNum);
-  }, [selectedBook, currentPageIndex]);
-
-  // Audio time & event handlers
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
-    const handleLoadedMetadata = () => setDuration(audio.duration || 0);
-    const handleEnded = () => setIsPlaying(false);
-    const handlePlay = () => setIsPlaying(true);
-    const handlePause = () => setIsPlaying(false);
-
-    audio.addEventListener("timeupdate", handleTimeUpdate);
-    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
-    audio.addEventListener("ended", handleEnded);
-    audio.addEventListener("play", handlePlay);
-    audio.addEventListener("pause", handlePause);
-
-    return () => {
-      audio.removeEventListener("timeupdate", handleTimeUpdate);
-      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
-      audio.removeEventListener("ended", handleEnded);
-      audio.removeEventListener("play", handlePlay);
-      audio.removeEventListener("pause", handlePause);
-    };
-  }, []);
-
-  // Sync playback rate
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.playbackRate = playbackRate;
-    }
-  }, [playbackRate]);
-
-  // Sync mute
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.muted = isMuted;
-    }
-  }, [isMuted]);
-
-  // Handle play/pause track
-  const handleTogglePlayMedia = (media: BookPageMedia) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    if (currentMedia?.id === media.id) {
-      if (isPlaying) {
-        audio.pause();
-      } else {
-        audio.play().catch(console.error);
-      }
-    } else {
-      setCurrentMedia(media);
-      audio.src = media.url || "";
-      audio.currentTime = 0;
-      audio.play().catch(console.error);
-    }
-  };
-
-  // Keyboard navigation
-  useEffect(() => {
-    if (!selectedBook) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
-      if (e.key === "ArrowLeft") {
-        // Next page in RTL or previous
-        handleNextPage();
-      } else if (e.key === "ArrowRight") {
-        handlePrevPage();
-      } else if (e.key === " ") {
-        e.preventDefault();
-        if (currentMedia && audioRef.current) {
-          if (isPlaying) audioRef.current.pause();
-          else audioRef.current.play().catch(console.error);
+      setIsLoadingBooks(true);
+      const res = await fetch("/api/books");
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.books)) {
+          setBooks(data.books);
+          if (data.books.length > 0 && !selectedBook) {
+            setSelectedBook(data.books[0]);
+          }
         }
       }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedBook, currentPageIndex, currentMedia, isPlaying]);
-
-  const handlePrevPage = () => {
-    if (currentPageIndex > 0) {
-      setCurrentPageIndex((prev) => prev - 1);
+    } catch (e) {
+      console.error("Failed to fetch books from server:", e);
+    } finally {
+      setIsLoadingBooks(false);
     }
   };
 
-  const handleNextPage = () => {
+  useEffect(() => {
+    fetchBooksFromServer();
+  }, []);
+
+  // Handle ZIP file upload to server
+  const handleZipFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsUploadingZip(true);
+      setUploadMessage("جاري رفع واستخراج الكتاب على السيرفر...");
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/books/upload-zip", {
+        method: "POST",
+        body: formData
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json();
+        throw new Error(errJson.error || "فشل رفع الملف إلى السيرفر");
+      }
+
+      const data = await res.json();
+      if (data.book) {
+        setUploadMessage("تم حفظ الكتاب على السيرفر بنجاح!");
+        await fetchBooksFromServer();
+        setSelectedBook(data.book);
+        setCurrentPageIndex(0);
+        setViewMode("reader");
+      }
+    } catch (err: any) {
+      console.error("ZIP Upload error:", err);
+      alert(err.message || "حدث خطأ أثناء رفع واستخراج الكتاب");
+    } finally {
+      setIsUploadingZip(false);
+      setUploadMessage("");
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  // Open a specific book
+  const handleOpenBook = (book: InteractiveBook) => {
+    setSelectedBook(book);
+    // If book is A1.1, jump to page 186 (index 185) like in the screenshot, or first page
+    if (book.id === "miteinander-a1-1" && book.pages.length >= 186) {
+      setCurrentPageIndex(185);
+    } else {
+      // Find first page with media or page 0
+      const firstWithMedia = book.pages.findIndex((p) => p.media && p.media.length > 0);
+      setCurrentPageIndex(firstWithMedia >= 0 ? firstWithMedia : 0);
+    }
+    setViewMode("reader");
+  };
+
+  // Active, Prev, Next pages for 3-card carousel
+  const activePage: BookPage | null = useMemo(() => {
+    if (!selectedBook || !selectedBook.pages || selectedBook.pages.length === 0) return null;
+    return selectedBook.pages[currentPageIndex] || selectedBook.pages[0];
+  }, [selectedBook, currentPageIndex]);
+
+  const prevPage: BookPage | null = useMemo(() => {
+    if (!selectedBook || currentPageIndex <= 0) return null;
+    return selectedBook.pages[currentPageIndex - 1];
+  }, [selectedBook, currentPageIndex]);
+
+  const nextPage: BookPage | null = useMemo(() => {
+    if (!selectedBook || currentPageIndex >= selectedBook.pages.length - 1) return null;
+    return selectedBook.pages[currentPageIndex + 1];
+  }, [selectedBook, currentPageIndex]);
+
+  // Page navigation
+  const goToNextPage = () => {
     if (selectedBook && currentPageIndex < selectedBook.pages.length - 1) {
       setCurrentPageIndex((prev) => prev + 1);
     }
   };
 
-  // Upload book handler
-  const handleUploadSubmit = async (e: React.FormEvent) => {
+  const goToPrevPage = () => {
+    if (currentPageIndex > 0) {
+      setCurrentPageIndex((prev) => prev - 1);
+    }
+  };
+
+  // Jump to specific page
+  const handleJumpToPage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!uploadFile) {
-      setUploadError("الرجاء اختيار ملف مضغوط (ZIP) للكتاب.");
+    if (!selectedBook) return;
+    const targetNum = parseInt(searchPageInput.trim(), 10);
+    if (!isNaN(targetNum)) {
+      const idx = selectedBook.pages.findIndex((p) => p.pageNumber === targetNum);
+      if (idx >= 0) {
+        setCurrentPageIndex(idx);
+        setIsSearchOpen(false);
+        setSearchPageInput("");
+        return;
+      }
+    }
+    alert(`الصفحة ${searchPageInput} غير موجودة في هذا الكتاب`);
+  };
+
+  // Audio Playback
+  const handlePlayAudio = (media: BookPageMedia) => {
+    if (activeAudioMedia?.id === media.id) {
+      if (isPlayingAudio) {
+        audioRef.current?.pause();
+        setIsPlayingAudio(false);
+      } else {
+        audioRef.current?.play();
+        setIsPlayingAudio(true);
+      }
       return;
     }
 
-    setUploading(true);
-    setUploadProgress(0);
-    setUploadError(null);
+    setActiveAudioMedia(media);
+    setIsPlayingAudio(true);
+  };
 
-    try {
-      const newBook = await uploadBookArchive(uploadFile, uploadTitle, (pct) => {
-        setUploadProgress(pct);
+  useEffect(() => {
+    if (activeAudioMedia && audioRef.current) {
+      const streamUrl = activeAudioMedia.url || `/api/media/stream/${encodeURIComponent(activeAudioMedia.fileName)}`;
+      audioRef.current.src = streamUrl;
+      audioRef.current.play().catch((err) => {
+        console.warn("Audio autoplay blocked or failed:", err);
       });
-
-      setBooks((prev) => [newBook, ...prev]);
-      setShowUploadModal(false);
-      setUploadFile(null);
-      setUploadTitle("");
-      // Open the new book immediately
-      setSelectedBook(newBook);
-      setCurrentPageIndex(0);
-    } catch (err: any) {
-      setUploadError(err.message || "فشل رفع واستخراج الكتاب");
-    } finally {
-      setUploading(false);
+      setIsPlayingAudio(true);
     }
-  };
+  }, [activeAudioMedia]);
 
-  // Delete book handler
-  const handleDeleteBook = async (id: string) => {
-    try {
-      const ok = await deleteBookFromServer(id);
-      if (ok) {
-        setBooks((prev) => prev.filter((b) => b.id !== id));
-        if (selectedBook?.id === id) {
-          setSelectedBook(null);
-        }
+  // Keyboard navigation
+  useEffect(() => {
+    if (viewMode !== "reader") return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft") {
+        goToPrevPage();
+      } else if (e.key === "ArrowRight") {
+        goToNextPage();
+      } else if (e.key === "Escape") {
+        if (activeVideoMedia) setActiveVideoMedia(null);
+        else if (isSearchOpen) setIsSearchOpen(false);
+        else setViewMode("shelf");
       }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setDeletingBookId(null);
-    }
-  };
-
-  // Rename book handler
-  const handleSaveRename = async () => {
-    if (!editingBook || !editTitle.trim()) return;
-    try {
-      const updated = await updateBookMetadata(editingBook.id, { title: editTitle.trim() });
-      if (updated) {
-        setBooks((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
-        if (selectedBook?.id === updated.id) {
-          setSelectedBook(updated);
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setEditingBook(null);
-      setEditTitle("");
-    }
-  };
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [viewMode, currentPageIndex, selectedBook, activeVideoMedia, isSearchOpen]);
 
   // Format seconds to mm:ss
-  const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    return `${m}:${s < 10 ? "0" : ""}${s}`;
+  const formatTime = (seconds: number) => {
+    if (isNaN(seconds) || seconds < 0) return "0:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
   };
 
-  // Send media to Advanced Studio Player
-  const handleSendToStudioPlayer = (media: BookPageMedia) => {
-    if (!onPlayMediaInStudio) return;
-    onPlayMediaInStudio({
-      id: media.id,
-      title: `${selectedBook?.title || "كتاب"} - ${media.title}`,
-      originalName: media.fileName,
-      filename: media.fileName,
-      url: media.url,
-      type: media.type
-    });
-  };
-
-  // ==========================================
-  // VIEW: READER VIEW (WHEN BOOK IS OPEN)
-  // ==========================================
-  if (selectedBook) {
+  // =========================================================================
+  // SCREEN 1: "My Books" (Exact replica of Image 1 / image_2553d493.png)
+  // =========================================================================
+  if (viewMode === "shelf") {
     return (
-      <div className="flex flex-col h-full bg-slate-950 text-slate-100 select-none overflow-hidden" dir="rtl">
-        <audio ref={audioRef} />
-
-        {/* Top Control Bar */}
-        <header className="h-14 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 flex items-center justify-between gap-3 shrink-0 z-30">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => {
-                if (audioRef.current) audioRef.current.pause();
-                setSelectedBook(null);
-                setCurrentMedia(null);
-              }}
-              className="p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-bold"
-              title="العودة لمكتبة الكتب"
-            >
-              <ArrowRight className="w-4 h-4" />
-              <span>مكتبة الكتب</span>
-            </button>
-
-            <div className="h-4 w-px bg-slate-800" />
-
-            <div className="flex flex-col min-w-0 max-w-[220px] sm:max-w-md">
-              <span className="text-xs font-black truncate text-white">{selectedBook.title}</span>
-              <span className="text-[10px] text-slate-400 font-medium">
-                الصفحة {currentPageIndex + 1} من {selectedBook.pages.length}
-              </span>
-            </div>
-          </div>
-
-          {/* Center: Page Jump & Controls */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handlePrevPage}
-              disabled={currentPageIndex <= 0}
-              className={`p-2 rounded-xl transition-all cursor-pointer ${
-                currentPageIndex <= 0
-                  ? "opacity-30 cursor-not-allowed text-slate-600"
-                  : "hover:bg-slate-800 text-slate-300 hover:text-white active:scale-95"
-              }`}
-              title="الصفحة السابقة"
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-1 bg-slate-800/80 px-2.5 py-1 rounded-xl border border-slate-700/60 text-xs font-bold">
-              <input
-                type="number"
-                min={1}
-                max={selectedBook.pages.length}
-                value={currentPageIndex + 1}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  if (!isNaN(val) && val >= 1 && val <= selectedBook.pages.length) {
-                    setCurrentPageIndex(val - 1);
-                  }
-                }}
-                className="w-10 bg-transparent text-center font-extrabold text-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded"
-              />
-              <span className="text-slate-500">/</span>
-              <span className="text-slate-400">{selectedBook.pages.length}</span>
-            </div>
-
-            <button
-              onClick={handleNextPage}
-              disabled={currentPageIndex >= selectedBook.pages.length - 1}
-              className={`p-2 rounded-xl transition-all cursor-pointer ${
-                currentPageIndex >= selectedBook.pages.length - 1
-                  ? "opacity-30 cursor-not-allowed text-slate-600"
-                  : "hover:bg-slate-800 text-slate-300 hover:text-white active:scale-95"
-              }`}
-              title="الصفحة التالية"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* Right Controls: Zoom, Fit, Media Drawer */}
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setZoomLevel((z) => Math.max(50, z - 15))}
-              className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-              title="تصغير"
-            >
-              <ZoomOut className="w-4 h-4" />
-            </button>
-
-            <span className="text-[10px] font-bold text-slate-400 w-9 text-center">{zoomLevel}%</span>
-
-            <button
-              onClick={() => setZoomLevel((z) => Math.min(250, z + 15))}
-              className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-              title="تكبير"
-            >
-              <ZoomIn className="w-4 h-4" />
-            </button>
-
-            <button
-              onClick={() => setPageFit((f) => (f === "contain" ? "width" : "contain"))}
-              className={`p-1.5 rounded-lg transition-colors cursor-pointer text-xs font-bold ${
-                pageFit === "width" ? "bg-blue-600/30 text-blue-400 border border-blue-500/40" : "hover:bg-slate-800 text-slate-400"
-              }`}
-              title={pageFit === "width" ? "ملاءمة الارتفاع" : "ملاءمة العرض"}
-            >
-              <Maximize2 className="w-4 h-4" />
-            </button>
-
-            <div className="h-4 w-px bg-slate-800 mx-1" />
-
-            <button
-              onClick={() => setShowMediaDrawer((d) => !d)}
-              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                showMediaDrawer
-                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-xs"
-                  : "hover:bg-slate-800 text-slate-400"
-              }`}
-              title="مسارات الصوت والوسائط"
-            >
-              <Music className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">المسارات ({selectedBook.allMedia?.length || 0})</span>
-            </button>
-          </div>
+      <div className="w-full min-h-screen bg-white text-gray-900 font-sans select-none pb-16">
+        {/* Top Header */}
+        <header className="w-full px-5 py-4 flex items-center justify-between border-b border-gray-100 bg-white sticky top-0 z-10">
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">My Books</h1>
+          <button
+            type="button"
+            className="p-1.5 text-gray-800 hover:text-black transition"
+            title="Edit Books"
+          >
+            <Pencil className="w-6 h-6 stroke-[2]" />
+          </button>
         </header>
 
-        {/* Main Body */}
-        <div className="flex-1 flex overflow-hidden relative">
-          {/* Page Image Display Viewport */}
-          <div className="flex-1 overflow-auto bg-slate-950 flex items-center justify-center p-4 relative">
-            {currentPage && currentPage.pageImage ? (
-              <div
-                className="transition-transform duration-200 ease-out shadow-2xl rounded-lg overflow-hidden border border-slate-800/80 bg-white"
-                style={{
-                  transform: `scale(${zoomLevel / 100})`,
-                  transformOrigin: "center center",
-                  maxHeight: pageFit === "contain" ? "calc(100vh - 170px)" : undefined,
-                  maxWidth: pageFit === "width" ? "100%" : undefined
-                }}
-              >
-                <img
-                  src={currentPage.pageImage}
-                  alt={`صفحة ${currentPageIndex + 1}`}
-                  className={`block select-none pointer-events-auto ${
-                    pageFit === "contain" ? "max-h-[calc(100vh-170px)] object-contain" : "w-full object-contain"
-                  }`}
-                  loading="eager"
-                />
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center p-8 text-center bg-slate-900/60 rounded-3xl border border-slate-800 max-w-md">
-                <BookOpen className="w-16 h-16 text-slate-700 mb-3" />
-                <h4 className="text-base font-black text-slate-200 mb-1">لا توجد صورة لهذه الصفحة</h4>
-                <p className="text-xs text-slate-500">
-                  يمكنك الاستماع للمسارات الصوتية المصاحبة للكتاب من اللائحة الجانبية.
-                </p>
-              </div>
-            )}
+        {/* Hidden File Input for ZIP Upload */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleZipFileSelected}
+          accept=".zip,application/zip"
+          className="hidden"
+        />
 
-            {/* Quick floating on-page audio badges if this page has audio */}
-            {currentPageMedia.length > 0 && (
-              <div className="absolute top-6 right-6 flex flex-col gap-2 z-20">
-                {currentPageMedia.map((m) => {
-                  const isCurrent = currentMedia?.id === m.id;
-                  return (
-                    <button
-                      key={m.id}
-                      onClick={() => handleTogglePlayMedia(m)}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-2xl backdrop-blur-md border text-xs font-black shadow-lg transition-all cursor-pointer ${
-                        isCurrent && isPlaying
-                          ? "bg-amber-500 text-slate-950 border-amber-400 scale-105"
-                          : "bg-slate-900/90 hover:bg-slate-800 text-amber-400 border-amber-500/40"
-                      }`}
-                    >
-                      {isCurrent && isPlaying ? (
-                        <Pause className="w-3.5 h-3.5 fill-current" />
-                      ) : (
-                        <Play className="w-3.5 h-3.5 fill-current" />
-                      )}
-                      <span>{m.title}</span>
-                      {m.trackNumber && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-black/20">#{m.trackNumber}</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+        {/* Add Book Row */}
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          className="w-full px-5 py-5 flex items-center gap-5 cursor-pointer hover:bg-gray-50/70 transition border-b border-gray-100"
+        >
+          {/* Blue Viewfinder Card */}
+          <div className="w-32 h-32 rounded-2xl bg-[#007aff] flex items-center justify-center text-white shadow-sm flex-shrink-0">
+            {isUploadingZip ? (
+              <Loader2 className="w-12 h-12 animate-spin text-white" />
+            ) : (
+              <svg
+                className="w-14 h-14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                {/* 4 Viewfinder Corners */}
+                <path d="M4 8V5a1 1 0 0 1 1-1h3" />
+                <path d="M16 4h3a1 1 0 0 1 1 1v3" />
+                <path d="M20 16v3a1 1 0 0 1-1 1h-3" />
+                <path d="M8 20H5a1 1 0 0 1-1-1v-3" />
+                {/* Plus in Center */}
+                <line x1="12" y1="8" x2="12" y2="16" />
+                <line x1="8" y1="12" x2="16" y2="12" />
+              </svg>
             )}
           </div>
 
-          {/* Right/Left Drawer: Media Tracks Explorer */}
-          {showMediaDrawer && (
-            <aside className="w-80 sm:w-96 bg-slate-900/95 border-r border-slate-800 flex flex-col shrink-0 z-20">
-              <div className="p-3.5 border-b border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Music className="w-4 h-4 text-amber-400" />
-                  <span className="text-xs font-black text-white">المسارات التفاعلية</span>
-                  <span className="text-[10px] font-bold bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/30">
-                    {selectedBook.allMedia?.length || 0} مقطع
-                  </span>
+          <div className="flex flex-col">
+            <span className="text-[#007aff] font-semibold text-lg">Add Book</span>
+            {isUploadingZip && (
+              <span className="text-xs text-gray-500 mt-1">{uploadMessage}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Books List */}
+        <div className="w-full divide-y divide-gray-100">
+          {isLoadingBooks ? (
+            <div className="py-16 flex flex-col items-center justify-center text-gray-400 gap-3">
+              <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+              <span className="text-sm">جاري تحميل الكتب من السيرفر...</span>
+            </div>
+          ) : (
+            books.map((book) => (
+              <div
+                key={book.id}
+                onClick={() => handleOpenBook(book)}
+                className="w-full px-5 py-3.5 flex items-center cursor-pointer hover:bg-gray-50/70 transition"
+              >
+                {/* Cover Thumbnail */}
+                <div className="w-20 h-28 bg-gray-100 rounded overflow-hidden flex-shrink-0 shadow-sm border border-gray-100 flex items-center justify-center">
+                  <img
+                    src={book.coverImage || "/assets/aistudio/cover_a1_1.png"}
+                    alt={book.title}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = "/assets/aistudio/cover_a1_1.png";
+                    }}
+                  />
                 </div>
 
-                <button
-                  onClick={() => setShowMediaDrawer(false)}
-                  className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                {/* Details */}
+                <div className="flex-1 ml-4 pr-2 min-w-0">
+                  <h2 className="text-base font-bold text-gray-900 leading-snug truncate">
+                    {book.title}
+                  </h2>
+                  <p className="text-sm text-gray-400 mt-0.5 truncate">
+                    {book.subtitle || "Kurs- und Arbeitsbuch"}
+                  </p>
+                </div>
+
+                {/* Right Column: Chevron & Info */}
+                <div className="flex flex-col items-end justify-between h-24 flex-shrink-0 pl-2">
+                  <ChevronRight className="w-6 h-6 text-gray-300 stroke-[1.5]" />
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setInfoBook(book);
+                    }}
+                    className="p-1 text-gray-400 hover:text-gray-600 transition"
+                    title="معلومات الكتاب"
+                  >
+                    <Info className="w-5 h-5 stroke-[1.75]" />
+                  </button>
+                </div>
               </div>
-
-              {/* Media list */}
-              <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                {(!selectedBook.allMedia || selectedBook.allMedia.length === 0) ? (
-                  <div className="text-center py-12 text-slate-500 text-xs">
-                    لا توجد مسارات صوتية أو مرئية مفهرسة في هذا الكتاب.
-                  </div>
-                ) : (
-                  selectedBook.allMedia.map((m, idx) => {
-                    const isCurrent = currentMedia?.id === m.id;
-                    const isForThisPage = m.pageNumber === currentPageIndex + 1;
-
-                    return (
-                      <div
-                        key={m.id || idx}
-                        className={`p-3 rounded-2xl border transition-all flex flex-col gap-2 ${
-                          isCurrent
-                            ? "bg-amber-500/10 border-amber-500/60 shadow-xs"
-                            : isForThisPage
-                            ? "bg-slate-800/80 border-slate-700"
-                            : "bg-slate-900/60 hover:bg-slate-800/50 border-slate-800/80"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <button
-                              onClick={() => handleTogglePlayMedia(m)}
-                              className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 cursor-pointer transition-all ${
-                                isCurrent && isPlaying
-                                  ? "bg-amber-500 text-slate-950 scale-105"
-                                  : "bg-slate-800 hover:bg-amber-500 hover:text-slate-900 text-amber-400"
-                              }`}
-                            >
-                              {isCurrent && isPlaying ? (
-                                <Pause className="w-3.5 h-3.5 fill-current" />
-                              ) : (
-                                <Play className="w-3.5 h-3.5 fill-current mr-0.5" />
-                              )}
-                            </button>
-
-                            <div className="flex flex-col min-w-0">
-                              <span className="text-xs font-black truncate text-slate-200">{m.title}</span>
-                              <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                                {m.trackNumber && <span>مسار #{m.trackNumber}</span>}
-                                {m.pageNumber && (
-                                  <button
-                                    onClick={() => setCurrentPageIndex((m.pageNumber || 1) - 1)}
-                                    className="text-blue-400 hover:underline font-bold"
-                                  >
-                                    ص {m.pageNumber}
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Action to send to Studio Player */}
-                          {onPlayMediaInStudio && (
-                            <button
-                              onClick={() => handleSendToStudioPlayer(m)}
-                              className="px-2 py-1 rounded-lg bg-blue-500/15 hover:bg-blue-500 text-blue-400 hover:text-white border border-blue-500/30 text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1 shrink-0"
-                              title="فتح المقطع في استوديو المشغل المتقدم للتكرار والترجمة"
-                            >
-                              <ExternalLink className="w-3 h-3" />
-                              <span>استوديو</span>
-                            </button>
-                          )}
-                        </div>
-
-                        {/* If this is the active media, show miniature scrubber */}
-                        {isCurrent && (
-                          <div className="pt-2 border-t border-amber-500/20 flex flex-col gap-1.5">
-                            <input
-                              type="range"
-                              min={0}
-                              max={duration || 100}
-                              value={currentTime}
-                              onChange={(e) => {
-                                const newTime = parseFloat(e.target.value);
-                                setCurrentTime(newTime);
-                                if (audioRef.current) audioRef.current.currentTime = newTime;
-                              }}
-                              className="w-full h-1.5 bg-slate-700 accent-amber-500 rounded-lg cursor-pointer"
-                            />
-                            <div className="flex justify-between items-center text-[10px] font-bold text-amber-400/80">
-                              <span>{formatTime(currentTime)}</span>
-                              <span>{formatTime(duration)}</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </aside>
+            ))
           )}
         </div>
 
-        {/* Bottom Audio Player Bar (when audio is active) */}
-        {currentMedia && (
-          <footer className="h-16 bg-slate-900 border-t border-slate-800 px-4 flex items-center justify-between gap-4 shrink-0 z-30">
-            <div className="flex items-center gap-3 min-w-0 max-w-xs">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0 text-amber-400">
-                <Music className="w-5 h-5" />
-              </div>
-              <div className="flex flex-col min-w-0">
-                <span className="text-xs font-black truncate text-white">{currentMedia.title}</span>
-                <span className="text-[10px] text-slate-400 font-medium truncate">
-                  {currentMedia.trackNumber ? `مسار #${currentMedia.trackNumber}` : currentMedia.fileName}
-                </span>
-              </div>
-            </div>
-
-            {/* Center: Transport Controls & Scrubber */}
-            <div className="flex-1 max-w-xl flex flex-col items-center gap-1">
-              <div className="flex items-center gap-3">
+        {/* Info Modal */}
+        {infoBook && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl">
+              <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+                <h3 className="font-bold text-lg text-gray-900">{infoBook.title}</h3>
                 <button
-                  onClick={() => {
-                    if (audioRef.current) audioRef.current.currentTime = Math.max(0, currentTime - 5);
-                  }}
-                  className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-                  title="تراجع 5 ثواني"
+                  type="button"
+                  onClick={() => setInfoBook(null)}
+                  className="p-1 text-gray-400 hover:text-gray-600 rounded-full"
                 >
-                  <RotateCcw className="w-4 h-4" />
+                  <X className="w-5 h-5" />
                 </button>
-
-                <button
-                  onClick={() => handleTogglePlayMedia(currentMedia)}
-                  className="w-9 h-9 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center justify-center font-bold shadow-md active:scale-95 transition-all cursor-pointer"
-                >
-                  {isPlaying ? (
-                    <Pause className="w-4 h-4 fill-current" />
-                  ) : (
-                    <Play className="w-4 h-4 fill-current mr-0.5" />
-                  )}
-                </button>
-
-                <div className="flex items-center gap-1 bg-slate-800 px-2 py-0.5 rounded-lg text-[10px] font-bold text-slate-300">
-                  {[0.75, 1.0, 1.25].map((rate) => (
-                    <button
-                      key={rate}
-                      onClick={() => setPlaybackRate(rate)}
-                      className={`px-1.5 py-0.5 rounded transition-colors ${
-                        playbackRate === rate ? "bg-amber-500 text-slate-950 font-black" : "hover:text-white"
-                      }`}
-                    >
-                      {rate}x
-                    </button>
-                  ))}
-                </div>
               </div>
-
-              <div className="w-full flex items-center gap-2">
-                <span className="text-[10px] text-slate-400 w-8 text-left">{formatTime(currentTime)}</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={duration || 100}
-                  value={currentTime}
-                  onChange={(e) => {
-                    const newTime = parseFloat(e.target.value);
-                    setCurrentTime(newTime);
-                    if (audioRef.current) audioRef.current.currentTime = newTime;
-                  }}
-                  className="flex-1 h-1.5 bg-slate-700 accent-amber-500 rounded-lg cursor-pointer"
-                />
-                <span className="text-[10px] text-slate-400 w-8 text-right">{formatTime(duration)}</span>
+              <div className="mt-4 space-y-2 text-sm text-gray-600">
+                <p>
+                  <strong className="text-gray-800">الناشر:</strong> {infoBook.author || "Hueber Verlag"}
+                </p>
+                <p>
+                  <strong className="text-gray-800">العنوان الفرعي:</strong>{" "}
+                  {infoBook.subtitle || "Kurs- und Arbeitsbuch"}
+                </p>
+                <p>
+                  <strong className="text-gray-800">إجمالي الصفحات:</strong>{" "}
+                  {infoBook.totalPages || infoBook.pages?.length || 0}
+                </p>
+                <p>
+                  <strong className="text-gray-800">مكان الحفظ:</strong> سيرفر النظام (Express Server)
+                </p>
               </div>
-            </div>
-
-            {/* Right: Volume & Studio Player Link */}
-            <div className="flex items-center gap-2">
               <button
-                onClick={() => setIsMuted((m) => !m)}
-                className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+                type="button"
+                onClick={() => {
+                  const b = infoBook;
+                  setInfoBook(null);
+                  handleOpenBook(b);
+                }}
+                className="w-full mt-6 py-2.5 bg-[#007aff] text-white rounded-xl font-medium hover:bg-blue-600 transition"
               >
-                {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                فتح الكتاب
               </button>
-
-              {onPlayMediaInStudio && (
-                <button
-                  onClick={() => handleSendToStudioPlayer(currentMedia)}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>فتح في مشغل الاستوديو</span>
-                </button>
-              )}
             </div>
-          </footer>
+          </div>
         )}
       </div>
     );
   }
 
-  // ==========================================
-  // VIEW: BOOKS LIBRARY VIEW
-  // ==========================================
+  // =========================================================================
+  // SCREEN 2: "Book" Reader (Exact replica of Image 2 / image_9ed8165c.png)
+  // =========================================================================
+  const currentPageMedia: BookPageMedia[] = activePage?.media || [];
+
   return (
-    <div className="flex-1 flex flex-col bg-slate-50 dark:bg-slate-950 p-4 sm:p-6 overflow-y-auto select-none" dir="rtl">
-      {/* Header */}
-      <div className="max-w-7xl mx-auto w-full mb-6">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 pb-5 border-b border-slate-200 dark:border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-600 dark:text-amber-400 shadow-xs">
-              <BookOpen className="w-6 h-6 stroke-[2.2]" />
-            </div>
-            <div>
-              <h2 className="text-xl font-black text-slate-900 dark:text-white">الكتب الرقمية التفاعلية</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                تصفح الكتب الدراسية مع المقاطع الصوتية والمرئية المصاحبة لكل صفحة
-              </p>
-            </div>
-          </div>
+    <div className="w-full min-h-screen bg-white text-gray-900 font-sans select-none flex flex-col pb-24">
+      {/* Audio Element */}
+      <audio
+        ref={audioRef}
+        onTimeUpdate={() => {
+          if (audioRef.current) {
+            setAudioCurrentTime(audioRef.current.currentTime);
+          }
+        }}
+        onLoadedMetadata={() => {
+          if (audioRef.current) {
+            setAudioDuration(audioRef.current.duration);
+          }
+        }}
+        onEnded={() => setIsPlayingAudio(false)}
+      />
 
-          <div className="flex items-center gap-2.5">
-            {onBackToMediaExplorer && (
-              <button
-                onClick={onBackToMediaExplorer}
-                className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
-              >
-                <ArrowRight className="w-4 h-4" />
-                <span>مستعرض الوسائط</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => {
-                setUploadError(null);
-                setUploadProgress(0);
-                setShowUploadModal(true);
-              }}
-              className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 font-black text-xs transition-all flex items-center gap-2 cursor-pointer shadow-md"
-            >
-              <Upload className="w-4 h-4 stroke-[2.5]" />
-              <span>إضافة كتاب تفاعلي (ZIP)</span>
-            </button>
-          </div>
+      {/* Top Header */}
+      <header className="w-full px-4 py-3 flex items-center justify-between border-b border-gray-100 bg-white sticky top-0 z-20">
+        <div className="flex items-center">
+          <button
+            type="button"
+            onClick={() => {
+              if (audioRef.current) {
+                audioRef.current.pause();
+                setIsPlayingAudio(false);
+              }
+              setViewMode("shelf");
+            }}
+            className="p-1.5 -ml-1.5 text-gray-900 hover:text-black transition"
+            title="Back to My Books"
+          >
+            <ArrowLeft className="w-6 h-6 stroke-[2]" />
+          </button>
+          <span className="text-xl font-bold text-gray-900 ml-2">Book</span>
         </div>
 
-        {/* Search Bar */}
-        <div className="mt-4 flex items-center gap-3">
-          <div className="relative flex-1 max-w-md">
-            <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="البحث في الكتب التفاعلية..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl pr-10 pl-4 py-2 text-xs font-bold text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-            />
-          </div>
-          <span className="text-xs font-bold text-slate-400">
-            {filteredBooks.length} {filteredBooks.length === 1 ? "كتاب" : "كتب"}
-          </span>
-        </div>
+        <button
+          type="button"
+          onClick={() => setIsSearchOpen(!isSearchOpen)}
+          className="p-1.5 text-gray-900 hover:text-black transition"
+          title="Search / Jump to Page"
+        >
+          <Search className="w-6 h-6 stroke-[2]" />
+        </button>
+      </header>
+
+      {/* Search Input Bar (Expandable) */}
+      {isSearchOpen && (
+        <form
+          onSubmit={handleJumpToPage}
+          className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex items-center gap-2"
+        >
+          <input
+            type="number"
+            min={1}
+            max={selectedBook?.totalPages || 250}
+            value={searchPageInput}
+            onChange={(e) => setSearchPageInput(e.target.value)}
+            placeholder="أدخل رقم الصفحة (مثلاً: 186)..."
+            className="flex-1 px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+            autoFocus
+          />
+          <button
+            type="submit"
+            className="px-4 py-1.5 bg-[#007aff] text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition"
+          >
+            انتقال
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsSearchOpen(false)}
+            className="p-1.5 text-gray-400 hover:text-gray-600"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </form>
+      )}
+
+      {/* Book Title Centered */}
+      <div className="w-full text-center py-3">
+        <h2 className="text-base font-normal text-gray-800 tracking-tight">
+          {selectedBook?.title || "Miteinander! A1.1 KB+AB"}
+        </h2>
       </div>
 
-      {/* Books Grid */}
-      <div className="max-w-7xl mx-auto w-full flex-1">
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-20">
-            <div className="w-10 h-10 border-3 border-amber-500 border-t-transparent rounded-full animate-spin mb-3" />
-            <span className="text-xs font-bold text-slate-500">جاري تحميل مكتبة الكتب...</span>
-          </div>
-        ) : filteredBooks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-8 shadow-xs">
-            <div className="w-16 h-16 rounded-3xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500 mb-4">
-              <BookOpen className="w-8 h-8" />
-            </div>
-            <h3 className="text-base font-black text-slate-800 dark:text-slate-200 mb-1">
-              لا توجد كتب رقمية مضافة حتى الآن
-            </h3>
-            <p className="text-xs text-slate-500 max-w-md mb-6 leading-relaxed">
-              قم برفع كتابك الدراسي بصيغة ملف مضغوط (ZIP) يحتوي على صور الصفحات ومسارات الاستماع (MP3)، وسيتم استخراجه وفهرسته تفاعلياً تلقائياً!
-            </p>
-            <button
-              onClick={() => {
-                setUploadError(null);
-                setUploadProgress(0);
-                setShowUploadModal(true);
+      {/* 3-Card Carousel */}
+      <div className="w-full flex items-center justify-center overflow-hidden py-2 px-2 relative min-h-[300px]">
+        {/* Previous Page Card (Faded on Left) */}
+        <div
+          onClick={goToPrevPage}
+          className={`w-1/3 max-w-[210px] aspect-[3/4] bg-white rounded-sm shadow border border-gray-100 flex items-center justify-center overflow-hidden cursor-pointer transform scale-[0.88] opacity-80 hover:opacity-100 transition-all duration-200 -mr-4 ${
+            !prevPage ? "invisible" : ""
+          }`}
+          title={prevPage ? `الصفحة السابقة ${prevPage.pageNumber}` : ""}
+        >
+          {prevPage && (
+            <img
+              src={prevPage.pageImage || "/assets/aistudio/image_629fa44a.png"}
+              alt={`Page ${prevPage.pageNumber}`}
+              className="w-full h-full object-cover object-top"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = "/assets/aistudio/image_629fa44a.png";
               }}
-              className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs transition-all flex items-center gap-2 cursor-pointer shadow-md"
-            >
-              <Upload className="w-4 h-4 stroke-[2.5]" />
-              <span>رفع كتاب جديد الآن</span>
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-            {filteredBooks.map((book) => (
-              <div
-                key={book.id}
-                className="group bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 overflow-hidden shadow-xs hover:shadow-lg transition-all flex flex-col justify-between"
-              >
-                {/* Book Cover Area */}
-                <div
-                  onClick={() => {
-                    setSelectedBook(book);
-                    setCurrentPageIndex(0);
-                  }}
-                  className="aspect-[4/3] bg-slate-100 dark:bg-slate-800 relative cursor-pointer overflow-hidden flex items-center justify-center"
-                >
-                  {book.coverImage ? (
-                    <img
-                      src={book.coverImage}
-                      alt={book.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                  ) : (
-                    <BookOpen className="w-12 h-12 text-slate-400 group-hover:scale-110 transition-transform" />
-                  )}
+            />
+          )}
+        </div>
 
-                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3.5">
-                    <span className="text-xs font-black text-white flex items-center gap-1.5">
-                      <span>فتح وقراءة الكتاب</span>
-                      <ArrowRight className="w-3.5 h-3.5 rotate-180" />
-                    </span>
-                  </div>
+        {/* Center Active Page Card */}
+        <div className="w-1/2 max-w-[280px] sm:max-w-[320px] aspect-[3/4] bg-white rounded-sm shadow-md border border-gray-200 z-10 flex items-center justify-center overflow-hidden transition-all duration-200">
+          {activePage ? (
+            <img
+              src={activePage.pageImage || "/assets/aistudio/image_629fa44a.png"}
+              alt={`Page ${activePage.pageNumber}`}
+              className="w-full h-full object-cover object-top"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = "/assets/aistudio/image_629fa44a.png";
+              }}
+            />
+          ) : (
+            <div className="text-gray-300 text-sm">جاري التحميل...</div>
+          )}
+        </div>
 
-                  <span className="absolute top-3 right-3 bg-slate-900/80 backdrop-blur-md text-white text-[10px] font-black px-2.5 py-1 rounded-xl border border-slate-700/60 shadow-xs">
-                    {book.totalPages} صفحة
-                  </span>
-                </div>
+        {/* Next Page Card (Faded on Right) */}
+        <div
+          onClick={goToNextPage}
+          className={`w-1/3 max-w-[210px] aspect-[3/4] bg-white rounded-sm shadow border border-gray-100 flex items-center justify-center overflow-hidden cursor-pointer transform scale-[0.88] opacity-80 hover:opacity-100 transition-all duration-200 -ml-4 ${
+            !nextPage ? "invisible" : ""
+          }`}
+          title={nextPage ? `الصفحة التالية ${nextPage.pageNumber}` : ""}
+        >
+          {nextPage && (
+            <img
+              src={nextPage.pageImage || "/assets/aistudio/image_629fa44a.png"}
+              alt={`Page ${nextPage.pageNumber}`}
+              className="w-full h-full object-cover object-top"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = "/assets/aistudio/image_629fa44a.png";
+              }}
+            />
+          )}
+        </div>
 
-                {/* Book Info */}
-                <div className="p-4 flex-1 flex flex-col justify-between">
-                  <div>
-                    <h4 className="font-black text-sm text-slate-900 dark:text-white truncate mb-1">
-                      {book.title}
-                    </h4>
-                    {book.subtitle && (
-                      <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1 mb-2 font-medium">
-                        {book.subtitle}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-600 dark:text-amber-400">
-                      <Music className="w-3.5 h-3.5" />
-                      <span>{book.allMedia?.length || 0} مسار صوتي</span>
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditingBook(book);
-                          setEditTitle(book.title);
-                        }}
-                        className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg transition-colors cursor-pointer"
-                        title="تعديل اسم الكتاب"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeletingBookId(book.id);
-                        }}
-                        className="p-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
-                        title="حذف الكتاب"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+        {/* Left / Right Chevron Click Helpers for Mobile & Desktop */}
+        {prevPage && (
+          <button
+            type="button"
+            onClick={goToPrevPage}
+            className="absolute left-2 p-2 rounded-full bg-white/80 shadow text-gray-700 hover:bg-white z-20"
+            title="الصفحة السابقة"
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+        )}
+        {nextPage && (
+          <button
+            type="button"
+            onClick={goToNextPage}
+            className="absolute right-2 p-2 rounded-full bg-white/80 shadow text-gray-700 hover:bg-white z-20"
+            title="الصفحة التالية"
+          >
+            <ChevronRight className="w-5 h-5" />
+          </button>
         )}
       </div>
 
-      {/* ========================================== */}
-      {/* MODAL: UPLOAD INTERACTIVE BOOK (ZIP) */}
-      {/* ========================================== */}
-      {showUploadModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs select-none">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl relative">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800 mb-4">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-500">
-                  <Upload className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-slate-900 dark:text-white">إضافة كتاب تفاعلي</h3>
-                  <p className="text-[11px] text-slate-500">رفع واستخراج حزمة الكتاب الرقمي (ZIP)</p>
-                </div>
-              </div>
+      {/* Page Number Indicator */}
+      <div className="w-full text-center py-2">
+        <span className="text-gray-400 text-sm font-normal">
+          {activePage?.pageNumber || currentPageIndex + 1}
+        </span>
+      </div>
 
-              {!uploading && (
-                <button
-                  onClick={() => setShowUploadModal(false)}
-                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-xl transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+      {/* Divider */}
+      <div className="w-full border-t border-gray-200 mt-1" />
+
+      {/* Media Rows Exclusively for this Page */}
+      <div className="w-full divide-y divide-gray-100 flex-1">
+        {currentPageMedia.length === 0 ? (
+          <div className="py-12 text-center text-gray-300 text-sm">
+            لا توجد تسجيلات صوتية أو فيديو حصرية لهذه الصفحة
+          </div>
+        ) : (
+          currentPageMedia.map((m) => {
+            const isThisAudioPlaying = isPlayingAudio && activeAudioMedia?.id === m.id;
+
+            return (
+              <div
+                key={m.id}
+                className="w-full px-5 py-4 flex items-center justify-between hover:bg-gray-50/60 transition"
+              >
+                {/* Media Details */}
+                <div className="flex-1 pr-4 min-w-0">
+                  <div className="text-base font-normal text-gray-900 leading-snug truncate">
+                    {m.title}
+                  </div>
+                  <div className="text-sm text-gray-400 mt-0.5 capitalize">
+                    {m.type === "video" ? "Video" : "Audio"}
+                  </div>
+                </div>
+
+                {/* Right Action Button */}
+                {m.type === "video" ? (
+                  <button
+                    type="button"
+                    onClick={() => setActiveVideoMedia(m)}
+                    className="p-1 text-[#007aff] hover:opacity-80 transition flex-shrink-0"
+                    title="تشغيل الفيديو"
+                  >
+                    {/* Solid Blue Camera Icon matching screenshot */}
+                    <div className="w-7 h-7 flex items-center justify-center">
+                      <svg
+                        className="w-6 h-6 text-[#007aff] fill-[#007aff]"
+                        viewBox="0 0 24 24"
+                      >
+                        <path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14v-4z" />
+                        <rect x="3" y="6" width="12" height="12" rx="2" />
+                      </svg>
+                    </div>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handlePlayAudio(m)}
+                    className="p-1 text-[#007aff] hover:opacity-80 transition flex-shrink-0"
+                    title={isThisAudioPlaying ? "إيقاف مؤقت" : "تشغيل الصوت"}
+                  >
+                    {/* Solid Blue Triangle Play Icon matching screenshot */}
+                    <div className="w-7 h-7 flex items-center justify-center">
+                      {isThisAudioPlaying ? (
+                        <Pause className="w-5 h-5 text-[#007aff] fill-[#007aff]" />
+                      ) : (
+                        <svg
+                          className="w-5 h-5 text-[#007aff] fill-[#007aff]"
+                          viewBox="0 0 24 24"
+                        >
+                          <polygon points="5 3 19 12 5 21 5 3" />
+                        </svg>
+                      )}
+                    </div>
+                  </button>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Floating Bottom Audio Player Bar */}
+      {activeAudioMedia && (
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-3 shadow-lg z-30 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (isPlayingAudio) {
+                  audioRef.current?.pause();
+                  setIsPlayingAudio(false);
+                } else {
+                  audioRef.current?.play();
+                  setIsPlayingAudio(true);
+                }
+              }}
+              className="w-10 h-10 rounded-full bg-[#007aff] text-white flex items-center justify-center hover:bg-blue-600 transition flex-shrink-0 shadow-sm"
+            >
+              {isPlayingAudio ? (
+                <Pause className="w-5 h-5 fill-white" />
+              ) : (
+                <Play className="w-5 h-5 fill-white ml-0.5" />
               )}
-            </div>
+            </button>
 
-            <form onSubmit={handleUploadSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  عنوان الكتاب (اختياري)
-                </label>
-                <input
-                  type="text"
-                  placeholder="مثال: Schritte International Neu 1"
-                  value={uploadTitle}
-                  onChange={(e) => setUploadTitle(e.target.value)}
-                  disabled={uploading}
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-                />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-gray-900 truncate">
+                {activeAudioMedia.title}
               </div>
-
-              {/* Drag & Drop File Area */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  ملف الكتاب المضغوط (ZIP Archive)
-                </label>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-xs text-gray-400 font-mono">
+                  {formatTime(audioCurrentTime)}
+                </span>
                 <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".zip,application/zip"
+                  type="range"
+                  min={0}
+                  max={audioDuration || 100}
+                  value={audioCurrentTime}
                   onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) {
-                      setUploadFile(f);
-                      if (!uploadTitle.trim()) {
-                        const base = f.name.replace(/\.zip$/i, "").replace(/[_-]/g, " ");
-                        setUploadTitle(base);
-                      }
-                    }
+                    const time = parseFloat(e.target.value);
+                    setAudioCurrentTime(time);
+                    if (audioRef.current) audioRef.current.currentTime = time;
                   }}
-                  className="hidden"
+                  className="flex-1 h-1.5 bg-gray-200 rounded-lg accent-[#007aff] cursor-pointer"
                 />
-
-                <div
-                  onClick={() => !uploading && fileInputRef.current?.click()}
-                  className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer ${
-                    uploadFile
-                      ? "border-amber-500 bg-amber-50/50 dark:bg-amber-950/20"
-                      : "border-slate-300 dark:border-slate-700 hover:border-amber-500 hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                  }`}
-                >
-                  <BookOpen className="w-10 h-10 text-amber-500 mx-auto mb-2" />
-                  {uploadFile ? (
-                    <div>
-                      <span className="text-xs font-black text-slate-900 dark:text-white block truncate">
-                        {uploadFile.name}
-                      </span>
-                      <span className="text-[11px] text-slate-500">
-                        ({(uploadFile.size / (1024 * 1024)).toFixed(1)} ميجابايت)
-                      </span>
-                    </div>
-                  ) : (
-                    <div>
-                      <span className="text-xs font-black text-slate-700 dark:text-slate-300 block mb-1">
-                        انقر لاختيار ملف الـ ZIP أو اسحبه هنا
-                      </span>
-                      <span className="text-[10px] text-slate-400">
-                        يدعم حزم الكتب الرقمية التفاعلية مع ملفات الصوت والصور
-                      </span>
-                    </div>
-                  )}
-                </div>
+                <span className="text-xs text-gray-400 font-mono">
+                  {formatTime(audioDuration)}
+                </span>
               </div>
-
-              {/* Progress indicator */}
-              {uploading && (
-                <div className="space-y-1.5 pt-2">
-                  <div className="flex justify-between items-center text-xs font-bold">
-                    <span className="text-slate-600 dark:text-slate-300">
-                      {uploadProgress < 100 ? "جاري رفع الملف للسيرفر..." : "جاري فك الضغط وفهرسة الصفحات والوسائط..."}
-                    </span>
-                    <span className="text-amber-500 font-black">{uploadProgress}%</span>
-                  </div>
-                  <div className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-amber-500 transition-all duration-200 rounded-full"
-                      style={{ width: `${uploadProgress}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Error banner */}
-              {uploadError && (
-                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span className="flex-1">{uploadError}</span>
-                </div>
-              )}
-
-              <div className="pt-2 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowUploadModal(false)}
-                  disabled={uploading}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                >
-                  إلغاء
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={uploading || !uploadFile}
-                  className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer shadow-md ${
-                    uploading || !uploadFile
-                      ? "opacity-40 cursor-not-allowed bg-slate-300 dark:bg-slate-700 text-slate-500"
-                      : "bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950"
-                  }`}
-                >
-                  {uploading ? (
-                    <>
-                      <div className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                      <span>جاري المعالجة...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="w-4 h-4 stroke-[2.5]" />
-                      <span>بدء الرفع والاستخراج</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
+            </div>
           </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (audioRef.current) {
+                audioRef.current.pause();
+                setIsPlayingAudio(false);
+              }
+              setActiveAudioMedia(null);
+            }}
+            className="p-1.5 text-gray-400 hover:text-gray-600 rounded-full flex-shrink-0"
+            title="إغلاق المشغل"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
       )}
 
-      {/* MODAL: DELETE CONFIRMATION */}
-      {deletingBookId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs select-none">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center">
-            <div className="w-12 h-12 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-500 mx-auto mb-3">
-              <Trash2 className="w-6 h-6" />
-            </div>
-            <h3 className="text-base font-black text-slate-900 dark:text-white mb-1">حذف الكتاب التفاعلي؟</h3>
-            <p className="text-xs text-slate-500 mb-5">
-              سيتم حذف الكتاب وجميع ملفات الصفحات والمسارات الصوتية التابعة له من السيرفر نهائياً.
-            </p>
-            <div className="flex items-center justify-center gap-2">
+      {/* Video Modal Player */}
+      {activeVideoMedia && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4">
+          <div className="bg-black rounded-2xl overflow-hidden max-w-2xl w-full shadow-2xl relative flex flex-col">
+            {/* Modal Header */}
+            <div className="p-4 bg-gray-900/90 flex items-center justify-between text-white border-b border-gray-800">
+              <span className="font-medium text-sm truncate pr-2">
+                {activeVideoMedia.title}
+              </span>
               <button
-                onClick={() => setDeletingBookId(null)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                type="button"
+                onClick={() => setActiveVideoMedia(null)}
+                className="p-1 text-gray-400 hover:text-white rounded-full transition"
               >
-                تراجع
-              </button>
-              <button
-                onClick={() => handleDeleteBook(deletingBookId)}
-                className="px-5 py-2 rounded-xl text-xs font-black bg-rose-600 hover:bg-rose-700 text-white transition-all cursor-pointer shadow-md"
-              >
-                تأكيد الحذف
+                <X className="w-5 h-5" />
               </button>
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* MODAL: RENAME BOOK */}
-      {editingBook && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs select-none">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl">
-            <h3 className="text-base font-black text-slate-900 dark:text-white mb-3">تعديل اسم الكتاب</h3>
-            <input
-              type="text"
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/30 mb-4"
-            />
-            <div className="flex items-center justify-end gap-2">
-              <button
-                onClick={() => setEditingBook(null)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-              >
-                إلغاء
-              </button>
-              <button
-                onClick={handleSaveRename}
-                className="px-5 py-2 rounded-xl text-xs font-black bg-amber-500 hover:bg-amber-600 text-slate-950 transition-all cursor-pointer shadow-md"
-              >
-                حفظ التعديل
-              </button>
+            {/* Video Player */}
+            <div className="relative aspect-video bg-black flex items-center justify-center">
+              <video
+                src={activeVideoMedia.url || `/api/media/stream/${encodeURIComponent(activeVideoMedia.fileName)}`}
+                controls
+                autoPlay
+                className="w-full h-full object-contain"
+              />
             </div>
           </div>
         </div>

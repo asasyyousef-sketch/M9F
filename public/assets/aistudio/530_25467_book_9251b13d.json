@@ -1,0 +1,37 @@
+{
+    "file_format_version": "0.1",
+    "article_number": "530_25467",
+    "book_version": 1,
+    "print": "",
+    "isbn": "9783195018913",
+    "series": "Miteinander!",
+    "title": "Miteinander! A1.2 KB+AB",
+    "subtitle": "Kurs- und Arbeitsbuch",
+    "sort_as": "miteinander-miteinander-a1-2-kbab-100",
+    "search_tags": [
+        "9783195018913"
+    ],
+    "cover_img": "530_25467.jpg",
+    "updated_date": "2024-06-10",
+    "killed_versions": [],
+    "level": "A1",
+    "study_lang": "de",
+    "course_lang": "de",
+    "files": {
+        "audio": {
+            "autoload": true,
+            "size": "152 MB",
+            "bytes": 151834129
+        },
+        "video": {
+            "autoload": false,
+            "size": "1.7 GB",
+            "bytes": 1678428367
+        },
+        "book": {
+            "size": "7 MB",
+            "bytes": 6912839
+        }
+    },
+    "show_pages_without_media": false
+}
