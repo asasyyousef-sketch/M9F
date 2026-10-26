@@ -576,7 +576,6 @@ export interface BookPage {
 export interface InteractiveBook {
   id: string;
   title: string;
-  subtitle?: string;
   author?: string;
   coverImage?: string;
   totalPages: number;
