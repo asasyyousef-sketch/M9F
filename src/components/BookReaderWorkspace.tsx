@@ -23,7 +23,9 @@ import {
   CheckCircle2,
   Trash2,
   Music,
-  Video as VideoIcon
+  Video as VideoIcon,
+  SkipBack,
+  SkipForward
 } from "lucide-react";
 import { InteractiveBook, BookPage, BookPageMedia, MediaFile } from "../types";
 import { getAllBooksFromDB, saveBookToDB, deleteBookFromDB, DEMO_BOOK } from "../utils/bookStorage";
@@ -31,6 +33,115 @@ import { getAllBooksFromDB, saveBookToDB, deleteBookFromDB, DEMO_BOOK } from "..
 interface BookReaderWorkspaceProps {
   onPlayMediaInStudio?: (file: Partial<MediaFile>) => void;
   onBackToMediaExplorer?: () => void;
+}
+
+// Helper: Extract valid page number from media file name
+export function extractPageFromFileName(fileName: string, validPageNumbers: Set<number>): number | undefined {
+  if (!fileName) return undefined;
+  const base = fileName.replace(/\.[^/.]+$/, "");
+
+  // 1. Explicit educational patterns: e.g. "530_25460-a-175", "530_25460-p-001", "p-175", "a-02", "audio-05"
+  const explicitRegexes = [
+    /[-_](?:a|audio)[-_]0*(\d{1,4})/i,
+    /[-_](?:v|video)[-_]0*(\d{1,4})/i,
+    /[-_](?:p|page)[-_]?0*(\d{1,4})/i,
+    /(?:^|[\/\\_-])p0*(\d{1,4})(?:[\/\\_-]|$)/i,
+    /(?:^|[\/\\_-])page0*(\d{1,4})(?:[\/\\_-]|$)/i
+  ];
+
+  for (const reg of explicitRegexes) {
+    const match = base.match(reg);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (validPageNumbers.has(num)) {
+        return num;
+      }
+    }
+  }
+
+  // 2. Token based matching:
+  // e.g. "530_25460_175_01" -> split into tokens ["530", "25460", "175", "01"]
+  // Exclude book IDs (e.g. 530, 25460) by verifying against validPageNumbers
+  const tokens = base.split(/[-_ \/\.]+/);
+  // Search tokens from right to left (page numbers are usually near the end, while book IDs are at the start)
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const token = tokens[i];
+    const num = parseInt(token, 10);
+    if (!isNaN(num) && validPageNumbers.has(num)) {
+      // Ignore if it's the very first token and the book has multiple segments (e.g. book ID prefix)
+      if (i === 0 && tokens.length > 2 && num > 100) continue;
+      return num;
+    }
+  }
+
+  return undefined;
+}
+
+// Helper: Re-link pages and media if they were improperly mapped or missing
+export function relinkBook(book: InteractiveBook): { updatedBook: InteractiveBook; wasModified: boolean } {
+  if (!book || !book.pages || book.pages.length === 0) {
+    return { updatedBook: book, wasModified: false };
+  }
+
+  const allMedia = book.allMedia || [];
+  if (allMedia.length === 0) {
+    return { updatedBook: book, wasModified: false };
+  }
+
+  const validPagesSet = new Set<number>(book.pages.map((p) => p.pageNumber));
+  const pageMediaMap = new Map<number, BookPageMedia[]>();
+
+  // Initialize with existing page media
+  book.pages.forEach((p) => {
+    pageMediaMap.set(p.pageNumber, [...(p.media || [])]);
+  });
+
+  let modified = false;
+
+  // Process all media files in the archive
+  allMedia.forEach((m) => {
+    let targetPage = m.pageNumber;
+
+    // If targetPage is missing or not in valid pages, inspect file name
+    if (!targetPage || !validPagesSet.has(targetPage)) {
+      const detected = extractPageFromFileName(m.fileName, validPagesSet);
+      if (detected) {
+        targetPage = detected;
+        m.pageNumber = detected;
+        modified = true;
+      }
+    }
+
+    if (targetPage && validPagesSet.has(targetPage)) {
+      const currentList = pageMediaMap.get(targetPage) || [];
+      const alreadyExists = currentList.some(
+        (existing) => existing.id === m.id || existing.fileName === m.fileName
+      );
+      if (!alreadyExists) {
+        currentList.push({ ...m, pageNumber: targetPage });
+        pageMediaMap.set(targetPage, currentList);
+        modified = true;
+      }
+    }
+  });
+
+  if (!modified) {
+    return { updatedBook: book, wasModified: false };
+  }
+
+  const newPages = book.pages.map((p) => ({
+    ...p,
+    media: pageMediaMap.get(p.pageNumber) || []
+  }));
+
+  return {
+    updatedBook: {
+      ...book,
+      pages: newPages,
+      allMedia
+    },
+    wasModified: true
+  };
 }
 
 export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
@@ -66,11 +177,11 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   const zipInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Load books from IndexedDB on initial mount
+  // Load books from IndexedDB on initial mount and re-link pages automatically
   useEffect(() => {
     async function loadBooks() {
       try {
-        const storedBooks = await getAllBooksFromDB();
+        let storedBooks = await getAllBooksFromDB();
         if (storedBooks.length === 0) {
           // Seed initial demo book
           await saveBookToDB(DEMO_BOOK);
@@ -79,10 +190,29 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
           // Default to page 175 (index 2)
           setCurrentPageIndex(2);
         } else {
-          setBooks(storedBooks);
-          setSelectedBook(storedBooks[0]);
+          // Auto-repair & re-link any previously uploaded book in IndexedDB
+          let anyModified = false;
+          const healedBooks = await Promise.all(
+            storedBooks.map(async (b) => {
+              const { updatedBook, wasModified } = relinkBook(b);
+              if (wasModified) {
+                anyModified = true;
+                try {
+                  await saveBookToDB(updatedBook);
+                } catch (e) {
+                  console.error("Failed to re-save healed book:", e);
+                }
+              }
+              return updatedBook;
+            })
+          );
+
+          setBooks(healedBooks);
+          const firstBook = healedBooks[0];
+          setSelectedBook(firstBook);
+
           // Find first page that has media or default to page 175 if exists
-          const initialIdx = storedBooks[0].pages.findIndex((p) => p.media && p.media.length > 0);
+          const initialIdx = firstBook.pages.findIndex((p) => p.media && p.media.length > 0);
           setCurrentPageIndex(initialIdx >= 0 ? initialIdx : 0);
         }
       } catch (err) {
@@ -134,11 +264,26 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     return gathered;
   }, [selectedBook]);
 
-  // Find index of first page that has media in the current book
-  const firstPageWithMediaIndex = useMemo(() => {
-    if (!selectedBook) return -1;
-    return selectedBook.pages.findIndex((p) => p.media && p.media.length > 0);
-  }, [selectedBook]);
+  // Find nearest previous and next pages that have media
+  const prevPageWithMedia = useMemo(() => {
+    if (!selectedBook) return null;
+    for (let i = currentPageIndex - 1; i >= 0; i--) {
+      if (selectedBook.pages[i]?.media && selectedBook.pages[i].media.length > 0) {
+        return { index: i, page: selectedBook.pages[i] };
+      }
+    }
+    return null;
+  }, [selectedBook, currentPageIndex]);
+
+  const nextPageWithMedia = useMemo(() => {
+    if (!selectedBook) return null;
+    for (let i = currentPageIndex + 1; i < selectedBook.pages.length; i++) {
+      if (selectedBook.pages[i]?.media && selectedBook.pages[i].media.length > 0) {
+        return { index: i, page: selectedBook.pages[i] };
+      }
+    }
+    return null;
+  }, [selectedBook, currentPageIndex]);
 
   // Filtered list for "All Media" tab
   const filteredAllMedia = useMemo(() => {
@@ -172,9 +317,11 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [currentPageIndex, selectedBook, isSearchOpen, isZoomModalOpen, activeVideoModal]);
 
+  // Page Navigation Handlers: ALWAYS switch to "page" tab so the user sees the page-exclusive media immediately
   const handlePrevPage = () => {
     if (currentPageIndex > 0) {
       setCurrentPageIndex((prev) => prev - 1);
+      setActiveMediaTab("page");
       stopAudio();
     }
   };
@@ -182,6 +329,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   const handleNextPage = () => {
     if (selectedBook && currentPageIndex < selectedBook.pages.length - 1) {
       setCurrentPageIndex((prev) => prev + 1);
+      setActiveMediaTab("page");
       stopAudio();
     }
   };
@@ -196,7 +344,6 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   // Play audio or open video
   const handlePlayMedia = (media: BookPageMedia) => {
     if (media.type === "video") {
-      // Open direct video modal player
       stopAudio();
       setActiveVideoModal(media);
       return;
@@ -223,7 +370,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     }
   };
 
-  // Web Audio educational speech synthesis fallback for demo media
+  // Speech synthesizer fallback for demo media
   const simulateEducationalAudio = (title: string) => {
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
@@ -265,6 +412,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     if (idx >= 0) {
       setCurrentPageIndex(idx);
       setActiveMediaTab("page");
+      stopAudio();
     }
   };
 
@@ -290,7 +438,6 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     try {
       const allFiles = await filesMap.getAllFiles();
 
-      // Dictionaries & Collections
       interface FoundMedia {
         id: string;
         fileName: string;
@@ -301,7 +448,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
         type: "audio" | "video";
         title: string;
         trackNumber?: string;
-        detectedPageNum?: number;
+        explicitPageNum?: number;
       }
 
       interface FoundImage {
@@ -337,8 +484,11 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
         else if (lower.match(/\.(jpg|jpeg|png|webp|svg|bmp)$/)) {
           const blob = await f.getAsBlob();
           const url = URL.createObjectURL(blob);
-          // Detect page number from filename: e.g. "530_25460-p-001.jpg" or "page_1" or "001"
-          const pageMatch = baseName.match(/(?:[-_]p[-_]?|page[-_]?|p)(\d{1,4})/i) || baseName.match(/\b(\d{1,4})\b/);
+          // Detect page number from filename: e.g. "530_25460-p-001.jpg", "p-175", "001.jpg"
+          const pageMatch =
+            baseName.match(/[-_]p[-_]?0*(\d{1,4})/i) ||
+            baseName.match(/(?:^|[\/\\_-])p0*(\d{1,4})/i) ||
+            baseName.match(/\b0*(\d{1,4})\b/);
           const detectedPageNum = pageMatch ? parseInt(pageMatch[1], 10) : undefined;
 
           foundImages.push({
@@ -356,9 +506,12 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
           const url = URL.createObjectURL(blob);
           const cleanName = baseName.replace(/\.[^/.]+$/, "");
 
-          // Detect potential page number from filename e.g. "530_25460-a-001" or "p-175"
-          const pageMatch = baseName.match(/(?:[-_]p[-_]?|page[-_]?|p)(\d{1,4})/i) || baseName.match(/\b(\d{1,4})\b/);
-          const detectedPageNum = pageMatch ? parseInt(pageMatch[1], 10) : undefined;
+          // Detect explicit page marker from filename (e.g. -a-175, -p-175, -v-175)
+          const pageMatch =
+            baseName.match(/[-_](?:a|audio)[-_]0*(\d{1,4})/i) ||
+            baseName.match(/[-_](?:v|video)[-_]0*(\d{1,4})/i) ||
+            baseName.match(/[-_](?:p|page)[-_]?0*(\d{1,4})/i);
+          const explicitPageNum = pageMatch ? parseInt(pageMatch[1], 10) : undefined;
 
           // Track title formatting
           const title = cleanName
@@ -376,8 +529,8 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
             blob,
             type: isVideo ? "video" : "audio",
             title: title || `${isVideo ? "فيديو" : "صوت"} ${foundMedias.length + 1}`,
-            trackNumber: detectedPageNum ? `${detectedPageNum}` : undefined,
-            detectedPageNum
+            trackNumber: explicitPageNum ? `ص ${explicitPageNum}` : undefined,
+            explicitPageNum
           });
         }
       }
@@ -385,7 +538,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
       // Smart Media Lookup Function
       const findMediaMatch = (mediaRef: string): FoundMedia | undefined => {
         if (!mediaRef) return undefined;
-        const refNorm = mediaRef.replace(/\\/g, "/").toLowerCase();
+        const refNorm = mediaRef.trim().replace(/\\/g, "/").toLowerCase();
         const refBase = refNorm.split("/").pop() || "";
         const refClean = refBase.replace(/\.[^/.]+$/, "");
 
@@ -393,7 +546,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
           if (m.fileName.toLowerCase() === refBase) return true;
           if (m.normalizedPath.endsWith(refNorm) || refNorm.endsWith(m.normalizedPath)) return true;
           if (m.cleanName === refClean) return true;
-          if (refClean.length > 2 && (m.cleanName.includes(refClean) || refClean.includes(m.cleanName))) return true;
+          if (refClean.length >= 3 && (m.cleanName.includes(refClean) || refClean.includes(m.cleanName))) return true;
           return false;
         });
       };
@@ -401,7 +554,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
       // Smart Image Lookup Function
       const findImageMatch = (imgRef: string): FoundImage | undefined => {
         if (!imgRef) return undefined;
-        const refNorm = imgRef.replace(/\\/g, "/").toLowerCase();
+        const refNorm = imgRef.trim().replace(/\\/g, "/").toLowerCase();
         const refBase = refNorm.split("/").pop() || "";
         const refClean = refBase.replace(/\.[^/.]+$/, "");
 
@@ -414,54 +567,48 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
         });
       };
 
-      // Identify Content JSON and Book Meta JSON
-      let contentJSON: any = null;
-      let bookMetaJSON: any = null;
+      // Search all JSON files for pages and media definitions
+      let rawPages: any[] = [];
+      let topLevelMediaList: any[] = [];
+      let detectedBookTitle = filesMap.defaultTitle;
 
       for (const item of jsonTexts) {
-        const pathLower = item.path.toLowerCase();
         const data = item.data;
+        if (!data) continue;
 
-        // Check if data is array of pages or contains pages/content
-        if (
-          Array.isArray(data) ||
-          Array.isArray(data.pages) ||
-          Array.isArray(data.content) ||
-          Array.isArray(data.items) ||
-          Array.isArray(data.data) ||
-          Array.isArray(data.chapters) ||
-          (data.book && Array.isArray(data.book.pages))
-        ) {
-          contentJSON = data;
+        // Check metadata
+        if (data.title || data.book_title || data.name) {
+          detectedBookTitle = data.title || data.book_title || data.name;
         }
 
-        if (pathLower.includes("book.json") || pathLower.includes("meta") || data.title || data.book_title) {
-          bookMetaJSON = data;
+        // Check top-level media array
+        if (Array.isArray(data.media)) {
+          topLevelMediaList.push(...data.media);
+        } else if (data.media && typeof data.media === "object") {
+          topLevelMediaList.push(...Object.values(data.media));
         }
-      }
+        if (Array.isArray(data.audios)) topLevelMediaList.push(...data.audios);
+        if (Array.isArray(data.videos)) topLevelMediaList.push(...data.videos);
 
-      const bookTitle =
-        bookMetaJSON?.title ||
-        bookMetaJSON?.book_title ||
-        contentJSON?.book_title ||
-        contentJSON?.title ||
-        filesMap.defaultTitle;
-
-      // Extract raw page objects array
-      let rawPages: any[] = [];
-      if (contentJSON) {
-        if (Array.isArray(contentJSON)) {
-          rawPages = contentJSON;
-        } else if (Array.isArray(contentJSON.pages)) {
-          rawPages = contentJSON.pages;
-        } else if (Array.isArray(contentJSON.content)) {
-          rawPages = contentJSON.content;
-        } else if (Array.isArray(contentJSON.items)) {
-          rawPages = contentJSON.items;
-        } else if (Array.isArray(contentJSON.data)) {
-          rawPages = contentJSON.data;
-        } else if (contentJSON.book && Array.isArray(contentJSON.book.pages)) {
-          rawPages = contentJSON.book.pages;
+        // Check pages
+        if (Array.isArray(data)) {
+          rawPages = data;
+        } else if (Array.isArray(data.pages)) {
+          rawPages = data.pages;
+        } else if (data.pages && typeof data.pages === "object") {
+          rawPages = Object.values(data.pages);
+        } else if (Array.isArray(data.content)) {
+          rawPages = data.content;
+        } else if (data.content && typeof data.content === "object") {
+          if (Array.isArray(data.content.pages)) {
+            rawPages = data.content.pages;
+          } else {
+            rawPages = Object.values(data.content);
+          }
+        } else if (Array.isArray(data.items)) {
+          rawPages = data.items;
+        } else if (Array.isArray(data.data)) {
+          rawPages = data.data;
         }
       }
 
@@ -479,7 +626,6 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
           const rawImgRef = p.page_img || p.image || p.img || p.pageImage || p.src || p.file || "";
           let matchedImage = findImageMatch(rawImgRef);
           if (!matchedImage) {
-            // Try matching image by page number
             matchedImage = foundImages.find((img) => img.detectedPageNum === pageNum);
           }
           if (!matchedImage && foundImages[idx]) {
@@ -493,21 +639,43 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
           const rawMediaArr: any[] = [];
 
           if (Array.isArray(p.media)) rawMediaArr.push(...p.media);
+          else if (p.media && typeof p.media === "object") rawMediaArr.push(...Object.values(p.media));
+
           if (Array.isArray(p.audios)) rawMediaArr.push(...p.audios);
           if (Array.isArray(p.videos)) rawMediaArr.push(...p.videos);
           if (Array.isArray(p.tracks)) rawMediaArr.push(...p.tracks);
           if (Array.isArray(p.files)) rawMediaArr.push(...p.files);
+
           if (typeof p.audio === "string") rawMediaArr.push({ type: "audio", file_name: p.audio });
           if (typeof p.video === "string") rawMediaArr.push({ type: "video", file_name: p.video });
 
+          // Also check top-level media assigned to this page number
+          topLevelMediaList.forEach((tm) => {
+            const tmPage = parseInt(String(tm.page ?? tm.page_number ?? tm.pageNumber ?? 0), 10);
+            if (tmPage === pageNum) {
+              rawMediaArr.push(tm);
+            }
+          });
+
           rawMediaArr.forEach((m, mIdx) => {
-            const rawFileName = m.file_name || m.fileName || m.filename || m.file || m.src || m.path || m.url || m.name || "";
+            const rawFileName =
+              typeof m === "string"
+                ? m
+                : m.file_name || m.fileName || m.filename || m.file || m.src || m.path || m.url || m.name || "";
             const matchedMedia = findMediaMatch(rawFileName);
 
-            const isVideo = m.type === "video" || matchedMedia?.type === "video" || Boolean(rawFileName.match(/\.(mp4|webm|mov|mkv)$/i));
+            const isVideo =
+              m.type === "video" ||
+              matchedMedia?.type === "video" ||
+              Boolean(rawFileName.match(/\.(mp4|webm|mov|mkv)$/i));
             const mediaType: "audio" | "video" = isVideo ? "video" : "audio";
             const trackNum = m.track_number || m.trackNumber || m.track || `${pageNum}/${mIdx + 1}`;
-            const mediaTitle = m.title || m.label || m.name || matchedMedia?.title || `${mediaType === "video" ? "Video" : "Audio"}: ${rawFileName}`;
+            const mediaTitle =
+              m.title ||
+              m.label ||
+              m.name ||
+              matchedMedia?.title ||
+              `${mediaType === "video" ? "Video" : "Audio"}: ${rawFileName}`;
 
             if (matchedMedia) {
               assignedMediaIds.add(matchedMedia.id);
@@ -554,34 +722,45 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
         });
       }
 
-      // Auto-assign any unassigned media to pages by detected page number!
+      const validPageNumbers = new Set<number>(constructedPages.map((p) => p.pageNumber));
+
+      // Auto-assign any media whose filename references a valid page number
       foundMedias.forEach((m) => {
-        if (!assignedMediaIds.has(m.id) && m.detectedPageNum) {
-          const targetPage = constructedPages.find((p) => p.pageNumber === m.detectedPageNum);
-          if (targetPage) {
-            targetPage.media.push({
-              id: m.id,
-              trackNumber: `${m.detectedPageNum}`,
-              title: m.title,
-              type: m.type,
-              fileName: m.fileName,
-              url: m.url,
-              blob: m.blob,
-              pageNumber: m.detectedPageNum
-            });
-            assignedMediaIds.add(m.id);
+        if (!assignedMediaIds.has(m.id)) {
+          const detectedPageNum = extractPageFromFileName(m.fileName, validPageNumbers);
+          if (detectedPageNum) {
+            const targetPage = constructedPages.find((p) => p.pageNumber === detectedPageNum);
+            if (targetPage) {
+              const alreadyHas = targetPage.media.some(
+                (item) => item.id === m.id || item.fileName === m.fileName
+              );
+              if (!alreadyHas) {
+                targetPage.media.push({
+                  id: m.id,
+                  trackNumber: `ص ${detectedPageNum}`,
+                  title: m.title,
+                  type: m.type,
+                  fileName: m.fileName,
+                  url: m.url,
+                  blob: m.blob,
+                  pageNumber: detectedPageNum
+                });
+                assignedMediaIds.add(m.id);
+              }
+            }
           }
         }
       });
 
       // Prepare comprehensive allMedia list (contains EVERY single media file in the archive)
       const allBookMediaList: BookPageMedia[] = foundMedias.map((m) => {
-        // Find which page this media is attached to, if any
-        let linkedPageNum = m.detectedPageNum;
-        for (const pg of constructedPages) {
-          if (pg.media.some((item) => item.id === m.id || item.fileName === m.fileName)) {
-            linkedPageNum = pg.pageNumber;
-            break;
+        let linkedPageNum = m.explicitPageNum;
+        if (!linkedPageNum) {
+          for (const pg of constructedPages) {
+            if (pg.media.some((item) => item.id === m.id || item.fileName === m.fileName)) {
+              linkedPageNum = pg.pageNumber;
+              break;
+            }
           }
         }
 
@@ -604,32 +783,30 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
       const audiosFound = foundMedias.filter((m) => m.type === "audio").length;
       const videosFound = foundMedias.filter((m) => m.type === "video").length;
 
-      const newBook: InteractiveBook = {
+      let newBook: InteractiveBook = {
         id: `book-${Date.now()}`,
-        title: bookTitle,
+        title: detectedBookTitle,
         totalPages: constructedPages.length,
         createdAt: new Date().toISOString(),
         pages: constructedPages,
         allMedia: allBookMediaList
       };
 
+      // Run final re-linker to ensure 100% of pages are mapped
+      const { updatedBook } = relinkBook(newBook);
+      newBook = updatedBook;
+
       await saveBookToDB(newBook);
       setBooks((prev) => [newBook, ...prev]);
       setSelectedBook(newBook);
 
-      // Automatically navigate to the first page that contains media, or page 0
-      const firstMediaIdx = constructedPages.findIndex((p) => p.media && p.media.length > 0);
+      // Automatically navigate to the first page that contains media
+      const firstMediaIdx = newBook.pages.findIndex((p) => p.media && p.media.length > 0);
       setCurrentPageIndex(firstMediaIdx >= 0 ? firstMediaIdx : 0);
-
-      // Default tab: if the active page has media, show "page", otherwise switch to "all" so user immediately sees all media!
-      if (firstMediaIdx === -1 && allBookMediaList.length > 0) {
-        setActiveMediaTab("all");
-      } else {
-        setActiveMediaTab("page");
-      }
+      setActiveMediaTab("page");
 
       setImportStatus(
-        `✅ تم الاستيراد بنجاح! تم تجهيز ${constructedPages.length} صفحة و ${allBookMediaList.length} ملف وسائط (${audiosFound} صوتي، ${videosFound} فيديو).`
+        `✅ تم الاستيراد بنجاح! تم تجهيز ${newBook.pages.length} صفحة و ${allBookMediaList.length} ملف وسائط (${audiosFound} صوت، ${videosFound} فيديو).`
       );
 
       setTimeout(() => {
@@ -830,6 +1007,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
                   const idx = selectedBook.pages.findIndex((p) => p.pageNumber === targetNum);
                   if (idx >= 0) {
                     setCurrentPageIndex(idx);
+                    setActiveMediaTab("page");
                     setIsSearchOpen(false);
                     setSearchQuery("");
                   }
@@ -849,6 +1027,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
                   if (b) {
                     setSelectedBook(b);
                     setCurrentPageIndex(0);
+                    setActiveMediaTab("page");
                   }
                 }}
                 className="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 font-bold text-slate-700"
@@ -1023,7 +1202,10 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
                     }`}
                   >
                     <Volume2 className="w-3.5 h-3.5" />
-                    <span>وسائط الصفحة ({activePage?.media?.length || 0})</span>
+                    <span>
+                      وسائط الصفحة {activePage?.pageNumber || currentPageIndex + 1} (
+                      {activePage?.media?.length || 0})
+                    </span>
                   </button>
 
                   <button
@@ -1052,7 +1234,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
               {activeMediaTab === "page" && (
                 <div>
                   {activePage?.media && activePage.media.length > 0 ? (
-                    <div className="divide-y divide-slate-200">
+                    <div className="divide-y divide-slate-200 animate-fadeIn">
                       {activePage.media.map((media) => {
                         const isCurrentPlaying = activePlayingMediaId === media.id && isPlayingAudio;
 
@@ -1137,35 +1319,40 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
                     <div className="py-8 px-4 text-center flex flex-col items-center justify-center bg-slate-50/60 rounded-xl my-3 border border-dashed border-slate-200">
                       <Volume2 className="w-8 h-8 text-slate-300 mb-2" />
                       <p className="text-xs font-bold text-slate-700">
-                        لا توجد مقاطع وسائط مرتبطة مباشرة بالصفحة الحالية ({activePage?.pageNumber || currentPageIndex + 1})
+                        الصفحة الحالية ({activePage?.pageNumber || currentPageIndex + 1}) لا تحتوي على مقاطع وسائط خاصة بها
                       </p>
-                      {allBookMedia.length > 0 ? (
-                        <div className="mt-2 text-xs text-slate-500 flex flex-col items-center gap-2">
-                          <span>
-                            يحتوي هذا الكتاب على <strong>{allBookMedia.length} مقطع وسائط</strong> ({audioCount} صوت، {videoCount} فيديو) في باقي الصفحات والمجلدات.
-                          </span>
-                          <div className="flex items-center gap-2 mt-1">
-                            <button
-                              onClick={() => setActiveMediaTab("all")}
-                              className="px-3 py-1.5 bg-[#0056f6] text-white rounded-lg text-xs font-bold hover:bg-[#0047d1] cursor-pointer shadow-2xs"
-                            >
-                              استعراض جميع وسائط الكتاب ({allBookMedia.length})
-                            </button>
-                            {firstPageWithMediaIndex >= 0 && (
-                              <button
-                                onClick={() => setCurrentPageIndex(firstPageWithMediaIndex)}
-                                className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-50 cursor-pointer"
-                              >
-                                الانتقال لصفحة {selectedBook.pages[firstPageWithMediaIndex].pageNumber} (تحتوي وسائط)
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="text-2xs text-slate-400 mt-1">
-                          لم يتم العثور على ملفات صوتية أو فيديو في هذا الكتاب
-                        </p>
-                      )}
+
+                      {/* Quick Navigation to nearest page with media */}
+                      <div className="flex flex-wrap items-center justify-center gap-2 mt-3">
+                        {prevPageWithMedia && (
+                          <button
+                            onClick={() => setCurrentPageIndex(prevPageWithMedia.index)}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-300 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-50 cursor-pointer shadow-2xs"
+                          >
+                            <SkipBack className="w-3.5 h-3.5 text-slate-500" />
+                            <span>صفحة {prevPageWithMedia.page.pageNumber} (تحتوي وسائط)</span>
+                          </button>
+                        )}
+
+                        {nextPageWithMedia && (
+                          <button
+                            onClick={() => setCurrentPageIndex(nextPageWithMedia.index)}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-300 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-50 cursor-pointer shadow-2xs"
+                          >
+                            <span>صفحة {nextPageWithMedia.page.pageNumber} (تحتوي وسائط)</span>
+                            <SkipForward className="w-3.5 h-3.5 text-slate-500" />
+                          </button>
+                        )}
+
+                        {allBookMedia.length > 0 && (
+                          <button
+                            onClick={() => setActiveMediaTab("all")}
+                            className="px-3 py-1.5 bg-[#0056f6] text-white rounded-lg text-xs font-bold hover:bg-[#0047d1] cursor-pointer shadow-2xs"
+                          >
+                            استعراض جميع وسائط الكتاب ({allBookMedia.length})
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1175,7 +1362,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
               {/* TAB 2: COMPREHENSIVE ALL BOOK MEDIA BROWSER              */}
               {/* ======================================================== */}
               {activeMediaTab === "all" && (
-                <div className="pt-2">
+                <div className="pt-2 animate-fadeIn">
                   {/* Search and Filters Bar */}
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-2 mb-3 px-2">
                     <div className="relative w-full sm:w-72">
@@ -1193,7 +1380,9 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
                       <button
                         onClick={() => setMediaTypeFilter("all")}
                         className={`px-2.5 py-1 text-2xs font-bold rounded-md cursor-pointer transition-all ${
-                          mediaTypeFilter === "all" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                          mediaTypeFilter === "all"
+                            ? "bg-slate-800 text-white"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                         }`}
                       >
                         الكل ({allBookMedia.length})
@@ -1201,7 +1390,9 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
                       <button
                         onClick={() => setMediaTypeFilter("audio")}
                         className={`px-2.5 py-1 text-2xs font-bold rounded-md cursor-pointer transition-all ${
-                          mediaTypeFilter === "audio" ? "bg-[#0056f6] text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                          mediaTypeFilter === "audio"
+                            ? "bg-[#0056f6] text-white"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                         }`}
                       >
                         صوتيات ({audioCount})
@@ -1209,7 +1400,9 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
                       <button
                         onClick={() => setMediaTypeFilter("video")}
                         className={`px-2.5 py-1 text-2xs font-bold rounded-md cursor-pointer transition-all ${
-                          mediaTypeFilter === "video" ? "bg-purple-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                          mediaTypeFilter === "video"
+                            ? "bg-purple-600 text-white"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                         }`}
                       >
                         فيديوهات ({videoCount})
