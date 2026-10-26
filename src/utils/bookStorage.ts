@@ -35,7 +35,46 @@ export async function getAllBooksFromDB(): Promise<InteractiveBook[]> {
     const tx = db.transaction(STORE_NAME, "readonly");
     const store = tx.objectStore(STORE_NAME);
     const req = store.getAll();
-    req.onsuccess = () => resolve(req.result || []);
+    req.onsuccess = () => {
+      const books: InteractiveBook[] = req.result || [];
+      // Rehydrate blob URLs if they were stored as blobs
+      books.forEach((book) => {
+        if (Array.isArray(book.pages)) {
+          book.pages.forEach((page) => {
+            if (page.imageBlob && (!page.pageImage || page.pageImage.startsWith("blob:"))) {
+              try {
+                page.pageImage = URL.createObjectURL(page.imageBlob);
+              } catch (e) {
+                console.error("Error creating image blob URL:", e);
+              }
+            }
+            if (Array.isArray(page.media)) {
+              page.media.forEach((m) => {
+                if (m.blob && (!m.url || m.url.startsWith("blob:"))) {
+                  try {
+                    m.url = URL.createObjectURL(m.blob);
+                  } catch (e) {
+                    console.error("Error creating media blob URL:", e);
+                  }
+                }
+              });
+            }
+          });
+        }
+        if (Array.isArray(book.allMedia)) {
+          book.allMedia.forEach((m) => {
+            if (m.blob && (!m.url || m.url.startsWith("blob:"))) {
+              try {
+                m.url = URL.createObjectURL(m.blob);
+              } catch (e) {
+                console.error("Error creating allMedia blob URL:", e);
+              }
+            }
+          });
+        }
+      });
+      resolve(books);
+    };
     req.onerror = () => reject(req.error);
   });
 }

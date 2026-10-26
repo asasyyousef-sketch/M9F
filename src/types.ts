@@ -561,12 +561,15 @@ export interface BookPageMedia {
   type: "audio" | "video";
   fileName: string;
   url?: string;
+  blob?: Blob;
+  pageNumber?: number;
 }
 
 export interface BookPage {
   pageNumber: number;
   displayLabel?: string;
   pageImage: string;
+  imageBlob?: Blob;
   media: BookPageMedia[];
 }
 
@@ -577,6 +580,8 @@ export interface InteractiveBook {
   coverImage?: string;
   totalPages: number;
   pages: BookPage[];
+  allMedia?: BookPageMedia[];
   createdAt: string;
 }
+
 
