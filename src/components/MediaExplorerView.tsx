@@ -18,6 +18,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ArrowUp,
+  ArrowDown,
   ArrowRight,
   RefreshCw,
   FolderInput,
@@ -1279,7 +1280,7 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
             /* A. UNIFIED DETAILS VIEW (TABLE WITH FOLDERS & FILES)     */
             /* ======================================================== */
             <div className="border border-slate-200/90 rounded-xl overflow-hidden shadow-2xs">
-              <table className="w-full text-right border-collapse table-fixed">
+              <table className="w-full text-right border-collapse">
                 <thead className="bg-slate-50 border-b border-slate-200 text-[11px] font-black text-slate-500 select-none">
                   <tr>
                     {isSelectionMode && (
@@ -1300,61 +1301,101 @@ export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({
                     <th
                       onClick={() => {
                         setSortField("name");
-                        setSortDirection((p) => (p === "asc" ? "desc" : "asc"));
+                        setSortDirection((p) => (sortField === "name" && p === "asc" ? "desc" : "asc"));
                       }}
-                      className="p-2.5 cursor-pointer hover:bg-slate-100 transition-colors w-auto"
+                      className="p-2.5 cursor-pointer hover:bg-slate-100 transition-colors text-right"
                     >
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1.5">
                         <span>الاسم والعنصر</span>
-                        {sortField === "name" && <ArrowUpDown className="w-3 h-3 text-blue-600" />}
+                        {sortField === "name" ? (
+                          sortDirection === "asc" ? (
+                            <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
+                          ) : (
+                            <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-300" />
+                        )}
                       </div>
                     </th>
                     <th
                       onClick={() => {
                         setSortField("type");
-                        setSortDirection((p) => (p === "asc" ? "desc" : "asc"));
+                        setSortDirection((p) => (sortField === "type" && p === "asc" ? "desc" : "asc"));
                       }}
-                      className="p-2.5 w-24 cursor-pointer hover:bg-slate-100 transition-colors hidden sm:table-cell"
+                      className="p-2.5 w-28 cursor-pointer hover:bg-slate-100 transition-colors hidden sm:table-cell text-right"
                     >
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1.5">
                         <span>النوع</span>
-                        {sortField === "type" && <ArrowUpDown className="w-3 h-3 text-blue-600" />}
+                        {sortField === "type" ? (
+                          sortDirection === "asc" ? (
+                            <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
+                          ) : (
+                            <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-300" />
+                        )}
                       </div>
                     </th>
                     <th
                       onClick={() => {
                         setSortField("size");
-                        setSortDirection((p) => (p === "asc" ? "desc" : "asc"));
+                        setSortDirection((p) => (sortField === "size" && p === "asc" ? "desc" : "asc"));
                       }}
-                      className="p-2.5 w-24 cursor-pointer hover:bg-slate-100 transition-colors"
+                      className="p-2.5 w-28 cursor-pointer hover:bg-slate-100 transition-colors text-right"
                     >
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1.5">
                         <span>الحجم</span>
-                        {sortField === "size" && <ArrowUpDown className="w-3 h-3 text-blue-600" />}
+                        {sortField === "size" ? (
+                          sortDirection === "asc" ? (
+                            <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
+                          ) : (
+                            <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-300" />
+                        )}
                       </div>
                     </th>
                     <th
                       onClick={() => {
                         setSortField("date");
-                        setSortDirection((p) => (p === "asc" ? "desc" : "asc"));
+                        setSortDirection((p) => (sortField === "date" && p === "asc" ? "desc" : "asc"));
                       }}
-                      className="p-2.5 w-28 cursor-pointer hover:bg-slate-100 transition-colors hidden md:table-cell"
+                      className="p-2.5 w-32 cursor-pointer hover:bg-slate-100 transition-colors hidden md:table-cell text-right"
                     >
-                      <div className="flex items-center gap-1">
-                        <span>تاريخ التعديل</span>
-                        {sortField === "date" && <ArrowUpDown className="w-3 h-3 text-blue-600" />}
+                      <div className="flex items-center gap-1.5">
+                        <span>تاريخ الإضافة</span>
+                        {sortField === "date" ? (
+                          sortDirection === "asc" ? (
+                            <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
+                          ) : (
+                            <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-300" />
+                        )}
                       </div>
                     </th>
                     <th
                       onClick={() => {
                         setSortField("subtitles");
-                        setSortDirection((p) => (p === "asc" ? "desc" : "asc"));
+                        setSortDirection((p) => (sortField === "subtitles" && p === "asc" ? "desc" : "asc"));
                       }}
-                      className="p-2.5 w-28 cursor-pointer hover:bg-slate-100 transition-colors hidden lg:table-cell"
+                      className="p-2.5 w-32 cursor-pointer hover:bg-slate-100 transition-colors hidden lg:table-cell text-right"
                     >
-                      <div className="flex items-center gap-1">
-                        <span>الترجمات / العناصر</span>
-                        {sortField === "subtitles" && <ArrowUpDown className="w-3 h-3 text-blue-600" />}
+                      <div className="flex items-center gap-1.5">
+                        <span>الترجمات / المحتوى</span>
+                        {sortField === "subtitles" ? (
+                          sortDirection === "asc" ? (
+                            <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
+                          ) : (
+                            <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-300" />
+                        )}
                       </div>
                     </th>
                     <th className="p-2.5 w-28 text-center">إجراءات</th>

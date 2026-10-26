@@ -89,6 +89,7 @@ import { SubtitleOptionsModal, SubtitleOptionsPanel } from "./SubtitleOptionsMod
 import { CleanCueEditorModal } from "./CleanCueEditorModal";
 import { ALL_AVAILABLE_MODELS, AIModelOption } from "./AICorrectorWorkspace";
 import { MediaExplorerView } from "./MediaExplorerView";
+import { BookReaderWorkspace } from "./BookReaderWorkspace";
 import { formatSubtitleTrackProtocol } from "../utils/subtitleNaming";
 import { ReviewChatModal, ReviewChatMessage } from "./ReviewChatModal";
 import { ShadowingStudioModal } from "./ShadowingStudioModal";
@@ -477,6 +478,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       return false;
     }
   });
+
+  // Workspace Tab: Media Files vs Interactive Books
+  const [mediaWorkspaceTab, setMediaWorkspaceTab] = useState<"media" | "books">("media");
 
   // Subtitle States
   const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
@@ -1328,6 +1332,28 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     } catch (e) {}
     setIsPlayerOpen(false);
     setIsImmersiveMode(false);
+  };
+
+  // Play media track from Interactive Digital Books inside Studio Player
+  const handlePlayBookMediaInStudio = (mediaInfo: Partial<MediaFile>) => {
+    const existing = files.find((f) => f.title === mediaInfo.title || f.originalName === mediaInfo.originalName);
+    if (existing) {
+      handleSelectFile(existing, true);
+      const syntheticFile: MediaFile = {
+        id: mediaInfo.id || `book-media-${Date.now()}`,
+        filename: mediaInfo.filename || mediaInfo.originalName || "audio.mp3",
+        originalName: mediaInfo.originalName || mediaInfo.filename || "audio.mp3",
+        title: mediaInfo.title || "مقطع كتاب رقمي",
+        size: mediaInfo.size || 1024 * 1024,
+        mimeType: mediaInfo.type === "video" ? "video/mp4" : "audio/mpeg",
+        type: mediaInfo.type || "audio",
+        url: mediaInfo.url || "",
+        uploadedAt: new Date().toISOString(),
+        subtitles: []
+      };
+      setFiles((prev) => [syntheticFile, ...prev]);
+      handleSelectFile(syntheticFile, true);
+    }
   };
 
   // Folder management functions
@@ -6135,59 +6161,104 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           /* WINDOWS FILE EXPLORER WORKSPACE (With Library Tools)     */
           /* ======================================================== */
           <div className="w-full flex-1 flex flex-col min-h-[600px] -mt-1">
-            <MediaExplorerView
-              files={files}
-              folders={folders}
-              fileFolderMap={fileFolderMap}
-              activeFolderId={activeFolderId}
-              currentFile={currentFile}
-              onBackToLibrary={onBackToLibrary}
-              loading={loading}
-              uploading={uploading}
-              uploadProgress={uploadProgress}
-              uploadingFolderName={uploadingFolderName}
-              uploadingFileName={uploadingFileName}
-              onSelectFolder={(id) => setActiveFolderId(id)}
-              onSelectFile={(file, autoPlay) => {
-                if (file) {
-                  handleSelectFile(file, autoPlay !== false);
-                }
-              }}
-              onOpenCreateFolder={handleOpenCreateFolderModal}
-              onOpenEditFolder={handleOpenEditFolderModal}
-              onDeleteFolder={handleDeleteFolder}
-              onMoveFile={handleMoveFileToFolder}
-              onBulkMove={handleBulkMoveFiles}
-              onBulkDelete={handleBulkDeleteFiles}
-              onDeleteFile={handleDeleteFile}
-              onStartRename={handleStartRename}
-              editingId={editingId}
-              editTitleText={editTitleText}
-              setEditTitleText={setEditTitleText}
-              onSaveRename={handleSaveRename}
-              onUploadClick={() => fileInputRef.current?.click()}
-              onUploadFolderClick={() => folderInputRef.current?.click()}
-              onOpenYouTubeDownload={() => {
-                setGradioInitialMode("youtube");
-                setShowGradioModal(true);
-              }}
-              onOpenGradioModal={() => {
-                setGradioInitialMode("current");
-                setShowGradioModal(true);
-              }}
-              onOpenGradioModalForFile={(file) => {
-                setCurrentFile(file);
-                setGradioInitialMode("current");
-                setShowGradioModal(true);
-              }}
-              onOpenSubtitleOptionsForFile={(file) => {
-                handleSelectFile(file, false);
-                setShowTranscriptPanel(true);
-                setSidePanelView("subtitles");
-              }}
-              onRefreshFiles={fetchMediaFiles}
-              onToggleSidebar={onToggleSidebar}
-            />
+            {/* Top Workspace Tab Bar (Media Explorer vs Interactive Books) */}
+            <div className="w-full bg-white border-b border-slate-200/90 px-4 sm:px-6 py-2 flex items-center justify-between z-10 shrink-0 select-none">
+              <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
+                <button
+                  onClick={() => setMediaWorkspaceTab("media")}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                    mediaWorkspaceTab === "media"
+                      ? "bg-white text-slate-900 shadow-xs"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  <Film className="w-3.5 h-3.5 text-blue-600" />
+                  <span>مستعرض الوسائط</span>
+                </button>
+                <button
+                  onClick={() => setMediaWorkspaceTab("books")}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                    mediaWorkspaceTab === "books"
+                      ? "bg-white text-slate-900 shadow-xs"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  <BookOpen className="w-3.5 h-3.5 text-amber-600" />
+                  <span>الكتب الرقمية التفاعلية</span>
+                </button>
+              </div>
+
+              {onBackToLibrary && (
+                <button
+                  onClick={onBackToLibrary}
+                  className="px-3 py-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                >
+                  <span>العودة للمكتبة</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {mediaWorkspaceTab === "books" ? (
+              <BookReaderWorkspace
+                onPlayMediaInStudio={handlePlayBookMediaInStudio}
+                onBackToMediaExplorer={() => setMediaWorkspaceTab("media")}
+              />
+            ) : (
+              <MediaExplorerView
+                files={files}
+                folders={folders}
+                fileFolderMap={fileFolderMap}
+                activeFolderId={activeFolderId}
+                currentFile={currentFile}
+                onBackToLibrary={onBackToLibrary}
+                loading={loading}
+                uploading={uploading}
+                uploadProgress={uploadProgress}
+                uploadingFolderName={uploadingFolderName}
+                uploadingFileName={uploadingFileName}
+                onSelectFolder={(id) => setActiveFolderId(id)}
+                onSelectFile={(file, autoPlay) => {
+                  if (file) {
+                    handleSelectFile(file, autoPlay !== false);
+                  }
+                }}
+                onOpenCreateFolder={handleOpenCreateFolderModal}
+                onOpenEditFolder={handleOpenEditFolderModal}
+                onDeleteFolder={handleDeleteFolder}
+                onMoveFile={handleMoveFileToFolder}
+                onBulkMove={handleBulkMoveFiles}
+                onBulkDelete={handleBulkDeleteFiles}
+                onDeleteFile={handleDeleteFile}
+                onStartRename={handleStartRename}
+                editingId={editingId}
+                editTitleText={editTitleText}
+                setEditTitleText={setEditTitleText}
+                onSaveRename={handleSaveRename}
+                onUploadClick={() => fileInputRef.current?.click()}
+                onUploadFolderClick={() => folderInputRef.current?.click()}
+                onOpenYouTubeDownload={() => {
+                  setGradioInitialMode("youtube");
+                  setShowGradioModal(true);
+                }}
+                onOpenGradioModal={() => {
+                  setGradioInitialMode("current");
+                  setShowGradioModal(true);
+                }}
+                onOpenGradioModalForFile={(file) => {
+                  setCurrentFile(file);
+                  setGradioInitialMode("current");
+                  setShowGradioModal(true);
+                }}
+                onOpenSubtitleOptionsForFile={(file) => {
+                  handleSelectFile(file, false);
+                  setShowTranscriptPanel(true);
+                  setSidePanelView("subtitles");
+                }}
+                onRefreshFiles={fetchMediaFiles}
+                onToggleSidebar={onToggleSidebar}
+              />
+            )}
           </div>
         )}
       </div>

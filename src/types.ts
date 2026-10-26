@@ -553,3 +553,30 @@ export const ALL_AVAILABLE_MODELS: AIModelOption[] = [
   { key: "gemini-1.5-pro", name: "Gemini 1.5 Pro 💎", desc: "سياق واسع وفهم دقيق للجمل", badge: "سياق كبير", group: "general" },
   { key: "gemini-1.5-flash", name: "Gemini 1.5 Flash ⚡", desc: "نموذج فلاش القياسي الكلاسيكي", badge: "مستقر", group: "general" }
 ];
+
+export interface BookPageMedia {
+  id: string;
+  trackNumber?: string;
+  title: string;
+  type: "audio" | "video";
+  fileName: string;
+  url?: string;
+}
+
+export interface BookPage {
+  pageNumber: number;
+  displayLabel?: string;
+  pageImage: string;
+  media: BookPageMedia[];
+}
+
+export interface InteractiveBook {
+  id: string;
+  title: string;
+  author?: string;
+  coverImage?: string;
+  totalPages: number;
+  pages: BookPage[];
+  createdAt: string;
+}
+
