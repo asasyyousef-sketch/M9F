@@ -1336,9 +1336,20 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   // Play media track from Interactive Digital Books inside Studio Player
   const handlePlayBookMediaInStudio = (mediaInfo: Partial<MediaFile>) => {
-    const existing = files.find((f) => f.title === mediaInfo.title || f.originalName === mediaInfo.originalName);
+    // Switch immediately to Media Player tab
+    setMediaWorkspaceTab("media");
+
+    const existing = files.find(
+      (f) =>
+        (mediaInfo.id && f.id === mediaInfo.id) ||
+        (mediaInfo.url && f.url === mediaInfo.url) ||
+        (mediaInfo.originalName && f.originalName === mediaInfo.originalName) ||
+        (mediaInfo.title && f.title === mediaInfo.title)
+    );
+
     if (existing) {
       handleSelectFile(existing, true);
+    } else {
       const syntheticFile: MediaFile = {
         id: mediaInfo.id || `book-media-${Date.now()}`,
         filename: mediaInfo.filename || mediaInfo.originalName || "audio.mp3",

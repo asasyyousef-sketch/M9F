@@ -355,8 +355,15 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     setIsPlayingAudio(false);
   };
 
-  // Play audio or open video
+  // Play audio or open video directly in Studio Media Player
   const handlePlayMedia = (media: BookPageMedia) => {
+    // If studio player callback is provided, launch directly into Media Player (كبل في مشغل الوسائط)
+    if (onPlayMediaInStudio) {
+      stopAudio();
+      handleOpenInStudioPlayer(media);
+      return;
+    }
+
     if (media.type === "video") {
       stopAudio();
       setActiveVideoModal(media);
