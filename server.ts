@@ -13,6 +13,7 @@ import { getSupabase, SUPABASE_SQL_SCHEMA } from "./src/supabaseClient";
 import { formatSubtitleTrackProtocol } from "./src/utils/subtitleNaming";
 import { GoogleGenAI, Type } from "@google/genai";
 import { authMiddleware, registerAuthRoutes, loadUsers, syncUsersWithSupabase } from "./serverAuth";
+import { registerServerBookRoutes } from "./serverBooks";
 
 // ─── Crash & Unhandled Rejection Immunity ───────────────────────────────────────
 // Prevents server crashes from remote sockets (e.g. Gradio / Python / Whisper server disconnecting mid-stream)
@@ -264,6 +265,9 @@ async function startServer() {
       console.error("Failed to link existing data to primary admin:", e);
     }
   });
+
+  // Mount Interactive Books server routes & persistence
+  registerServerBookRoutes(app);
 
   // Migrate old db.json if it exists
   if (!fs.existsSync(DB_PATH) && fs.existsSync(OLD_DB_PATH)) {
@@ -5537,13 +5541,19 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
 
 تأكد من أن الكلمات دقيقة جداً لغوياً وصحيحة إملائياً، ومفيدة جداً للمتعلم.`;
 
-      let customRules = "\n\n⚠️ قواعد التخصيص الإضافية التي حددها المستخدم ويجب الالتزام بها:";
-      customRules += "\n- 🚨 قاعدة إلزامية هامة جداً لأدوات التعريف وصيغ الجمع الألمانية:";
-      customRules += "\n  * ميزة أدوات التعريف (isArticleMode و correctArticle) تُفعّل وتُطبق فقط وحصراً على الكلمات والأسماء المفردة والجمع (Nouns مثل: Tisch, Auto, Lampe, Kinder).";
-      customRules += "\n  * في حال كانت الكلمة اسماً: يجب تجريد الأداة من frontText ووضعها حصراً في correctArticle (اكتب \"Tisch\" وليس \"der Tisch\"، واكتب \"Kinder\" وليس \"die Kinder\").";
-      customRules += "\n  * 🚨 تفريق حاسم وإلزامي بين المؤنث المفرد والجمع: أداة المؤنث المفرد هي \"die\". بينما أداة الجمع لجميع أسماء الجمع هي إلزامياً \"die-plural\". يمنع منعاً باتاً كتابة \"die\" لأسماء الجمع (مثل Kinder, Eltern, Leute, Bücher) لأنها ستُصنف كمؤنث، بل اكتب حتماً \"die-plural\"!";
-      customRules += "\n  * في حال كانت البطاقة عبارة عن جملة كاملة أو عبارة أو سؤال (مثل: \"Das Auto ist groß\" أو \"Die Katze schläft\"): ممنوع تماماً عزل الأداة أو تفعيل وضع الأداة! يجب إبقاء الجملة كاملة بأداتها داخل frontText، ويجب إلزامياً وضع (isArticleMode = false) و (correctArticle = \"\").";
-      customRules += "\n  * صيغة الجمع في (pluralText) توضع مجردة تماماً بدون أداة التعريف أيضاً (اكتب \"Tische\" وليس \"die Tische\").";
+       let customRules = "\n\n⚠️ قواعد التخصيص الإضافية التي حددها المستخدم ويجب الالتزام بها:";
+      customRules += "\n- 🚨 بروتوكول وقواعد إلزامية لتصنيف أدوات التعريف وصيغ الجمع الألمانية (der / die / das / die-plural):";
+      customRules += "\n  * ميزة أدوات التعريف (isArticleMode و correctArticle) تُفعّل فقط على الكلمات والمفردات والأسماء (Nouns).";
+      customRules += "\n  * حقل frontText للأسماء يُكتب مجرداً تماماً بدون أداة التعريف (اكتب \"Tisch\" وليس \"der Tisch\"، واكتب \"Katze\" وليس \"die Katze\"، واكتب \"Kinder\" وليس \"die Kinder\").";
+      customRules += "\n  * بروتوكول تحديد الأداة في correctArticle مع وضع isArticleMode = true:";
+      customRules += "\n    1. [المذكر - Maskulin]: ضع \"correctArticle\": \"der\" (أمثلة: Tisch, Januar, Hund).";
+      customRules += "\n    2. [المؤنث - Feminin]: ضع \"correctArticle\": \"die\" (أمثلة: Katze, Frau, Sonne, Lampe).";
+      customRules += "\n    3. [المحايد - Neutral]: ضع \"correctArticle\": \"das\" (أمثلة: Handy, Buch, Auto, Kind).";
+      customRules += "\n    4. [الجمع - Plural Noun]: ضع \"correctArticle\": \"die-plural\" فقط وحصراً إذا كانت الكلمة في frontText بحد ذاتها اسم جمع (مثل Kinder, Eltern, Leute, Ferien, Geschwister).";
+      customRules += "\n  * ⚠️ قاعدة حاسمة جداً لعلاقة المفرد بالجمع:";
+      customRules += "\n    إذا كانت الكلمة اسماً مفرداً (مثل Januar أو Tisch أو Katze)، فإن أداتها في correctArticle تبقى حتماً أداتها المفردة (\"der\" أو \"die\" أو \"das\") ولا تتغير أبداً إلى \"die-plural\"، حتى مع وجود صيغة جمع في pluralText (مثل Januare أو Tische أو Katzen)!";
+      customRules += "\n  * في حال كانت البطاقة عبارة عن جملة كاملة أو سؤال أو تعبير (مثل: \"Das Auto ist groß\" أو \"Die Kinder spielen\"): ممنوع عزل الأداة! تبقى الجملة كاملة بأداتها داخل frontText، ويجب وضع isArticleMode = false و correctArticle = \"\" فارغاً تماماً.";
+      customRules += "\n  * صيغة الجمع في (pluralText) توضع مجردة تماماً بدون أداة التعريف (اكتب \"Tische\" وليس \"die Tische\").";
       if (!isAuto) {
         customRules += `\n- يجب عليك توليد بالضبط ${requestedCardsCount} بطاقة تعليمية في مصفوفة cards. تذكر: العدد المطلوب هو ${requestedCardsCount} بطاقة بالضبط، ولا تقم بإنشاء أكثر أو أقل من هذا العدد حتى لو طلب المستخدم في نصه عدداً آخر. أهمل تماماً أي أرقام يذكرها المستخدم في البرومبت واعتمد فقط هذا الرقم المحدد وهو ${requestedCardsCount}.`;
       }
@@ -5556,7 +5566,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       }
 
       if (germanArticlesMode !== "off") {
-        customRules += "\n- 🚨 قاعدة أدوات التعريف الألمانية (isArticleMode و correctArticle): للأسماء والمفردات المفردة (Single Nouns مثل: Handy, Tisch, Lampe) يجب إلزامياً وضع الأداة فقط في correctArticle وتجريد frontText تماماً من أداة التعريف (اكتب في frontText كلمة 'Handy' وليس 'Das Handy'، واكتب 'Tisch' وليس 'der Tisch') مع وضع isArticleMode = true. أما الجمل والعبارات الكاملة (مثل 'Das Buch ist schön') فيجب إبقاؤها كاملة بأداتها داخل frontText مع وضع isArticleMode = false و correctArticle = '' فارغاً.";
+        customRules += "\n- 🚨 قاعدة أدوات التعريف الألمانية (isArticleMode و correctArticle): طبّق بروتوكول الأدوات بدقة: \"der\" للمذكر، \"die\" للمؤنث، \"das\" للمحايد، و \"die-plural\" للأسماء التي تكون في frontText بحد ذاتها جمعاً. وللجمل ضع isArticleMode = false و correctArticle = ''.";
       } else {
         customRules += "\n- ممنوع تماماً استخدام وضع أدوات التعريف الألمانية. يجب وضع (isArticleMode = false) and (correctArticle = \"\") لجميع البطاقات دون استثناء.";
       }
@@ -7418,7 +7428,7 @@ Do NOT flag text that is already grammatically and orthographically correct.`;
 2. "backText": الترجمة العربية الدقيقة والمبسطة للكلمة أو الجملة (مثال: "طاولة" أو "كتاب" أو "السيارة كبيرة").
 3. "translationHint": وصف بسيط وموجز جداً باللغة العربية يشرح المعنى أو سياق استخدام الجملة أو نوع الكلمة (مثال: "اسم مذكر في الألمانية يشير للطاولة").
 4. "isArticleMode": boolean (ضع true فقط وحصراً إذا كان النص اسماً مفرداً في الألمانية له أداة تعريف مثل der/die/das، أما إذا كان جملة كاملة أو عبارة فضع دائماً false).
-5. "correctArticle": إذا كان اسماً مفرداً ألمانياً، حدد الأداة المناسبة بدقة: "der" للمذكر، "die" للمؤنث، "das" للمحايد، و "die-plural" للجمع. أما إذا كان جملة أو تعبيراً، فاجعل correctArticle دائماً نصاً فارغاً ""!
+5. "correctArticle": إذا كان اسماً ألمانياً، حدد الأداة وفق البروتوكول: "der" للمذكر، "die" للمؤنث، "das" للمحايد، و "die-plural" للأسماء التي هي بحد ذاتها جمع فقط (إذا كان الاسم مفرداً فتبقى أداته المفردة دائماً حتى لو كان له صيغة جمع). أما إذا كان جملة أو تعبيراً، فاجعل correctArticle دائماً نصاً فارغاً ""!
 6. "isPluralMode": boolean (ضع true إذا كان اسماً وله صيغة جمع معروفة، وإلا false).
 7. "pluralText": الكلمة بصيغة الجمع مجردة تماماً بدون أداة (مثال: "Tische" وليس "die Tische") وإلا "".
 8. "imageSearchQuery": عبارة بحث إنجليزية قصيرة ودقيقة جداً تمثل المفهوم بصرياً لجلب صورة توضيحية مطابقة (مثال: "wooden office desk table" لـ "Tisch").`;

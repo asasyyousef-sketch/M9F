@@ -44,6 +44,7 @@ import {
   Info,
   Hash,
   Copy,
+  Clipboard,
   ExternalLink,
   Upload,
   DownloadCloud,
@@ -473,8 +474,11 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
   const [externalJsonInput, setExternalJsonInput] = useState("");
   const [externalError, setExternalError] = useState<string | null>(null);
   const [externalCopySuccess, setExternalCopySuccess] = useState(false);
+  const [externalPasteSuccess, setExternalPasteSuccess] = useState(false);
+  const [externalPasteHint, setExternalPasteHint] = useState<string | null>(null);
   const [externalImporting, setExternalImporting] = useState(false);
   const [externalImportProgress, setExternalImportProgress] = useState("");
+  const jsonTextareaRef = React.useRef<HTMLTextAreaElement | null>(null);
 
   const fetchImageForQuery = async (query: string, timeoutMs = 8000): Promise<string | undefined> => {
     if (!query || !query.trim() || imagesMode === "off") return undefined;
@@ -590,25 +594,27 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
     }
 
     if (germanArticlesMode !== "off") {
-      promptText += `\n🚨 قواعد إلزامية صارمة لأدوات التعريف الألمانية (der / die / das / die-plural):
-1. للأسماء والمفردات المفردة والجمع (Nouns مثل: Das Handy, Der Tisch, Die Katze, Die Kinder):
-   - الأداة (der / die / das / die-plural) توضع حصراً وبشكل منفرد في حقل "correctArticle" مع "isArticleMode": true.
-   - حقل "frontText": يجب أن يحتوي فقط على الاسم مجرداً تماماً بدون أداة التعريف (اكتب "Handy" فقط وليس "Das Handy"، واكتب "Tisch" فقط وليس "der Tisch"، واكتب "Kinder" فقط وليس "die Kinder"). يمنع منعاً باتاً كتابة الأداة داخل frontText للأسماء والمفردات!
-   - ⚠️ قاعدة حاسمة جداً للتمييز بين المؤنث (die) والجمع (die-plural):
-     * أداة الاسم المفرد المؤنث (Feminine مثل Katze, Frau, Sonne): هي دائماً "die".
-     * أداة الاسم الجمع (Plural Noun مثل Kinder, Eltern, Leute, Bücher, Autos) أو بطاقة مخصصة لاسم جمع: هي إلزامياً وحتماً "die-plural".
-     * يمنع منعاً باتاً كتابة "die" لأسماء الجمع لأن النظام سيعتبرها خطأً كمؤنث! اكتب دائماً "die-plural" لأسماء الجمع.
-2. للجمل والعبارات الكاملة (Sentences & Phrases مثل: "Das Buch ist schön", "Die Kinder spielen"):
+      promptText += `\n🚨 بروتوكول وقواعد إلزامية صارمة لتصنيف أدوات التعريف الألمانية (der / die / das / die-plural):
+1. بروتوكول تصنيف الكلمات والمفردات (Nouns Vocabulary Protocol):
+   - يجب تجريد حقل "frontText" تماماً من أداة التعريف (اكتب "Januar" وليس "der Januar"، واكتب "Katze" وليس "die Katze"، واكتب "Kind" وليس "das Kind"، واكتب "Kinder" وليس "die Kinder").
+   - الأداة توضع حصراً في حقل "correctArticle" مع وضع "isArticleMode": true وفق القواعد الأربع التالية:
+     * [المذكر - Maskulin]: ضع "correctArticle": "der" (أمثلة: Tisch, Januar, Hund, Mann).
+     * [المؤنث - Feminin]: ضع "correctArticle": "die" (أمثلة: Katze, Frau, Sonne, Lampe).
+     * [المحايد - Neutral]: ضع "correctArticle": "das" (أمثلة: Handy, Buch, Kind, Auto).
+     * [الجمع - Plural Noun]: ضع "correctArticle": "die-plural" فقط وحصراً إذا كانت الكلمة في frontText بحد ذاتها اسم جمع (أمثلة: Kinder, Eltern, Leute, Ferien, Geschwister).
+   - ⚠️ قاعدة حاسمة جداً لعلاقة المفرد بالجمع:
+     * إذا كانت الكلمة اسماً مفرداً (مثل: Januar أو Tisch أو Katze)، فإن أداتها في correctArticle تبقى دائماً أداتها المفردة الأصلية ("der" أو "die" أو "das") ولا تتغير أبداً إلى "die-plural"، حتى لو تم تفعيل الجمع (isPluralMode: true) وتوفير صيغة الجمع (pluralText: "Januare" أو "Tische" أو "Katzen")!
+     * صيغة الجمع تذهب حصراً لحقل "pluralText" ولا تؤثر أبداً على قيمة "correctArticle" للاسم المفرد.
+2. للجمل والعبارات الكاملة (Sentences & Expressions مثل: "Das Buch ist schön", "Die Kinder spielen"):
    - الجملة يجب أن تبقى كاملة بجميع كلماتها وأداتها الطبيعية مدمجة داخل "frontText" (مثال: "Das Buch ist schön").
-   - ممنوع منعاً باتاً عزل الأداة من الجملة أو تفكيكها! يجب إلزامياً وضع "isArticleMode": false و "correctArticle": "" كفارغ تماماً.\n`;
+   - ممنوع تماماً عزل الأداة من الجملة! يجب إلزامياً وضع "isArticleMode": false و "correctArticle": "" كفارغ تماماً.\n`;
     } else {
       promptText += `- إيقاف أدوات التعريف (isArticleMode = false) و correctArticle = "".\n`;
     }
 
     if (germanPluralMode !== "off") {
-      promptText += `\n🚨 قواعد إلزامية صارمة ومطلوبة لصيغة الجمع الألمانية (pluralText و isPluralMode):
-- لكل اسم أو مفردة ألمانية (Single Noun)، يجب عليك حتماً وتلقائياً توفير صيغة الجمع الصحيحة في حقل "pluralText" مع وضع "isPluralMode": true.
-- صيغة الجمع في pluralText تُكتب مجردة بدون أداة التعريف (مثال لـ Handy: اكتب في pluralText "Handys". مثال لـ Tisch: اكتب "Tische". مثال لـ Buch: اكتب "Bücher").
+      promptText += `\n🚨 قواعد إلزامية لصيغة الجمع الألمانية (pluralText و isPluralMode):
+- لكل اسم أو مفردة ألمانية مفردة (Single Noun)، يجب عليك حتماً وتلقائياً توفير صيغة الجمع الصحيحة مجردة في حقل "pluralText" مع وضع "isPluralMode": true (مثال: لـ Tisch اكتب "Tische"، لـ Katze اكتب "Katzen"، لـ Januar اكتب "Januare").
 - يمنع منعاً باتاً ترك حقل pluralText فارغاً لأي اسم مفرد! أما الجمل والعبارات الكاملة فاجعل لها "isPluralMode": false و "pluralText": "".\n`;
     } else {
       promptText += `- إيقاف صيغة الجمع (isPluralMode = false) و pluralText = "".\n`;
@@ -658,14 +664,102 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
     return promptText;
   };
 
-  const handleCopyExternalPrompt = () => {
+  // دالة نسخ فائقة التوافق مع هواتف الآيفون ومتصفحات الويب وWebKit
+  const copyTextToClipboard = async (text: string): Promise<boolean> => {
+    // 1. محاولة استخدام Clipboard API الحديثة
+    if (typeof navigator !== "undefined" && navigator?.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (err) {
+        console.warn("navigator.clipboard.writeText failed, falling back to execCommand:", err);
+      }
+    }
+
+    // 2. بديل متوافق 100% مع iOS Safari ومتصفحات الموبايل (execCommand)
+    try {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      textArea.style.position = "fixed";
+      textArea.style.top = "0";
+      textArea.style.left = "0";
+      textArea.style.width = "2em";
+      textArea.style.height = "2em";
+      textArea.style.padding = "0";
+      textArea.style.border = "none";
+      textArea.style.outline = "none";
+      textArea.style.boxShadow = "none";
+      textArea.style.background = "transparent";
+      textArea.style.opacity = "0.01";
+      textArea.style.zIndex = "-1";
+      textArea.setAttribute("readonly", "");
+      document.body.appendChild(textArea);
+
+      textArea.focus();
+      textArea.select();
+      textArea.setSelectionRange(0, text.length);
+
+      const successful = document.execCommand("copy");
+      document.body.removeChild(textArea);
+      if (successful) return true;
+    } catch (err) {
+      console.warn("execCommand fallback copy failed:", err);
+    }
+
+    return false;
+  };
+
+  const handleCopyExternalPrompt = async (transitionToImport = true) => {
     const fullPrompt = constructFullExternalPrompt(prompt);
-    navigator.clipboard.writeText(fullPrompt);
+    await copyTextToClipboard(fullPrompt);
     setExternalCopySuccess(true);
+    setExternalPasteHint(null);
+
+    if (transitionToImport) {
+      // الانتقال الفوري لتبويب الاستيراد ولصق JSON
+      setExternalTab("import");
+      // تركيز المؤشر وتمرير الشاشة تلقائياً لصندوق JSON لراحة مستخدمي الموبايل
+      setTimeout(() => {
+        if (jsonTextareaRef.current) {
+          jsonTextareaRef.current.focus();
+          jsonTextareaRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, 120);
+    }
+
     setTimeout(() => {
       setExternalCopySuccess(false);
-      setExternalTab("import");
-    }, 1000);
+    }, 3500);
+  };
+
+  const handlePasteExternalJson = async () => {
+    setExternalPasteSuccess(false);
+    setExternalPasteHint(null);
+    setExternalError(null);
+
+    // محاولة قراءة الحافظة مباشرة
+    if (typeof navigator !== "undefined" && navigator?.clipboard?.readText) {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text && text.trim()) {
+          setExternalJsonInput(text);
+          setExternalPasteSuccess(true);
+          setTimeout(() => setExternalPasteSuccess(false), 2500);
+          if (jsonTextareaRef.current) {
+            jsonTextareaRef.current.focus();
+          }
+          return;
+        }
+      } catch (err) {
+        console.warn("navigator.clipboard.readText error (restricted permission):", err);
+      }
+    }
+
+    // في حال قيود أمان متصفح Safari على أجهزة الآيفون، تركيز المؤشر للمستخدم
+    if (jsonTextareaRef.current) {
+      jsonTextareaRef.current.focus();
+    }
+    setExternalPasteHint("المتصفح يطلب إذناً يدوياً: انقر نقرة مطولة داخل المربع أدناه ثم اضغط «لصق» (Paste).");
   };
 
   const handleImportExternalJson = async () => {
@@ -751,37 +845,33 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
         const rawGender = String(c.gender || c.type || c.category || c.number || "").trim().toLowerCase();
         let rawArt = String(c.correctArticle || c.article || c.art || "").trim().toLowerCase();
 
-        // Check if card indicates plural (explicit tag in frontText, hint, gender, or article)
+        let cleanFront = rawFront.replace(/\s*[\(\[]\s*(?:pl\.|plural|جمع)\s*[\)\]]/i, "").trim();
+        const hasDistinctPlural = Boolean(plText && cleanFront && plText.toLowerCase() !== cleanFront.toLowerCase());
+
+        // Check if card indicates that the front word itself is inherently a plural noun
         const hasPluralMarkerInFront = /\s*[\(\[]\s*(?:pl\.|plural|جمع)\s*[\)\]]/i.test(rawFront);
-        const hasPluralMarkerInHint = /\b(?:pl\.|plural|اسم جمع|صيغة جمع|\(جمع\))\b/i.test(hintCombined);
         const isPluralCardExplicit = Boolean(
-          c.isPluralMode ||
-          c.isPlural ||
           c.isPluralCard ||
           c.isPluralNoun ||
-          c.is_plural ||
           rawGender === "plural" ||
           rawGender === "pl" ||
           rawGender === "die-plural" ||
-          rawArt.includes("plural") ||
           rawArt.includes("die-plural") ||
           rawArt === "die (جمع)" ||
           rawArt === "die (pl)" ||
           rawArt === "die pl" ||
-          hasPluralMarkerInFront ||
-          hasPluralMarkerInHint
+          (hasPluralMarkerInFront && !hasDistinctPlural)
         );
 
-        let cleanFront = rawFront.replace(/\s*[\(\[]\s*(?:pl\.|plural|جمع)\s*[\)\]]/i, "").trim();
-
-        // Determine correctArticle
+        // Determine correctArticle according to the unified German protocol:
+        // [der] Masculine, [die] Feminine, [das] Neuter, [die-plural] Plural Noun Card
         let art = "";
-        if (isPluralCardExplicit) {
-          art = "die-plural";
-        } else if (rawArt === "der" || rawGender === "m" || rawGender === "masculine" || rawGender === "maskulin") {
+        if (rawArt === "der" || rawGender === "m" || rawGender === "masculine" || rawGender === "maskulin") {
           art = "der";
         } else if (rawArt === "das" || rawGender === "n" || rawGender === "neuter" || rawGender === "neutral") {
           art = "das";
+        } else if (rawArt === "die-plural" || (isPluralCardExplicit && !hasDistinctPlural)) {
+          art = "die-plural";
         } else if (rawArt === "die" || rawGender === "f" || rawGender === "feminine" || rawGender === "feminin") {
           art = "die";
         } else if (rawArt) {
@@ -3649,6 +3739,8 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                   onClick={() => {
                     setExternalError(null);
                     setExternalCopySuccess(false);
+                    setExternalPasteSuccess(false);
+                    setExternalPasteHint(null);
                     setExternalTab("prompt");
                     setShowExternalModal(true);
                   }}
@@ -5762,25 +5854,55 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                   <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl text-xs text-indigo-900 font-semibold space-y-1">
                     <p className="font-bold">💡 كيف تستخدم هذا الخيار؟</p>
                     <p className="text-[11px] text-indigo-800/80 leading-relaxed">
-                      1. اضغط على زر "نسخ البرومبت" بالأسفل.<br />
-                      2. ألصق النص في ChatGPT أو Gemini أو Claude أو أي نموذج أخر.<br />
-                      3. انسخ رد النموذج كـ JSON ثم انتقل لتبويب "2. إدخال البيانات المجلوبة" لتأكيد الاستيراد.
+                      1. اضغط على زر "نسخ البرومبت وانتقال للاستيراد" بالأسفل.<br />
+                      2. ألصق النص في ChatGPT أو Claude أو Gemini أو DeepSeek.<br />
+                      3. انسخ رد النموذج كـ JSON ثم ألصقه في الخطوة التالية لتأكيد الاستيراد فوراً.
                     </p>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
                       <label className="text-xs font-bold text-slate-700">البرومبت المولد تلقائياً مع كافة القواعد:</label>
-                      {externalCopySuccess && (
-                        <span className="text-[10px] font-extrabold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 animate-pulse">
-                          تم نسخ النص بنجاح! ✅
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {externalCopySuccess && (
+                          <span className="text-[11px] font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-200 animate-pulse flex items-center gap-1">
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>تم النسخ بنجاح!</span>
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleCopyExternalPrompt(false)}
+                          className="px-2.5 py-1 text-[11px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-all cursor-pointer flex items-center gap-1 active:scale-95"
+                          title="نسخ النص فقط دون الانتقال"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>نسخ فقط</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExternalTab("import");
+                            setTimeout(() => {
+                              if (jsonTextareaRef.current) {
+                                jsonTextareaRef.current.focus();
+                                jsonTextareaRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+                              }
+                            }, 120);
+                          }}
+                          className="px-2.5 py-1 text-[11px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-all cursor-pointer flex items-center gap-1 active:scale-95"
+                          title="الانتقال لخانة اللصق"
+                        >
+                          <span>الانتقال للصق ⬅️</span>
+                        </button>
+                      </div>
                     </div>
+
                     <textarea
                       readOnly
+                      onClick={(e) => (e.target as HTMLTextAreaElement).select()}
                       value={constructFullExternalPrompt(prompt)}
-                      className="w-full h-56 p-3.5 bg-slate-900 text-slate-200 font-mono text-xs rounded-xl border border-slate-800 focus:outline-none resize-none leading-relaxed"
+                      className="w-full h-56 p-3.5 bg-slate-900 text-slate-200 font-mono text-xs sm:text-[13px] rounded-xl border border-slate-800 focus:outline-none resize-none leading-relaxed select-all"
                       dir="rtl"
                     />
                   </div>
@@ -5788,11 +5910,32 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
               ) : (
                 <div className="space-y-3">
                   <div className="p-3 bg-amber-50/60 border border-amber-200/70 rounded-xl text-xs text-amber-900 font-semibold">
-                    <p className="font-bold">📥 أدخل أو ألصق النتيجة الملصقة (JSON):</p>
+                    <p className="font-bold">📥 إدخال النتيجة المنسوخة (JSON):</p>
                     <p className="text-[11px] text-amber-800/80 mt-0.5 leading-relaxed">
-                      يدعم التطبيق كود JSON المباشر أو الملتف داخل كتل الماركداون (```json ... ```). سيتم استخراج المجلد والبطاقات تلقائياً.
+                      يدعم التطبيق كود JSON المباشر أو الملتف داخل كتل الماركداون (```json ... ```). استخدم زر «📋 لصق الرد من الحافظة» أدناه أو ألصق يدوياً.
                     </p>
                   </div>
+
+                  {externalCopySuccess && (
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl flex items-center gap-2 animate-fade-in">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>✅ تم نسخ البرومبت إلى الحافظة بنجاح! انتقلت تلقائياً لخانة الاستيراد.</span>
+                    </div>
+                  )}
+
+                  {externalPasteSuccess && (
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl flex items-center gap-2 animate-fade-in">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>✅ تم لصق كود JSON من الحافظة بنجاح! جاهز للاستيراد.</span>
+                    </div>
+                  )}
+
+                  {externalPasteHint && (
+                    <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold rounded-xl flex items-center gap-2">
+                      <Info className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>{externalPasteHint}</span>
+                    </div>
+                  )}
 
                   {externalError && (
                     <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold rounded-xl flex items-center gap-2">
@@ -5808,17 +5951,56 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                     </div>
                   )}
 
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-700">كود JSON المجلوب:</label>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs font-black text-slate-700">كود JSON المجلوب:</label>
+                        {externalJsonInput.trim() && (
+                          <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono font-bold">
+                            {externalJsonInput.length} حرف
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {externalJsonInput.trim() && (
+                          <button
+                            type="button"
+                            disabled={externalImporting}
+                            onClick={() => {
+                              setExternalJsonInput("");
+                              setExternalError(null);
+                              setExternalPasteHint(null);
+                            }}
+                            className="px-2.5 py-1 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-all cursor-pointer flex items-center gap-1 active:scale-95 disabled:opacity-50"
+                            title="مسح محتوى المربع"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>تفريغ</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          disabled={externalImporting}
+                          onClick={handlePasteExternalJson}
+                          className="px-3.5 py-1.5 text-xs font-black text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-xs active:scale-95 disabled:opacity-50"
+                          title="لصق الرد من الحافظة مباشرة بضغطة واحدة"
+                        >
+                          <Clipboard className="w-4 h-4 text-indigo-600" />
+                          <span>📋 لصق الرد من الحافظة</span>
+                        </button>
+                      </div>
+                    </div>
+
                     <textarea
+                      ref={jsonTextareaRef}
                       value={externalJsonInput}
                       disabled={externalImporting}
                       onChange={(e) => {
                         setExternalJsonInput(e.target.value);
                         if (externalError) setExternalError(null);
                       }}
-                      placeholder={`ألصق النتيجة هنا... مثال:\n{\n  "folder": { "name": "مفردات السفر", "color": "#0056f6" },\n  "cards": [\n    { "frontText": "Bonjour", "backText": "مرحباً" }\n  ]\n}`}
-                      className="w-full h-52 p-3.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-none transition-all resize-none disabled:opacity-60"
+                      placeholder={`ألصق النتيجة هنا أو اضغط زر «📋 لصق الرد من الحافظة» أعلاه...\n\nمثال:\n{\n  "folder": { "name": "مفردات السفر", "color": "#0056f6" },\n  "cards": [\n    { "frontText": "Handy", "backText": "هاتف", "correctArticle": "das" }\n  ]\n}`}
+                      className="w-full h-52 p-3.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs sm:text-[13px] text-slate-800 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:outline-none transition-all resize-none disabled:opacity-60 leading-relaxed"
                       dir="ltr"
                     />
                   </div>
@@ -5827,31 +6009,61 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
             </div>
 
             {/* Footer Actions */}
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-3 shrink-0">
-              <button
-                type="button"
-                disabled={externalImporting}
-                onClick={() => setShowExternalModal(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-all cursor-pointer disabled:opacity-40"
-              >
-                إغلاق
-              </button>
-
-              {externalTab === "prompt" ? (
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 sm:gap-3 shrink-0 flex-wrap sm:flex-nowrap">
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleCopyExternalPrompt}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm active:scale-95 transition-all cursor-pointer flex items-center gap-2"
+                  disabled={externalImporting}
+                  onClick={() => setShowExternalModal(false)}
+                  className="px-3.5 py-2 text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-all cursor-pointer disabled:opacity-40"
                 >
-                  <Copy className="w-4 h-4" />
-                  <span>نسخ البرومبت وانتقال للاستيراد</span>
+                  إغلاق
                 </button>
+                {externalTab === "import" && (
+                  <button
+                    type="button"
+                    disabled={externalImporting}
+                    onClick={() => setExternalTab("prompt")}
+                    className="px-3 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Code className="w-3.5 h-3.5 text-slate-500" />
+                    <span>العودة للبرومبت</span>
+                  </button>
+                )}
+              </div>
+
+              {externalTab === "prompt" ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExternalTab("import");
+                      setTimeout(() => {
+                        if (jsonTextareaRef.current) {
+                          jsonTextareaRef.current.focus();
+                          jsonTextareaRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+                        }
+                      }, 120);
+                    }}
+                    className="px-3 py-2.5 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all cursor-pointer"
+                  >
+                    الانتقال للاستيراد ⬅️
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyExternalPrompt(true)}
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl shadow-sm active:scale-95 transition-all cursor-pointer flex items-center gap-2"
+                  >
+                    <Copy className="w-4 h-4" />
+                    <span>نسخ البرومبت وانتقال للاستيراد</span>
+                  </button>
+                </div>
               ) : (
                 <button
                   type="button"
                   onClick={handleImportExternalJson}
                   disabled={!externalJsonInput.trim() || externalImporting}
-                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm active:scale-95 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-sm active:scale-95 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {externalImporting ? (
                     <>
