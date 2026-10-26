@@ -80,46 +80,77 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     fetchBooksFromServer();
   }, []);
 
-  // Handle ZIP file upload to server
-  const handleZipFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [errorMessage, setErrorMessage] = useState<string>("");
+
+  // Handle ZIP file upload to server with real upload progress tracking
+  const handleZipFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    try {
-      setIsUploadingZip(true);
-      setUploadMessage("جاري رفع واستخراج الكتاب على السيرفر...");
+    setIsUploadingZip(true);
+    setUploadProgress(0);
+    setUploadMessage("جاري بدء رفع الملف إلى السيرفر...");
+    setErrorMessage("");
 
-      const formData = new FormData();
-      formData.append("file", file);
+    const formData = new FormData();
+    formData.append("file", file);
 
-      const res = await fetch("/api/books/upload-zip", {
-        method: "POST",
-        body: formData
-      });
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/books/upload-zip");
 
-      if (!res.ok) {
-        const errJson = await res.json();
-        throw new Error(errJson.error || "فشل رفع الملف إلى السيرفر");
+    // Track upload progress
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const percent = Math.round((event.loaded / event.total) * 100);
+        setUploadProgress(percent);
+        if (percent < 100) {
+          setUploadMessage(`جاري رفع الملف إلى السيرفر: ${percent}%`);
+        } else {
+          setUploadMessage("اكتمل الرفع، جاري فك الضغط وتجهيز صفحات وصوتيات الكتاب على السيرفر...");
+        }
+      }
+    };
+
+    xhr.onload = async () => {
+      setIsUploadingZip(false);
+      setUploadProgress(0);
+      setUploadMessage("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+
+      let responseJson: any = null;
+      try {
+        if (xhr.responseText) {
+          responseJson = JSON.parse(xhr.responseText);
+        }
+      } catch (jsonErr) {
+        console.warn("Could not parse response as JSON:", xhr.responseText);
       }
 
-      const data = await res.json();
-      if (data.book) {
-        setUploadMessage("تم حفظ الكتاب على السيرفر بنجاح!");
+      if (xhr.status >= 200 && xhr.status < 300 && responseJson?.book) {
         await fetchBooksFromServer();
-        setSelectedBook(data.book);
+        setSelectedBook(responseJson.book);
         setCurrentPageIndex(0);
         setViewMode("reader");
+      } else {
+        const errorText =
+          responseJson?.error ||
+          xhr.responseText ||
+          `فشل رفع واستخراج الكتاب (رمز السيرفر: ${xhr.status})`;
+        console.error("ZIP Upload failed:", errorText);
+        setErrorMessage(errorText);
       }
-    } catch (err: any) {
-      console.error("ZIP Upload error:", err);
-      alert(err.message || "حدث خطأ أثناء رفع واستخراج الكتاب");
-    } finally {
+    };
+
+    xhr.onerror = () => {
       setIsUploadingZip(false);
+      setUploadProgress(0);
       setUploadMessage("");
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    }
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setErrorMessage("حدث خطأ في الاتصال بالسيرفر أثناء رفع الملف المضغوط");
+    };
+
+    xhr.send(formData);
   };
 
   // Open a specific book
@@ -263,15 +294,34 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
           className="hidden"
         />
 
+        {/* Error Banner if any */}
+        {errorMessage && (
+          <div className="mx-5 my-3 p-3.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm flex items-center justify-between">
+            <span className="pr-2">{errorMessage}</span>
+            <button
+              type="button"
+              onClick={() => setErrorMessage("")}
+              className="p-1 text-red-400 hover:text-red-700 flex-shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Add Book Row */}
         <div
-          onClick={() => fileInputRef.current?.click()}
-          className="w-full px-5 py-5 flex items-center gap-5 cursor-pointer hover:bg-gray-50/70 transition border-b border-gray-100"
+          onClick={() => !isUploadingZip && fileInputRef.current?.click()}
+          className={`w-full px-5 py-5 flex items-center gap-5 border-b border-gray-100 transition ${
+            isUploadingZip ? "cursor-wait bg-blue-50/20" : "cursor-pointer hover:bg-gray-50/70"
+          }`}
         >
           {/* Blue Viewfinder Card */}
           <div className="w-32 h-32 rounded-2xl bg-[#007aff] flex items-center justify-center text-white shadow-sm flex-shrink-0">
             {isUploadingZip ? (
-              <Loader2 className="w-12 h-12 animate-spin text-white" />
+              <div className="flex flex-col items-center gap-1">
+                <Loader2 className="w-10 h-10 animate-spin text-white" />
+                <span className="text-xs font-semibold text-white">{uploadProgress}%</span>
+              </div>
             ) : (
               <svg
                 className="w-14 h-14"
@@ -294,10 +344,20 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
             )}
           </div>
 
-          <div className="flex flex-col">
+          <div className="flex flex-col flex-1 min-w-0 pr-4">
             <span className="text-[#007aff] font-semibold text-lg">Add Book</span>
-            {isUploadingZip && (
-              <span className="text-xs text-gray-500 mt-1">{uploadMessage}</span>
+            {isUploadingZip ? (
+              <div className="mt-2 max-w-xs">
+                <div className="w-full bg-blue-100 h-2 rounded-full overflow-hidden">
+                  <div
+                    className="bg-[#007aff] h-full transition-all duration-200"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+                <span className="text-xs text-gray-500 mt-1.5 block truncate">{uploadMessage}</span>
+              </div>
+            ) : (
+              <span className="text-xs text-gray-400 mt-0.5">رفع واستخراج ملف كتاب مضغوط (ZIP)</span>
             )}
           </div>
         </div>
