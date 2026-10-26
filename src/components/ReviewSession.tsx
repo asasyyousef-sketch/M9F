@@ -655,6 +655,7 @@ interface StudyCardProps {
   swipeSensitivity?: number;
   reviewVoiceTarget?: "primary" | "secondary";
   speakFrontArticle?: boolean;
+  onUpdateCard?: (card: Flashcard) => void;
 }
 
 const StudyCard: React.FC<StudyCardProps> = ({
@@ -672,6 +673,7 @@ const StudyCard: React.FC<StudyCardProps> = ({
   swipeSensitivity = 40,
   reviewVoiceTarget = "primary",
   speakFrontArticle = true,
+  onUpdateCard,
 }) => {
   // Capture card in local state so it stays exactly the same when unmounting/exiting
   const [localCard, setLocalCard] = useState(card);
@@ -690,6 +692,115 @@ const StudyCard: React.FC<StudyCardProps> = ({
   const [imagePage, setImagePage] = useState(1);
   const [isCachingCard, setIsCachingCard] = useState(false);
   const [cacheSuccessMsg, setCacheSuccessMsg] = useState(false);
+  const [setAsPrimarySuccess, setSetAsPrimarySuccess] = useState(false);
+
+  const handleSetAsPrimaryImage = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const selectedUrl = extraImages[currentImageIndex];
+    if (!selectedUrl) return;
+
+    const targetField = localFlipped ? "backImage" : "frontImage";
+    const posField = localFlipped ? "backImagePosition" : "frontImagePosition";
+
+    const updatedCard: Flashcard = {
+      ...localCard,
+      [targetField]: selectedUrl,
+      [posField]: "50% 50% 1.0"
+    };
+    setLocalCard(updatedCard);
+
+    setExtraImages(prev => {
+      const rest = prev.filter(u => u !== selectedUrl);
+      return [selectedUrl, ...rest];
+    });
+    setCurrentImageIndex(0);
+
+    // 1. Notify parent ReviewSession & App.tsx to update React state, localStorage and persistDB
+    if (onUpdateCard) {
+      onUpdateCard(updatedCard);
+    }
+
+    // 2. Cache candidate list locally
+    try {
+      const autoKey = `auto_images_${localCard.id}`;
+      const raw = localStorage.getItem(autoKey);
+      if (raw) {
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          const rest = list.filter((u: string) => u !== selectedUrl);
+          localStorage.setItem(autoKey, JSON.stringify([selectedUrl, ...rest]));
+        }
+      }
+    } catch (err) {}
+
+    // 3. Update localStorage cached_cards
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key === "cached_cards" || key.startsWith("cached_cards_"))) {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            try {
+              const list = JSON.parse(raw);
+              if (Array.isArray(list)) {
+                const nextList = list.map((c: any) => c.id === localCard.id ? { ...c, [targetField]: selectedUrl } : c);
+                localStorage.setItem(key, JSON.stringify(nextList));
+              }
+            } catch (err) {}
+          }
+        }
+      }
+    } catch (err) {}
+
+    // 4. Direct authenticated POST to /api/data to guarantee Supabase cloud synchronization
+    try {
+      const activeToken = localStorage.getItem("app_auth_token");
+      const authHeaders: Record<string, string> = { "Content-Type": "application/json" };
+      if (activeToken) {
+        authHeaders["Authorization"] = `Bearer ${activeToken}`;
+      }
+
+      let allCards: any[] = [];
+      let allFolders: any[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key === "cached_cards" || key.startsWith("cached_cards_"))) {
+          try {
+            const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+            if (Array.isArray(parsed) && parsed.length > allCards.length) {
+              allCards = parsed;
+            }
+          } catch (e) {}
+        }
+        if (key && (key === "cached_folders" || key.startsWith("cached_folders_"))) {
+          try {
+            const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+            if (Array.isArray(parsed) && parsed.length > allFolders.length) {
+              allFolders = parsed;
+            }
+          } catch (e) {}
+        }
+      }
+
+      const finalCards = allCards.map((c: any) => c.id === localCard.id ? { ...c, [targetField]: selectedUrl } : c);
+
+      fetch("/api/data", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          folders: allFolders,
+          cards: finalCards
+        })
+      }).catch((err) => {
+        console.error("Direct save to /api/data failed:", err);
+      });
+    } catch (err) {
+      console.error("Failed to persist card primary image:", err);
+    }
+
+    setSetAsPrimarySuccess(true);
+    setTimeout(() => setSetAsPrimarySuccess(false), 2200);
+  };
 
   // --- DESCRIPTION POPUP MODAL STATE & HANDLERS (LONG PRESS ONLY) ---
   const [isDescriptionModalOpen, setIsDescriptionModalOpen] = useState(false);
@@ -1944,18 +2055,30 @@ const StudyCard: React.FC<StudyCardProps> = ({
                   <p className="text-[10px] text-white/80 leading-tight font-medium">اسحب للأسفل للخروج • يمين/يسار للتنقل</p>
                 </div>
 
-                {/* Exit Button */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsFullScreen(false);
-                  }}
-                  className="w-11 h-11 rounded-full bg-black/50 text-white hover:bg-black/75 active:scale-95 transition-all flex items-center justify-center cursor-pointer shadow-lg border border-white/10 pointer-events-auto"
-                  title="إغلاق العرض"
-                >
-                  <X className="w-5.5 h-5.5" />
-                </button>
+                {/* Top Corner Action Controls */}
+                <div className="flex items-center gap-2 pointer-events-auto">
+                  <button
+                    type="button"
+                    onClick={handleSetAsPrimaryImage}
+                    className="px-2.5 py-1 text-[11px] font-bold bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-lg shadow-md border border-red-500/50 transition-all flex items-center gap-1 cursor-pointer"
+                    title="تعيين كصورة أساسية"
+                  >
+                    <span>{setAsPrimarySuccess ? "✓ تم التعيين" : "تعيين كصورة أساسية"}</span>
+                  </button>
+
+                  {/* Exit Button */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsFullScreen(false);
+                    }}
+                    className="w-11 h-11 rounded-full bg-black/50 text-white hover:bg-black/75 active:scale-95 transition-all flex items-center justify-center cursor-pointer shadow-lg border border-white/10"
+                    title="إغلاق العرض"
+                  >
+                    <X className="w-5.5 h-5.5" />
+                  </button>
+                </div>
               </div>
 
               {/* Overlay Footer inside Fullscreen (Zero screen space impact) */}
@@ -1989,6 +2112,7 @@ interface ReviewSessionProps {
   onClose: () => void;
   onUpdateStreak: (cardId: string, correct: boolean) => void;
   onEditCard?: (card: Flashcard) => void;
+  onUpdateCard?: (card: Flashcard) => void;
   chainMethods?: ReviewMethod[];
   chainIndex?: number;
   onCompleteChainStep?: (nextIndex: number) => void;
@@ -2002,6 +2126,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   onClose,
   onUpdateStreak,
   onEditCard,
+  onUpdateCard,
   chainMethods,
   chainIndex,
   onCompleteChainStep
@@ -2076,6 +2201,13 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   // Main session states
   const [sessionCards, setSessionCards] = useState<Flashcard[]>(filteredCards);
   const [currentIndex, setCurrentIndex] = useState(0);
+
+  const handleCardUpdateInternal = React.useCallback((updatedCard: Flashcard) => {
+    setSessionCards(prev => prev.map(c => c.id === updatedCard.id ? updatedCard : c));
+    if (onUpdateCard) {
+      onUpdateCard(updatedCard);
+    }
+  }, [onUpdateCard]);
   const [hasStartedStep, setHasStartedStep] = useState(false);
   const [isReviewChatOpen, setIsReviewChatOpen] = useState(false);
   const [spokenChallengeContext, setSpokenChallengeContext] = useState<{
@@ -5762,6 +5894,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                             swipeSensitivity={swipeSensitivity}
                             reviewVoiceTarget={reviewVoiceTarget}
                             speakFrontArticle={speakFrontArticle}
+                            onUpdateCard={handleCardUpdateInternal}
                           />
                         </motion.div>
                       </AnimatePresence>

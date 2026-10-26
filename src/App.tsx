@@ -1386,6 +1386,7 @@ function MainStudyApp() {
           onClose={() => setActiveReview(null)}
           onUpdateStreak={handleUpdateStreak}
           onEditCard={(card) => setEditingCard(card)}
+          onUpdateCard={(updatedCard) => handleEditCard(updatedCard.id, updatedCard)}
         />
       )}
 
