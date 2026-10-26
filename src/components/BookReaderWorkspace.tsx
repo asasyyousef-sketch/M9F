@@ -81,6 +81,79 @@ export function cleanAndSortBook(book: InteractiveBook): { updatedBook: Interact
   };
 }
 
+// Helper: Load official Hueber book from workspace assets
+export async function loadOfficialHueberBook(): Promise<InteractiveBook | null> {
+  try {
+    const res = await fetch("/assets/aistudio/530_25467_content_fd770cf0.json");
+    if (!res.ok) return null;
+    const contentData = await res.json();
+
+    let bookTitle = "Miteinander! A1.2 KB+AB";
+    try {
+      const metaRes = await fetch("/assets/aistudio/530_25467_book_9251b13d.json");
+      if (metaRes.ok) {
+        const meta = await metaRes.json();
+        if (meta.title) bookTitle = meta.title;
+      }
+    } catch {}
+
+    const rawPages: any[] = [];
+    if (Array.isArray(contentData.book_parts)) {
+      contentData.book_parts.forEach((bp: any) => {
+        if (Array.isArray(bp.pages)) rawPages.push(...bp.pages);
+      });
+    }
+
+    if (rawPages.length === 0) return null;
+
+    const constructedPages: BookPage[] = rawPages.map((p: any) => {
+      const pageNum = parseInt(String(p.page || 1), 10);
+      const pageMediaList: BookPageMedia[] = [];
+
+      if (Array.isArray(p.media)) {
+        p.media.forEach((m: any, mIdx: number) => {
+          pageMediaList.push({
+            id: m.media_id || `m-${pageNum}-${mIdx}`,
+            trackNumber: m.title ? m.title.split("–")[0]?.trim() : `${pageNum}/${mIdx + 1}`,
+            title: m.title || m.file_name,
+            type: m.type === "video" ? "video" : "audio",
+            fileName: m.file_name,
+            url: typeof m.hyperlinkObj === "string" && m.hyperlinkObj.startsWith("http") ? m.hyperlinkObj : undefined,
+            pageNumber: pageNum
+          });
+        });
+      }
+
+      return {
+        pageNumber: pageNum,
+        displayLabel: String(p.page_name || pageNum),
+        pageImage: "/assets/aistudio/image_629fa44a.png",
+        media: pageMediaList
+      };
+    });
+
+    constructedPages.sort((a, b) => a.pageNumber - b.pageNumber);
+
+    const allMedia: BookPageMedia[] = [];
+    constructedPages.forEach((pg) => {
+      allMedia.push(...pg.media);
+    });
+
+    return {
+      id: "miteinander-a1-2-official",
+      title: bookTitle,
+      author: "Hueber Verlag",
+      totalPages: constructedPages.length,
+      createdAt: new Date().toISOString(),
+      pages: constructedPages,
+      allMedia
+    };
+  } catch (e) {
+    console.error("Failed to load official Hueber book:", e);
+    return null;
+  }
+}
+
 export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   onPlayMediaInStudio,
   onBackToMediaExplorer
@@ -114,22 +187,26 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   const zipInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Load books from IndexedDB on initial mount and re-link pages automatically
+  // Load books from IndexedDB on initial mount
   useEffect(() => {
     async function loadBooks() {
       try {
         let storedBooks = await getAllBooksFromDB();
-        if (storedBooks.length === 0) {
-          // Seed initial demo book
-          await saveBookToDB(DEMO_BOOK);
-          setBooks([DEMO_BOOK]);
-          setSelectedBook(DEMO_BOOK);
-          // Default to page 175 (index 2)
-          setCurrentPageIndex(2);
+        const hasAnyMedia = storedBooks.some((b) => b.pages.some((p) => p.media && p.media.length > 0));
+
+        if (storedBooks.length === 0 || !hasAnyMedia) {
+          const official = await loadOfficialHueberBook();
+          if (official) {
+            await saveBookToDB(official);
+            storedBooks = [official];
+          } else {
+            await saveBookToDB(DEMO_BOOK);
+            storedBooks = [DEMO_BOOK];
+          }
         } else {
           // Auto-repair & sanitize any previously stored book in IndexedDB
           let anyModified = false;
-          const healedBooks = await Promise.all(
+          storedBooks = await Promise.all(
             storedBooks.map(async (b) => {
               const { updatedBook, wasModified } = cleanAndSortBook(b);
               if (wasModified) {
@@ -143,15 +220,15 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
               return updatedBook;
             })
           );
-
-          setBooks(healedBooks);
-          const firstBook = healedBooks[0];
-          setSelectedBook(firstBook);
-
-          // Find first page that has media or default to page 175 if exists
-          const initialIdx = firstBook.pages.findIndex((p) => p.media && p.media.length > 0);
-          setCurrentPageIndex(initialIdx >= 0 ? initialIdx : 0);
         }
+
+        setBooks(storedBooks);
+        const firstBook = storedBooks[0];
+        setSelectedBook(firstBook);
+
+        // Find first page that has media (e.g. Page 11) or default to 0
+        const initialIdx = firstBook.pages.findIndex((p) => p.media && p.media.length > 0);
+        setCurrentPageIndex(initialIdx >= 0 ? initialIdx : 0);
       } catch (err) {
         console.error("Failed to load books from DB:", err);
         setBooks([DEMO_BOOK]);
@@ -542,7 +619,13 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
         if (Array.isArray(data.videos)) topLevelMediaList.push(...data.videos);
 
         // Check pages
-        if (Array.isArray(data)) {
+        if (Array.isArray(data.book_parts)) {
+          const bpPages: any[] = [];
+          data.book_parts.forEach((bp: any) => {
+            if (Array.isArray(bp.pages)) bpPages.push(...bp.pages);
+          });
+          if (bpPages.length > 0) rawPages = bpPages;
+        } else if (Array.isArray(data)) {
           rawPages = data;
         } else if (Array.isArray(data.pages)) {
           rawPages = data.pages;
@@ -632,13 +715,19 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
               assignedMediaIds.add(matchedMedia.id);
             }
 
+            const resolvedUrl =
+              matchedMedia?.url ||
+              (typeof m.hyperlinkObj === "string" && m.hyperlinkObj.startsWith("http")
+                ? m.hyperlinkObj
+                : undefined);
+
             pageMediaList.push({
               id: matchedMedia ? matchedMedia.id : `media-${pageNum}-${mIdx}`,
               trackNumber: trackNum,
               title: mediaTitle,
               type: mediaType,
               fileName: matchedMedia?.fileName || rawFileName,
-              url: matchedMedia?.url,
+              url: resolvedUrl,
               blob: matchedMedia?.blob,
               pageNumber: pageNum
             });
