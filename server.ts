@@ -13,6 +13,7 @@ import { getSupabase, SUPABASE_SQL_SCHEMA } from "./src/supabaseClient";
 import { formatSubtitleTrackProtocol } from "./src/utils/subtitleNaming";
 import { GoogleGenAI, Type } from "@google/genai";
 import { authMiddleware, registerAuthRoutes, loadUsers, syncUsersWithSupabase } from "./serverAuth";
+import { registerServerBookRoutes } from "./serverBooks";
 
 // ─── Crash & Unhandled Rejection Immunity ───────────────────────────────────────
 // Prevents server crashes from remote sockets (e.g. Gradio / Python / Whisper server disconnecting mid-stream)
@@ -264,6 +265,9 @@ async function startServer() {
       console.error("Failed to link existing data to primary admin:", e);
     }
   });
+
+  // Mount Interactive Books routes & uploads
+  registerServerBookRoutes(app);
 
   // Migrate old db.json if it exists
   if (!fs.existsSync(DB_PATH) && fs.existsSync(OLD_DB_PATH)) {
