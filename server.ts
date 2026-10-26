@@ -6442,45 +6442,15 @@ function sanitizeCardArticleAndPlural(card: any): any {
         return res.status(400).json({ error: "مفتاح Gemini API Key غير مكوّن على الخادم حالياً. يرجى إضافته في الإعدادات." });
       }
 
-      // Helper function to call Gemini safely with automatic fallback on unavailable/high demand/404 errors
+      // Direct call to Gemini for the selected model without fallback
       const callGeminiSafe = async (targetModel: string, configObj: any) => {
         if (!ai) throw new Error("مفتاح Gemini API غير مكوّن.");
-
-        const candidateModels = [
-          targetModel,
-          "gemini-3.6-flash",
-          "gemini-3.5-flash",
-          "gemini-2.5-flash",
-          "gemini-1.5-flash",
-          "gemini-2.5-pro"
-        ];
-
-        const validCandidates = Array.from(
-          new Set(candidateModels.filter(Boolean))
-        );
-
-        let lastErr: any = null;
-        for (const candidate of validCandidates) {
-          try {
-            const result = await ai.models.generateContent({
-              model: candidate,
-              contents: promptText,
-              config: configObj
-            });
-
-            // Update friendly model name if a fallback model was used
-            if (candidate === "gemini-3.6-flash") aiModelName = "Gemini 3.6 Flash ⚡";
-            else if (candidate === "gemini-3.5-flash") aiModelName = "Gemini 3.5 Flash ⚡";
-            else if (candidate === "gemini-2.5-flash") aiModelName = "Gemini 2.5 Flash ⚡";
-            else if (candidate === "gemini-1.5-flash") aiModelName = "Gemini 1.5 Flash ⚡";
-
-            return result;
-          } catch (err: any) {
-            lastErr = err;
-            console.warn(`[Gemini Safe Call Warning] Model '${candidate}' failed: ${err?.message || err}. Trying next fallback candidate...`);
-          }
-        }
-        throw lastErr;
+        const result = await ai.models.generateContent({
+          model: targetModel,
+          contents: promptText,
+          config: configObj
+        });
+        return result;
       };
 
       // Helper function to call Groq API with system instructions and user prompt
@@ -7120,69 +7090,45 @@ Do NOT flag text that is already grammatically and orthographically correct.`;
           targetGeminiModel = "gemini-3.6-flash";
         }
 
-        const candidateModels = [
-          targetGeminiModel,
-          "gemini-3.6-flash",
-          "gemini-3.5-flash-lite",
-          "gemini-3.1-flash-lite",
-          "gemini-3.5-flash",
-          "gemini-2.5-flash",
-          "gemini-2.5-flash-lite",
-          "gemini-1.5-flash"
-        ];
-        const validCandidates = Array.from(new Set(candidateModels.filter(Boolean)));
-
-        let lastErr: any = null;
-
-        for (const candidate of validCandidates) {
-          try {
-            const result = await ai.models.generateContent({
-              model: candidate,
-              contents: `Please proofread this ${targetLanguage} text and return structured JSON:\n\n${text}`,
-              config: {
-                systemInstruction,
-                responseMimeType: "application/json",
-                responseSchema: {
-                  type: Type.OBJECT,
-                  properties: {
-                    hasErrors: { type: Type.BOOLEAN },
-                    corrections: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          original: { type: Type.STRING },
-                          replacement: { type: Type.STRING },
-                          explanation: { type: Type.STRING },
-                          type: { type: Type.STRING },
-                          beforeWord: { type: Type.STRING },
-                          afterWord: { type: Type.STRING },
-                          context: { type: Type.STRING }
-                        },
-                        required: ["original", "replacement", "explanation", "type"]
-                      }
+        const result = await ai.models.generateContent({
+          model: targetGeminiModel,
+          contents: `Please proofread this ${targetLanguage} text and return structured JSON:\n\n${text}`,
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                hasErrors: { type: Type.BOOLEAN },
+                corrections: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      original: { type: Type.STRING },
+                      replacement: { type: Type.STRING },
+                      explanation: { type: Type.STRING },
+                      type: { type: Type.STRING },
+                      beforeWord: { type: Type.STRING },
+                      afterWord: { type: Type.STRING },
+                      context: { type: Type.STRING }
                     },
-                    overallScore: { type: Type.NUMBER },
-                    summary: { type: Type.STRING }
-                  },
-                  required: ["hasErrors", "corrections", "overallScore", "summary"]
-                }
-              }
-            });
-
-            if (result.text) {
-              responseText = result.text;
-              modelActuallyUsed = candidate;
-              break;
+                    required: ["original", "replacement", "explanation", "type"]
+                  }
+                },
+                overallScore: { type: Type.NUMBER },
+                summary: { type: Type.STRING }
+              },
+              required: ["hasErrors", "corrections", "overallScore", "summary"]
             }
-          } catch (err: any) {
-            lastErr = err;
-            console.warn(`[Proofread Warning] Candidate '${candidate}' failed:`, err?.message || err);
           }
-        }
+        });
+
+        responseText = result.text || "";
+        modelActuallyUsed = targetGeminiModel;
 
         if (!responseText) {
-          throw lastErr || new Error("فشل تدقيق النص بالذكاء الاصطناعي");
+          throw new Error("فشل تدقيق النص بالذكاء الاصطناعي");
         }
       }
 
@@ -8184,18 +8130,6 @@ ${structureDirective}
           if (primaryModel.includes("groq")) primaryModel = "gemini-3.6-flash";
           if (primaryModel.includes("grok")) primaryModel = "gemini-3.6-flash";
 
-          const candidateModels = Array.from(new Set([
-            primaryModel,
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-1.5-pro",
-            "gemini-2.5-pro"
-          ]));
-
           // Build contents with history
           const contents: any[] = [];
           for (const item of limitedHistory) {
@@ -8209,28 +8143,17 @@ ${structureDirective}
             parts: [{ text: currentTurnPrompt }]
           });
 
-          for (const modelToTry of candidateModels) {
-            try {
-              const geminiRes = await aiClient.models.generateContent({
-                model: modelToTry,
-                contents: contents,
-                config: {
-                  systemInstruction: systemInstruction,
-                  temperature: responseLength === "concise" ? 0.3 : 0.6
-                }
-              });
-
-              responseText = geminiRes.text || "";
-              if (responseText) {
-                usedModelName = modelToTry;
-                break;
-              }
-            } catch (err: any) {
-              const errMsg = err?.message || String(err);
-              console.warn(`[Review Chat] Model '${modelToTry}' failed (${errMsg}). Trying next candidate...`);
-              modelWarnings.push(`الموديل '${modelToTry}' واجه خطأ: ${errMsg}`);
+          const geminiRes = await aiClient.models.generateContent({
+            model: primaryModel,
+            contents: contents,
+            config: {
+              systemInstruction: systemInstruction,
+              temperature: responseLength === "concise" ? 0.3 : 0.6
             }
-          }
+          });
+
+          responseText = geminiRes.text || "";
+          usedModelName = primaryModel;
         }
       }
 
@@ -8495,19 +8418,6 @@ ${structureDirective}
           if (primaryModel.includes("groq")) primaryModel = "gemini-3.7-flash";
           if (primaryModel.includes("grok")) primaryModel = "gemini-3.7-flash";
 
-          const candidateModels = Array.from(new Set([
-            primaryModel,
-            "gemini-3.7-flash",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-1.5-pro",
-            "gemini-2.5-pro"
-          ]));
-
           const contents: any[] = [];
           for (const item of limitedHistory) {
             contents.push({
@@ -8520,28 +8430,17 @@ ${structureDirective}
             parts: [{ text: currentTurnPrompt }]
           });
 
-          for (const modelToTry of candidateModels) {
-            try {
-              const geminiRes = await aiClient.models.generateContent({
-                model: modelToTry,
-                contents: contents,
-                config: {
-                  systemInstruction: systemInstruction,
-                  temperature: responseLength === "concise" ? 0.3 : 0.6
-                }
-              });
-
-              responseText = geminiRes.text || "";
-              if (responseText) {
-                usedModelName = modelToTry;
-                break;
-              }
-            } catch (err: any) {
-              const errMsg = err?.message || String(err);
-              console.warn(`[Sentence Chat] Model '${modelToTry}' failed (${errMsg}). Trying next candidate...`);
-              modelWarnings.push(`الموديل '${modelToTry}' واجه خطأ: ${errMsg}`);
+          const geminiRes = await aiClient.models.generateContent({
+            model: primaryModel,
+            contents: contents,
+            config: {
+              systemInstruction: systemInstruction,
+              temperature: responseLength === "concise" ? 0.3 : 0.6
             }
-          }
+          });
+
+          responseText = geminiRes.text || "";
+          usedModelName = primaryModel;
         }
       }
 
