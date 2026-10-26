@@ -35,112 +35,49 @@ interface BookReaderWorkspaceProps {
   onBackToMediaExplorer?: () => void;
 }
 
-// Helper: Extract valid page number from media file name
-export function extractPageFromFileName(fileName: string, validPageNumbers: Set<number>): number | undefined {
-  if (!fileName) return undefined;
-  const base = fileName.replace(/\.[^/.]+$/, "");
-
-  // 1. Explicit educational patterns: e.g. "530_25460-a-175", "530_25460-p-001", "p-175", "a-02", "audio-05"
-  const explicitRegexes = [
-    /[-_](?:a|audio)[-_]0*(\d{1,4})/i,
-    /[-_](?:v|video)[-_]0*(\d{1,4})/i,
-    /[-_](?:p|page)[-_]?0*(\d{1,4})/i,
-    /(?:^|[\/\\_-])p0*(\d{1,4})(?:[\/\\_-]|$)/i,
-    /(?:^|[\/\\_-])page0*(\d{1,4})(?:[\/\\_-]|$)/i
-  ];
-
-  for (const reg of explicitRegexes) {
-    const match = base.match(reg);
-    if (match) {
-      const num = parseInt(match[1], 10);
-      if (validPageNumbers.has(num)) {
-        return num;
-      }
-    }
-  }
-
-  // 2. Token based matching:
-  // e.g. "530_25460_175_01" -> split into tokens ["530", "25460", "175", "01"]
-  // Exclude book IDs (e.g. 530, 25460) by verifying against validPageNumbers
-  const tokens = base.split(/[-_ \/\.]+/);
-  // Search tokens from right to left (page numbers are usually near the end, while book IDs are at the start)
-  for (let i = tokens.length - 1; i >= 0; i--) {
-    const token = tokens[i];
-    const num = parseInt(token, 10);
-    if (!isNaN(num) && validPageNumbers.has(num)) {
-      // Ignore if it's the very first token and the book has multiple segments (e.g. book ID prefix)
-      if (i === 0 && tokens.length > 2 && num > 100) continue;
-      return num;
-    }
-  }
-
-  return undefined;
-}
-
-// Helper: Re-link pages and media if they were improperly mapped or missing
-export function relinkBook(book: InteractiveBook): { updatedBook: InteractiveBook; wasModified: boolean } {
+// Helper: Clean falsely guessed media and enforce strict ascending page order
+export function cleanAndSortBook(book: InteractiveBook): { updatedBook: InteractiveBook; wasModified: boolean } {
   if (!book || !book.pages || book.pages.length === 0) {
     return { updatedBook: book, wasModified: false };
   }
 
-  const allMedia = book.allMedia || [];
-  if (allMedia.length === 0) {
-    return { updatedBook: book, wasModified: false };
+  let wasModified = false;
+
+  // 1. Strictly sort pages in ascending order by pageNumber
+  const sortedPages = [...book.pages].sort((a, b) => a.pageNumber - b.pageNumber);
+  for (let i = 0; i < sortedPages.length; i++) {
+    if (sortedPages[i] !== book.pages[i]) {
+      wasModified = true;
+      break;
+    }
   }
 
-  const validPagesSet = new Set<number>(book.pages.map((p) => p.pageNumber));
-  const pageMediaMap = new Map<number, BookPageMedia[]>();
+  // 2. Strip falsely guessed audio (e.g., track numbers like "ص 1", "ص 2" that were speculatively attached to cover/intro pages)
+  const cleanedPages = sortedPages.map((page) => {
+    if (!page.media || page.media.length === 0) return page;
 
-  // Initialize with existing page media
-  book.pages.forEach((p) => {
-    pageMediaMap.set(p.pageNumber, [...(p.media || [])]);
-  });
-
-  let modified = false;
-
-  // Process all media files in the archive
-  allMedia.forEach((m) => {
-    let targetPage = m.pageNumber;
-
-    // If targetPage is missing or not in valid pages, inspect file name
-    if (!targetPage || !validPagesSet.has(targetPage)) {
-      const detected = extractPageFromFileName(m.fileName, validPagesSet);
-      if (detected) {
-        targetPage = detected;
-        m.pageNumber = detected;
-        modified = true;
+    // Remove any media that was speculatively injected by track-number heuristics
+    const legitimateMedia = page.media.filter((m) => {
+      if (m.trackNumber && m.trackNumber.startsWith("ص ")) {
+        wasModified = true;
+        return false;
       }
-    }
+      return true;
+    });
 
-    if (targetPage && validPagesSet.has(targetPage)) {
-      const currentList = pageMediaMap.get(targetPage) || [];
-      const alreadyExists = currentList.some(
-        (existing) => existing.id === m.id || existing.fileName === m.fileName
-      );
-      if (!alreadyExists) {
-        currentList.push({ ...m, pageNumber: targetPage });
-        pageMediaMap.set(targetPage, currentList);
-        modified = true;
-      }
+    if (legitimateMedia.length !== page.media.length) {
+      wasModified = true;
+      return { ...page, media: legitimateMedia };
     }
+    return page;
   });
-
-  if (!modified) {
-    return { updatedBook: book, wasModified: false };
-  }
-
-  const newPages = book.pages.map((p) => ({
-    ...p,
-    media: pageMediaMap.get(p.pageNumber) || []
-  }));
 
   return {
     updatedBook: {
       ...book,
-      pages: newPages,
-      allMedia
+      pages: cleanedPages
     },
-    wasModified: true
+    wasModified
   };
 }
 
@@ -190,17 +127,17 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
           // Default to page 175 (index 2)
           setCurrentPageIndex(2);
         } else {
-          // Auto-repair & re-link any previously uploaded book in IndexedDB
+          // Auto-repair & sanitize any previously stored book in IndexedDB
           let anyModified = false;
           const healedBooks = await Promise.all(
             storedBooks.map(async (b) => {
-              const { updatedBook, wasModified } = relinkBook(b);
+              const { updatedBook, wasModified } = cleanAndSortBook(b);
               if (wasModified) {
                 anyModified = true;
                 try {
                   await saveBookToDB(updatedBook);
                 } catch (e) {
-                  console.error("Failed to re-save healed book:", e);
+                  console.error("Failed to re-save sanitized book:", e);
                 }
               }
               return updatedBook;
@@ -414,6 +351,20 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
       setActiveMediaTab("page");
       stopAudio();
     }
+  };
+
+  // Re-sort pages in ascending order and clean up any mistakenly guessed media
+  const handleCleanAndSortActiveBook = async () => {
+    if (!selectedBook) return;
+    const { updatedBook } = cleanAndSortBook(selectedBook);
+    await saveBookToDB(updatedBook);
+    setSelectedBook(updatedBook);
+    setBooks((prev) => prev.map((b) => (b.id === updatedBook.id ? updatedBook : b)));
+    const firstMediaIdx = updatedBook.pages.findIndex((p) => p.media && p.media.length > 0);
+    setCurrentPageIndex(firstMediaIdx >= 0 ? firstMediaIdx : 0);
+    setActiveMediaTab("page");
+    setImportStatus("✅ تم فرز وترتيب صفحات الكتاب بنجاح وتنظيف صفحات الغلاف من أي وسائط غير حصرية!");
+    setTimeout(() => setImportStatus(""), 4000);
   };
 
   // =========================================================================
@@ -722,45 +673,16 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
         });
       }
 
-      const validPageNumbers = new Set<number>(constructedPages.map((p) => p.pageNumber));
-
-      // Auto-assign any media whose filename references a valid page number
-      foundMedias.forEach((m) => {
-        if (!assignedMediaIds.has(m.id)) {
-          const detectedPageNum = extractPageFromFileName(m.fileName, validPageNumbers);
-          if (detectedPageNum) {
-            const targetPage = constructedPages.find((p) => p.pageNumber === detectedPageNum);
-            if (targetPage) {
-              const alreadyHas = targetPage.media.some(
-                (item) => item.id === m.id || item.fileName === m.fileName
-              );
-              if (!alreadyHas) {
-                targetPage.media.push({
-                  id: m.id,
-                  trackNumber: `ص ${detectedPageNum}`,
-                  title: m.title,
-                  type: m.type,
-                  fileName: m.fileName,
-                  url: m.url,
-                  blob: m.blob,
-                  pageNumber: detectedPageNum
-                });
-                assignedMediaIds.add(m.id);
-              }
-            }
-          }
-        }
-      });
+      // STRICT SORTING: Sort all constructed pages in ascending order by pageNumber (1, 2, 3...)
+      constructedPages.sort((a, b) => a.pageNumber - b.pageNumber);
 
       // Prepare comprehensive allMedia list (contains EVERY single media file in the archive)
       const allBookMediaList: BookPageMedia[] = foundMedias.map((m) => {
-        let linkedPageNum = m.explicitPageNum;
-        if (!linkedPageNum) {
-          for (const pg of constructedPages) {
-            if (pg.media.some((item) => item.id === m.id || item.fileName === m.fileName)) {
-              linkedPageNum = pg.pageNumber;
-              break;
-            }
+        let linkedPageNum: number | undefined = undefined;
+        for (const pg of constructedPages) {
+          if (pg.media.some((item) => item.id === m.id || item.fileName === m.fileName)) {
+            linkedPageNum = pg.pageNumber;
+            break;
           }
         }
 
@@ -792,8 +714,8 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
         allMedia: allBookMediaList
       };
 
-      // Run final re-linker to ensure 100% of pages are mapped
-      const { updatedBook } = relinkBook(newBook);
+      // Run clean & sort to ensure strict page ordering and clean cover pages
+      const { updatedBook } = cleanAndSortBook(newBook);
       newBook = updatedBook;
 
       await saveBookToDB(newBook);
@@ -966,6 +888,18 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
           >
             <Search className="w-5 h-5" />
           </button>
+
+          {/* Re-sort & Clean Button */}
+          {selectedBook && (
+            <button
+              onClick={handleCleanAndSortActiveBook}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              title="إعادة فرز وترتيب الصفحات وإزالة أي صوتيات ملحقة بالغلاف بالخطأ"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-600" />
+              <span className="hidden sm:inline">فرز وترتيب الصفحات</span>
+            </button>
+          )}
 
           {/* Import Folder Option */}
           <button
