@@ -231,13 +231,14 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: "10mb" }));
+  app.use(express.json({ limit: "100mb" }));
+  app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
   // Enable CORS middleware for absolute localhost:3000 calls from custom frontend ports
   app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
-    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
     if (req.method === "OPTIONS") {
       return res.sendStatus(200);
     }
@@ -2004,8 +2005,31 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
 
   const bookUpload = multer({
     storage: bookDiskStorage,
-    limits: { fileSize: 2048 * 1024 * 1024 } // 2GB
+    limits: {
+      fileSize: 4 * 1024 * 1024 * 1024, // 4GB
+      fieldSize: 100 * 1024 * 1024,      // 100MB
+      files: 10000,
+      fields: 10000
+    }
   });
+
+  // Dedicated middleware ensuring sockets stay open during multi-hundred-megabyte streams
+  const bookUploadMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    // Disable socket and request timeouts for large media and book file streaming
+    req.socket.setTimeout(0);
+    if (req.setTimeout) req.setTimeout(0);
+    if (res.setTimeout) res.setTimeout(0);
+
+    bookUpload.any()(req, res, (err) => {
+      if (err) {
+        console.error("[Books Server] Multer upload stream error:", err);
+        return res.status(400).json({
+          error: `خطأ أثناء استلام الملف على السيرفر: ${err.message || err.code || "Upload stream error"}`
+        });
+      }
+      next();
+    });
+  };
 
   // Helper for natural sorting
   function naturalSortStrings(a: string, b: string): number {
@@ -2299,11 +2323,11 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
     }
   };
 
-  // 3. Upload Book Archive or Media Files (Mounted on multiple aliases for bulletproof routing)
-  app.post("/api/books/upload", bookUpload.any(), handleBookUploadRequest);
-  app.post("/api/media/books-upload", bookUpload.any(), handleBookUploadRequest);
-  app.post("/api/books/upload-archive", bookUpload.any(), handleBookUploadRequest);
-  app.post("/api/books", bookUpload.any(), handleBookUploadRequest);
+  // 3. Upload Book Archive or Media Files (Mounted on multiple aliases with stream immunity)
+  app.post("/api/books/upload", bookUploadMiddleware, handleBookUploadRequest);
+  app.post("/api/media/books-upload", bookUploadMiddleware, handleBookUploadRequest);
+  app.post("/api/books/upload-archive", bookUploadMiddleware, handleBookUploadRequest);
+  app.post("/api/books", bookUploadMiddleware, handleBookUploadRequest);
 
   // Fallback GET aliases for books
   app.get("/api/media/books", (req, res) => {
@@ -9705,7 +9729,7 @@ ${structureDirective}
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server is running at http://localhost:${PORT}`);
     console.log(`[Piper Server] Ready. Running background verification for Piper binaries and default models...`);
     repairPiperServerCore().then((res) => {
@@ -9714,6 +9738,12 @@ ${structureDirective}
       console.warn(`[Piper Server Startup Check] Non-blocking startup check error:`, err);
     });
   });
+
+  // Keep connections alive during heavy multi-hundred-megabyte file uploads
+  server.keepAliveTimeout = 300000; // 5 minutes
+  server.headersTimeout = 305000;
+  server.requestTimeout = 0; // No timeout for incoming request streams
+  server.timeout = 0;        // No socket timeout
 }
 
 startServer();

@@ -17,11 +17,15 @@ export default defineConfig(() => {
           target: process.env.BACKEND_URL || 'http://localhost:3000',
           changeOrigin: true,
           secure: false,
+          timeout: 0,
+          proxyTimeout: 0,
         },
         '/uploads': {
           target: process.env.BACKEND_URL || 'http://localhost:3000',
           changeOrigin: true,
           secure: false,
+          timeout: 0,
+          proxyTimeout: 0,
         },
       },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

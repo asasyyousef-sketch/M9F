@@ -235,7 +235,6 @@ async function extractBookClientSide(
   return book;
 }
 
-// Upload and extract book archive (ZIP) or media files onto the server with live progress
 export function uploadBookToServer(
   fileOrFiles: File | File[],
   title?: string,
@@ -245,33 +244,35 @@ export function uploadBookToServer(
     const formData = new FormData();
     const fileList = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
 
+    // Append each file exactly once to prevent double-upload payload overhead
     for (const f of fileList) {
       formData.append("file", f);
-      formData.append("files", f);
     }
 
     if (title && title.trim()) {
       formData.append("title", title.trim());
     }
 
-    const candidateEndpoints = [
-      getApiUrl("/api/books/upload"),
-      "/api/books/upload",
-      getApiUrl("/api/media/books-upload"),
-      "/api/media/books-upload",
-      getApiUrl("/api/books"),
-      "/api/books"
-    ];
+    // Prioritize same-origin relative path first (seamless in Vite dev and prod)
+    const candidateEndpoints: string[] = ["/api/books/upload"];
+    const directUrl = getApiUrl("/api/books/upload");
+    if (directUrl !== "/api/books/upload" && !candidateEndpoints.includes(directUrl)) {
+      candidateEndpoints.push(directUrl);
+    }
+    candidateEndpoints.push("/api/media/books-upload");
 
     let currentIdx = 0;
 
     const tryNext = () => {
       if (currentIdx >= candidateEndpoints.length) {
-        // Fallback: extract client-side using JSZip
-        console.warn("[Books] Server endpoints unavailable. Extracting client-side...");
+        // Fallback: extract client-side using JSZip and browser Blob storage
+        console.warn("[Books] Server stream interrupted or unavailable. Falling back to local instant extraction...");
         extractBookClientSide(fileOrFiles, title, onProgress)
           .then(resolve)
-          .catch(reject);
+          .catch((clientErr) => {
+            console.error("[Books] Client extraction error:", clientErr);
+            reject(new Error("تعذر رفع أو استخراج ملفات الكتاب. يرجى التأكد من صحة الملف وإعادة المحاولة."));
+          });
         return;
       }
 
@@ -280,8 +281,8 @@ export function uploadBookToServer(
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable && onProgress) {
-          const percent = Math.round((event.loaded / event.total) * 100);
-          onProgress(Math.min(percent, 98));
+          const percent = Math.round((event.loaded / event.total) * 95);
+          onProgress(percent);
         }
       };
 
@@ -298,23 +299,22 @@ export function uploadBookToServer(
           } catch (e) {
             tryNext();
           }
-        } else if (xhr.status === 404) {
+        } else if (xhr.status === 404 || xhr.status === 502 || xhr.status === 503) {
           tryNext();
         } else {
-          let errMsg = `فشل رفع واستخراج الكتاب (رمز السيرفر: ${xhr.status})`;
-          try {
-            const parsed = JSON.parse(xhr.responseText);
-            if (parsed.error) errMsg = parsed.error;
-          } catch (e) {}
-          reject(new Error(errMsg));
+          // If server returned specific error, try client fallback directly
+          tryNext();
         }
       };
 
       xhr.onerror = () => {
+        // Triggered on net::ERR_CONNECTION_RESET or network interrupt
+        console.warn(`[Books] Connection issue on ${endpoint}. Attempting next endpoint or client extraction...`);
         tryNext();
       };
 
       xhr.ontimeout = () => {
+        console.warn(`[Books] Upload timeout on ${endpoint}. Attempting fallback...`);
         tryNext();
       };
 
