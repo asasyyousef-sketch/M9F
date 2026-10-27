@@ -30,13 +30,20 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     loadBooks();
   }, []);
 
-  const loadBooks = async () => {
+  const loadBooks = async (retries = 2) => {
     setLoading(true);
     try {
       const serverBooks = await fetchBooksFromServer();
-      setBooks(serverBooks);
+      if (serverBooks.length > 0 || retries <= 0) {
+        setBooks(serverBooks);
+      } else {
+        setTimeout(() => loadBooks(retries - 1), 1000);
+      }
     } catch (e) {
       console.error("Error loading books from server:", e);
+      if (retries > 0) {
+        setTimeout(() => loadBooks(retries - 1), 1000);
+      }
     } finally {
       setLoading(false);
     }
