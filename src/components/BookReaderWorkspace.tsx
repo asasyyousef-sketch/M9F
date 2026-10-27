@@ -30,37 +30,29 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     loadBooks();
   }, []);
 
-  const loadBooks = async (retries = 2) => {
+  const loadBooks = async () => {
     setLoading(true);
     try {
       const serverBooks = await fetchBooksFromServer();
-      if (serverBooks.length > 0 || retries <= 0) {
-        setBooks(serverBooks);
-      } else {
-        setTimeout(() => loadBooks(retries - 1), 1000);
-      }
+      setBooks(serverBooks);
     } catch (e) {
       console.error("Error loading books from server:", e);
-      if (retries > 0) {
-        setTimeout(() => loadBooks(retries - 1), 1000);
-      }
     } finally {
       setLoading(false);
     }
   };
 
-  // Handle uploading files/ZIP to server
+  // Handle uploading ZIP to server
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const fileList = e.target.files;
-    if (!fileList || fileList.length === 0) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
 
     setUploading(true);
     setUploadProgress(0);
     setUploadError(null);
 
     try {
-      const filesArray = Array.from(fileList);
-      const newBook = await uploadBookToServer(filesArray.length === 1 ? filesArray[0] : filesArray, "", (pct) => {
+      const newBook = await uploadBookToServer(file, "", (pct) => {
         setUploadProgress(pct);
       });
 
@@ -283,11 +275,11 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   // =========================================================================
   return (
     <div className="w-full h-full bg-white text-slate-900 flex flex-col font-sans select-none overflow-y-auto" dir="ltr">
+      {/* Hidden File Input for ZIP Upload */}
       <input
         ref={fileInputRef}
         type="file"
-        accept=".zip,application/zip,application/x-zip-compressed,video/*,audio/*,.pdf,.mkv,.mp4,.mp3,.m4a"
-        multiple
+        accept=".zip,application/zip"
         onChange={handleFileUpload}
         className="hidden"
       />

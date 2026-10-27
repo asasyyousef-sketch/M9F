@@ -12,30 +12,17 @@ export default defineConfig(() => {
       },
     },
     server: {
-      proxy: {
-        '/api': {
-          target: process.env.BACKEND_URL || 'http://localhost:3000',
-          changeOrigin: true,
-          secure: false,
-          timeout: 120000,
-          proxyTimeout: 120000,
-          configure: (proxy) => {
-            proxy.on('error', (err, _req, res: any) => {
-              if (res && !res.headersSent && typeof res.writeHead === 'function') {
-                res.writeHead(502, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Proxy stream disconnected', message: err.message }));
-              }
-            });
-          },
-        },
-        '/uploads': {
-          target: process.env.BACKEND_URL || 'http://localhost:3000',
-          changeOrigin: true,
-          secure: false,
-          timeout: 120000,
-          proxyTimeout: 120000,
-        },
-      },
+      ...(process.env.BACKEND_URL
+        ? {
+            proxy: {
+              '/api': {
+                target: process.env.BACKEND_URL,
+                changeOrigin: true,
+                secure: false,
+              },
+            },
+          }
+        : {}),
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
