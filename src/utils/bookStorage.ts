@@ -127,7 +127,7 @@ async function extractBookClientSide(
   const fileList = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
   const primary = fileList[0];
   const bookId = `book-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-  const bookTitle = (title && title.trim()) || primary.name.replace(/\.[^/.]+$/, "");
+  let bookTitle = (title && title.trim()) || primary.name.replace(/\.[^/.]+$/, "");
 
   const pages: BookPage[] = [];
   const allMedia: BookPageMedia[] = [];
@@ -146,6 +146,25 @@ async function extractBookClientSide(
     const audFiles = fileKeys.filter(k => audioExts.some(ext => k.toLowerCase().endsWith(ext))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     const vidFiles = fileKeys.filter(k => videoExts.some(ext => k.toLowerCase().endsWith(ext))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
+    // Check for publisher manifest / content.json inside ZIP
+    let parsedContent: any = null;
+    let parsedManifest: any = null;
+    for (const k of fileKeys) {
+      const lower = k.toLowerCase();
+      if (lower.endsWith("book.json") || lower.endsWith("_book.json")) {
+        try {
+          const txt = await zip.files[k].async("string");
+          parsedManifest = JSON.parse(txt);
+        } catch (e) {}
+      }
+      if (lower.endsWith("content.json") || lower.endsWith("_content.json")) {
+        try {
+          const txt = await zip.files[k].async("string");
+          parsedContent = JSON.parse(txt);
+        } catch (e) {}
+      }
+    }
+
     // Extract images as object URLs
     for (let i = 0; i < imgFiles.length; i++) {
       const rel = imgFiles[i];
@@ -159,7 +178,7 @@ async function extractBookClientSide(
         pageImage: url,
         media: []
       });
-      if (onProgress) onProgress(Math.round(((i + 1) / Math.max(imgFiles.length, 1)) * 90));
+      if (onProgress) onProgress(Math.round(((i + 1) / Math.max(imgFiles.length, 1)) * 50));
     }
 
     // Extract audio
@@ -170,16 +189,27 @@ async function extractBookClientSide(
       const name = rel.split("/").pop() || rel;
       const numMatch = name.match(/\d+/);
       const track = numMatch ? numMatch[0] : String(i + 1).padStart(2, "0");
+
+      let pageNum: number | undefined;
+      const pageMatch = name.match(/(?:page|seite|p|s)[-_]?0*(\d+)/i);
+      if (pageMatch) pageNum = parseInt(pageMatch[1], 10);
+
       allMedia.push({
         id: `m-${Date.now()}-${i}`,
         trackNumber: track,
-        title: name.replace(/\.[^/.]+$/, ""),
+        title: name.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " "),
         type: "audio",
         fileName: name,
         url: url,
-        pageNumber: 1
+        pageNumber: pageNum || 1
       });
+      if (onProgress) onProgress(50 + Math.round(((i + 1) / Math.max(audFiles.length, 1)) * 40));
     }
+
+    // Map media to respective pages
+    pages.forEach((p) => {
+      p.media = allMedia.filter((m) => m.pageNumber === p.pageNumber);
+    });
 
     // Extract video
     for (let i = 0; i < vidFiles.length; i++) {
@@ -190,12 +220,16 @@ async function extractBookClientSide(
       allMedia.push({
         id: `v-${Date.now()}-${i}`,
         trackNumber: String(i + 1),
-        title: name.replace(/\.[^/.]+$/, ""),
+        title: name.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " "),
         type: "video",
         fileName: name,
         url: url,
         pageNumber: 1
       });
+    }
+
+    if (parsedManifest && parsedManifest.title) {
+      bookTitle = parsedManifest.title;
     }
   } else {
     for (let i = 0; i < fileList.length; i++) {
@@ -235,16 +269,124 @@ async function extractBookClientSide(
   return book;
 }
 
-export function uploadBookToServer(
+// Helper to upload files in small, resilient 6MB slices, completely bypassing GFE/Nginx/Cloud Run 32MB payload drops
+async function uploadFileInChunks(
+  file: File,
+  title?: string,
+  onProgress?: (percent: number) => void
+): Promise<InteractiveBook> {
+  const CHUNK_SIZE = 6 * 1024 * 1024; // 6MB slices
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  const uploadId = `up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const token = typeof window !== "undefined" ? localStorage.getItem("app_auth_token") : null;
+
+  const candidateEndpoints = ["/api/books/upload-chunk"];
+  const directUrl = getApiUrl("/api/books/upload-chunk");
+  if (directUrl !== "/api/books/upload-chunk" && !candidateEndpoints.includes(directUrl)) {
+    candidateEndpoints.push(directUrl);
+  }
+  candidateEndpoints.push("/api/media/books-upload-chunk");
+
+  let finalBook: InteractiveBook | null = null;
+
+  for (let idx = 0; idx < totalChunks; idx++) {
+    const start = idx * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const chunkBlob = file.slice(start, end);
+
+    const formData = new FormData();
+    formData.append("chunk", chunkBlob, file.name);
+    formData.append("uploadId", uploadId);
+    formData.append("chunkIndex", String(idx));
+    formData.append("totalChunks", String(totalChunks));
+    formData.append("fileName", file.name);
+    if (title && title.trim()) {
+      formData.append("title", title.trim());
+    }
+
+    let chunkUploaded = false;
+    let lastError: any = null;
+
+    // Retry each chunk across candidate endpoints if needed
+    for (const endpoint of candidateEndpoints) {
+      try {
+        const res = await new Promise<any>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", endpoint, true);
+          if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable && onProgress) {
+              const currentChunkProgress = e.loaded / e.total;
+              const overallProgress = Math.round(((idx + currentChunkProgress) / totalChunks) * 98);
+              onProgress(Math.min(overallProgress, 98));
+            }
+          };
+
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try {
+                resolve(JSON.parse(xhr.responseText));
+              } catch (e) {
+                reject(new Error("Invalid JSON response"));
+              }
+            } else {
+              reject(new Error(`Server returned ${xhr.status}`));
+            }
+          };
+
+          xhr.onerror = () => reject(new Error("Network connection reset"));
+          xhr.ontimeout = () => reject(new Error("Upload timed out"));
+          xhr.send(formData);
+        });
+
+        if (res && res.success) {
+          chunkUploaded = true;
+          if (res.book) {
+            finalBook = res.book;
+          }
+          break;
+        }
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (!chunkUploaded) {
+      throw lastError || new Error(`فشل رفع الجزء رقم ${idx + 1}`);
+    }
+  }
+
+  if (finalBook) {
+    if (onProgress) onProgress(100);
+    return finalBook;
+  }
+
+  throw new Error("لم يتم استلام بيانات الكتاب النهائي من السيرفر");
+}
+
+export async function uploadBookToServer(
   fileOrFiles: File | File[],
   title?: string,
   onProgress?: (percent: number) => void
 ): Promise<InteractiveBook> {
+  const fileList = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
+  const primary = fileList[0];
+
+  // If uploading an archive or single file, use ultra-safe 6MB chunking
+  if (fileList.length === 1 && primary) {
+    try {
+      console.log(`[Books] Starting sliced chunked upload for "${primary.name}" (${(primary.size / (1024 * 1024)).toFixed(1)} MB)...`);
+      return await uploadFileInChunks(primary, title, onProgress);
+    } catch (chunkErr: any) {
+      console.warn("[Books] Chunked upload failed or unreachable, activating instant client-side extraction fallback...", chunkErr);
+      return await extractBookClientSide(fileOrFiles, title, onProgress);
+    }
+  }
+
+  // Fallback for multiple loose files
   return new Promise((resolve, reject) => {
     const formData = new FormData();
-    const fileList = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
-
-    // Append each file exactly once to prevent double-upload payload overhead
     for (const f of fileList) {
       formData.append("file", f);
     }
@@ -253,7 +395,6 @@ export function uploadBookToServer(
       formData.append("title", title.trim());
     }
 
-    // Prioritize same-origin relative path first (seamless in Vite dev and prod)
     const candidateEndpoints: string[] = ["/api/books/upload"];
     const directUrl = getApiUrl("/api/books/upload");
     if (directUrl !== "/api/books/upload" && !candidateEndpoints.includes(directUrl)) {
@@ -265,13 +406,12 @@ export function uploadBookToServer(
 
     const tryNext = () => {
       if (currentIdx >= candidateEndpoints.length) {
-        // Fallback: extract client-side using JSZip and browser Blob storage
-        console.warn("[Books] Server stream interrupted or unavailable. Falling back to local instant extraction...");
+        console.warn("[Books] Direct endpoints unavailable. Extracting client-side...");
         extractBookClientSide(fileOrFiles, title, onProgress)
           .then(resolve)
           .catch((clientErr) => {
             console.error("[Books] Client extraction error:", clientErr);
-            reject(new Error("تعذر رفع أو استخراج ملفات الكتاب. يرجى التأكد من صحة الملف وإعادة المحاولة."));
+            reject(new Error("تعذر استخراج ملفات الكتاب. يرجى التأكد من الملف وإعادة المحاولة."));
           });
         return;
       }
@@ -299,31 +439,18 @@ export function uploadBookToServer(
           } catch (e) {
             tryNext();
           }
-        } else if (xhr.status === 404 || xhr.status === 502 || xhr.status === 503) {
-          tryNext();
         } else {
-          // If server returned specific error, try client fallback directly
           tryNext();
         }
       };
 
-      xhr.onerror = () => {
-        // Triggered on net::ERR_CONNECTION_RESET or network interrupt
-        console.warn(`[Books] Connection issue on ${endpoint}. Attempting next endpoint or client extraction...`);
-        tryNext();
-      };
-
-      xhr.ontimeout = () => {
-        console.warn(`[Books] Upload timeout on ${endpoint}. Attempting fallback...`);
-        tryNext();
-      };
+      xhr.onerror = () => tryNext();
+      xhr.ontimeout = () => tryNext();
 
       try {
         xhr.open("POST", endpoint, true);
         const token = typeof window !== "undefined" ? localStorage.getItem("app_auth_token") : null;
-        if (token) {
-          xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-        }
+        if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
         xhr.send(formData);
       } catch (err) {
         tryNext();

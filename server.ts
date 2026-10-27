@@ -2077,7 +2077,226 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
     }
   });
 
-  // Upload handler function (mounted on both /api/books/upload and /api/media/books-upload)
+  // Core book extraction and cataloging engine
+  const extractAndCatalogBook = async (options: {
+    primaryFilePath: string;
+    originalName: string;
+    title?: string;
+    subtitle?: string;
+    directFiles?: { path: string; originalname: string }[];
+  }) => {
+    const { primaryFilePath, originalName } = options;
+    const ext = path.extname(originalName).toLowerCase();
+    const bookId = `book-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const bookDir = path.join(BOOKS_DIR, bookId);
+
+    if (!fs.existsSync(bookDir)) {
+      fs.mkdirSync(bookDir, { recursive: true });
+    }
+
+    const isZip = ext === ".zip" || ext === ".epub" || ext.includes("zip");
+
+    if (isZip) {
+      let unzipOk = false;
+      try {
+        execSync(`unzip -q -o "${primaryFilePath}" -d "${bookDir}"`, { stdio: "ignore" });
+        unzipOk = true;
+      } catch (unzipError: any) {
+        console.warn("[Books] Native unzip warning:", unzipError?.message);
+      }
+
+      if (!unzipOk) {
+        const zipData = fs.readFileSync(primaryFilePath);
+        const zip = await JSZip.loadAsync(zipData);
+        for (const relPath of Object.keys(zip.files)) {
+          const entry = zip.files[relPath];
+          if (entry.dir || relPath.startsWith("__MACOSX/") || relPath.includes("/__MACOSX/")) continue;
+          const dest = path.join(bookDir, relPath.replace(/^(\.\/|\/)+/, ""));
+          const parent = path.dirname(dest);
+          if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
+          const content = await entry.async("nodebuffer");
+          fs.writeFileSync(dest, content);
+        }
+      }
+    } else if (options.directFiles && options.directFiles.length > 0) {
+      for (const f of options.directFiles) {
+        const dest = path.join(bookDir, f.originalname);
+        fs.copyFileSync(f.path, dest);
+      }
+    } else {
+      const dest = path.join(bookDir, originalName);
+      fs.copyFileSync(primaryFilePath, dest);
+    }
+
+    // Catalog files inside bookDir
+    const allExtracted = listAllFiles(bookDir);
+
+    let parsedManifest: any = null;
+    let parsedContent: any = null;
+
+    for (const rel of allExtracted) {
+      const lower = rel.toLowerCase();
+      if (lower.endsWith("book.json") || lower.endsWith("_book.json")) {
+        try {
+          parsedManifest = JSON.parse(fs.readFileSync(path.join(bookDir, rel), "utf-8"));
+        } catch (e) {}
+      }
+      if (lower.endsWith("content.json") || lower.endsWith("_content.json")) {
+        try {
+          parsedContent = JSON.parse(fs.readFileSync(path.join(bookDir, rel), "utf-8"));
+        } catch (e) {}
+      }
+    }
+
+    const imgExts = [".jpg", ".jpeg", ".png", ".webp", ".svg"];
+    const audExts = [".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac"];
+    const vidExts = [".mp4", ".webm", ".mov", ".mkv", ".m4v"];
+
+    const imageFiles: string[] = [];
+    const audioFiles: string[] = [];
+    const videoFiles: string[] = [];
+
+    for (const rel of allExtracted) {
+      const fileExt = path.extname(rel).toLowerCase();
+      if (imgExts.includes(fileExt)) imageFiles.push(rel);
+      else if (audExts.includes(fileExt)) audioFiles.push(rel);
+      else if (vidExts.includes(fileExt)) videoFiles.push(rel);
+    }
+
+    imageFiles.sort(naturalSortStrings);
+    audioFiles.sort(naturalSortStrings);
+    videoFiles.sort(naturalSortStrings);
+
+    const allMedia: any[] = [];
+
+    audioFiles.forEach((rel, idx) => {
+      const filename = path.basename(rel);
+      const nameWithoutExt = path.basename(rel, path.extname(rel));
+      const numMatch = filename.match(/\d+/);
+      const trackNum = numMatch ? numMatch[0] : String(idx + 1).padStart(2, "0");
+
+      let pageNum: number | undefined;
+      const pageMatch = filename.match(/(?:page|seite|p|s)[-_]?0*(\d+)/i);
+      if (pageMatch) pageNum = parseInt(pageMatch[1], 10);
+
+      allMedia.push({
+        id: `media-audio-${idx + 1}-${Date.now()}`,
+        trackNumber: trackNum,
+        title: nameWithoutExt.replace(/[_-]/g, " "),
+        type: "audio",
+        fileName: filename,
+        url: `/uploads/books/${bookId}/${rel}`,
+        pageNumber: pageNum
+      });
+    });
+
+    videoFiles.forEach((rel, idx) => {
+      const filename = path.basename(rel);
+      const nameWithoutExt = path.basename(rel, path.extname(rel));
+      allMedia.push({
+        id: `media-video-${idx + 1}-${Date.now()}`,
+        title: nameWithoutExt.replace(/[_-]/g, " "),
+        type: "video",
+        fileName: filename,
+        url: `/uploads/books/${bookId}/${rel}`
+      });
+    });
+
+    const pages: any[] = [];
+
+    if (parsedContent && Array.isArray(parsedContent.book_parts) && parsedContent.book_parts[0]?.pages) {
+      const publisherPages = parsedContent.book_parts[0].pages;
+      publisherPages.forEach((p: any) => {
+        const imgRel = imageFiles.find((f) => path.basename(f) === p.page_img) || "";
+        const pageMediaList: any[] = [];
+
+        if (Array.isArray(p.media)) {
+          p.media.forEach((m: any, mIdx: number) => {
+            const fileRel = [...audioFiles, ...videoFiles].find((f) => path.basename(f) === m.file_name);
+            const mUrl = fileRel ? `/uploads/books/${bookId}/${fileRel}` : `/uploads/media/audio.mp3`;
+
+            const mediaItem: any = {
+              id: m.media_id || `media-${p.page}-${mIdx}`,
+              trackNumber: m.title ? m.title.split("–")[0]?.trim() : String(mIdx + 1),
+              title: m.title || m.file_name || "مقطع صوتي",
+              type: m.type === "video" ? "video" : "audio",
+              fileName: m.file_name || "track.mp3",
+              url: mUrl,
+              pageNumber: p.page
+            };
+            pageMediaList.push(mediaItem);
+            if (!allMedia.some((existing) => existing.id === mediaItem.id)) {
+              allMedia.push(mediaItem);
+            }
+          });
+        }
+
+        pages.push({
+          pageNumber: p.page,
+          displayLabel: String(p.page),
+          pageImage: imgRel ? `/uploads/books/${bookId}/${imgRel}` : "",
+          media: pageMediaList
+        });
+      });
+    } else if (imageFiles.length > 0) {
+      imageFiles.forEach((rel, idx) => {
+        const pageNum = idx + 1;
+        const pageMedia = allMedia.filter(
+          (m) => m.pageNumber === pageNum || (m.trackNumber && parseInt(m.trackNumber, 10) === pageNum)
+        );
+
+        pages.push({
+          pageNumber: pageNum,
+          displayLabel: String(pageNum),
+          pageImage: `/uploads/books/${bookId}/${rel}`,
+          media: pageMedia
+        });
+      });
+    } else {
+      pages.push({
+        pageNumber: 1,
+        displayLabel: "1",
+        pageImage: "",
+        media: allMedia
+      });
+    }
+
+    let cleanTitle = (options.title && options.title.trim()) || "";
+    let subtitle = options.subtitle || "Kurs- und Arbeitsbuch";
+
+    if (parsedManifest) {
+      if (!cleanTitle && parsedManifest.title) cleanTitle = parsedManifest.title;
+      if (parsedManifest.subtitle) subtitle = parsedManifest.subtitle;
+    }
+    if (!cleanTitle) {
+      cleanTitle = path.basename(originalName, path.extname(originalName)).replace(/[_-]/g, " ");
+    }
+
+    let coverImg = "";
+    if (imageFiles.length > 0) {
+      coverImg = `/uploads/books/${bookId}/${imageFiles[0]}`;
+    }
+
+    const newBook = {
+      id: bookId,
+      title: cleanTitle,
+      subtitle: subtitle,
+      author: parsedManifest?.author || "Hueber Verlag",
+      coverImage: coverImg,
+      totalPages: pages.length,
+      pages: pages,
+      allMedia: allMedia,
+      createdAt: new Date().toISOString()
+    };
+
+    const existingBooks = loadBooksJson();
+    existingBooks.unshift(newBook);
+    saveBooksJson(existingBooks);
+
+    return newBook;
+  };
+
+  // Upload handler for full file payloads
   const handleBookUploadRequest = async (req: express.Request, res: express.Response) => {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) {
@@ -2086,48 +2305,15 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
 
     const primaryFile = files[0];
     const originalName = primaryFile.originalname || "book.zip";
-    const ext = path.extname(originalName).toLowerCase();
-
-    const bookId = `book-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    const bookDir = path.join(BOOKS_DIR, bookId);
-
-    if (!fs.existsSync(bookDir)) {
-      fs.mkdirSync(bookDir, { recursive: true });
-    }
 
     try {
-      const isZip = ext === ".zip" || ext === ".epub" || primaryFile.mimetype.includes("zip");
-
-      if (isZip) {
-        // Fast streaming native unzip without buffering entire archive in RAM
-        let unzipOk = false;
-        try {
-          execSync(`unzip -q -o "${primaryFile.path}" -d "${bookDir}"`, { stdio: "ignore" });
-          unzipOk = true;
-        } catch (unzipError: any) {
-          console.warn("[Books] Native unzip warning:", unzipError?.message);
-        }
-
-        if (!unzipOk) {
-          const zipData = fs.readFileSync(primaryFile.path);
-          const zip = await JSZip.loadAsync(zipData);
-          for (const relPath of Object.keys(zip.files)) {
-            const entry = zip.files[relPath];
-            if (entry.dir || relPath.startsWith("__MACOSX/") || relPath.includes("/__MACOSX/")) continue;
-            const dest = path.join(bookDir, relPath.replace(/^(\.\/|\/)+/, ""));
-            const parent = path.dirname(dest);
-            if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
-            const content = await entry.async("nodebuffer");
-            fs.writeFileSync(dest, content);
-          }
-        }
-      } else {
-        // Direct media files uploaded (audio/video/images)
-        for (const f of files) {
-          const dest = path.join(bookDir, f.originalname);
-          fs.copyFileSync(f.path, dest);
-        }
-      }
+      const newBook = await extractAndCatalogBook({
+        primaryFilePath: primaryFile.path,
+        originalName: originalName,
+        title: req.body.title,
+        subtitle: req.body.subtitle,
+        directFiles: files.length > 1 ? files.map((f) => ({ path: f.path, originalname: f.originalname })) : undefined
+      });
 
       // Cleanup temp uploads
       for (const f of files) {
@@ -2136,175 +2322,7 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
         } catch (e) {}
       }
 
-      // Catalog files inside bookDir
-      const allExtracted = listAllFiles(bookDir);
-
-      let parsedManifest: any = null;
-      let parsedContent: any = null;
-
-      for (const rel of allExtracted) {
-        const lower = rel.toLowerCase();
-        if (lower.endsWith("book.json") || lower.endsWith("_book.json")) {
-          try {
-            parsedManifest = JSON.parse(fs.readFileSync(path.join(bookDir, rel), "utf-8"));
-          } catch (e) {}
-        }
-        if (lower.endsWith("content.json") || lower.endsWith("_content.json")) {
-          try {
-            parsedContent = JSON.parse(fs.readFileSync(path.join(bookDir, rel), "utf-8"));
-          } catch (e) {}
-        }
-      }
-
-      const imgExts = [".jpg", ".jpeg", ".png", ".webp", ".svg"];
-      const audExts = [".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac"];
-      const vidExts = [".mp4", ".webm", ".mov", ".mkv", ".m4v"];
-
-      const imageFiles: string[] = [];
-      const audioFiles: string[] = [];
-      const videoFiles: string[] = [];
-
-      for (const rel of allExtracted) {
-        const fileExt = path.extname(rel).toLowerCase();
-        if (imgExts.includes(fileExt)) imageFiles.push(rel);
-        else if (audExts.includes(fileExt)) audioFiles.push(rel);
-        else if (vidExts.includes(fileExt)) videoFiles.push(rel);
-      }
-
-      imageFiles.sort(naturalSortStrings);
-      audioFiles.sort(naturalSortStrings);
-      videoFiles.sort(naturalSortStrings);
-
-      const allMedia: any[] = [];
-
-      audioFiles.forEach((rel, idx) => {
-        const filename = path.basename(rel);
-        const nameWithoutExt = path.basename(rel, path.extname(rel));
-        const numMatch = filename.match(/\d+/);
-        const trackNum = numMatch ? numMatch[0] : String(idx + 1).padStart(2, "0");
-
-        let pageNum: number | undefined;
-        const pageMatch = filename.match(/(?:page|seite|p|s)[-_]?0*(\d+)/i);
-        if (pageMatch) pageNum = parseInt(pageMatch[1], 10);
-
-        allMedia.push({
-          id: `media-audio-${idx + 1}-${Date.now()}`,
-          trackNumber: trackNum,
-          title: nameWithoutExt.replace(/[_-]/g, " "),
-          type: "audio",
-          fileName: filename,
-          url: `/uploads/books/${bookId}/${rel}`,
-          pageNumber: pageNum
-        });
-      });
-
-      videoFiles.forEach((rel, idx) => {
-        const filename = path.basename(rel);
-        const nameWithoutExt = path.basename(rel, path.extname(rel));
-        allMedia.push({
-          id: `media-video-${idx + 1}-${Date.now()}`,
-          title: nameWithoutExt.replace(/[_-]/g, " "),
-          type: "video",
-          fileName: filename,
-          url: `/uploads/books/${bookId}/${rel}`
-        });
-      });
-
-      const pages: any[] = [];
-
-      if (parsedContent && Array.isArray(parsedContent.book_parts) && parsedContent.book_parts[0]?.pages) {
-        const publisherPages = parsedContent.book_parts[0].pages;
-        publisherPages.forEach((p: any) => {
-          const imgRel = imageFiles.find((f) => path.basename(f) === p.page_img) || "";
-          const pageMediaList: any[] = [];
-
-          if (Array.isArray(p.media)) {
-            p.media.forEach((m: any, mIdx: number) => {
-              const fileRel = [...audioFiles, ...videoFiles].find((f) => path.basename(f) === m.file_name);
-              const mUrl = fileRel ? `/uploads/books/${bookId}/${fileRel}` : `/uploads/media/audio.mp3`;
-
-              const mediaItem: any = {
-                id: m.media_id || `media-${p.page}-${mIdx}`,
-                trackNumber: m.title ? m.title.split("–")[0]?.trim() : String(mIdx + 1),
-                title: m.title || m.file_name || "مقطع صوتي",
-                type: m.type === "video" ? "video" : "audio",
-                fileName: m.file_name || "track.mp3",
-                url: mUrl,
-                pageNumber: p.page
-              };
-              pageMediaList.push(mediaItem);
-              if (!allMedia.some((existing) => existing.id === mediaItem.id)) {
-                allMedia.push(mediaItem);
-              }
-            });
-          }
-
-          pages.push({
-            pageNumber: p.page,
-            displayLabel: String(p.page),
-            pageImage: imgRel ? `/uploads/books/${bookId}/${imgRel}` : "",
-            media: pageMediaList
-          });
-        });
-      } else if (imageFiles.length > 0) {
-        imageFiles.forEach((rel, idx) => {
-          const pageNum = idx + 1;
-          const pageMedia = allMedia.filter(
-            (m) => m.pageNumber === pageNum || (m.trackNumber && parseInt(m.trackNumber, 10) === pageNum)
-          );
-
-          pages.push({
-            pageNumber: pageNum,
-            displayLabel: String(pageNum),
-            pageImage: `/uploads/books/${bookId}/${rel}`,
-            media: pageMedia
-          });
-        });
-      } else {
-        pages.push({
-          pageNumber: 1,
-          displayLabel: "1",
-          pageImage: "",
-          media: allMedia
-        });
-      }
-
-      let cleanTitle = (req.body.title && typeof req.body.title === "string" && req.body.title.trim())
-        ? req.body.title.trim()
-        : "";
-      let subtitle = req.body.subtitle || "Kurs- und Arbeitsbuch";
-
-      if (parsedManifest) {
-        if (!cleanTitle && parsedManifest.title) cleanTitle = parsedManifest.title;
-        if (parsedManifest.subtitle) subtitle = parsedManifest.subtitle;
-      }
-      if (!cleanTitle) {
-        cleanTitle = path.basename(originalName, path.extname(originalName)).replace(/[_-]/g, " ");
-      }
-
-      let coverImg = "";
-      if (imageFiles.length > 0) {
-        coverImg = `/uploads/books/${bookId}/${imageFiles[0]}`;
-      }
-
-      const newBook = {
-        id: bookId,
-        title: cleanTitle,
-        subtitle: subtitle,
-        author: parsedManifest?.author || "Hueber Verlag",
-        coverImage: coverImg,
-        totalPages: pages.length,
-        pages: pages,
-        allMedia: allMedia,
-        createdAt: new Date().toISOString()
-      };
-
-      const existingBooks = loadBooksJson();
-      existingBooks.unshift(newBook);
-      saveBooksJson(existingBooks);
-
-      console.log(`[Books Server] Successfully saved book: "${newBook.title}" (${pages.length} pages, ${allMedia.length} tracks)`);
-
+      console.log(`[Books Server] Successfully saved book: "${newBook.title}" (${newBook.totalPages} pages)`);
       res.json({
         success: true,
         book: newBook,
@@ -2323,7 +2341,103 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
     }
   };
 
-  // 3. Upload Book Archive or Media Files (Mounted on multiple aliases with stream immunity)
+  // Chunked Upload for handling 100MB-2GB archives seamlessly across any proxy limit
+  const CHUNKS_DIR = path.join(BOOKS_TEMP_DIR, "chunks");
+  if (!fs.existsSync(CHUNKS_DIR)) {
+    try { fs.mkdirSync(CHUNKS_DIR, { recursive: true }); } catch (e) {}
+  }
+
+  const chunkUpload = multer({
+    dest: CHUNKS_DIR,
+    limits: { fileSize: 40 * 1024 * 1024 } // 40MB max per individual slice
+  });
+
+  const handleChunkUpload = async (req: express.Request, res: express.Response) => {
+    try {
+      const { uploadId, chunkIndex, totalChunks, fileName, title, subtitle } = req.body;
+      const file = req.file;
+
+      if (!file || !uploadId || chunkIndex === undefined || totalChunks === undefined) {
+        return res.status(400).json({ error: "بيانات الجزء ناقصة أو غير صالحة" });
+      }
+
+      const idx = parseInt(chunkIndex, 10);
+      const total = parseInt(totalChunks, 10);
+      const safeUploadId = String(uploadId).replace(/[^a-zA-Z0-9_-]/g, "");
+      const sessionDir = path.join(CHUNKS_DIR, safeUploadId);
+
+      if (!fs.existsSync(sessionDir)) {
+        fs.mkdirSync(sessionDir, { recursive: true });
+      }
+
+      const chunkPath = path.join(sessionDir, `chunk_${idx}`);
+      fs.renameSync(file.path, chunkPath);
+
+      // Check if all chunks have arrived
+      const chunks = fs.readdirSync(sessionDir).filter((f) => f.startsWith("chunk_"));
+      if (chunks.length === total) {
+        // All parts ready! Assemble in stream
+        const combinedPath = path.join(BOOKS_TEMP_DIR, `${safeUploadId}_${fileName || "book.zip"}`);
+        const writeStream = fs.createWriteStream(combinedPath);
+
+        for (let i = 0; i < total; i++) {
+          const partPath = path.join(sessionDir, `chunk_${i}`);
+          if (fs.existsSync(partPath)) {
+            const buf = fs.readFileSync(partPath);
+            writeStream.write(buf);
+            try { fs.unlinkSync(partPath); } catch (e) {}
+          }
+        }
+        writeStream.end();
+        await new Promise<void>((resolve) => writeStream.on("finish", () => resolve()));
+
+        try { fs.rmdirSync(sessionDir); } catch (e) {}
+
+        const newBook = await extractAndCatalogBook({
+          primaryFilePath: combinedPath,
+          originalName: fileName || "book.zip",
+          title: title,
+          subtitle: subtitle
+        });
+
+        try { if (fs.existsSync(combinedPath)) fs.unlinkSync(combinedPath); } catch (e) {}
+
+        console.log(`[Books Server] Chunked upload completed for "${newBook.title}"`);
+        return res.json({
+          success: true,
+          book: newBook,
+          message: "تم اكتمال رفع واستخراج الكتاب بنجاح"
+        });
+      }
+
+      return res.json({ success: true, chunkIndex: idx, totalChunks: total });
+    } catch (err: any) {
+      console.error("[Books Server] Chunk processing error:", err);
+      res.status(500).json({ error: `فشل معالجة الجزء: ${err?.message || "خطأ غير معروف"}` });
+    }
+  };
+
+  const chunkUploadMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    req.socket.setTimeout(0);
+    if (req.setTimeout) req.setTimeout(0);
+    if (res.setTimeout) res.setTimeout(0);
+
+    chunkUpload.single("chunk")(req, res, (err) => {
+      if (err) {
+        console.error("[Books Server] Chunk upload stream error:", err);
+        return res.status(400).json({
+          error: `خطأ أثناء استلام جزء الملف: ${err.message || err.code || "Upload error"}`
+        });
+      }
+      next();
+    });
+  };
+
+  // Chunked Upload Routes (immune to Cloud Run / Nginx body size caps)
+  app.post("/api/books/upload-chunk", chunkUploadMiddleware, handleChunkUpload);
+  app.post("/api/media/books-upload-chunk", chunkUploadMiddleware, handleChunkUpload);
+
+  // Standard Direct Upload Routes (Mounted on multiple aliases)
   app.post("/api/books/upload", bookUploadMiddleware, handleBookUploadRequest);
   app.post("/api/media/books-upload", bookUploadMiddleware, handleBookUploadRequest);
   app.post("/api/books/upload-archive", bookUploadMiddleware, handleBookUploadRequest);
