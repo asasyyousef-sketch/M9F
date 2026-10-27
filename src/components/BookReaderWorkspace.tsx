@@ -42,17 +42,18 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     }
   };
 
-  // Handle uploading ZIP to server
+  // Handle uploading files/ZIP to server
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
 
     setUploading(true);
     setUploadProgress(0);
     setUploadError(null);
 
     try {
-      const newBook = await uploadBookToServer(file, "", (pct) => {
+      const filesArray = Array.from(fileList);
+      const newBook = await uploadBookToServer(filesArray.length === 1 ? filesArray[0] : filesArray, "", (pct) => {
         setUploadProgress(pct);
       });
 
@@ -275,11 +276,11 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   // =========================================================================
   return (
     <div className="w-full h-full bg-white text-slate-900 flex flex-col font-sans select-none overflow-y-auto" dir="ltr">
-      {/* Hidden File Input for ZIP Upload */}
       <input
         ref={fileInputRef}
         type="file"
-        accept=".zip,application/zip"
+        accept=".zip,application/zip,application/x-zip-compressed,video/*,audio/*,.pdf,.mkv,.mp4,.mp3,.m4a"
+        multiple
         onChange={handleFileUpload}
         className="hidden"
       />

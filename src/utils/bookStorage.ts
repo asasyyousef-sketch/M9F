@@ -28,16 +28,22 @@ export async function fetchBookByIdFromServer(id: string): Promise<InteractiveBo
   }
 }
 
-// Upload and extract book archive (ZIP) onto the server with live progress
+// Upload and extract book archive (ZIP) or media files onto the server with live progress
 export function uploadBookToServer(
-  file: File,
+  fileOrFiles: File | File[],
   title?: string,
   onProgress?: (percent: number) => void
 ): Promise<InteractiveBook> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const formData = new FormData();
-    formData.append("file", file);
+    const fileList = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
+
+    for (const f of fileList) {
+      formData.append("file", f);
+      formData.append("files", f);
+    }
+
     if (title && title.trim()) {
       formData.append("title", title.trim());
     }

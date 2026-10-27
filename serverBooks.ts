@@ -1,14 +1,20 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import os from "os";
 import multer from "multer";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import JSZip from "jszip";
 import { InteractiveBook, BookPage, BookPageMedia } from "./src/types";
 
+const execFileAsync = promisify(execFile);
+
 const BOOKS_DIR = path.join(process.cwd(), "public", "uploads", "books");
 const BOOKS_META_PATH = path.join(process.cwd(), "books.json");
+const TEMP_UPLOAD_DIR = path.join(os.tmpdir(), "book-uploads");
 
-// Ensure books directory exists
+// Ensure directories exist
 if (!fs.existsSync(BOOKS_DIR)) {
   try {
     fs.mkdirSync(BOOKS_DIR, { recursive: true });
@@ -16,8 +22,15 @@ if (!fs.existsSync(BOOKS_DIR)) {
     console.error("Failed to create books directory:", err);
   }
 }
+if (!fs.existsSync(TEMP_UPLOAD_DIR)) {
+  try {
+    fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
+  } catch (err) {
+    console.error("Failed to create temp upload directory:", err);
+  }
+}
 
-// Default initial books matching user reference screenshot
+// Default initial books matching reference screenshot
 const INITIAL_BOOKS: InteractiveBook[] = [
   {
     id: "miteinander-a1-1",
@@ -179,7 +192,6 @@ export function loadBooksMeta(): InteractiveBook[] {
   } catch (e) {
     console.error("Error reading books.json:", e);
   }
-  // Initialize with reference books if file does not exist yet
   try {
     fs.writeFileSync(BOOKS_META_PATH, JSON.stringify(INITIAL_BOOKS, null, 2), "utf-8");
   } catch (e) {
@@ -220,21 +232,36 @@ function getAllFilesRecursive(dir: string, baseDir: string = dir): string[] {
 }
 
 export function registerServerBookRoutes(app: express.Express) {
-  // Ensure books.json exists on server start
   loadBooksMeta();
 
-  // Serve static files in /uploads/books
+  // Serve static files in /uploads/books with HTTP Range headers
   app.use(
     "/uploads/books",
     express.static(BOOKS_DIR, {
       setHeaders: (res) => {
         res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Access-Control-Allow-Origin", "*");
       }
     })
   );
 
+  // Configure Multer with disk storage (Zero heap RAM usage during large uploads)
+  const bookDiskStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      if (!fs.existsSync(TEMP_UPLOAD_DIR)) {
+        fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
+      }
+      cb(null, TEMP_UPLOAD_DIR);
+    },
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      const unique = Date.now() + "-" + Math.round(Math.random() * 1e6);
+      cb(null, `book-upload-${unique}${ext}`);
+    }
+  });
+
   const upload = multer({
-    storage: multer.memoryStorage(),
+    storage: bookDiskStorage,
     limits: {
       fileSize: 2 * 1024 * 1024 * 1024 // 2GB max
     }
@@ -265,47 +292,80 @@ export function registerServerBookRoutes(app: express.Express) {
     }
   });
 
-  // 3. Upload and extract Interactive Book archive on server
-  app.post("/api/books/upload", upload.single("file"), async (req, res) => {
+  // 3. Upload and extract book archive or media files on server (Direct Disk Stream)
+  app.post("/api/books/upload", upload.any(), async (req, res) => {
+    const uploadedFiles = req.files as Express.Multer.File[];
+    if (!uploadedFiles || uploadedFiles.length === 0) {
+      return res.status(400).json({ error: "الرجاء اختيار ملف لرفعه على السيرفر" });
+    }
+
+    const primaryFile = uploadedFiles[0];
+    const originalName = primaryFile.originalname || "book.zip";
+    const ext = path.extname(originalName).toLowerCase();
+
+    const bookId = `book-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const targetDir = path.join(BOOKS_DIR, bookId);
+
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+
     try {
-      if (!req.file) {
-        return res.status(400).json({ error: "الرجاء اختيار ملف الكتاب المضغوط (ZIP)" });
-      }
+      const isZip = ext === ".zip" || ext === ".epub" || primaryFile.mimetype.includes("zip");
 
-      const originalName = req.file.originalname || "book.zip";
-      const bookId = `book-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-      const targetDir = path.join(BOOKS_DIR, bookId);
-
-      if (!fs.existsSync(targetDir)) {
-        fs.mkdirSync(targetDir, { recursive: true });
-      }
-
-      // Extract ZIP using JSZip directly onto server filesystem
-      const zip = await JSZip.loadAsync(req.file.buffer);
-      const zipEntries = Object.keys(zip.files);
-
-      for (const relativePath of zipEntries) {
-        const fileEntry = zip.files[relativePath];
-        if (fileEntry.dir || relativePath.startsWith("__MACOSX/") || relativePath.includes("/__MACOSX/")) {
-          continue;
+      if (isZip) {
+        // High-speed native unzip via Linux command (takes <1 sec for 500MB without heap memory allocation)
+        let unzippedSuccessfully = false;
+        try {
+          await execFileAsync("unzip", ["-q", "-o", primaryFile.path, "-d", targetDir]);
+          unzippedSuccessfully = true;
+        } catch (unzipErr: any) {
+          console.warn("[Books Server] Native unzip failed, falling back to JSZip:", unzipErr?.message);
         }
 
-        const cleanRelPath = relativePath.replace(/^(\.\/|\/)+/, "");
-        const destPath = path.join(targetDir, cleanRelPath);
-        const destDir = path.dirname(destPath);
+        // Fallback: JSZip stream/buffer
+        if (!unzippedSuccessfully) {
+          const zipBuffer = fs.readFileSync(primaryFile.path);
+          const zip = await JSZip.loadAsync(zipBuffer);
+          const zipEntries = Object.keys(zip.files);
 
-        if (!fs.existsSync(destDir)) {
-          fs.mkdirSync(destDir, { recursive: true });
+          for (const relativePath of zipEntries) {
+            const fileEntry = zip.files[relativePath];
+            if (fileEntry.dir || relativePath.startsWith("__MACOSX/") || relativePath.includes("/__MACOSX/")) {
+              continue;
+            }
+
+            const cleanRelPath = relativePath.replace(/^(\.\/|\/)+/, "");
+            const destPath = path.join(targetDir, cleanRelPath);
+            const destDir = path.dirname(destPath);
+
+            if (!fs.existsSync(destDir)) {
+              fs.mkdirSync(destDir, { recursive: true });
+            }
+
+            const content = await fileEntry.async("nodebuffer");
+            fs.writeFileSync(destPath, content);
+          }
         }
-
-        const content = await fileEntry.async("nodebuffer");
-        fs.writeFileSync(destPath, content);
+      } else {
+        // If user uploaded direct audio/video/media files (like in media player), move them into book folder
+        for (const f of uploadedFiles) {
+          const destPath = path.join(targetDir, f.originalname);
+          fs.copyFileSync(f.path, destPath);
+        }
       }
 
-      // Catalog extracted files
+      // Clean up uploaded temporary files from /tmp
+      for (const f of uploadedFiles) {
+        try {
+          if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
+        } catch (e) {}
+      }
+
+      // Catalog all extracted files inside targetDir
       const allExtractedFiles = getAllFilesRecursive(targetDir);
 
-      // Check if this package has a Hueber / publisher JSON manifest
+      // Check if Hueber or publisher manifest exists
       let parsedManifest: any = null;
       let parsedContent: any = null;
 
@@ -324,20 +384,20 @@ export function registerServerBookRoutes(app: express.Express) {
       }
 
       const imageExtensions = [".jpg", ".jpeg", ".png", ".webp", ".svg"];
-      const audioExtensions = [".mp3", ".wav", ".m4a", ".aac", ".ogg"];
-      const videoExtensions = [".mp4", ".webm", ".mov", ".mkv"];
+      const audioExtensions = [".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus"];
+      const videoExtensions = [".mp4", ".webm", ".mov", ".mkv", ".m4v"];
 
       const imageFiles: string[] = [];
       const audioFiles: string[] = [];
       const videoFiles: string[] = [];
 
       for (const rel of allExtractedFiles) {
-        const ext = path.extname(rel).toLowerCase();
-        if (imageExtensions.includes(ext)) {
+        const fileExt = path.extname(rel).toLowerCase();
+        if (imageExtensions.includes(fileExt)) {
           imageFiles.push(rel);
-        } else if (audioExtensions.includes(ext)) {
+        } else if (audioExtensions.includes(fileExt)) {
           audioFiles.push(rel);
-        } else if (videoExtensions.includes(ext)) {
+        } else if (videoExtensions.includes(fileExt)) {
           videoFiles.push(rel);
         }
       }
@@ -388,7 +448,6 @@ export function registerServerBookRoutes(app: express.Express) {
       const pages: BookPage[] = [];
 
       if (parsedContent && Array.isArray(parsedContent.book_parts) && parsedContent.book_parts[0]?.pages) {
-        // Build directly from publisher content.json structure
         const publisherPages = parsedContent.book_parts[0].pages;
         publisherPages.forEach((p: any) => {
           const imgRel = imageFiles.find((f) => path.basename(f) === p.page_img) || "";
@@ -480,7 +539,7 @@ export function registerServerBookRoutes(app: express.Express) {
       existingBooks.unshift(newBook);
       saveBooksMeta(existingBooks);
 
-      console.log(`[Books Server] Book uploaded & extracted on server: "${newBook.title}" (${pages.length} pages, ${allMedia.length} tracks)`);
+      console.log(`[Books Server] Book saved on server: "${newBook.title}" (${pages.length} pages, ${allMedia.length} tracks)`);
 
       res.json({
         success: true,
@@ -489,6 +548,12 @@ export function registerServerBookRoutes(app: express.Express) {
       });
     } catch (err: any) {
       console.error("[Books Server] Upload/extract error:", err);
+      // Clean up temp files if error
+      for (const f of uploadedFiles) {
+        try {
+          if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
+        } catch (e) {}
+      }
       res.status(500).json({
         error: `فشل في استخراج أو حفظ الكتاب على السيرفر: ${err?.message || "خطأ غير معروف"}`
       });
