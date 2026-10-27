@@ -3,9 +3,15 @@ import { InteractiveBook } from "../types";
 // Fetch all books stored on the server
 export async function fetchBooksFromServer(): Promise<InteractiveBook[]> {
   try {
-    const res = await fetch("/api/books");
+    const res = await fetch("/api/books", {
+      headers: { Accept: "application/json" }
+    });
     if (!res.ok) {
-      throw new Error(`خطأ في جلب الكتب من السيرفر (رمز: ${res.status})`);
+      return [];
+    }
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      return [];
     }
     const data = await res.json();
     return Array.isArray(data.books) ? data.books : [];
