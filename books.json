@@ -1,5 +1,23 @@
 [
   {
+    "id": "book-1793118245138-nvm5j",
+    "title": "test page",
+    "subtitle": "Kurs- und Arbeitsbuch",
+    "author": "Hueber Verlag",
+    "coverImage": "",
+    "totalPages": 1,
+    "pages": [
+      {
+        "pageNumber": 1,
+        "displayLabel": "1",
+        "pageImage": "",
+        "media": []
+      }
+    ],
+    "allMedia": [],
+    "createdAt": "2026-10-27T16:24:05.139Z"
+  },
+  {
     "id": "miteinander-a1-1",
     "title": "Miteinander! A1.1 KB+AB",
     "subtitle": "Kurs- und Arbeitsbuch",

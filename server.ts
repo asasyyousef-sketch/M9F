@@ -2299,9 +2299,31 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
     }
   };
 
-  // 3. Upload Book Archive or Media Files
+  // 3. Upload Book Archive or Media Files (Mounted on multiple aliases for bulletproof routing)
   app.post("/api/books/upload", bookUpload.any(), handleBookUploadRequest);
   app.post("/api/media/books-upload", bookUpload.any(), handleBookUploadRequest);
+  app.post("/api/books/upload-archive", bookUpload.any(), handleBookUploadRequest);
+  app.post("/api/books", bookUpload.any(), handleBookUploadRequest);
+
+  // Fallback GET aliases for books
+  app.get("/api/media/books", (req, res) => {
+    try {
+      const books = loadBooksJson();
+      res.json({ success: true, books });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed loading books" });
+    }
+  });
+  app.get("/api/media/books/:id", (req, res) => {
+    try {
+      const books = loadBooksJson();
+      const found = books.find((b: any) => b.id === req.params.id);
+      if (!found) return res.status(404).json({ error: "الكتاب غير موجود" });
+      res.json({ success: true, book: found });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed loading book" });
+    }
+  });
 
   // 4. Delete Book
   app.delete("/api/books/:id", (req, res) => {
@@ -3224,32 +3246,10 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
             console.error("Failed to load transcripts in Supabase success path:", e);
           }
 
-          // Use Supabase cloud as authoritative primary source when available,
-          // merging any local-only user records
-          let sourceFolders = [...mappedFolders];
-          let sourceCards = [...mappedCards];
-          if (fs.existsSync(DB_PATH)) {
-            try {
-              const parsed = JSON.parse(fs.readFileSync(DB_PATH, "utf-8"));
-              const cloudFolderIds = new Set(mappedFolders.map((f: any) => f.id));
-              const cloudCardIds = new Set(mappedCards.map((c: any) => c.id));
-              
-              if (Array.isArray(parsed.folders)) {
-                for (const lf of parsed.folders) {
-                  if (!cloudFolderIds.has(lf.id)) {
-                    sourceFolders.push(lf);
-                  }
-                }
-              }
-              if (Array.isArray(parsed.cards)) {
-                for (const lc of parsed.cards) {
-                  if (!cloudCardIds.has(lc.id)) {
-                    sourceCards.push(lc);
-                  }
-                }
-              }
-            } catch (e) {}
-          }
+          // Use Supabase cloud as authoritative primary source when available
+          // Do not resurrect deleted items from old db.json cache
+          const sourceFolders = [...mappedFolders];
+          const sourceCards = [...mappedCards];
 
           const userFolders = sourceFolders.filter((f: any) => {
             const itemUserId = f.userId ? f.userId.trim() : null;
