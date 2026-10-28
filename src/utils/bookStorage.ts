@@ -314,16 +314,17 @@ async function uploadFilesToServerDisk(
 }
 
 /**
- * Direct High-Speed Single-Stream Upload to Server Disk (/api/books/upload)
- * Zero browser memory allocation, instant native Linux unzipping on server hard drive.
+ * 🚀 Enterprise 2-Phase Upload Pipeline (The YouTube Pattern)
+ * Phase 1: Uploads raw file to server disk with immediate 200 OK acknowledgment.
+ * Phase 2: Live-polls server worker until unzipping & indexing completes on disk.
  */
-export function uploadBookDirectToServer(
+export function uploadBookToServer(
   file: File,
   title?: string,
   onProgress?: (percent: number, statusText?: string) => void
 ): Promise<InteractiveBook> {
   return new Promise((resolve, reject) => {
-    if (onProgress) onProgress(5, "جاري رفع حزمة الكتاب إلى السيرفر مباشرة...");
+    if (onProgress) onProgress(5, "جاري رفع حزمة الكتاب إلى السيرفر...");
 
     const xhr = new XMLHttpRequest();
     const formData = new FormData();
@@ -332,24 +333,71 @@ export function uploadBookDirectToServer(
       formData.append("title", title.trim());
     }
 
+    // Phase 1: File stream progress (0% - 75%)
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && onProgress) {
-        const percent = Math.round((event.loaded / event.total) * 88);
-        onProgress(Math.max(5, percent), `جاري نقل الملف إلى القرص الصلب: ${percent}%`);
+        const uploadPercent = Math.round((event.loaded / event.total) * 75);
+        onProgress(Math.max(5, uploadPercent), `جاري نقل الملف إلى القرص الصلب: ${Math.round((event.loaded / event.total) * 100)}%`);
       }
     };
 
-    xhr.onload = () => {
+    xhr.onload = async () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const res = JSON.parse(xhr.responseText);
-          if (res.success && res.book) {
-            if (onProgress) onProgress(100, "تم استخراج وفهرسة الكتاب وحفظه على القرص الصلب بنجاح!");
-            saveBookToDB(res.book);
-            resolve(res.book);
-          } else {
-            reject(new Error(res.error || "فشل معالجة وحفظ الكتاب في السيرفر"));
+          const jobId = res.jobId;
+
+          if (!jobId) {
+            // Direct synchronous fallback
+            if (res.success && res.book) {
+              if (onProgress) onProgress(100, "تم اعتماد الكتاب بنجاح!");
+              saveBookToDB(res.book);
+              return resolve(res.book);
+            }
+            return reject(new Error("رد غير صالح من السيرفر"));
           }
+
+          if (onProgress) onProgress(80, "تم استلام الحزمة بنجاح! جاري فك الضغط التلقائي...");
+
+          // Phase 2: Poll background job status until completed
+          const pollInterval = setInterval(async () => {
+            try {
+              const pollRes = await fetch(`/api/books/jobs/${encodeURIComponent(jobId)}`);
+              if (!pollRes.ok) {
+                clearInterval(pollInterval);
+                return reject(new Error("فشل الاستعلام عن حالة معالجة الكتاب"));
+              }
+
+              const pollData = await pollRes.json();
+              const job = pollData.job;
+
+              if (!job) {
+                clearInterval(pollInterval);
+                return reject(new Error("المهمة لم تعد متوفرة على السيرفر"));
+              }
+
+              if (job.status === "extracting") {
+                if (onProgress) onProgress(85, job.message || "جاري فك ضغط الصفحات والصوتيات على القرص الصلب...");
+              } else if (job.status === "indexing") {
+                if (onProgress) onProgress(95, job.message || "جاري فهرسة الكتاب وربط الصوتيات والفيديوهات بالصفحات...");
+              } else if (job.status === "completed") {
+                clearInterval(pollInterval);
+                if (onProgress) onProgress(100, "تم حفظ واعتماد الكتاب بنجاح!");
+                if (job.book) {
+                  saveBookToDB(job.book);
+                  return resolve(job.book);
+                }
+                const books = await fetchBooksFromServer();
+                const found = books.find((b) => b.id === job.bookId);
+                return resolve(found || books[0]);
+              } else if (job.status === "error") {
+                clearInterval(pollInterval);
+                return reject(new Error(job.error || "حدث خطأ أثناء معالجة ملفات الكتاب"));
+              }
+            } catch (pollErr: any) {
+              console.warn("[Books Poll] Check warning:", pollErr?.message);
+            }
+          }, 600);
         } catch (e) {
           reject(new Error("رد غير صالح من سيرفر الكتب"));
         }
@@ -367,43 +415,13 @@ export function uploadBookDirectToServer(
       reject(new Error("حدث انقطاع في الاتصال بالسيرفر أثناء رفع الكتاب"));
     };
 
-    xhr.open("POST", "/api/books/upload", true);
+    // Post to the isolated background job endpoint
+    xhr.open("POST", "/api/books/upload-job", true);
     xhr.send(formData);
   });
 }
 
-/**
- * 1. Upload & Extract ZIP archive into the server's hard drive
- */
-export async function uploadBookToServer(
-  file: File,
-  _title?: string,
-  onProgress?: (percent: number, statusText?: string) => void
-): Promise<InteractiveBook> {
-  // Try direct single-request upload first (fastest, uses zero RAM)
-  try {
-    return await uploadBookDirectToServer(file, _title, onProgress);
-  } catch (directErr: any) {
-    console.warn("[Books] Direct upload failed, falling back to batch file extraction:", directErr?.message);
-    if (onProgress) onProgress(10, "جاري استخدام مسار الاستخراج البديل...");
-
-    const zip = await JSZip.loadAsync(file);
-    const rawFiles: RawFileEntry[] = [];
-
-    const entries = Object.keys(zip.files);
-    for (const rel of entries) {
-      const entry = zip.files[rel];
-      if (entry.dir || rel.includes("__MACOSX") || rel.includes(".DS_Store")) continue;
-      rawFiles.push({
-        name: rel,
-        getBlob: () => entry.async("blob")
-      });
-    }
-
-    const defaultTitle = file.name.replace(/\.zip$/i, "").replace(/[_-]/g, " ");
-    return uploadFilesToServerDisk(rawFiles, defaultTitle, onProgress);
-  }
-}
+export const uploadBookDirectToServer = uploadBookToServer;
 
 /**
  * 2. Upload Folder directly into the server's hard drive
