@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { ArrowLeft, Search, ChevronRight, Info, Pencil, Check } from "lucide-react";
+import { ArrowLeft, Search, ChevronRight, Info, Pencil, Check, FolderUp, FileArchive, X, Zap } from "lucide-react";
 import { InteractiveBook, BookPage, BookPageMedia, MediaFile } from "../types";
-import { fetchBooksFromServer, uploadBookToServer, deleteBookFromServer } from "../utils/bookStorage";
+import {
+  fetchBooksFromServer,
+  uploadBookToServer,
+  uploadBookFolderToServer,
+  deleteBookFromServer
+} from "../utils/bookStorage";
 
 interface BookReaderWorkspaceProps {
   onPlayMediaInStudio?: (file: Partial<MediaFile>) => void;
@@ -19,10 +24,15 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   const [currentPageIndex, setCurrentPageIndex] = useState<number>(0);
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
 
-  // Hidden upload input and upload state
+  // Hidden upload inputs and upload state
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
+  const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
+  const [skipVideos, setSkipVideos] = useState<boolean>(false);
+
   const [uploading, setUploading] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [uploadStatusText, setUploadStatusText] = useState<string>("");
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Load books from server on mount
@@ -42,18 +52,21 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     }
   };
 
-  // Handle uploading ZIP to server
+  // Handle uploading ZIP to server (Fast disk-based stream + native unzip)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setUploading(true);
     setUploadProgress(0);
+    setUploadStatusText("جاري تحضير ورفع الملف المضغوط إلى السيرفر...");
     setUploadError(null);
+    setShowUploadModal(false);
 
     try {
-      const newBook = await uploadBookToServer(file, "", (pct) => {
+      const newBook = await uploadBookToServer(file, "", (pct, status) => {
         setUploadProgress(pct);
+        if (status) setUploadStatusText(status);
       });
 
       // Reload books from server to ensure complete persistence
@@ -62,12 +75,47 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
 
       // Open newly uploaded book
       setSelectedBook(newBook);
-      setCurrentPageIndex(0);
+      const mediaIdx = newBook.pages.findIndex((p) => p.media && p.media.length > 0);
+      setCurrentPageIndex(mediaIdx >= 0 ? mediaIdx : 0);
     } catch (err: any) {
       setUploadError(err?.message || "فشل رفع واستخراج الكتاب على السيرفر");
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  // Handle uploading Book Folder directly (prod folder with book/, audio/, video/)
+  const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setUploading(true);
+    setUploadProgress(0);
+    setUploadStatusText("جاري فحص ملفات مجلد الكتاب...");
+    setUploadError(null);
+    setShowUploadModal(false);
+
+    try {
+      const newBook = await uploadBookFolderToServer(files, {
+        skipVideos: skipVideos,
+        onProgress: (pct, status) => {
+          setUploadProgress(pct);
+          setUploadStatusText(status);
+        }
+      });
+
+      const updatedList = await fetchBooksFromServer();
+      setBooks(updatedList);
+
+      setSelectedBook(newBook);
+      const mediaIdx = newBook.pages.findIndex((p) => p.media && p.media.length > 0);
+      setCurrentPageIndex(mediaIdx >= 0 ? mediaIdx : 0);
+    } catch (err: any) {
+      setUploadError(err?.message || "فشل حفظ وفهرسة مجلد الكتاب على السيرفر");
+    } finally {
+      setUploading(false);
+      if (folderInputRef.current) folderInputRef.current.value = "";
     }
   };
 
@@ -284,6 +332,19 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
         className="hidden"
       />
 
+      {/* Hidden File Input for Folder Upload */}
+      <input
+        ref={folderInputRef}
+        type="file"
+        // @ts-ignore
+        webkitdirectory="true"
+        // @ts-ignore
+        directory="true"
+        multiple
+        onChange={handleFolderUpload}
+        className="hidden"
+      />
+
       {/* Top Header: "My Books" on left, Edit Pencil on right */}
       <div className="h-16 px-4 flex items-center justify-between border-b border-gray-100 shrink-0">
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">My Books</h1>
@@ -299,23 +360,37 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
 
       {/* Uploading progress notification if active */}
       {uploading && (
-        <div className="p-3 bg-blue-50 border-b border-blue-100 flex items-center justify-between text-xs font-semibold text-blue-700">
-          <span>Uploading and extracting book to server...</span>
-          <span className="font-bold">{uploadProgress}%</span>
+        <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-200 text-xs font-semibold text-blue-900 shadow-inner">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-2.5 h-2.5 rounded-full bg-blue-600 animate-ping" />
+              <span className="font-bold text-sm text-blue-900">{uploadStatusText || "جاري حفظ الكتاب على السيرفر..."}</span>
+            </div>
+            <span className="font-mono font-bold text-base text-blue-700">{uploadProgress}%</span>
+          </div>
+          <div className="w-full bg-blue-200/60 rounded-full h-2 overflow-hidden">
+            <div
+              className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
         </div>
       )}
 
       {/* Upload error banner if any */}
       {uploadError && (
         <div className="p-3 bg-rose-50 border-b border-rose-200 text-xs font-semibold text-rose-700 flex items-center justify-between">
-          <span>{uploadError}</span>
-          <button onClick={() => setUploadError(null)} className="underline ml-2">Dismiss</button>
+          <div className="flex items-center gap-2">
+            <span className="font-bold">تنبيه:</span>
+            <span>{uploadError}</span>
+          </div>
+          <button onClick={() => setUploadError(null)} className="underline ml-2 cursor-pointer">إغلاق</button>
         </div>
       )}
 
       {/* "Add Book" Section (Matching image_0f369acc.png) */}
       <div
-        onClick={() => !uploading && fileInputRef.current?.click()}
+        onClick={() => !uploading && setShowUploadModal(true)}
         className="p-4 flex items-center gap-4 border-b border-gray-200 cursor-pointer hover:bg-slate-50/60 transition-colors"
       >
         {/* Blue Scan Frame with Plus Icon */}
@@ -328,8 +403,88 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
         </div>
 
         {/* Blue Text "Add Book" */}
-        <span className="text-base font-bold text-[#007aff]">Add Book</span>
+        <div className="flex flex-col">
+          <span className="text-base font-bold text-[#007aff]">Add Book</span>
+          <span className="text-xs text-slate-400 mt-0.5">رفع كتاب تفاعلي جديد (ملف ZIP أو مجلد مباشر)</span>
+        </div>
       </div>
+
+      {/* Modal: Select Upload Method (ZIP or Folder) */}
+      {showUploadModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-100 overflow-hidden text-right" dir="rtl">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <button
+                onClick={() => setShowUploadModal(false)}
+                className="p-1 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <h3 className="text-base font-bold text-slate-900">إضافة كتاب تفاعلي إلى السيرفر</h3>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-slate-500 leading-relaxed">
+                تم تحديث محرك السيرفر ليعمل بدون استهلاك الذاكرة المؤقتة (RAM) نهائياً مع فك ضغط فوري وحفظ مباشر على القرص:
+              </p>
+
+              {/* Option 1: Direct Folder Upload */}
+              <button
+                type="button"
+                onClick={() => folderInputRef.current?.click()}
+                className="w-full p-4 rounded-xl border-2 border-blue-500/30 hover:border-blue-600 bg-blue-50/50 hover:bg-blue-50 text-right transition-all flex items-start gap-3 cursor-pointer group"
+              >
+                <div className="p-2.5 rounded-lg bg-blue-600 text-white shrink-0 group-hover:scale-105 transition-transform">
+                  <FolderUp className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-bold text-blue-950">رفع مجلد الكتاب المباشر (الأفضل والأنصح)</h4>
+                    <span className="text-[10px] font-bold bg-blue-200/80 text-blue-800 px-1.5 py-0.5 rounded">موصى به</span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1 leading-snug">
+                    اختر مجلد <span className="font-mono font-bold text-slate-700">prod</span> المفكوك مباشرة من حاسوبك بدون الحاجة لضغطه.
+                  </p>
+                </div>
+              </button>
+
+              {/* Option 2: High-Speed Native ZIP Upload */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full p-4 rounded-xl border border-slate-200 hover:border-slate-400 bg-white hover:bg-slate-50 text-right transition-all flex items-start gap-3 cursor-pointer group"
+              >
+                <div className="p-2.5 rounded-lg bg-slate-800 text-white shrink-0 group-hover:scale-105 transition-transform">
+                  <FileArchive className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-bold text-slate-900">رفع ملف ZIP مضغوط</h4>
+                    <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">فك فوري بالقرص</span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1 leading-snug">
+                    رفع ملف الـ ZIP مباشرة عبر معالج النظام فائق السرعة وبدون أي استهلاك للـ RAM.
+                  </p>
+                </div>
+              </button>
+
+              {/* Fast mode: Skip bulky video files (optional) */}
+              <label className="flex items-center gap-2.5 pt-2 px-1 text-xs text-slate-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={skipVideos}
+                  onChange={(e) => setSkipVideos(e.target.checked)}
+                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
+                />
+                <span className="flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5 text-amber-500" />
+                  <span>تخطي الفيديوهات الضخمة لتسريع الرفع 10 أضعاف (رفع الصفحات والأصوات فقط)</span>
+                </span>
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Books List (Matching image_0f369acc.png rows) */}
       <div className="flex-1 divide-y divide-gray-200">

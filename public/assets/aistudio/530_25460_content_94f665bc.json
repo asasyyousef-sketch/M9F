@@ -1,0 +1,3096 @@
+{
+  "file_format_version": "0.1",
+  "keyboard": "numerical",
+  "book_parts": [
+    {
+      "pages": [
+        {
+          "page": 1,
+          "page_name": "1",
+          "page_absolute": 1,
+          "show_page": true,
+          "page_img": "530_25460-p-001.jpg",
+          "media": []
+        },
+        {
+          "page": 2,
+          "page_name": "2",
+          "page_absolute": 2,
+          "show_page": false,
+          "page_img": "530_25460-p-002.jpg",
+          "media": []
+        },
+        {
+          "page": 3,
+          "page_name": "3",
+          "page_absolute": 3,
+          "show_page": false,
+          "page_img": "530_25460-p-003.jpg",
+          "media": []
+        },
+        {
+          "page": 4,
+          "page_name": "4",
+          "page_absolute": 4,
+          "show_page": false,
+          "page_img": "530_25460-p-004.jpg",
+          "media": []
+        },
+        {
+          "page": 5,
+          "page_name": "5",
+          "page_absolute": 5,
+          "show_page": false,
+          "page_img": "530_25460-p-005.jpg",
+          "media": []
+        },
+        {
+          "page": 6,
+          "page_name": "6",
+          "page_absolute": 6,
+          "show_page": false,
+          "page_img": "530_25460-p-006.jpg",
+          "media": []
+        },
+        {
+          "page": 7,
+          "page_name": "7",
+          "page_absolute": 7,
+          "show_page": false,
+          "page_img": "530_25460-p-007.jpg",
+          "media": []
+        },
+        {
+          "page": 8,
+          "page_name": "8",
+          "page_absolute": 8,
+          "show_page": false,
+          "page_img": "530_25460-p-008.jpg",
+          "media": []
+        },
+        {
+          "page": 9,
+          "page_name": "9",
+          "page_absolute": 9,
+          "show_page": false,
+          "page_img": "530_25460-p-009.jpg",
+          "media": []
+        },
+        {
+          "page": 10,
+          "page_name": "10",
+          "page_absolute": 10,
+          "show_page": false,
+          "page_img": "530_25460-p-010.jpg",
+          "media": []
+        },
+        {
+          "page": 11,
+          "page_name": "11",
+          "page_absolute": 11,
+          "show_page": true,
+          "page_img": "530_25460-p-011.jpg",
+          "media": [
+            {
+              "file_name": "1_01_Miteinander_A11_KB_Start_1a.mp3",
+              "media_id": "6edcaae7-98cf-45ca-9de1-75eb423f6a68",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/01 – Audio: Start, 1a"
+            },
+            {
+              "file_name": "1_02_Miteinander_A11_KB_Start_2a.mp3",
+              "media_id": "6ffa23a3-0d12-4ffc-a0ed-e0c8c71137bb",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/02 – Audio: Start, 2a"
+            },
+            {
+              "file_name": "1_03_Miteinander_A11_KB_Start_2b.mp3",
+              "media_id": "389f45d2-f13f-4a80-964d-f507d1f828ec",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/03 – Audio: Start, 2b"
+            }
+          ]
+        },
+        {
+          "page": 12,
+          "page_name": "12",
+          "page_absolute": 12,
+          "show_page": true,
+          "page_img": "530_25460-p-012.jpg",
+          "media": [
+            {
+              "file_name": "1_04_Miteinander_A11_KB_Start_3.mp3",
+              "media_id": "e7e4619c-4ba4-408a-85ed-d21cf68cebd0",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/04 – Audio: Start, 3"
+            },
+            {
+              "file_name": "1_05_Miteinander_A11_KB_Start_5a.mp3",
+              "media_id": "b11a395f-adb2-496b-8346-c09f5b90d4fd",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/05 – Audio: Start, 5a"
+            }
+          ]
+        },
+        {
+          "page": 13,
+          "page_name": "13",
+          "page_absolute": 13,
+          "show_page": true,
+          "page_img": "530_25460-p-013.jpg",
+          "media": [
+            {
+              "file_name": "1_06_Miteinander_A11_KB_Start_6a.mp3",
+              "media_id": "a5efbbd5-49c6-4d44-9730-cf59ac8bae27",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/06 – Audio: Start, 6a"
+            },
+            {
+              "file_name": "1_07_Miteinander_A11_KB_Start_7a.mp3",
+              "media_id": "5078667f-9f9e-4b91-9ef0-0a174d63e70c",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/07 – Audio: Start, 7a"
+            },
+            {
+              "file_name": "1_08_Miteinander_A11_KB_Start_7b.mp3",
+              "media_id": "972da7d8-36f1-432a-9192-156e82f36223",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/08 – Audio: Start, 7b"
+            }
+          ]
+        },
+        {
+          "page": 14,
+          "page_name": "14",
+          "page_absolute": 14,
+          "show_page": true,
+          "page_img": "530_25460-p-014.jpg",
+          "media": [
+            {
+              "file_name": "01_Miteinander_A11_KB_Start_Extrafilm.mp4",
+              "media_id": "74cd4894-8c40-4b33-ad44-c4e0879b8569",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/mit-a11s14-1?Identifier=mit",
+              "type": "video",
+              "title": "01 – Video: Start, Extrafilm"
+            },
+            {
+              "file_name": "1_09_Miteinander_A11_KB_Start_10a_b.mp3",
+              "media_id": "161c68a1-2267-45c2-bcf2-995a58b52309",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/09 – Audio: Start, 10a_b"
+            }
+          ]
+        },
+        {
+          "page": 15,
+          "page_name": "15",
+          "page_absolute": 15,
+          "show_page": true,
+          "page_img": "530_25460-p-015.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L01-03-digVerw.mp4",
+              "media_id": "cf924dea-51a9-49d4-9198-73356897b416",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L01-03-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C1 – L1, 3, Kommunikation"
+            },
+            {
+              "file_name": "1_10_Miteinander_A11_KB_L1_1.mp3",
+              "media_id": "3d30fcc3-f233-4f0c-810f-9d5e46b16dd7",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/10 – Audio: L1, 1"
+            },
+            {
+              "file_name": "1_11_Miteinander_A11_KB_L1_2.mp3",
+              "media_id": "0379cac9-2eeb-46db-bb79-41061e2077dd",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/11 – Audio: L1, 2"
+            }
+          ]
+        },
+        {
+          "page": 16,
+          "page_name": "16",
+          "page_absolute": 16,
+          "show_page": true,
+          "page_img": "530_25460-p-016.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L01-A2a-digVerw.mp4",
+              "media_id": "88730ccc-b260-4d8a-a28b-5f82404e386c",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L01-A2a-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C2 – L1, A2a, Grammatik"
+            },
+            {
+              "file_name": "1_12_Miteinander_A11_KB_L1_A1a_b.mp3",
+              "media_id": "921f290d-ba1d-485d-bd22-380b463d1957",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/12 – Audio: L1, A1a_b"
+            }
+          ]
+        },
+        {
+          "page": 17,
+          "page_name": "17",
+          "page_absolute": 17,
+          "show_page": true,
+          "page_img": "530_25460-p-017.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L01-A3b-digVerw.mp4",
+              "media_id": "b122191d-5047-4509-acc7-6cd7c233b1ff",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L01-A3b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C3 – L1, A3b, Grammatik"
+            },
+            {
+              "file_name": "1_13_Miteinander_A11_KB_L1_A3a.mp3",
+              "media_id": "6ad8b527-0cde-4865-a350-718cb1cf52fa",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/13 – Audio: L1, A3a"
+            }
+          ]
+        },
+        {
+          "page": 18,
+          "page_name": "18",
+          "page_absolute": 18,
+          "show_page": true,
+          "page_img": "530_25460-p-018.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L01-B2b-digVerw.mp4",
+              "media_id": "1f9d375e-5cf8-4c83-b153-0bf2661e6b01",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L01-B2b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C4 – L1, B2b, Grammatik"
+            },
+            {
+              "file_name": "1_14_Miteinander_A11_KB_L1_B1a.mp3",
+              "media_id": "70a84101-eb6d-4903-9807-73f0e8c44b17",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/14 – Audio: L1, B1a"
+            },
+            {
+              "file_name": "1_15_Miteinander_A11_KB_L1_B2a.mp3",
+              "media_id": "bac81343-8f70-4d86-8f96-c4f6e9db315c",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/15 – Audio: L1, B2a"
+            }
+          ]
+        },
+        {
+          "page": 19,
+          "page_name": "19",
+          "page_absolute": 19,
+          "show_page": false,
+          "page_img": "530_25460-p-019.jpg",
+          "media": []
+        },
+        {
+          "page": 20,
+          "page_name": "20",
+          "page_absolute": 20,
+          "show_page": false,
+          "page_img": "530_25460-p-020.jpg",
+          "media": []
+        },
+        {
+          "page": 21,
+          "page_name": "21",
+          "page_absolute": 21,
+          "show_page": true,
+          "page_img": "530_25460-p-021.jpg",
+          "media": [
+            {
+              "file_name": "02_Miteinander_A11_KB_L1_Extrafilm.mp4",
+              "media_id": "96176e3f-fd80-40a0-bdb4-343ac95fbf18",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/mit-a11s21-1?Identifier=mit",
+              "type": "video",
+              "title": "02 – Video: L1, Extrafilm"
+            },
+            {
+              "file_name": "1_16_Miteinander_A11_KB_L1_C2a.mp3",
+              "media_id": "4cf3ba08-01bb-4f1f-8ca4-7078b2f07a0b",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/16 – Audio: L1, C2a"
+            },
+            {
+              "file_name": "1_17_Miteinander_A11_KB_L1_C2b.mp3",
+              "media_id": "721f231e-5cda-4784-85f8-f647c661100e",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/17 – Audio: L1, C2b"
+            },
+            {
+              "file_name": "1_18_Miteinander_A11_KB_L1_C2c.mp3",
+              "media_id": "70b4871e-814e-4272-ae9f-f99ce6103995",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/18 – Audio: L1, C2c"
+            }
+          ]
+        },
+        {
+          "page": 22,
+          "page_name": "22",
+          "page_absolute": 22,
+          "show_page": false,
+          "page_img": "530_25460-p-022.jpg",
+          "media": []
+        },
+        {
+          "page": 23,
+          "page_name": "23",
+          "page_absolute": 23,
+          "show_page": false,
+          "page_img": "530_25460-p-023.jpg",
+          "media": []
+        },
+        {
+          "page": 24,
+          "page_name": "24",
+          "page_absolute": 24,
+          "show_page": false,
+          "page_img": "530_25460-p-024.jpg",
+          "media": []
+        },
+        {
+          "page": 25,
+          "page_name": "25",
+          "page_absolute": 25,
+          "show_page": true,
+          "page_img": "530_25460-p-025.jpg",
+          "media": [
+            {
+              "file_name": "1_19_Miteinander_A11_KB_L2_1a_b.mp3",
+              "media_id": "0d59bd27-7366-4536-bfa3-0d64b5933952",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/19 – Audio: L2, 1a_b"
+            }
+          ]
+        },
+        {
+          "page": 26,
+          "page_name": "26",
+          "page_absolute": 26,
+          "show_page": true,
+          "page_img": "530_25460-p-026.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L02-A1b-digVerw.mp4",
+              "media_id": "6257000b-f8f6-4eac-bc71-d5720dc51ba9",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L02-A1b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C5 – L2, A1b, Grammatik"
+            },
+            {
+              "file_name": "1_20_Miteinander_A11_KB_L2_A1a.mp3",
+              "media_id": "195a714f-417f-490f-b1aa-93997f9f61e4",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/20 – Audio: L2, A1a"
+            }
+          ]
+        },
+        {
+          "page": 27,
+          "page_name": "27",
+          "page_absolute": 27,
+          "show_page": true,
+          "page_img": "530_25460-p-027.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L02-A2b-digVerw.mp4",
+              "media_id": "297eff3d-4135-4447-bfe2-d5d742ee3dbb",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L02-A2b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C6 – L2, A2b, Grammatik"
+            },
+            {
+              "file_name": "1_21_Miteinander_A11_KB_L2_A3a.mp3",
+              "media_id": "8e4f1c6b-6655-47eb-af84-f77909cff890",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/21 – Audio: L2, A3a"
+            },
+            {
+              "file_name": "1_22_Miteinander_A11_KB_L2_A3b.mp3",
+              "media_id": "106f95e7-6801-4eec-bba9-28cc99930777",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/22 – Audio: L2, A3b"
+            }
+          ]
+        },
+        {
+          "page": 28,
+          "page_name": "28",
+          "page_absolute": 28,
+          "show_page": true,
+          "page_img": "530_25460-p-028.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L02-B2a-digVerw.mp4",
+              "media_id": "e345c16c-d4ff-4492-9d21-a3bae28a95b7",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L02-B2a-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C7 – L2, B2a, Kommunikation"
+            },
+            {
+              "file_name": "KB-A11-L02-B2b-digVerw.mp4",
+              "media_id": "bcad3a4d-6503-4f24-a7fa-bce142ad7387",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L02-B2b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C8 – L2, B2b, Grammatik"
+            },
+            {
+              "file_name": "1_23_Miteinander_A11_KB_L2_B1a_b.mp3",
+              "media_id": "ad1d07e1-86d5-4bde-ae1b-37b73cd7d844",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/23 – Audio: L2, B1a_b"
+            }
+          ]
+        },
+        {
+          "page": 29,
+          "page_name": "29",
+          "page_absolute": 29,
+          "show_page": true,
+          "page_img": "530_25460-p-029.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L02-B3-digVerw.mp4",
+              "media_id": "d2604880-5c22-4cdc-a240-6fb76a5b037f",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L02-B3-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C9 – L2, B3, Grammatik"
+            }
+          ]
+        },
+        {
+          "page": 30,
+          "page_name": "30",
+          "page_absolute": 30,
+          "show_page": true,
+          "page_img": "530_25460-p-030.jpg",
+          "media": [
+            {
+              "file_name": "1_24_Miteinander_A11_KB_L2_C1a.mp3",
+              "media_id": "365cca3c-1234-4458-a52d-0527828a13f4",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/24 – Audio: L2, C1a"
+            },
+            {
+              "file_name": "1_25_Miteinander_A11_KB_L2_C1c.mp3",
+              "media_id": "376fe1a0-c73a-4609-bc27-4a600c48ce00",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/25 – Audio: L2, C1c"
+            }
+          ]
+        },
+        {
+          "page": 31,
+          "page_name": "31",
+          "page_absolute": 31,
+          "show_page": true,
+          "page_img": "530_25460-p-031.jpg",
+          "media": [
+            {
+              "file_name": "03_Miteinander_A11_KB_L2_Extrafilm.mp4",
+              "media_id": "97d60d23-54e2-4b9a-874a-f50bb2a986eb",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/mit-a11s31-1?Identifier=mit",
+              "type": "video",
+              "title": "03 – Video: L2, Extrafilm"
+            },
+            {
+              "file_name": "1_26_Miteinander_A11_KB_L2_C2.mp3",
+              "media_id": "a78420ca-64fa-4a62-8ec4-acdc815bbaa6",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/26 – Audio: L2, C2"
+            }
+          ]
+        },
+        {
+          "page": 32,
+          "page_name": "32",
+          "page_absolute": 32,
+          "show_page": false,
+          "page_img": "530_25460-p-032.jpg",
+          "media": []
+        },
+        {
+          "page": 33,
+          "page_name": "33",
+          "page_absolute": 33,
+          "show_page": false,
+          "page_img": "530_25460-p-033.jpg",
+          "media": []
+        },
+        {
+          "page": 34,
+          "page_name": "34",
+          "page_absolute": 34,
+          "show_page": false,
+          "page_img": "530_25460-p-034.jpg",
+          "media": []
+        },
+        {
+          "page": 35,
+          "page_name": "35",
+          "page_absolute": 35,
+          "show_page": true,
+          "page_img": "530_25460-p-035.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L03-01c-digVerw.mp4",
+              "media_id": "b866b70a-7920-4da9-a7c1-ce9abd178156",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L03-01c-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C10 – L3, 1c, Grammatik"
+            },
+            {
+              "file_name": "1_27_Miteinander_A11_KB_L3_1b.mp3",
+              "media_id": "203ffc14-b569-45d0-b26e-ebec91bbda5a",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/27 – Audio: L3, 1b"
+            }
+          ]
+        },
+        {
+          "page": 36,
+          "page_name": "36",
+          "page_absolute": 36,
+          "show_page": true,
+          "page_img": "530_25460-p-036.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L03-A1b-digVerw.mp4",
+              "media_id": "241ee070-f51c-4b94-b154-216352cfd041",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L03-A1b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C11 – L3, A1b, Grammatik"
+            },
+            {
+              "file_name": "1_28_Miteinander_A11_KB_L3_A1a.mp3",
+              "media_id": "b42eefce-5ef5-4184-b71a-c87c68a86f57",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/28 – Audio: L3, A1a"
+            },
+            {
+              "file_name": "1_29_Miteinander_A11_KB_L3_A2.mp3",
+              "media_id": "8ffa4afd-5554-4c4b-92c5-992dcd708b61",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/29 – Audio: L3, A2"
+            }
+          ]
+        },
+        {
+          "page": 37,
+          "page_name": "37",
+          "page_absolute": 37,
+          "show_page": true,
+          "page_img": "530_25460-p-037.jpg",
+          "media": [
+            {
+              "file_name": "1_30_Miteinander_A11_KB_L3_A3.mp3",
+              "media_id": "227ea8b0-cbde-4ba9-a059-1e32e80125f4",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/30 – Audio: L3, A3"
+            }
+          ]
+        },
+        {
+          "page": 38,
+          "page_name": "38",
+          "page_absolute": 38,
+          "show_page": false,
+          "page_img": "530_25460-p-038.jpg",
+          "media": []
+        },
+        {
+          "page": 39,
+          "page_name": "39",
+          "page_absolute": 39,
+          "show_page": true,
+          "page_img": "530_25460-p-039.jpg",
+          "media": [
+            {
+              "file_name": "06_Miteinander_A11_KB_L3_B3c_Beispiel.mp4",
+              "media_id": "3e5f1495-e076-4298-b44d-844c9f2ea32f",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/mit-a11s39-1?Identifier=mit",
+              "type": "video",
+              "title": "06 – Video: L3, B3c, Beispiel"
+            },
+            {
+              "file_name": "KB-A11-L03-B3b-digVerw.mp4",
+              "media_id": "7179cd59-ec6c-45a5-a90f-8c826aa9ca84",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L03-B3b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C12 – L3, B3b, Grammatik"
+            },
+            {
+              "file_name": "1_31_Miteinander_A11_KB_L3_B3b.mp3",
+              "media_id": "d5caf24d-6ed0-404c-8e8e-5b76c76117c2",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/31 – Audio: L3, B3b"
+            }
+          ]
+        },
+        {
+          "page": 40,
+          "page_name": "40",
+          "page_absolute": 40,
+          "show_page": true,
+          "page_img": "530_25460-p-040.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L03-C1b-digVerw.mp4",
+              "media_id": "8e699a5a-1240-41a9-a055-8a35299a9df6",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L03-C1b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C13 – L3, C1b, Grammatik"
+            }
+          ]
+        },
+        {
+          "page": 41,
+          "page_name": "41",
+          "page_absolute": 41,
+          "show_page": true,
+          "page_img": "530_25460-p-041.jpg",
+          "media": [
+            {
+              "file_name": "04_Miteinander_A11_KB_L3_Extrafilm.mp4",
+              "media_id": "dfe415e3-2213-402c-aa62-ad8097dc51b6",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/mit-a11s41-1?Identifier=mit",
+              "type": "video",
+              "title": "04 – Video: L3, Extrafilm"
+            },
+            {
+              "file_name": "1_32_Miteinander_A11_KB_L3_C3.mp3",
+              "media_id": "dc745662-27fc-44f4-9312-06798640de47",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/32 – Audio: L3, C3"
+            }
+          ]
+        },
+        {
+          "page": 42,
+          "page_name": "42",
+          "page_absolute": 42,
+          "show_page": false,
+          "page_img": "530_25460-p-042.jpg",
+          "media": []
+        },
+        {
+          "page": 43,
+          "page_name": "43",
+          "page_absolute": 43,
+          "show_page": false,
+          "page_img": "530_25460-p-043.jpg",
+          "media": []
+        },
+        {
+          "page": 44,
+          "page_name": "44",
+          "page_absolute": 44,
+          "show_page": false,
+          "page_img": "530_25460-p-044.jpg",
+          "media": []
+        },
+        {
+          "page": 45,
+          "page_name": "45",
+          "page_absolute": 45,
+          "show_page": true,
+          "page_img": "530_25460-p-045.jpg",
+          "media": [
+            {
+              "file_name": "1_33_Miteinander_A11_KB_L4_1a_b.mp3",
+              "media_id": "c8e625b7-c1a3-4c67-9e69-c66c3cd6af2b",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/33 – Audio: L4, 1a_b"
+            }
+          ]
+        },
+        {
+          "page": 46,
+          "page_name": "46",
+          "page_absolute": 46,
+          "show_page": true,
+          "page_img": "530_25460-p-046.jpg",
+          "media": [
+            {
+              "file_name": "1_34_Miteinander_A11_KB_L4_A1a_b.mp3",
+              "media_id": "00c93bf3-c958-4836-a272-feb96f44af20",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/34 – Audio: L4, A1a_b"
+            }
+          ]
+        },
+        {
+          "page": 47,
+          "page_name": "47",
+          "page_absolute": 47,
+          "show_page": true,
+          "page_img": "530_25460-p-047.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L04-A2b-digVerw.mp4",
+              "media_id": "d5c1f13b-e5de-44a2-9923-a79f49ef45ab",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L04-A2b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C14 – L4, A2b, Grammatik"
+            }
+          ]
+        },
+        {
+          "page": 48,
+          "page_name": "48",
+          "page_absolute": 48,
+          "show_page": true,
+          "page_img": "530_25460-p-048.jpg",
+          "media": [
+            {
+              "file_name": "1_35_Miteinander_A11_KB_L4_B1b_B2a.mp3",
+              "media_id": "5957a776-f3c0-44f1-a6e7-d1a1623f4393",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/35 – Audio: L4, B1b_B2a"
+            }
+          ]
+        },
+        {
+          "page": 49,
+          "page_name": "49",
+          "page_absolute": 49,
+          "show_page": true,
+          "page_img": "530_25460-p-049.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L04-B2b-digVerw.mp4",
+              "media_id": "2761065a-fd86-4dd7-a0dd-14fd758e7efb",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L04-B2b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C15 – L4, B2b, Grammatik"
+            }
+          ]
+        },
+        {
+          "page": 50,
+          "page_name": "50",
+          "page_absolute": 50,
+          "show_page": false,
+          "page_img": "530_25460-p-050.jpg",
+          "media": []
+        },
+        {
+          "page": 51,
+          "page_name": "51",
+          "page_absolute": 51,
+          "show_page": true,
+          "page_img": "530_25460-p-051.jpg",
+          "media": [
+            {
+              "file_name": "05_Miteinander_A11_KB_L4_Extrafilm.mp4",
+              "media_id": "ee69d0bc-0808-42df-b35c-d2f2fc7ab926",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/mit-a11s51-1?Identifier=mit",
+              "type": "video",
+              "title": "05 – Video: L4, Extrafilm"
+            },
+            {
+              "file_name": "1_36_Miteinander_A11_KB_L4_C3.mp3",
+              "media_id": "fcad800a-7278-48b8-84f2-f0c24a4324cb",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/36 – Audio: L4, C3"
+            }
+          ]
+        },
+        {
+          "page": 52,
+          "page_name": "52",
+          "page_absolute": 52,
+          "show_page": false,
+          "page_img": "530_25460-p-052.jpg",
+          "media": []
+        },
+        {
+          "page": 53,
+          "page_name": "53",
+          "page_absolute": 53,
+          "show_page": false,
+          "page_img": "530_25460-p-053.jpg",
+          "media": []
+        },
+        {
+          "page": 54,
+          "page_name": "54",
+          "page_absolute": 54,
+          "show_page": false,
+          "page_img": "530_25460-p-054.jpg",
+          "media": []
+        },
+        {
+          "page": 55,
+          "page_name": "55",
+          "page_absolute": 55,
+          "show_page": true,
+          "page_img": "530_25460-p-055.jpg",
+          "media": [
+            {
+              "file_name": "1_37_Miteinander_A11_KB_L5_1.mp3",
+              "media_id": "c80c48b3-8781-4ad8-9145-94a79dc0ecee",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/37 – Audio: L5, 1"
+            },
+            {
+              "file_name": "1_38_Miteinander_A11_KB_L5_2b_3b.mp3",
+              "media_id": "78d76729-7012-4eb0-9c85-ac65c23bf298",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/38 – Audio: L5, 2b_3b"
+            },
+            {
+              "file_name": "1_38_Miteinander_A11_KB_L5_2b_3b.mp3",
+              "media_id": "7cf37f2a-c1d8-4a1f-9cf6-d3a6dc1cb548",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/38 – Audio: L5, 2b_3b"
+            }
+          ]
+        },
+        {
+          "page": 56,
+          "page_name": "56",
+          "page_absolute": 56,
+          "show_page": true,
+          "page_img": "530_25460-p-056.jpg",
+          "media": [
+            {
+              "file_name": "1_39_Miteinander_A11_KB_L5_A1.mp3",
+              "media_id": "1ee0a30f-4b62-4af6-ad31-e96ad5b13098",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/39 – Audio: L5, A1"
+            }
+          ]
+        },
+        {
+          "page": 57,
+          "page_name": "57",
+          "page_absolute": 57,
+          "show_page": true,
+          "page_img": "530_25460-p-057.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L05-A3-digVerw.mp4",
+              "media_id": "45aa0b09-4130-4f9b-a006-5b5ee04c906f",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L05-A3-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C16 – L5, A3, Grammatik"
+            },
+            {
+              "file_name": "KB-A11-L05-A6-digVerw.mp4",
+              "media_id": "28eb8c17-0f81-4ff5-8545-e0c1b0b130dc",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L05-A6-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C17 – L5, A6, Grammatik"
+            }
+          ]
+        },
+        {
+          "page": 58,
+          "page_name": "58",
+          "page_absolute": 58,
+          "show_page": true,
+          "page_img": "530_25460-p-058.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L05-B2b-digVerw.mp4",
+              "media_id": "40db2e4d-373c-409c-9178-c28dd106a122",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L05-B2b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C18 – L5, B2b, Grammatik"
+            },
+            {
+              "file_name": "1_40_Miteinander_A11_KB_L5_B1_B2a.mp3",
+              "media_id": "09881417-9866-4a6e-ba1a-80e9cf61537c",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/40 – Audio: L5, B1_B2a"
+            },
+            {
+              "file_name": "1_40_Miteinander_A11_KB_L5_B1_B2a.mp3",
+              "media_id": "c0b91110-34eb-4380-979e-328fcf78e323",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/40 – Audio: L5, B1_B2a"
+            },
+            {
+              "file_name": "1_41_Miteinander_A11_KB_L5_B3a.mp3",
+              "media_id": "bfa76f35-e1eb-4a8b-b800-f5b09efc596c",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/41 – Audio: L5, B3a"
+            }
+          ]
+        },
+        {
+          "page": 59,
+          "page_name": "59",
+          "page_absolute": 59,
+          "show_page": true,
+          "page_img": "530_25460-p-059.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L05-B5-digVerw.mp4",
+              "media_id": "fb1dfdc4-3b5d-40b5-9e4d-b167a2eb330e",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L05-B5-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C19 – L5, B5, Kommunikation"
+            },
+            {
+              "file_name": "1_42_Miteinander_A11_KB_L5_B4.mp3",
+              "media_id": "f2899847-fc70-4767-a06c-919bb077da36",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/42 – Audio: L5, B4"
+            }
+          ]
+        },
+        {
+          "page": 60,
+          "page_name": "60",
+          "page_absolute": 60,
+          "show_page": true,
+          "page_img": "530_25460-p-060.jpg",
+          "media": [
+            {
+              "file_name": "1_43_Miteinander_A11_KB_L5_C2a.mp3",
+              "media_id": "672c5b34-8a9b-4438-8198-ce6470404381",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/43 – Audio: L5, C2a"
+            }
+          ]
+        },
+        {
+          "page": 61,
+          "page_name": "61",
+          "page_absolute": 61,
+          "show_page": true,
+          "page_img": "530_25460-p-061.jpg",
+          "media": [
+            {
+              "file_name": "07_Miteinander_A11_KB_L5_Extrafilm.mp4",
+              "media_id": "9ed7c392-2f32-4de7-a86c-d3666cb4ceff",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/mit-a11s61-1?Identifier=mit",
+              "type": "video",
+              "title": "07 – Video: L5, Extrafilm"
+            },
+            {
+              "file_name": "KB-A11-L05-C4a-digVerw.mp4",
+              "media_id": "8d117b62-0ec7-4a05-aa0a-aec35710aa7c",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L05-C4a-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C20 – L5, C4a, Kommunikation"
+            },
+            {
+              "file_name": "1_44_Miteinander_A11_KB_L5_C3.mp3",
+              "media_id": "13034985-ca05-45d1-9f2c-0de459678640",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/44 – Audio: L5, C3"
+            }
+          ]
+        },
+        {
+          "page": 62,
+          "page_name": "62",
+          "page_absolute": 62,
+          "show_page": false,
+          "page_img": "530_25460-p-062.jpg",
+          "media": []
+        },
+        {
+          "page": 63,
+          "page_name": "63",
+          "page_absolute": 63,
+          "show_page": false,
+          "page_img": "530_25460-p-063.jpg",
+          "media": []
+        },
+        {
+          "page": 64,
+          "page_name": "64",
+          "page_absolute": 64,
+          "show_page": true,
+          "page_img": "530_25460-p-064.jpg",
+          "media": [
+            {
+              "file_name": "1_45_Miteinander_A11_KB_L5_Wiederholung_3_Lied.mp3",
+              "media_id": "e2d66411-14dc-4b81-860a-3ccd4ed9551c",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "Audio: L5, Wiederholung 3, Lied"
+            },
+            {
+              "file_name": "45_Miteinander_A11_KB_L5_Wiederholung_3_Lied_Karaoke.mp3",
+              "media_id": "01b9ccca-c310-49bc-ad58-9e0083023ab6",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "Audio: L5, Wiederholung 3, Lied_Karaoke"
+            }
+          ]
+        },
+        {
+          "page": 65,
+          "page_name": "65",
+          "page_absolute": 65,
+          "show_page": true,
+          "page_img": "530_25460-p-065.jpg",
+          "media": [
+            {
+              "file_name": "1_46_Miteinander_A11_KB_L6_1a_b.mp3",
+              "media_id": "eea71867-0b18-4cfb-99a2-eee01905090b",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/46 – Audio: L6, 1a_b"
+            }
+          ]
+        },
+        {
+          "page": 66,
+          "page_name": "66",
+          "page_absolute": 66,
+          "show_page": true,
+          "page_img": "530_25460-p-066.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L06-A3-digVerw.mp4",
+              "media_id": "c8edbcc3-3608-4e21-8a8d-78acdc9843b4",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L06-A3-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C21 – L6, A3, Grammatik"
+            },
+            {
+              "file_name": "1_47_Miteinander_A11_KB_L6_A1.mp3",
+              "media_id": "53c9ddba-471c-45e3-b1c5-ea8a7889a880",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/47 – Audio: L6, A1"
+            },
+            {
+              "file_name": "1_48_Miteinander_A11_KB_L6_A3.mp3",
+              "media_id": "95998219-0319-4e36-a20e-9eba994e3b2a",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/48 – Audio: L6, A3"
+            }
+          ]
+        },
+        {
+          "page": 67,
+          "page_name": "67",
+          "page_absolute": 67,
+          "show_page": true,
+          "page_img": "530_25460-p-067.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L06-A6a-digVerw.mp4",
+              "media_id": "b7bb61a5-25c8-449f-b051-667f19d74f18",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L06-A6a-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C22 – L6, A6a, Kommunikation"
+            },
+            {
+              "file_name": "KB-A11-L06-A6b-digVerw.mp4",
+              "media_id": "9783ba61-1a39-4dcd-afd9-2fb26f8f8fc1",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L06-A6b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C23 – L6, A6b, Grammatik"
+            },
+            {
+              "file_name": "1_49_Miteinander_A11_KB_L6_A5a.mp3",
+              "media_id": "b3283cbb-2c8e-4840-9d97-d81b9b79991c",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/49 – Audio: L6, A5a"
+            },
+            {
+              "file_name": "1_50_Miteinander_A11_KB_L6_A6a.mp3",
+              "media_id": "7cd064cc-4541-405a-97a6-ab37fbfd8eae",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/50 – Audio: L6, A6a"
+            }
+          ]
+        },
+        {
+          "page": 68,
+          "page_name": "68",
+          "page_absolute": 68,
+          "show_page": true,
+          "page_img": "530_25460-p-068.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L06-B1a-digVerw.mp4",
+              "media_id": "eb9acf81-3dcc-4b36-bb0d-1cfd22ef2ad6",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L06-B1a-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C24 – L6, B1a, Grammatik"
+            }
+          ]
+        },
+        {
+          "page": 69,
+          "page_name": "69",
+          "page_absolute": 69,
+          "show_page": true,
+          "page_img": "530_25460-p-069.jpg",
+          "media": [
+            {
+              "file_name": "08_Miteinander_A11_KB_L6_B2b_Beispiel.mp4",
+              "media_id": "acbd7e45-be4b-4a2c-b388-b59909542b82",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/mit-a11s69-1?Identifier=mit",
+              "type": "video",
+              "title": "08 – Video: L6, B2b, Beispiel"
+            }
+          ]
+        },
+        {
+          "page": 70,
+          "page_name": "70",
+          "page_absolute": 70,
+          "show_page": true,
+          "page_img": "530_25460-p-070.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L06-C2-digVerw.mp4",
+              "media_id": "051d108a-3fc9-4632-8ed4-19fbb1e7d7c2",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L06-C2-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C25 – L6, C2, Grammatik"
+            },
+            {
+              "file_name": "KB-A11-L06-C3-digVerw.mp4",
+              "media_id": "bcbba904-445e-41d0-9416-f94836c2f288",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L06-C3-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C26 – L6, C3, Grammatik"
+            }
+          ]
+        },
+        {
+          "page": 71,
+          "page_name": "71",
+          "page_absolute": 71,
+          "show_page": true,
+          "page_img": "530_25460-p-071.jpg",
+          "media": [
+            {
+              "file_name": "09_Miteinander_A11_KB_L6_Extrafilm.mp4",
+              "media_id": "7bc6b9d9-72da-45f1-82ba-e690ecfb25b2",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/mit-a11s71-1?Identifier=mit",
+              "type": "video",
+              "title": "09 – Video: L6, Extrafilm"
+            },
+            {
+              "file_name": "1_51_Miteinander_A11_KB_L6_C5a.mp3",
+              "media_id": "502fa9a9-a1de-4fe1-b900-686a69ce29c3",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/51 – Audio: L6, C5a"
+            },
+            {
+              "file_name": "1_52_Miteinander_A11_KB_L6_C5b.mp3",
+              "media_id": "c545db28-ff13-4c95-b674-c2e718cd8f7e",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/52 – Audio: L6, C5b"
+            },
+            {
+              "file_name": "1_53_Miteinander_A11_KB_L6_C6a_b.mp3",
+              "media_id": "0d47368a-7ef8-4546-837b-4b92b038cf5f",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/53 – Audio: L6, C6a_b"
+            }
+          ]
+        },
+        {
+          "page": 72,
+          "page_name": "72",
+          "page_absolute": 72,
+          "show_page": false,
+          "page_img": "530_25460-p-072.jpg",
+          "media": []
+        },
+        {
+          "page": 73,
+          "page_name": "73",
+          "page_absolute": 73,
+          "show_page": false,
+          "page_img": "530_25460-p-073.jpg",
+          "media": []
+        },
+        {
+          "page": 74,
+          "page_name": "74",
+          "page_absolute": 74,
+          "show_page": false,
+          "page_img": "530_25460-p-074.jpg",
+          "media": []
+        },
+        {
+          "page": 75,
+          "page_name": "75",
+          "page_absolute": 75,
+          "show_page": true,
+          "page_img": "530_25460-p-075.jpg",
+          "media": [
+            {
+              "file_name": "1_54_Miteinander_A11_KB_L7_1.mp3",
+              "media_id": "12fdd413-ed8b-4e23-a2f0-4c136b9d7102",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/54 – Audio: L7, 1"
+            },
+            {
+              "file_name": "1_55_Miteinander_A11_KB_L7_2.mp3",
+              "media_id": "cffdb7a3-bde5-4930-8a59-3cc583baf138",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/55 – Audio: L7, 2"
+            }
+          ]
+        },
+        {
+          "page": 76,
+          "page_name": "76",
+          "page_absolute": 76,
+          "show_page": true,
+          "page_img": "530_25460-p-076.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L07-A1b-digVerw.mp4",
+              "media_id": "03aa3363-6ebe-430c-a456-0f788f7e3a5b",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L07-A1b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C27 – L7, A1b, Grammatik"
+            },
+            {
+              "file_name": "1_56_Miteinander_A11_KB_L7_A1a.mp3",
+              "media_id": "816521e0-340c-418f-b7d5-ccdc55eb3d2a",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/56 – Audio: L7, A1a"
+            }
+          ]
+        },
+        {
+          "page": 77,
+          "page_name": "77",
+          "page_absolute": 77,
+          "show_page": true,
+          "page_img": "530_25460-p-077.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L07-A5-digVerw.mp4",
+              "media_id": "ea893a96-eac3-4991-9e9c-50ff10bf7c37",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L07-A5-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C28 – L7, A5, Grammatik"
+            }
+          ]
+        },
+        {
+          "page": 78,
+          "page_name": "78",
+          "page_absolute": 78,
+          "show_page": true,
+          "page_img": "530_25460-p-078.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L07-B2-digVerw.mp4",
+              "media_id": "614e788f-f83f-43c3-9d14-4fa118a7fea4",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L07-B2-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C29 – L7, B2, Grammatik"
+            },
+            {
+              "file_name": "1_57_Miteinander_A11_KB_L7_B1c.mp3",
+              "media_id": "9398e6f0-81de-4ea9-9689-6c745ef48c5d",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/57 – Audio: L7, B1c"
+            },
+            {
+              "file_name": "1_58_Miteinander_A11_KB_L7_B2.mp3",
+              "media_id": "9954b7eb-23d7-4b7d-8062-9e246c1eb4d1",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/58 – Audio: L7, B2"
+            }
+          ]
+        },
+        {
+          "page": 79,
+          "page_name": "79",
+          "page_absolute": 79,
+          "show_page": true,
+          "page_img": "530_25460-p-079.jpg",
+          "media": [
+            {
+              "file_name": "10_Miteinander_A11_KB_L7_B5b_Beispiel.mp4",
+              "media_id": "11fec9d3-b485-4987-8e76-54a7317daebb",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/mit-a11s79-1?Identifier=mit",
+              "type": "video",
+              "title": "10 – Video: L7, B5b, Beispiel"
+            },
+            {
+              "file_name": "1_59_Miteinander_A11_KB_L7_B4.mp3",
+              "media_id": "f960d739-6b5e-4b46-9e4b-320516bf0ea4",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/59 – Audio: L7, B4"
+            },
+            {
+              "file_name": "1_60_Miteinander_A11_KB_L7_B5a.mp3",
+              "media_id": "4bcb1e2a-60c2-4adf-ba3c-92cfb63a8a7c",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/60 – Audio: L7, B5a"
+            }
+          ]
+        },
+        {
+          "page": 80,
+          "page_name": "80",
+          "page_absolute": 80,
+          "show_page": false,
+          "page_img": "530_25460-p-080.jpg",
+          "media": []
+        },
+        {
+          "page": 81,
+          "page_name": "81",
+          "page_absolute": 81,
+          "show_page": true,
+          "page_img": "530_25460-p-081.jpg",
+          "media": [
+            {
+              "file_name": "11_Miteinander_A11_KB_L7_Extrafilm.mp4",
+              "media_id": "eedab4ac-d3fb-43d2-a849-4f71481687b6",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/mit-a11s81-1?Identifier=mit",
+              "type": "video",
+              "title": "11 – Video: L7, Extrafilm"
+            },
+            {
+              "file_name": "1_61_Miteinander_A11_KB_L7_C3b_C5.mp3",
+              "media_id": "05da78a7-496b-4c70-98f4-0ac5e95a6573",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/61 – Audio: L7, C3b_C5"
+            },
+            {
+              "file_name": "1_61_Miteinander_A11_KB_L7_C3b_C5.mp3",
+              "media_id": "ab05a700-2cf7-4915-8e03-5816238ae7af",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/61 – Audio: L7, C3b_C5"
+            }
+          ]
+        },
+        {
+          "page": 82,
+          "page_name": "82",
+          "page_absolute": 82,
+          "show_page": false,
+          "page_img": "530_25460-p-082.jpg",
+          "media": []
+        },
+        {
+          "page": 83,
+          "page_name": "83",
+          "page_absolute": 83,
+          "show_page": false,
+          "page_img": "530_25460-p-083.jpg",
+          "media": []
+        },
+        {
+          "page": 84,
+          "page_name": "84",
+          "page_absolute": 84,
+          "show_page": false,
+          "page_img": "530_25460-p-084.jpg",
+          "media": []
+        },
+        {
+          "page": 85,
+          "page_name": "85",
+          "page_absolute": 85,
+          "show_page": true,
+          "page_img": "530_25460-p-085.jpg",
+          "media": [
+            {
+              "file_name": "1_62_Miteinander_A11_KB_L8_1.mp3",
+              "media_id": "3af6611a-1d8b-4368-aa1b-70d182cfe28b",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/62 – Audio: L8, 1"
+            }
+          ]
+        },
+        {
+          "page": 86,
+          "page_name": "86",
+          "page_absolute": 86,
+          "show_page": true,
+          "page_img": "530_25460-p-086.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L08-A1d-digVerw.mp4",
+              "media_id": "dbe96a6e-81a0-4f95-a44e-22455bbb692b",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L08-A1d-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C30 – L8, A1d, Grammatik"
+            },
+            {
+              "file_name": "1_63_Miteinander_A11_KB_L8_A1a.mp3",
+              "media_id": "c72bf97e-0d2a-46da-ae73-0118e164c7f1",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/63 – Audio: L8, A1a"
+            },
+            {
+              "file_name": "1_64_Miteinander_A11_KB_L8_A1b.mp3",
+              "media_id": "ccd34613-c3d6-4e2b-89b0-fb99e3e9d494",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/64 – Audio: L8, A1b"
+            },
+            {
+              "file_name": "1_65_Miteinander_A11_KB_L8_A1c.mp3",
+              "media_id": "6e350fc2-815e-4331-823c-9bbc3886c06d",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/65 – Audio: L8, A1c"
+            },
+            {
+              "file_name": "1_66_Miteinander_A11_KB_L8_A2a.mp3",
+              "media_id": "4ce5810e-d9d0-45b6-ac1a-5d621a65a979",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/66 – Audio: L8, A2a"
+            }
+          ]
+        },
+        {
+          "page": 87,
+          "page_name": "87",
+          "page_absolute": 87,
+          "show_page": true,
+          "page_img": "530_25460-p-087.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L08-A3b-digVerw.mp4",
+              "media_id": "5cae4d3e-4981-4b57-89c5-3f42deb973d5",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L08-A3b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C31 – L8, A3b, Kommunikation"
+            },
+            {
+              "file_name": "KB-A11-L08-A3c-digVerw.mp4",
+              "media_id": "799c8d77-dc81-468a-bf5b-31858a02cdb0",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L08-A3c-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C32 – L8, A3c, Grammatik"
+            }
+          ]
+        },
+        {
+          "page": 88,
+          "page_name": "88",
+          "page_absolute": 88,
+          "show_page": true,
+          "page_img": "530_25460-p-088.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L08-B2b-digVerw.mp4",
+              "media_id": "6a65a967-ac16-4705-85cb-6f6fc29ae828",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L08-B2b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C33 – L8, B2b, Grammatik"
+            }
+          ]
+        },
+        {
+          "page": 89,
+          "page_name": "89",
+          "page_absolute": 89,
+          "show_page": true,
+          "page_img": "530_25460-p-089.jpg",
+          "media": [
+            {
+              "file_name": "1_67_Miteinander_A11_KB_L8_B3a.mp3",
+              "media_id": "1904f9b9-05a1-49f9-8c22-ad1468aaa4d4",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "1/67 – Audio: L8, B3a"
+            }
+          ]
+        },
+        {
+          "page": 90,
+          "page_name": "90",
+          "page_absolute": 90,
+          "show_page": false,
+          "page_img": "530_25460-p-090.jpg",
+          "media": []
+        },
+        {
+          "page": 91,
+          "page_name": "91",
+          "page_absolute": 91,
+          "show_page": true,
+          "page_img": "530_25460-p-091.jpg",
+          "media": [
+            {
+              "file_name": "12_Miteinander_A11_KB_L8_Extrafilm.mp4",
+              "media_id": "22d04ec3-a2f0-4325-9fce-ce2ef1b2ecf5",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/mit-a11s91-1?Identifier=mit",
+              "type": "video",
+              "title": "12 – Video: L8, Extrafilm"
+            },
+            {
+              "file_name": "KB-A11-L08-C2b-digVerw.mp4",
+              "media_id": "e414edc6-d953-4d38-97b5-4d6c4330b39b",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L08-C2b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C34 – L8, C2b, Kommunikation"
+            }
+          ]
+        },
+        {
+          "page": 92,
+          "page_name": "92",
+          "page_absolute": 92,
+          "show_page": false,
+          "page_img": "530_25460-p-092.jpg",
+          "media": []
+        },
+        {
+          "page": 93,
+          "page_name": "93",
+          "page_absolute": 93,
+          "show_page": false,
+          "page_img": "530_25460-p-093.jpg",
+          "media": []
+        },
+        {
+          "page": 94,
+          "page_name": "94",
+          "page_absolute": 94,
+          "show_page": true,
+          "page_img": "530_25460-p-094.jpg",
+          "media": [
+            {
+              "file_name": "1_68_Miteinander_A11_KB_L8_Wiederholung_3_Lied.mp3",
+              "media_id": "d6713efe-5d39-469a-943c-db86dfcf9c6c",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "Audio: L8, Wiederholung 3, Lied"
+            },
+            {
+              "file_name": "68_Miteinander_A11_KB_L8_Wiederholung_3_Lied_Karaoke.mp3",
+              "media_id": "e6930350-2230-41fd-a866-65ebbc460819",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "Audio: L8, Wiederholung 3, Lied_Karaoke"
+            }
+          ]
+        },
+        {
+          "page": 95,
+          "page_name": "95",
+          "page_absolute": 95,
+          "show_page": false,
+          "page_img": "530_25460-p-095.jpg",
+          "media": []
+        },
+        {
+          "page": 96,
+          "page_name": "96",
+          "page_absolute": 96,
+          "show_page": false,
+          "page_img": "530_25460-p-096.jpg",
+          "media": []
+        },
+        {
+          "page": 97,
+          "page_name": "97",
+          "page_absolute": 97,
+          "show_page": false,
+          "page_img": "530_25460-p-097.jpg",
+          "media": []
+        },
+        {
+          "page": 98,
+          "page_name": "98",
+          "page_absolute": 98,
+          "show_page": false,
+          "page_img": "530_25460-p-098.jpg",
+          "media": []
+        },
+        {
+          "page": 99,
+          "page_name": "99",
+          "page_absolute": 99,
+          "show_page": false,
+          "page_img": "530_25460-p-099.jpg",
+          "media": []
+        },
+        {
+          "page": 100,
+          "page_name": "100",
+          "page_absolute": 100,
+          "show_page": false,
+          "page_img": "530_25460-p-100.jpg",
+          "media": []
+        },
+        {
+          "page": 101,
+          "page_name": "101",
+          "page_absolute": 101,
+          "show_page": false,
+          "page_img": "530_25460-p-101.jpg",
+          "media": []
+        },
+        {
+          "page": 102,
+          "page_name": "102",
+          "page_absolute": 102,
+          "show_page": false,
+          "page_img": "530_25460-p-102.jpg",
+          "media": []
+        },
+        {
+          "page": 103,
+          "page_name": "103",
+          "page_absolute": 103,
+          "show_page": false,
+          "page_img": "530_25460-p-103.jpg",
+          "media": []
+        },
+        {
+          "page": 104,
+          "page_name": "104",
+          "page_absolute": 104,
+          "show_page": false,
+          "page_img": "530_25460-p-104.jpg",
+          "media": []
+        },
+        {
+          "page": 105,
+          "page_name": "105",
+          "page_absolute": 105,
+          "show_page": true,
+          "page_img": "530_25460-p-105.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L01-A2a-digVerw.mp4",
+              "media_id": "2bcb4ab0-298c-4300-a3b7-974818fe8415",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L01-A2a-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C37 – L1, A2a, Grammatik"
+            }
+          ]
+        },
+        {
+          "page": 106,
+          "page_name": "106",
+          "page_absolute": 106,
+          "show_page": true,
+          "page_img": "530_25460-p-106.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L02-A1b-digVerw.mp4",
+              "media_id": "1c0580dc-3280-4430-84e8-9727c8479f8a",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L02-A1b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C38 – L2, A1b, Grammatik"
+            }
+          ]
+        },
+        {
+          "page": 107,
+          "page_name": "107",
+          "page_absolute": 107,
+          "show_page": false,
+          "page_img": "530_25460-p-107.jpg",
+          "media": []
+        },
+        {
+          "page": 108,
+          "page_name": "108",
+          "page_absolute": 108,
+          "show_page": false,
+          "page_img": "530_25460-p-108.jpg",
+          "media": []
+        },
+        {
+          "page": 109,
+          "page_name": "109",
+          "page_absolute": 109,
+          "show_page": false,
+          "page_img": "530_25460-p-109.jpg",
+          "media": []
+        },
+        {
+          "page": 110,
+          "page_name": "110",
+          "page_absolute": 110,
+          "show_page": true,
+          "page_img": "530_25460-p-110.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L05-B5-digVerw.mp4",
+              "media_id": "7a539ced-9331-4900-ad49-5969381787cd",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L05-B5-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C35 – L5, B5, Kommunikation"
+            }
+          ]
+        },
+        {
+          "page": 111,
+          "page_name": "111",
+          "page_absolute": 111,
+          "show_page": false,
+          "page_img": "530_25460-p-111.jpg",
+          "media": []
+        },
+        {
+          "page": 112,
+          "page_name": "112",
+          "page_absolute": 112,
+          "show_page": false,
+          "page_img": "530_25460-p-112.jpg",
+          "media": []
+        },
+        {
+          "page": 113,
+          "page_name": "113",
+          "page_absolute": 113,
+          "show_page": false,
+          "page_img": "530_25460-p-113.jpg",
+          "media": []
+        },
+        {
+          "page": 114,
+          "page_name": "114",
+          "page_absolute": 114,
+          "show_page": true,
+          "page_img": "530_25460-p-114.jpg",
+          "media": [
+            {
+              "file_name": "KB-A11-L08-C2b-digVerw.mp4",
+              "media_id": "d6965482-6b6a-4367-8c10-18ac480d4fbf",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/KB-A11-L08-C2b-digVerw?Identifier=mit",
+              "type": "video",
+              "title": "C36 – L8, C2b, Kommunikation"
+            }
+          ]
+        },
+        {
+          "page": 115,
+          "page_name": "115",
+          "page_absolute": 115,
+          "show_page": false,
+          "page_img": "530_25460-p-115.jpg",
+          "media": []
+        },
+        {
+          "page": 116,
+          "page_name": "116",
+          "page_absolute": 116,
+          "show_page": false,
+          "page_img": "530_25460-p-116.jpg",
+          "media": []
+        },
+        {
+          "page": 117,
+          "page_name": "117",
+          "page_absolute": 117,
+          "show_page": true,
+          "page_img": "530_25460-p-117.jpg",
+          "media": [
+            {
+              "file_name": "2_01_Miteinander_A11_AB_Start_4.mp3",
+              "media_id": "255d4c39-0cae-4bd6-ae49-655eb6a97ff1",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/01 – Audio: Start, 4"
+            },
+            {
+              "file_name": "2_02_Miteinander_A11_AB_Start_5.mp3",
+              "media_id": "44e0bae1-20b8-490f-9631-e3da51ce3c71",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/02 – Audio: Start, 5"
+            }
+          ]
+        },
+        {
+          "page": 118,
+          "page_name": "118",
+          "page_absolute": 118,
+          "show_page": true,
+          "page_img": "530_25460-p-118.jpg",
+          "media": [
+            {
+              "file_name": "2_03_Miteinander_A11_AB_Start_12b.mp3",
+              "media_id": "07bbc53f-a595-43ed-8af1-94bfab1036e2",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/03 – Audio: Start, 12b"
+            },
+            {
+              "file_name": "2_04_Miteinander_A11_AB_Start_13.mp3",
+              "media_id": "e9a366aa-4d4f-43de-8843-7459d8ec4974",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/04 – Audio: Start, 13"
+            }
+          ]
+        },
+        {
+          "page": 119,
+          "page_name": "119",
+          "page_absolute": 119,
+          "show_page": true,
+          "page_img": "530_25460-p-119.jpg",
+          "media": [
+            {
+              "file_name": "2_05_Miteinander_A11_AB_Start_15.mp3",
+              "media_id": "f2f65001-9397-48af-8141-0664db426758",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/05 – Audio: Start, 15"
+            }
+          ]
+        },
+        {
+          "page": 120,
+          "page_name": "120",
+          "page_absolute": 120,
+          "show_page": false,
+          "page_img": "530_25460-p-120.jpg",
+          "media": []
+        },
+        {
+          "page": 121,
+          "page_name": "121",
+          "page_absolute": 121,
+          "show_page": false,
+          "page_img": "530_25460-p-121.jpg",
+          "media": []
+        },
+        {
+          "page": 122,
+          "page_name": "122",
+          "page_absolute": 122,
+          "show_page": true,
+          "page_img": "530_25460-p-122.jpg",
+          "media": [
+            {
+              "file_name": "2_06_Miteinander_A11_AB_L1_11c.mp3",
+              "media_id": "3f82cb87-a57e-4404-9282-976cea75908e",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/06 – Audio: L1, 11c"
+            }
+          ]
+        },
+        {
+          "page": 123,
+          "page_name": "123",
+          "page_absolute": 123,
+          "show_page": false,
+          "page_img": "530_25460-p-123.jpg",
+          "media": []
+        },
+        {
+          "page": 124,
+          "page_name": "124",
+          "page_absolute": 124,
+          "show_page": true,
+          "page_img": "530_25460-p-124.jpg",
+          "media": [
+            {
+              "file_name": "2_07_Miteinander_A11_AB_L1_18a.mp3",
+              "media_id": "0cf3f559-2611-4836-9142-fd41825e3720",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/07 – Audio: L1, 18a"
+            },
+            {
+              "file_name": "2_08_Miteinander_A11_AB_L1_18b.mp3",
+              "media_id": "3d772364-2d5a-426f-a926-a87508db9d64",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/08 – Audio: L1, 18b"
+            }
+          ]
+        },
+        {
+          "page": 125,
+          "page_name": "125",
+          "page_absolute": 125,
+          "show_page": true,
+          "page_img": "530_25460-p-125.jpg",
+          "media": [
+            {
+              "file_name": "2_09_Miteinander_A11_AB_L1_20.mp3",
+              "media_id": "0e12c6c3-6627-4f05-b52d-f1ca87b9b93a",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/09 – Audio: L1, 20"
+            }
+          ]
+        },
+        {
+          "page": 126,
+          "page_name": "126",
+          "page_absolute": 126,
+          "show_page": false,
+          "page_img": "530_25460-p-126.jpg",
+          "media": []
+        },
+        {
+          "page": 127,
+          "page_name": "127",
+          "page_absolute": 127,
+          "show_page": false,
+          "page_img": "530_25460-p-127.jpg",
+          "media": []
+        },
+        {
+          "page": 128,
+          "page_name": "128",
+          "page_absolute": 128,
+          "show_page": true,
+          "page_img": "530_25460-p-128.jpg",
+          "media": [
+            {
+              "file_name": "2_10_Miteinander_A11_AB_L2_7a.mp3",
+              "media_id": "8d784150-2c4f-4328-a985-5daf9da51b7b",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/10 – Audio: L2, 7a"
+            },
+            {
+              "file_name": "2_11_Miteinander_A11_AB_L2_7b.mp3",
+              "media_id": "39249f93-bfb2-4ce3-b2ee-dae03c5c9ad1",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/11 – Audio: L2, 7b"
+            }
+          ]
+        },
+        {
+          "page": 129,
+          "page_name": "129",
+          "page_absolute": 129,
+          "show_page": true,
+          "page_img": "530_25460-p-129.jpg",
+          "media": [
+            {
+              "file_name": "2_13_Miteinander_A11_AB_L2_10_Gespraech_1.mp3",
+              "media_id": "cc6292f4-f9a9-4256-9bd9-06767a08dcc9",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/13 – Audio: L2, 10, Gespäch 1"
+            },
+            {
+              "file_name": "2_14_Miteinander_A11_AB_L2_10_Gespraech_2.mp3",
+              "media_id": "d55a5f2d-6617-4fd0-8c55-ed3c8dc97425",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/14 – Audio: L2, 10, Gespäch 2"
+            },
+            {
+              "file_name": "2_15_Miteinander_A11_AB_L2_10_Gespraech_3.mp3",
+              "media_id": "26fc19ba-6923-4e6d-850a-b059cacc390e",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/15 – Audio: L2, 10, Gespäch 3"
+            },
+            {
+              "file_name": "2_12_Miteinander_A11_AB_L2_9b.mp3",
+              "media_id": "a6ba89e5-eddc-4654-89e2-7b2cf14ad261",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/12 – Audio: L2, 9b"
+            }
+          ]
+        },
+        {
+          "page": 130,
+          "page_name": "130",
+          "page_absolute": 130,
+          "show_page": true,
+          "page_img": "530_25460-p-130.jpg",
+          "media": [
+            {
+              "file_name": "2_16_Miteinander_A11_AB_L2_14.mp3",
+              "media_id": "41092d4e-7d52-48b5-a2fc-126ad6b714cf",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/16 – Audio: L2, 14"
+            }
+          ]
+        },
+        {
+          "page": 131,
+          "page_name": "131",
+          "page_absolute": 131,
+          "show_page": false,
+          "page_img": "530_25460-p-131.jpg",
+          "media": []
+        },
+        {
+          "page": 132,
+          "page_name": "132",
+          "page_absolute": 132,
+          "show_page": false,
+          "page_img": "530_25460-p-132.jpg",
+          "media": []
+        },
+        {
+          "page": 133,
+          "page_name": "133",
+          "page_absolute": 133,
+          "show_page": true,
+          "page_img": "530_25460-p-133.jpg",
+          "media": [
+            {
+              "file_name": "2_17_Miteinander_A11_AB_L2_22.mp3",
+              "media_id": "40b72534-7ef9-4834-83b3-70cfad0af7e7",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/17 – Audio: L2, 22"
+            }
+          ]
+        },
+        {
+          "page": 134,
+          "page_name": "134",
+          "page_absolute": 134,
+          "show_page": false,
+          "page_img": "530_25460-p-134.jpg",
+          "media": []
+        },
+        {
+          "page": 135,
+          "page_name": "135",
+          "page_absolute": 135,
+          "show_page": false,
+          "page_img": "530_25460-p-135.jpg",
+          "media": []
+        },
+        {
+          "page": 136,
+          "page_name": "136",
+          "page_absolute": 136,
+          "show_page": true,
+          "page_img": "530_25460-p-136.jpg",
+          "media": [
+            {
+              "file_name": "2_18_Miteinander_A11_AB_LFT_1_Hoeren6.mp3",
+              "media_id": "0f098f54-9351-451d-8449-8a283a11a14c",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/18 – Audio: LFT 1, Hören 6"
+            }
+          ]
+        },
+        {
+          "page": 137,
+          "page_name": "137",
+          "page_absolute": 137,
+          "show_page": false,
+          "page_img": "530_25460-p-137.jpg",
+          "media": []
+        },
+        {
+          "page": 138,
+          "page_name": "138",
+          "page_absolute": 138,
+          "show_page": false,
+          "page_img": "530_25460-p-138.jpg",
+          "media": []
+        },
+        {
+          "page": 139,
+          "page_name": "139",
+          "page_absolute": 139,
+          "show_page": true,
+          "page_img": "530_25460-p-139.jpg",
+          "media": [
+            {
+              "file_name": "2_19_Miteinander_A11_AB_L3_5a.mp3",
+              "media_id": "000c2d85-7857-4c37-89dd-1c8b4a76611a",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/19 – Audio: L3, 5a"
+            },
+            {
+              "file_name": "2_20_Miteinander_A11_AB_L3_5b.mp3",
+              "media_id": "fff0505a-0ab0-4e2d-b0bd-08fbe4ed5f29",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/20 – Audio: L3, 5b"
+            }
+          ]
+        },
+        {
+          "page": 140,
+          "page_name": "140",
+          "page_absolute": 140,
+          "show_page": false,
+          "page_img": "530_25460-p-140.jpg",
+          "media": []
+        },
+        {
+          "page": 141,
+          "page_name": "141",
+          "page_absolute": 141,
+          "show_page": false,
+          "page_img": "530_25460-p-141.jpg",
+          "media": []
+        },
+        {
+          "page": 142,
+          "page_name": "142",
+          "page_absolute": 142,
+          "show_page": false,
+          "page_img": "530_25460-p-142.jpg",
+          "media": []
+        },
+        {
+          "page": 143,
+          "page_name": "143",
+          "page_absolute": 143,
+          "show_page": true,
+          "page_img": "530_25460-p-143.jpg",
+          "media": [
+            {
+              "file_name": "2_21_Miteinander_A11_AB_L3_15a_Gespraech_1.mp3",
+              "media_id": "b56584cd-b35a-4ec2-9b26-3a78778f4b85",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/21 – Audio: L3, 15a, Gespäch 1"
+            },
+            {
+              "file_name": "2_22_Miteinander_A11_AB_L3_15a_Gespraech_2.mp3",
+              "media_id": "99f83359-0ef9-46b2-a1cb-0e6625faaaac",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/22 – Audio: L3, 15a, Gespäch 2"
+            },
+            {
+              "file_name": "2_23_Miteinander_A11_AB_L3_17b.mp3",
+              "media_id": "fc67f86f-b0cc-47bb-a502-daa70bd41b8a",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/23 – Audio: L3, 17b"
+            }
+          ]
+        },
+        {
+          "page": 144,
+          "page_name": "144",
+          "page_absolute": 144,
+          "show_page": false,
+          "page_img": "530_25460-p-144.jpg",
+          "media": []
+        },
+        {
+          "page": 145,
+          "page_name": "145",
+          "page_absolute": 145,
+          "show_page": false,
+          "page_img": "530_25460-p-145.jpg",
+          "media": []
+        },
+        {
+          "page": 146,
+          "page_name": "146",
+          "page_absolute": 146,
+          "show_page": false,
+          "page_img": "530_25460-p-146.jpg",
+          "media": []
+        },
+        {
+          "page": 147,
+          "page_name": "147",
+          "page_absolute": 147,
+          "show_page": true,
+          "page_img": "530_25460-p-147.jpg",
+          "media": [
+            {
+              "file_name": "2_24_Miteinander_A11_AB_L4_8.mp3",
+              "media_id": "db3f072a-c226-48d5-b01f-4c99342b35ad",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/24 – Audio: L4, 8"
+            }
+          ]
+        },
+        {
+          "page": 148,
+          "page_name": "148",
+          "page_absolute": 148,
+          "show_page": false,
+          "page_img": "530_25460-p-148.jpg",
+          "media": []
+        },
+        {
+          "page": 149,
+          "page_name": "149",
+          "page_absolute": 149,
+          "show_page": true,
+          "page_img": "530_25460-p-149.jpg",
+          "media": [
+            {
+              "file_name": "2_25_Miteinander_A11_AB_L4_16a.mp3",
+              "media_id": "24042f06-f887-4c4a-9a09-382fef05a964",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/25 – Audio: L4, 16a"
+            }
+          ]
+        },
+        {
+          "page": 150,
+          "page_name": "150",
+          "page_absolute": 150,
+          "show_page": false,
+          "page_img": "530_25460-p-150.jpg",
+          "media": []
+        },
+        {
+          "page": 151,
+          "page_name": "151",
+          "page_absolute": 151,
+          "show_page": false,
+          "page_img": "530_25460-p-151.jpg",
+          "media": []
+        },
+        {
+          "page": 152,
+          "page_name": "152",
+          "page_absolute": 152,
+          "show_page": false,
+          "page_img": "530_25460-p-152.jpg",
+          "media": []
+        },
+        {
+          "page": 153,
+          "page_name": "153",
+          "page_absolute": 153,
+          "show_page": false,
+          "page_img": "530_25460-p-153.jpg",
+          "media": []
+        },
+        {
+          "page": 154,
+          "page_name": "154",
+          "page_absolute": 154,
+          "show_page": true,
+          "page_img": "530_25460-p-154.jpg",
+          "media": [
+            {
+              "file_name": "2_26_Miteinander_A11_AB_LFT_2_Hoeren6.mp3",
+              "media_id": "48bb8f0f-e1ab-438c-bf5a-184874c8be2c",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/26 – Audio: LFT 2, Hören 6"
+            }
+          ]
+        },
+        {
+          "page": 155,
+          "page_name": "155",
+          "page_absolute": 155,
+          "show_page": false,
+          "page_img": "530_25460-p-155.jpg",
+          "media": []
+        },
+        {
+          "page": 156,
+          "page_name": "156",
+          "page_absolute": 156,
+          "show_page": false,
+          "page_img": "530_25460-p-156.jpg",
+          "media": []
+        },
+        {
+          "page": 157,
+          "page_name": "157",
+          "page_absolute": 157,
+          "show_page": true,
+          "page_img": "530_25460-p-157.jpg",
+          "media": [
+            {
+              "file_name": "2_27_Miteinander_A11_AB_L5_6.mp3",
+              "media_id": "0bed675e-0456-4a57-b9b0-6871cd92b033",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/27 – Audio: L5, 6"
+            }
+          ]
+        },
+        {
+          "page": 158,
+          "page_name": "158",
+          "page_absolute": 158,
+          "show_page": false,
+          "page_img": "530_25460-p-158.jpg",
+          "media": []
+        },
+        {
+          "page": 159,
+          "page_name": "159",
+          "page_absolute": 159,
+          "show_page": false,
+          "page_img": "530_25460-p-159.jpg",
+          "media": []
+        },
+        {
+          "page": 160,
+          "page_name": "160",
+          "page_absolute": 160,
+          "show_page": true,
+          "page_img": "530_25460-p-160.jpg",
+          "media": [
+            {
+              "file_name": "2_28_Miteinander_A11_AB_L5_16a.mp3",
+              "media_id": "37f873bd-ef8a-4a0b-ad43-b44edc200567",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/28 – Audio: L5, 16a"
+            },
+            {
+              "file_name": "2_29_Miteinander_A11_AB_L5_18.mp3",
+              "media_id": "3ec9894b-c4b1-42ae-88a1-f06a734909c9",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/29 – Audio: L5, 18"
+            },
+            {
+              "file_name": "AB-A11-L05-16-digVerw.mp4",
+              "media_id": "d6965482-6b6a-4367-8c10-18ac480d4fcd",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/AB-A11-L05-16-digVerw.mp4",
+              "type": "video",
+              "title": "L5, 16, Aussprache"
+            }
+          ]
+        },
+        {
+          "page": 161,
+          "page_name": "161",
+          "page_absolute": 161,
+          "show_page": false,
+          "page_img": "530_25460-p-161.jpg",
+          "media": []
+        },
+        {
+          "page": 162,
+          "page_name": "162",
+          "page_absolute": 162,
+          "show_page": false,
+          "page_img": "530_25460-p-162.jpg",
+          "media": []
+        },
+        {
+          "page": 163,
+          "page_name": "163",
+          "page_absolute": 163,
+          "show_page": false,
+          "page_img": "530_25460-p-163.jpg",
+          "media": []
+        },
+        {
+          "page": 164,
+          "page_name": "164",
+          "page_absolute": 164,
+          "show_page": false,
+          "page_img": "530_25460-p-164.jpg",
+          "media": []
+        },
+        {
+          "page": 165,
+          "page_name": "165",
+          "page_absolute": 165,
+          "show_page": true,
+          "page_img": "530_25460-p-165.jpg",
+          "media": [
+            {
+              "file_name": "2_30_Miteinander_A11_AB_L6_7b.mp3",
+              "media_id": "bbb5cfa5-ab9e-4489-a34d-126100063a2d",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/30 – Audio: L6, 7b"
+            },
+            {
+              "file_name": "2_31_Miteinander_A11_AB_L6_8.mp3",
+              "media_id": "b546aeee-a792-4e10-b29c-00c88a23fabc",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/31 – Audio: L6, 8"
+            }
+          ]
+        },
+        {
+          "page": 166,
+          "page_name": "166",
+          "page_absolute": 166,
+          "show_page": false,
+          "page_img": "530_25460-p-166.jpg",
+          "media": []
+        },
+        {
+          "page": 167,
+          "page_name": "167",
+          "page_absolute": 167,
+          "show_page": false,
+          "page_img": "530_25460-p-167.jpg",
+          "media": []
+        },
+        {
+          "page": 168,
+          "page_name": "168",
+          "page_absolute": 168,
+          "show_page": true,
+          "page_img": "530_25460-p-168.jpg",
+          "media": [
+            {
+              "file_name": "2_32_Miteinander_A11_AB_L6_17a.mp3",
+              "media_id": "9c4ba52a-2091-49f9-a3b9-afd5a84e39d5",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/32 – Audio: L6, 17a"
+            }
+          ]
+        },
+        {
+          "page": 169,
+          "page_name": "169",
+          "page_absolute": 169,
+          "show_page": true,
+          "page_img": "530_25460-p-169.jpg",
+          "media": [
+            {
+              "file_name": "2_33_Miteinander_A11_AB_L6_20a.mp3",
+              "media_id": "bd21e079-d77a-43b9-af87-259df5500478",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/33 – Audio: L6, 20a"
+            },
+            {
+              "file_name": "2_34_Miteinander_A11_AB_L6_20b.mp3",
+              "media_id": "15dd158d-cdba-4e5f-adbb-0bdac899057d",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/34 – Audio: L6, 20b"
+            }
+          ]
+        },
+        {
+          "page": 170,
+          "page_name": "170",
+          "page_absolute": 170,
+          "show_page": false,
+          "page_img": "530_25460-p-170.jpg",
+          "media": []
+        },
+        {
+          "page": 171,
+          "page_name": "171",
+          "page_absolute": 171,
+          "show_page": false,
+          "page_img": "530_25460-p-171.jpg",
+          "media": []
+        },
+        {
+          "page": 172,
+          "page_name": "172",
+          "page_absolute": 172,
+          "show_page": true,
+          "page_img": "530_25460-p-172.jpg",
+          "media": [
+            {
+              "file_name": "2_35_Miteinander_A11_AB_LFT_3_Hoeren5.mp3",
+              "media_id": "a387a7b5-1c60-4bad-994c-5b23ed6e9f1f",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/35 – Audio: LFT 3, Hören 5"
+            }
+          ]
+        },
+        {
+          "page": 173,
+          "page_name": "173",
+          "page_absolute": 173,
+          "show_page": false,
+          "page_img": "530_25460-p-173.jpg",
+          "media": []
+        },
+        {
+          "page": 174,
+          "page_name": "174",
+          "page_absolute": 174,
+          "show_page": false,
+          "page_img": "530_25460-p-174.jpg",
+          "media": []
+        },
+        {
+          "page": 175,
+          "page_name": "175",
+          "page_absolute": 175,
+          "show_page": true,
+          "page_img": "530_25460-p-175.jpg",
+          "media": [
+            {
+              "file_name": "2_36_Miteinander_A11_AB_L7_6a.mp3",
+              "media_id": "b973d11e-b1c1-46e0-8a6b-e2f1476e474a",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/36 – Audio: L7, 6a"
+            },
+            {
+              "file_name": "2_37_Miteinander_A11_AB_L7_6b.mp3",
+              "media_id": "4b25fd98-3b42-4fb7-8603-d23897767c16",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/37 – Audio: L7, 6b"
+            }
+          ]
+        },
+        {
+          "page": 176,
+          "page_name": "176",
+          "page_absolute": 176,
+          "show_page": true,
+          "page_img": "530_25460-p-176.jpg",
+          "media": [
+            {
+              "file_name": "2_38_Miteinander_A11_AB_L7_8a.mp3",
+              "media_id": "290cc8ee-e7ff-4e08-a595-425a23814224",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/38 – Audio: L7, 8a"
+            },
+            {
+              "file_name": "2_39_Miteinander_A11_AB_L7_8c.mp3",
+              "media_id": "d13aca1b-29a1-4d83-b214-40e9dc3b991c",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/39 – Audio: L7, 8c"
+            }
+          ]
+        },
+        {
+          "page": 177,
+          "page_name": "177",
+          "page_absolute": 177,
+          "show_page": false,
+          "page_img": "530_25460-p-177.jpg",
+          "media": []
+        },
+        {
+          "page": 178,
+          "page_name": "178",
+          "page_absolute": 178,
+          "show_page": false,
+          "page_img": "530_25460-p-178.jpg",
+          "media": []
+        },
+        {
+          "page": 179,
+          "page_name": "179",
+          "page_absolute": 179,
+          "show_page": true,
+          "page_img": "530_25460-p-179.jpg",
+          "media": [
+            {
+              "file_name": "2_40_Miteinander_A11_AB_L7_18.mp3",
+              "media_id": "c51cfd8b-b648-4c52-ac7f-06780afb5419",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/40 – Audio: L7, 18"
+            }
+          ]
+        },
+        {
+          "page": 180,
+          "page_name": "180",
+          "page_absolute": 180,
+          "show_page": false,
+          "page_img": "530_25460-p-180.jpg",
+          "media": []
+        },
+        {
+          "page": 181,
+          "page_name": "181",
+          "page_absolute": 181,
+          "show_page": false,
+          "page_img": "530_25460-p-181.jpg",
+          "media": []
+        },
+        {
+          "page": 182,
+          "page_name": "182",
+          "page_absolute": 182,
+          "show_page": false,
+          "page_img": "530_25460-p-182.jpg",
+          "media": []
+        },
+        {
+          "page": 183,
+          "page_name": "183",
+          "page_absolute": 183,
+          "show_page": true,
+          "page_img": "530_25460-p-183.jpg",
+          "media": [
+            {
+              "file_name": "2_41_Miteinander_A11_AB_L8_6c.mp3",
+              "media_id": "680358b0-bd3f-4432-9bf5-3bc892e232b8",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/41 – Audio: L8, 6c"
+            }
+          ]
+        },
+        {
+          "page": 184,
+          "page_name": "184",
+          "page_absolute": 184,
+          "show_page": true,
+          "page_img": "530_25460-p-184.jpg",
+          "media": [
+            {
+              "file_name": "2_42_Miteinander_A11_AB_L8_9.mp3",
+              "media_id": "6daab2fa-afbb-40d6-8cba-479e00532dd7",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/42 – Audio: L8, 9"
+            }
+          ]
+        },
+        {
+          "page": 185,
+          "page_name": "185",
+          "page_absolute": 185,
+          "show_page": false,
+          "page_img": "530_25460-p-185.jpg",
+          "media": []
+        },
+        {
+          "page": 186,
+          "page_name": "186",
+          "page_absolute": 186,
+          "show_page": true,
+          "page_img": "530_25460-p-186.jpg",
+          "media": [
+            {
+              "file_name": "2_43_Miteinander_A11_AB_L8_14b.mp3",
+              "media_id": "b4576c7a-1d6a-46f1-b8d7-f73fb64ef0c6",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/43 – Audio: L8, 14b"
+            },
+            {
+              "file_name": "2_44_Miteinander_A11_AB_L8_14c.mp3",
+              "media_id": "f6f76442-ef62-4ed7-906a-91c750ba0c9b",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/44 – Audio: L8, 14c"
+            },
+            {
+              "file_name": "AB-A11-L08-14a-digVerw.mp4",
+              "media_id": "d6965482-6b6a-4367-8c10-18ac480d4fef",
+              "hyperlinkObj": "https://www.hueber.de/getmedia/AB-A11-L08-14a-digVerw.mp4",
+              "type": "video",
+              "title": "L8, 14a, Aussprache"
+            }
+          ]
+        },
+        {
+          "page": 187,
+          "page_name": "187",
+          "page_absolute": 187,
+          "show_page": false,
+          "page_img": "530_25460-p-187.jpg",
+          "media": []
+        },
+        {
+          "page": 188,
+          "page_name": "188",
+          "page_absolute": 188,
+          "show_page": false,
+          "page_img": "530_25460-p-188.jpg",
+          "media": []
+        },
+        {
+          "page": 189,
+          "page_name": "189",
+          "page_absolute": 189,
+          "show_page": false,
+          "page_img": "530_25460-p-189.jpg",
+          "media": []
+        },
+        {
+          "page": 190,
+          "page_name": "190",
+          "page_absolute": 190,
+          "show_page": true,
+          "page_img": "530_25460-p-190.jpg",
+          "media": [
+            {
+              "file_name": "2_45_Miteinander_A11_AB_LFT_4_Hoeren6a.mp3",
+              "media_id": "0343c00f-9059-4823-8445-e564da644834",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/45 – Audio: LFT 4, Hören 6a"
+            }
+          ]
+        },
+        {
+          "page": 191,
+          "page_name": "191",
+          "page_absolute": 191,
+          "show_page": false,
+          "page_img": "530_25460-p-191.jpg",
+          "media": []
+        },
+        {
+          "page": 192,
+          "page_name": "192",
+          "page_absolute": 192,
+          "show_page": false,
+          "page_img": "530_25460-p-192.jpg",
+          "media": []
+        },
+        {
+          "page": 193,
+          "page_name": "193",
+          "page_absolute": 193,
+          "show_page": true,
+          "page_img": "530_25460-p-193.jpg",
+          "media": [
+            {
+              "file_name": "2_46_Miteinander_A11_AB_Hoeren_Training_1b.mp3",
+              "media_id": "c5c98934-3efd-4393-9943-6d0a58ca055a",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/46 – Audio: Hören Training, 1b"
+            }
+          ]
+        },
+        {
+          "page": 194,
+          "page_name": "194",
+          "page_absolute": 194,
+          "show_page": true,
+          "page_img": "530_25460-p-194.jpg",
+          "media": [
+            {
+              "file_name": "2_47_Miteinander_A11_AB_Hoeren_Pruefung.mp3",
+              "media_id": "2ddc84b2-aa40-406f-a741-7411a22f7e5c",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/47 – Audio: Hören Prüfung"
+            }
+          ]
+        },
+        {
+          "page": 195,
+          "page_name": "195",
+          "page_absolute": 195,
+          "show_page": false,
+          "page_img": "530_25460-p-195.jpg",
+          "media": []
+        },
+        {
+          "page": 196,
+          "page_name": "196",
+          "page_absolute": 196,
+          "show_page": false,
+          "page_img": "530_25460-p-196.jpg",
+          "media": []
+        },
+        {
+          "page": 197,
+          "page_name": "197",
+          "page_absolute": 197,
+          "show_page": false,
+          "page_img": "530_25460-p-197.jpg",
+          "media": []
+        },
+        {
+          "page": 198,
+          "page_name": "198",
+          "page_absolute": 198,
+          "show_page": false,
+          "page_img": "530_25460-p-198.jpg",
+          "media": []
+        },
+        {
+          "page": 199,
+          "page_name": "199",
+          "page_absolute": 199,
+          "show_page": false,
+          "page_img": "530_25460-p-199.jpg",
+          "media": []
+        },
+        {
+          "page": 200,
+          "page_name": "200",
+          "page_absolute": 200,
+          "show_page": false,
+          "page_img": "530_25460-p-200.jpg",
+          "media": []
+        },
+        {
+          "page": 201,
+          "page_name": "201",
+          "page_absolute": 201,
+          "show_page": false,
+          "page_img": "530_25460-p-201.jpg",
+          "media": []
+        },
+        {
+          "page": 202,
+          "page_name": "202",
+          "page_absolute": 202,
+          "show_page": true,
+          "page_img": "530_25460-p-202.jpg",
+          "media": [
+            {
+              "file_name": "2_48_Miteinander_A11_AB_Hoeren_Training_1b.mp3",
+              "media_id": "6209bfd2-e14f-4183-a092-4d6f3b657485",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/48 – Audio: Hören Training, 1b"
+            },
+            {
+              "file_name": "2_49_Miteinander_A11_AB_Hoeren_Pruefung.mp3",
+              "media_id": "b946ddd1-2bc8-48eb-ace6-d03b9269ce27",
+              "hyperlinkObj": "",
+              "type": "audio",
+              "title": "2/49 – Audio: Hören Prüfung"
+            }
+          ]
+        },
+        {
+          "page": 203,
+          "page_name": "203",
+          "page_absolute": 203,
+          "show_page": false,
+          "page_img": "530_25460-p-203.jpg",
+          "media": []
+        },
+        {
+          "page": 204,
+          "page_name": "204",
+          "page_absolute": 204,
+          "show_page": false,
+          "page_img": "530_25460-p-204.jpg",
+          "media": []
+        },
+        {
+          "page": 205,
+          "page_name": "205",
+          "page_absolute": 205,
+          "show_page": false,
+          "page_img": "530_25460-p-205.jpg",
+          "media": []
+        },
+        {
+          "page": 206,
+          "page_name": "206",
+          "page_absolute": 206,
+          "show_page": false,
+          "page_img": "530_25460-p-206.jpg",
+          "media": []
+        },
+        {
+          "page": 207,
+          "page_name": "207",
+          "page_absolute": 207,
+          "show_page": false,
+          "page_img": "530_25460-p-207.jpg",
+          "media": []
+        },
+        {
+          "page": 208,
+          "page_name": "208",
+          "page_absolute": 208,
+          "show_page": false,
+          "page_img": "530_25460-p-208.jpg",
+          "media": []
+        },
+        {
+          "page": 209,
+          "page_name": "209",
+          "page_absolute": 209,
+          "show_page": false,
+          "page_img": "530_25460-p-209.jpg",
+          "media": []
+        },
+        {
+          "page": 210,
+          "page_name": "210",
+          "page_absolute": 210,
+          "show_page": false,
+          "page_img": "530_25460-p-210.jpg",
+          "media": []
+        },
+        {
+          "page": 211,
+          "page_name": "211",
+          "page_absolute": 211,
+          "show_page": false,
+          "page_img": "530_25460-p-211.jpg",
+          "media": []
+        },
+        {
+          "page": 212,
+          "page_name": "212",
+          "page_absolute": 212,
+          "show_page": false,
+          "page_img": "530_25460-p-212.jpg",
+          "media": []
+        },
+        {
+          "page": 213,
+          "page_name": "213",
+          "page_absolute": 213,
+          "show_page": false,
+          "page_img": "530_25460-p-213.jpg",
+          "media": []
+        },
+        {
+          "page": 214,
+          "page_name": "214",
+          "page_absolute": 214,
+          "show_page": false,
+          "page_img": "530_25460-p-214.jpg",
+          "media": []
+        },
+        {
+          "page": 215,
+          "page_name": "215",
+          "page_absolute": 215,
+          "show_page": false,
+          "page_img": "530_25460-p-215.jpg",
+          "media": []
+        },
+        {
+          "page": 216,
+          "page_name": "216",
+          "page_absolute": 216,
+          "show_page": false,
+          "page_img": "530_25460-p-216.jpg",
+          "media": []
+        },
+        {
+          "page": 217,
+          "page_name": "217",
+          "page_absolute": 217,
+          "show_page": false,
+          "page_img": "530_25460-p-217.jpg",
+          "media": []
+        },
+        {
+          "page": 218,
+          "page_name": "218",
+          "page_absolute": 218,
+          "show_page": false,
+          "page_img": "530_25460-p-218.jpg",
+          "media": []
+        },
+        {
+          "page": 219,
+          "page_name": "219",
+          "page_absolute": 219,
+          "show_page": false,
+          "page_img": "530_25460-p-219.jpg",
+          "media": []
+        },
+        {
+          "page": 220,
+          "page_name": "220",
+          "page_absolute": 220,
+          "show_page": false,
+          "page_img": "530_25460-p-220.jpg",
+          "media": []
+        },
+        {
+          "page": 221,
+          "page_name": "221",
+          "page_absolute": 221,
+          "show_page": false,
+          "page_img": "530_25460-p-221.jpg",
+          "media": []
+        },
+        {
+          "page": 222,
+          "page_name": "222",
+          "page_absolute": 222,
+          "show_page": false,
+          "page_img": "530_25460-p-222.jpg",
+          "media": []
+        }
+      ]
+    }
+  ]
+}

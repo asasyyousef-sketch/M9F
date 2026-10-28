@@ -344,6 +344,7 @@ async function startServer() {
     color?: string;
     createdAt: string;
     parentId?: string | null;
+    userId?: string;
   }
 
   interface ServerMediaFoldersData {
@@ -400,6 +401,7 @@ async function startServer() {
     secondaryTrackId?: string;
     showDualSubtitles?: boolean;
     folderId?: string;
+    userId?: string;
   }
 
   function loadMediaMeta(): ServerMediaFile[] {
@@ -410,15 +412,24 @@ async function startServer() {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed)) {
             let dirty = false;
-            // Every media item MUST physically exist in MEDIA_DIR on local disk
+            const seenIds = new Set<string>();
+            const seenFilenames = new Set<string>();
+
+            // Every media item MUST physically exist in MEDIA_DIR on local disk and have unique id & filename
             const valid = parsed.filter((item: ServerMediaFile) => {
               if (!item || !item.filename) return false;
+              if (seenIds.has(item.id) || seenFilenames.has(item.filename)) {
+                dirty = true;
+                return false;
+              }
               const filePath = path.join(MEDIA_DIR, item.filename);
               const exists = fs.existsSync(filePath);
               if (!exists) {
                 dirty = true;
                 return false;
               }
+              seenIds.add(item.id);
+              seenFilenames.add(item.filename);
               // Ensure its url points to local stream, cancelling external streaming
               if (!item.url || item.url.startsWith("http://") || item.url.startsWith("https://")) {
                 item.url = `/api/media/stream/${encodeURIComponent(item.filename)}`;
@@ -475,21 +486,45 @@ async function startServer() {
     }
   }));
 
-  // 1. Get all media files
+  // Helper to extract authenticated user for media & folder operations
+  function getMediaAuthUser(req: any) {
+    const currentUser = (req as any).user;
+    const currentUserId: string | null = currentUser ? (currentUser.userId || currentUser.id) : null;
+    const users = loadUsers(DB_PATH);
+    const isAdmin = currentUser ? currentUser.role === "admin" : (users.length === 0);
+    return { currentUserId, isAdmin, currentUser };
+  }
+
+  // 1. Get media files for authenticated user (Strict per-user isolation)
   app.get("/api/media/files", (req, res) => {
     try {
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
       const list = loadMediaMeta();
+
+      // Return only files belonging to current user (or unassigned files if admin)
+      const userFiles = list.filter((f) => {
+        if (!currentUserId) return false;
+        if (f.userId === currentUserId) return true;
+        if (!f.userId && isAdmin) return true;
+        return false;
+      });
+
       // Sort newest first
-      list.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
-      res.json({ files: list });
+      userFiles.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+      res.json({ files: userFiles });
     } catch (e: any) {
       res.status(500).json({ error: e.message || "Failed to load media files" });
     }
   });
 
-  // 2. Upload media files (supports single or multiple)
+  // 2. Upload media files (Assigned strictly to current authenticated user)
   app.post("/api/media/upload", mediaUpload.array("files", 10), (req, res) => {
     try {
+      const { currentUserId } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لرفع الملفات إلى حسابك" });
+      }
+
       const uploadedFiles = req.files as Express.Multer.File[];
       if (!uploadedFiles || uploadedFiles.length === 0) {
         return res.status(400).json({ error: "لم يتم اختيار أي ملفات للرفع" });
@@ -518,7 +553,8 @@ async function startServer() {
           mimeType: file.mimetype || (isVideo ? "video/mp4" : "audio/mpeg"),
           type: mediaType,
           uploadedAt: new Date().toISOString(),
-          url: `/api/media/stream/${file.filename}`
+          url: `/api/media/stream/${file.filename}`,
+          userId: currentUserId
         };
 
         newItems.push(item);
@@ -538,19 +574,32 @@ async function startServer() {
     }
   });
 
-  // 3. Delete media file (Directly unlinks physical file from server directory immediately)
+  // 3. Delete media file (Ownership check + directly unlinks physical file permanently)
   app.delete("/api/media/files/:id", (req, res) => {
     try {
       const { id } = req.params;
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لحذف الملف" });
+      }
+
       const list = loadMediaMeta();
       const targetIndex = list.findIndex((m) => m.id === id || m.filename === id);
 
-      let removedFilename = id;
-      if (targetIndex !== -1) {
-        const [removed] = list.splice(targetIndex, 1);
-        removedFilename = removed.filename;
-        saveMediaMeta(list);
+      if (targetIndex === -1) {
+        return res.status(404).json({ error: "الملف غير موجود أو تم حذفه مسبقاً" });
       }
+
+      const targetFile = list[targetIndex];
+      // Ownership check: User can only delete their own files unless admin
+      if (targetFile.userId && targetFile.userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "غير مصرح لك بحذف ملف تابع لمستخدم آخر" });
+      }
+
+      list.splice(targetIndex, 1);
+      saveMediaMeta(list);
+
+      const removedFilename = targetFile.filename;
 
       // Directly remove physical files from MEDIA_DIR so files never pile up
       const filesToUnlink = new Set([
@@ -608,6 +657,11 @@ async function startServer() {
   app.post("/api/media/files/batch-delete", (req, res) => {
     try {
       const { fileIds } = req.body;
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لحذف الملفات" });
+      }
+
       if (!Array.isArray(fileIds) || fileIds.length === 0) {
         return res.status(400).json({ error: "قائمة معرفات الملفات مطلوبة" });
       }
@@ -619,7 +673,12 @@ async function startServer() {
 
       for (const item of list) {
         if (idsSet.has(item.id) || idsSet.has(item.filename)) {
-          removedFiles.push(item);
+          // Ownership check
+          if (!item.userId || item.userId === currentUserId || isAdmin) {
+            removedFiles.push(item);
+          } else {
+            remaining.push(item);
+          }
         } else {
           remaining.push(item);
         }
@@ -662,9 +721,13 @@ async function startServer() {
         const foldersData = loadMediaFoldersData();
         if (foldersData.fileFolderMap) {
           let dirty = false;
-          for (const fid of fileIds) {
-            if (foldersData.fileFolderMap[fid]) {
-              delete foldersData.fileFolderMap[fid];
+          for (const item of removedFiles) {
+            if (foldersData.fileFolderMap[item.id]) {
+              delete foldersData.fileFolderMap[item.id];
+              dirty = true;
+            }
+            if (foldersData.fileFolderMap[item.filename]) {
+              delete foldersData.fileFolderMap[item.filename];
               dirty = true;
             }
           }
@@ -676,7 +739,7 @@ async function startServer() {
 
       res.json({
         success: true,
-        message: `تم حذف ${removedFiles.length || fileIds.length} ملف نهائياً من السيرفر والقرص`,
+        message: `تم حذف ${removedFiles.length} ملف نهائياً من السيرفر والقرص`,
         deletedCount: removedFiles.length
       });
     } catch (e: any) {
@@ -689,6 +752,11 @@ async function startServer() {
     try {
       const { id } = req.params;
       const { title } = req.body;
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لتعديل اسم الملف" });
+      }
+
       if (!title || typeof title !== "string") {
         return res.status(400).json({ error: "عنوان الملف مطلوب" });
       }
@@ -697,6 +765,10 @@ async function startServer() {
       const item = list.find((m) => m.id === id || m.filename === id);
       if (!item) {
         return res.status(404).json({ error: "الملف غير موجود" });
+      }
+
+      if (item.userId && item.userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "غير مصرح لك بتعديل هذا الملف" });
       }
 
       item.title = title.trim();
@@ -708,16 +780,36 @@ async function startServer() {
   });
 
   // ==========================================
-  // 📂 MEDIA FOLDERS MANAGEMENT (Server-Side Persistent)
+  // 📂 MEDIA FOLDERS MANAGEMENT (Server-Side Persistent & User Isolated)
   // ==========================================
-  // 1. Get all folders and file-to-folder mapping
+  // 1. Get all folders and file-to-folder mapping for authenticated user
   app.get("/api/media/folders", (req, res) => {
     try {
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
       const data = loadMediaFoldersData();
+
+      const userFolders = data.folders.filter((f) => {
+        if (!currentUserId) return false;
+        if (f.userId === currentUserId) return true;
+        if (!f.userId && isAdmin) return true;
+        return false;
+      });
+
+      const allFiles = loadMediaMeta();
+      const userFileIds = new Set(allFiles.filter(f => f.userId === currentUserId || (!f.userId && isAdmin)).map(f => f.id));
+      const userFolderIds = new Set(userFolders.map(f => f.id));
+
+      const filteredMap: Record<string, string> = {};
+      Object.entries(data.fileFolderMap || {}).forEach(([fId, foldId]) => {
+        if (userFileIds.has(fId) && userFolderIds.has(foldId)) {
+          filteredMap[fId] = foldId;
+        }
+      });
+
       res.json({
         success: true,
-        folders: data.folders,
-        fileFolderMap: data.fileFolderMap
+        folders: userFolders,
+        fileFolderMap: filteredMap
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message || "فشل في جلب قائمة المجلدات" });
@@ -728,6 +820,11 @@ async function startServer() {
   app.post("/api/media/folders", (req, res) => {
     try {
       const { id, name, parentId, color } = req.body;
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لإنشاء مجلد" });
+      }
+
       if (!name || typeof name !== "string") {
         return res.status(400).json({ error: "اسم المجلد مطلوب" });
       }
@@ -741,17 +838,20 @@ async function startServer() {
         name: cleanName,
         parentId: parentId || null,
         color: color || "#3b82f6",
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        userId: currentUserId
       };
 
       data.folders.push(newFolder);
       saveMediaFoldersData(data);
 
+      const userFolders = data.folders.filter(f => f.userId === currentUserId || (!f.userId && isAdmin));
+
       res.json({
         success: true,
         message: `تم إنشاء مجلد "${cleanName}" بنجاح`,
         folder: newFolder,
-        folders: data.folders,
+        folders: userFolders,
         fileFolderMap: data.fileFolderMap
       });
     } catch (e: any) {
@@ -764,11 +864,19 @@ async function startServer() {
     try {
       const { id } = req.params;
       const { name, color, parentId } = req.body;
-      const data = loadMediaFoldersData();
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لتعديل المجلد" });
+      }
 
+      const data = loadMediaFoldersData();
       const folder = data.folders.find((f) => f.id === id);
       if (!folder) {
         return res.status(404).json({ error: "المجلد غير موجود" });
+      }
+
+      if (folder.userId && folder.userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "غير مصرح لك بتعديل هذا المجلد" });
       }
 
       if (name && typeof name === "string") folder.name = name.trim();
@@ -776,10 +884,12 @@ async function startServer() {
       if (parentId !== undefined) folder.parentId = parentId;
 
       saveMediaFoldersData(data);
+      const userFolders = data.folders.filter(f => f.userId === currentUserId || (!f.userId && isAdmin));
+
       res.json({
         success: true,
         folder,
-        folders: data.folders,
+        folders: userFolders,
         fileFolderMap: data.fileFolderMap
       });
     } catch (e: any) {
@@ -791,7 +901,20 @@ async function startServer() {
   app.delete("/api/media/folders/:id", (req, res) => {
     try {
       const { id } = req.params;
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لحذف المجلد" });
+      }
+
       const data = loadMediaFoldersData();
+      const targetFolder = data.folders.find((f) => f.id === id);
+      if (!targetFolder) {
+        return res.status(404).json({ error: "المجلد غير موجود" });
+      }
+
+      if (targetFolder.userId && targetFolder.userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "غير مصرح لك بحذف هذا المجلد" });
+      }
 
       // Recursive descendant helper
       const getDescendants = (targetId: string, all: ServerMediaFolder[]): string[] => {
@@ -810,11 +933,13 @@ async function startServer() {
       });
 
       saveMediaFoldersData(data);
+      const userFolders = data.folders.filter(f => f.userId === currentUserId || (!f.userId && isAdmin));
+
       res.json({
         success: true,
         message: "تم حذف المجلد وتفريغ الملفات للمجلد الرئيسي",
         deletedFolderIds: Array.from(idsToDelete),
-        folders: data.folders,
+        folders: userFolders,
         fileFolderMap: data.fileFolderMap
       });
     } catch (e: any) {
@@ -826,12 +951,21 @@ async function startServer() {
   app.post("/api/media/folders/move-files", (req, res) => {
     try {
       const { fileIds, targetFolderId } = req.body;
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لنقل الملفات" });
+      }
+
       if (!Array.isArray(fileIds) || fileIds.length === 0) {
         return res.status(400).json({ error: "قائمة الملفات مطلوبة" });
       }
 
+      const allFiles = loadMediaMeta();
+      const userFileIds = new Set(allFiles.filter(f => f.userId === currentUserId || (!f.userId && isAdmin)).map(f => f.id));
+
       const data = loadMediaFoldersData();
       for (const fileId of fileIds) {
+        if (!userFileIds.has(fileId)) continue;
         if (!targetFolderId || targetFolderId === "uncategorized") {
           delete data.fileFolderMap[fileId];
         } else {
@@ -840,11 +974,13 @@ async function startServer() {
       }
 
       saveMediaFoldersData(data);
+      const userFolders = data.folders.filter(f => f.userId === currentUserId || (!f.userId && isAdmin));
+
       res.json({
         success: true,
         message: `تم نقل ${fileIds.length} ملف بنجاح`,
         fileFolderMap: data.fileFolderMap,
-        folders: data.folders
+        folders: userFolders
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message || "فشل نقل الملفات" });
@@ -855,16 +991,31 @@ async function startServer() {
   app.post("/api/media/folders/sync", (req, res) => {
     try {
       const { folders, fileFolderMap } = req.body;
-      const data: ServerMediaFoldersData = {
-        folders: Array.isArray(folders) ? folders : [],
-        fileFolderMap: fileFolderMap && typeof fileFolderMap === "object" ? fileFolderMap : {}
-      };
-      saveMediaFoldersData(data);
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول" });
+      }
+
+      const existingData = loadMediaFoldersData();
+      const otherFolders = existingData.folders.filter(f => f.userId && f.userId !== currentUserId);
+
+      const incomingFolders: ServerMediaFolder[] = Array.isArray(folders)
+        ? folders.map((f: any) => ({ ...f, userId: currentUserId }))
+        : [];
+
+      const mergedFolders = [...otherFolders, ...incomingFolders];
+      const mergedMap = { ...existingData.fileFolderMap, ...(fileFolderMap || {}) };
+
+      saveMediaFoldersData({
+        folders: mergedFolders,
+        fileFolderMap: mergedMap
+      });
+
       res.json({
         success: true,
         message: "تمت مزامنة المجلدات على السيرفر بنجاح",
-        folders: data.folders,
-        fileFolderMap: data.fileFolderMap
+        folders: incomingFolders,
+        fileFolderMap: fileFolderMap || {}
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message || "فشل مزامنة المجلدات" });
@@ -875,6 +1026,11 @@ async function startServer() {
   app.post("/api/media/from-youtube", async (req, res) => {
     try {
       const { title, videoUrl, videoId, srtText, cues, duration, thumbnailUrl, formatId, author, description } = req.body;
+      const { currentUserId } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لتنزيل وحفظ الفيديو" });
+      }
+
       if (!title && !videoId) {
         return res.status(400).json({ error: "بيانات الفيديو غير مكتملة" });
       }
@@ -1005,7 +1161,8 @@ async function startServer() {
         author: author || undefined,
         description: description || undefined,
         subtitles: cleanCues.length > 0 ? [subTrack] : [],
-        primaryTrackId: cleanCues.length > 0 ? subTrack.id : undefined
+        primaryTrackId: cleanCues.length > 0 ? subTrack.id : undefined,
+        userId: currentUserId
       };
 
       currentList.unshift(newItem);
@@ -1238,6 +1395,11 @@ async function startServer() {
         return res.status(404).json({ error: "الملف غير موجود" });
       }
 
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (item.userId && item.userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "غير مصرح لك بتعديل ترجمات هذا الملف" });
+      }
+
       if (!item.subtitles) {
         item.subtitles = [];
       }
@@ -1328,6 +1490,11 @@ async function startServer() {
         return res.status(404).json({ error: "الملف غير موجود" });
       }
 
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (item.userId && item.userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "غير مصرح لك بتعديل ترجمات هذا الملف" });
+      }
+
       if (!item.subtitles) {
         item.subtitles = [];
       }
@@ -1372,6 +1539,11 @@ async function startServer() {
         return res.status(404).json({ error: "الملف غير موجود" });
       }
 
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (item.userId && item.userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "غير مصرح لك بتعديل خيارات هذا الملف" });
+      }
+
       if (primaryTrackId !== undefined) {
         item.primaryTrackId = primaryTrackId || undefined;
       }
@@ -1402,6 +1574,11 @@ async function startServer() {
       const item = list.find((m) => m.id === id || m.filename === id);
       if (!item) {
         return res.status(404).json({ error: "الملف غير موجود" });
+      }
+
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (item.userId && item.userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "غير مصرح لك بحذف ترجمات هذا الملف" });
       }
 
       if (item.subtitles) {

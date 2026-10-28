@@ -32,7 +32,7 @@ export async function fetchBookByIdFromServer(id: string): Promise<InteractiveBo
 export function uploadBookToServer(
   file: File,
   title?: string,
-  onProgress?: (percent: number) => void
+  onProgress?: (percent: number, statusText?: string) => void
 ): Promise<InteractiveBook> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -42,10 +42,16 @@ export function uploadBookToServer(
       formData.append("title", title.trim());
     }
 
+    if (onProgress) onProgress(0, "جاري رفع الملف إلى السيرفر...");
+
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && onProgress) {
         const percent = Math.round((event.loaded / event.total) * 100);
-        onProgress(Math.min(percent, 98));
+        if (percent >= 99) {
+          onProgress(99, "تم الرفع! جاري فك الضغط والفهرسة على السيرفر في ثوانٍ...");
+        } else {
+          onProgress(percent, `جاري رفع الملف إلى السيرفر (${percent}%)...`);
+        }
       }
     };
 
@@ -54,7 +60,7 @@ export function uploadBookToServer(
         try {
           const res = JSON.parse(xhr.responseText);
           if (res.success && res.book) {
-            if (onProgress) onProgress(100);
+            if (onProgress) onProgress(100, "تم استخراج وحفظ الكتاب بنجاح!");
             resolve(res.book);
           } else {
             reject(new Error(res.error || "فشل معالجة وحفظ الكتاب في السيرفر"));
@@ -80,9 +86,148 @@ export function uploadBookToServer(
       reject(new Error("انتهت مهلة انتظار السيرفر أثناء رفع واستخراج الكتاب"));
     };
 
+    // 10 minutes timeout for very large archives
+    xhr.timeout = 10 * 60 * 1000;
     xhr.open("POST", "/api/books/upload", true);
     xhr.send(formData);
   });
+}
+
+// Upload a book folder directly (file by file) without needing a ZIP file
+export async function uploadBookFolderToServer(
+  rawFiles: FileList | File[],
+  options?: {
+    title?: string;
+    subtitle?: string;
+    skipVideos?: boolean;
+    onProgress?: (percent: number, statusText: string) => void;
+  }
+): Promise<InteractiveBook> {
+  const fileArray = Array.from(rawFiles);
+  if (fileArray.length === 0) {
+    throw new Error("لم يتم تحديد أي ملفات داخل المجلد");
+  }
+
+  // 1. Filter out OS junk
+  let eligibleFiles = fileArray.filter((f) => {
+    const rel = (f as any).webkitRelativePath || f.name;
+    if (rel.includes("__MACOSX") || rel.includes(".DS_Store") || rel.includes("Thumbs.db")) {
+      return false;
+    }
+    if (options?.skipVideos) {
+      const ext = rel.toLowerCase().split(".").pop();
+      if (ext === "mp4" || ext === "webm" || ext === "mov" || ext === "mkv") {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  if (eligibleFiles.length === 0) {
+    throw new Error("المجلد المختار لا يحتوي على ملفات مدعومة");
+  }
+
+  // Sort files: JSON manifests and images first, then audios, then videos
+  eligibleFiles.sort((a, b) => {
+    const nameA = ((a as any).webkitRelativePath || a.name).toLowerCase();
+    const nameB = ((b as any).webkitRelativePath || b.name).toLowerCase();
+    const isJsonA = nameA.endsWith(".json");
+    const isJsonB = nameB.endsWith(".json");
+    if (isJsonA && !isJsonB) return -1;
+    if (!isJsonA && isJsonB) return 1;
+
+    const isImgA = /\.(jpg|jpeg|png|webp|svg)$/i.test(nameA);
+    const isImgB = /\.(jpg|jpeg|png|webp|svg)$/i.test(nameB);
+    if (isImgA && !isImgB) return -1;
+    if (!isImgA && isImgB) return 1;
+
+    return 0;
+  });
+
+  // 2. Initialize book folder on server
+  if (options?.onProgress) {
+    options.onProgress(0, "جاري تهيئة مجلد الكتاب على السيرفر...");
+  }
+
+  const initRes = await fetch("/api/books/init-folder-upload", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ totalFiles: eligibleFiles.length })
+  });
+
+  if (!initRes.ok) {
+    throw new Error(`فشل تهيئة مجلد الكتاب على السيرفر (رمز: ${initRes.status})`);
+  }
+
+  const { bookId } = await initRes.json();
+  if (!bookId) {
+    throw new Error("لم يرجع السيرفر معرف الكتاب");
+  }
+
+  // 3. Upload files in parallel batches (concurrency of 4)
+  const total = eligibleFiles.length;
+  let completed = 0;
+  const CONCURRENCY = 4;
+
+  const uploadSingleFile = async (file: File): Promise<void> => {
+    const relPath = (file as any).webkitRelativePath || file.name;
+    const formData = new FormData();
+    formData.append("file", file, file.name);
+
+    const res = await fetch(`/api/books/${bookId}/upload-file`, {
+      method: "POST",
+      headers: {
+        "x-relative-path": encodeURIComponent(relPath)
+      },
+      body: formData
+    });
+
+    if (!res.ok) {
+      throw new Error(`فشل رفع الملف ${relPath}`);
+    }
+
+    completed++;
+    const pct = Math.round((completed / total) * 98);
+    if (options?.onProgress) {
+      options.onProgress(pct, `جاري حفظ ملفات الكتاب (${completed}/${total})...`);
+    }
+  };
+
+  // Run in chunks
+  for (let i = 0; i < eligibleFiles.length; i += CONCURRENCY) {
+    const batch = eligibleFiles.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map((f) => uploadSingleFile(f)));
+  }
+
+  // 4. Finalize & Catalog Book
+  if (options?.onProgress) {
+    options.onProgress(99, "جاري مطابقة الصفحات وفهرسة الصوتيات والفيديوهات على السيرفر...");
+  }
+
+  const finalizeRes = await fetch(`/api/books/${bookId}/finalize-folder-upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: options?.title || "",
+      subtitle: options?.subtitle || ""
+    })
+  });
+
+  if (!finalizeRes.ok) {
+    const errText = await finalizeRes.text();
+    throw new Error(`فشل فهرسة الكتاب على السيرفر: ${errText}`);
+  }
+
+  const finalizeData = await finalizeRes.json();
+  if (!finalizeData.success || !finalizeData.book) {
+    throw new Error(finalizeData.error || "فشل إتمام حفظ الكتاب على السيرفر");
+  }
+
+  if (options?.onProgress) {
+    options.onProgress(100, "تم حفظ وفهرسة الكتاب بالكامل على السيرفر بنجاح!");
+  }
+
+  return finalizeData.book;
 }
 
 // Delete book from server
