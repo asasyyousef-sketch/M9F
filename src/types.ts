@@ -499,7 +499,7 @@ export interface MediaFile {
   showDualSubtitles?: boolean;
 }
 
-export type PaperStyle = "plain" | "ruled" | "grid" | "ivory" | "legal" | "dark" | "white";
+export type PaperStyle = "plain" | "ruled" | "grid" | "ivory" | "legal" | "dark";
 
 export interface NoteItem {
   id: string;
@@ -515,7 +515,6 @@ export interface NoteItem {
   fontSize?: "sm" | "base" | "lg" | "xl";
   fontFamily?: "cairo" | "amiri" | "tajawal" | "inter" | "mono";
   dir?: "rtl" | "ltr";
-  zoom?: number;
   createdAt: string;
   updatedAt: string;
 }

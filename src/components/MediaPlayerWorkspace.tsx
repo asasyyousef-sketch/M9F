@@ -94,7 +94,6 @@ import { formatSubtitleTrackProtocol } from "../utils/subtitleNaming";
 import { ReviewChatModal, ReviewChatMessage } from "./ReviewChatModal";
 import { ShadowingStudioModal } from "./ShadowingStudioModal";
 import { speakClient } from "./Modals";
-import { useAuth } from "../context/AuthContext";
 
 export interface SubtitleTrackStyleConfig {
   fontSize: number; // in px
@@ -439,27 +438,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   onToggleSidebar,
   onBackToLibrary
 }) => {
-  const { currentUser, token, authFetch } = useAuth();
-
-  // Robust authenticated fetch helper that always passes the session token
-  const apiFetch = useCallback(
-    async (url: string, init?: RequestInit): Promise<Response> => {
-      if (authFetch) {
-        return authFetch(url, init);
-      }
-      const headers = new Headers(init?.headers || {});
-      const activeToken = token || (typeof window !== "undefined" ? localStorage.getItem("app_auth_token") : null);
-      if (activeToken) {
-        headers.set("Authorization", `Bearer ${activeToken}`);
-      }
-      return fetch(url, {
-        ...init,
-        headers
-      });
-    },
-    [authFetch, token]
-  );
-
   const [files, setFiles] = useState<MediaFile[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [uploading, setUploading] = useState<boolean>(false);
@@ -868,7 +846,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     showDual?: boolean
   ) => {
     try {
-      await apiFetch(`/api/media/${fileId}/subtitle-preferences`, {
+      await fetch(`/api/media/${fileId}/subtitle-preferences`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1112,12 +1090,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   // Active screen mode: File Manager (default) vs Active Player
   const [isPlayerOpen, setIsPlayerOpen] = useState<boolean>(false);
 
-  // Folders State (Synchronized with Server and scoped per user)
+  // Folders State (Synchronized with Server)
   const [folders, setFolders] = useState<MediaFolder[]>(() => {
     try {
-      const uId = currentUser?.id;
-      const key = uId ? `media_player_folders_${uId}` : "media_player_folders";
-      const saved = localStorage.getItem(key);
+      const saved = localStorage.getItem("media_player_folders");
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -1126,38 +1102,32 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
 
-  // File to Folder mapping (fileId -> folderId) (Synchronized with Server and scoped per user)
+  // File to Folder mapping (fileId -> folderId) (Synchronized with Server)
   const [fileFolderMap, setFileFolderMap] = useState<Record<string, string>>(() => {
     try {
-      const uId = currentUser?.id;
-      const key = uId ? `media_file_folder_map_${uId}` : "media_file_folder_map";
-      const saved = localStorage.getItem(key);
+      const saved = localStorage.getItem("media_file_folder_map");
       return saved ? JSON.parse(saved) : {};
     } catch {
       return {};
     }
   });
 
-  // Save folders & map to localStorage scoped to current user
+  // Save folders & map to localStorage as fast client fallback
   useEffect(() => {
     try {
-      if (currentUser?.id) {
-        localStorage.setItem(`media_player_folders_${currentUser.id}`, JSON.stringify(folders));
-      }
+      localStorage.setItem("media_player_folders", JSON.stringify(folders));
     } catch (e) {
       console.error(e);
     }
-  }, [folders, currentUser?.id]);
+  }, [folders]);
 
   useEffect(() => {
     try {
-      if (currentUser?.id) {
-        localStorage.setItem(`media_file_folder_map_${currentUser.id}`, JSON.stringify(fileFolderMap));
-      }
+      localStorage.setItem("media_file_folder_map", JSON.stringify(fileFolderMap));
     } catch (e) {
       console.error(e);
     }
-  }, [fileFolderMap, currentUser?.id]);
+  }, [fileFolderMap]);
 
   // Folder Modal states
   const [showFolderModal, setShowFolderModal] = useState<boolean>(false);
@@ -1262,9 +1232,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   }, [currentFile]);
 
   // Fetch folders and mapping from server
-  const fetchMediaFolders = useCallback(async () => {
+  const fetchMediaFolders = async () => {
     try {
-      const res = await apiFetch("/api/media/folders");
+      const res = await fetch("/api/media/folders");
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.folders)) {
@@ -1277,34 +1247,23 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     } catch (err) {
       console.error("Failed to load folders from server:", err);
     }
-  }, [apiFetch]);
+  };
 
-  // Fetch files from server (strictly deduplicated and scoped)
-  const fetchMediaFiles = useCallback(async () => {
+  // Fetch files from server
+  const fetchMediaFiles = async () => {
     setLoading(true);
     try {
-      const res = await apiFetch("/api/media/files");
+      const res = await fetch("/api/media/files");
       if (!res.ok) throw new Error("فشل في جلب قائمة الملفات");
       const data = await res.json();
-      const rawFiles: MediaFile[] = data.files || [];
-      const seenIds = new Set<string>();
-      const loadedFiles: MediaFile[] = [];
-      for (const f of rawFiles) {
-        if (f && f.id && !seenIds.has(f.id)) {
-          seenIds.add(f.id);
-          loadedFiles.push(f);
-        }
-      }
+      const loadedFiles: MediaFile[] = data.files || [];
       setFiles(loadedFiles);
 
       // Keep currentFile synchronized if already playing
-      if (currentFileRef.current) {
-        const updatedCurrent = loadedFiles.find((f) => f.id === currentFileRef.current?.id);
+      if (currentFile) {
+        const updatedCurrent = loadedFiles.find((f) => f.id === currentFile.id);
         if (updatedCurrent) {
           setCurrentFile(updatedCurrent);
-        } else {
-          setCurrentFile(null);
-          setIsPlaying(false);
         }
       }
     } catch (err: any) {
@@ -1313,32 +1272,12 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [apiFetch]);
+  };
 
-  // Sync files and folders when currentUser changes
   useEffect(() => {
-    if (!currentUser?.id) {
-      setFiles([]);
-      setFolders([]);
-      setFileFolderMap({});
-      setCurrentFile(null);
-      setIsPlaying(false);
-      return;
-    }
-
-    try {
-      const savedFolders = localStorage.getItem(`media_player_folders_${currentUser.id}`);
-      if (savedFolders) setFolders(JSON.parse(savedFolders));
-      else setFolders([]);
-
-      const savedMap = localStorage.getItem(`media_file_folder_map_${currentUser.id}`);
-      if (savedMap) setFileFolderMap(JSON.parse(savedMap));
-      else setFileFolderMap({});
-    } catch (e) {}
-
     fetchMediaFiles();
     fetchMediaFolders();
-  }, [currentUser?.id, fetchMediaFiles, fetchMediaFolders]);
+  }, []);
 
   // Save currently selected file and open player view in direct cinematic mode
   const handleSelectFile = (file: MediaFile | null, autoPlay: boolean = true) => {
@@ -1477,7 +1416,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       setSuccessMsg(`تم إنشاء مجلد "${cleanName}" بنجاح 📁`);
 
       try {
-        await apiFetch("/api/media/folders", {
+        await fetch("/api/media/folders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(newFolder)
@@ -1492,7 +1431,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       setSuccessMsg(`تم تعديل اسم المجلد إلى "${cleanName}" 📁`);
 
       try {
-        await apiFetch(`/api/media/folders/${editingFolderId}`, {
+        await fetch(`/api/media/folders/${editingFolderId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name: cleanName })
@@ -1539,7 +1478,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     setSuccessMsg(`تم حذف مجلد "${folderName}"`);
 
     try {
-      await apiFetch(`/api/media/folders/${folderId}`, {
+      await fetch(`/api/media/folders/${folderId}`, {
         method: "DELETE"
       });
     } catch (err) {
@@ -1561,7 +1500,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     setSuccessMsg("تم نقل الملف بنجاح 📁");
 
     try {
-      await apiFetch("/api/media/folders/move-files", {
+      await fetch("/api/media/folders/move-files", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fileIds: [fileId], targetFolderId })
@@ -1587,7 +1526,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     setSuccessMsg(`تم نقل ${fileIds.length} ملف بنجاح 📁`);
 
     try {
-      await apiFetch("/api/media/folders/move-files", {
+      await fetch("/api/media/folders/move-files", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fileIds, targetFolderId })
@@ -1620,13 +1559,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         });
 
         for (const fId of folderIds) {
-          await apiFetch(`/api/media/folders/${fId}`, { method: "DELETE" }).catch(() => {});
+          await fetch(`/api/media/folders/${fId}`, { method: "DELETE" }).catch(() => {});
         }
       }
 
       // Delete files directly from server folder & local state
       if (fileIds.length > 0) {
-        await apiFetch("/api/media/files/batch-delete", {
+        await fetch("/api/media/files/batch-delete", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ fileIds })
@@ -1967,15 +1906,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     setErrorMsg(null);
 
     const savedKey = getSavedGeminiKey();
-    const activeToken = token || (typeof window !== "undefined" ? localStorage.getItem("app_auth_token") : null);
 
     try {
       const res = await fetch(`/api/media/${currentFile.id}/translate-subtitles`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
-          ...(savedKey ? { "x-gemini-key": savedKey } : {})
+          ...(savedKey ? { "x-gemini-key": savedKey, Authorization: `Bearer ${savedKey}` } : {})
         },
         body: JSON.stringify({
           trackId: activeTrack.id,
@@ -2062,7 +1999,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           createdAt: new Date().toISOString()
         };
         setFolders((prev) => [...prev, newFolder]);
-        apiFetch("/api/media/folders", {
+        fetch("/api/media/folders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(newFolder)
@@ -2109,10 +2046,6 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/media/upload", true);
-    const activeToken = token || (typeof window !== "undefined" ? localStorage.getItem("app_auth_token") : null);
-    if (activeToken) {
-      xhr.setRequestHeader("Authorization", `Bearer ${activeToken}`);
-    }
 
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) {
@@ -2142,7 +2075,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
               // Persist mapping to server
               const fileIds = res.files.map((f: any) => f.id);
-              apiFetch("/api/media/folders/move-files", {
+              fetch("/api/media/folders/move-files", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ fileIds, targetFolderId: folderToUse })
@@ -2231,15 +2164,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     setErrorMsg(null);
 
     const savedKey = getSavedGeminiKey();
-    const activeToken = token || (typeof window !== "undefined" ? localStorage.getItem("app_auth_token") : null);
 
     try {
       const res = await fetch(`/api/media/${currentFile.id}/generate-subtitles`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
-          ...(savedKey ? { "x-gemini-key": savedKey } : {})
+          ...(savedKey ? { "x-gemini-key": savedKey, Authorization: `Bearer ${savedKey}` } : {})
         },
         body: JSON.stringify({
           language: aiSubtitleLang,
@@ -2359,7 +2290,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     });
 
     try {
-      const res = await apiFetch(`/api/media/${mediaId}/subtitles`, {
+      const res = await fetch(`/api/media/${mediaId}/subtitles`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2436,7 +2367,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     if (!window.confirm("هل تريد حذف مسار الترجمة هذا نهائياً؟")) return;
 
     try {
-      const res = await apiFetch(`/api/media/${currentFile.id}/subtitles/${trackId}`, {
+      const res = await fetch(`/api/media/${currentFile.id}/subtitles/${trackId}`, {
         method: "DELETE"
       });
       if (!res.ok) throw new Error("فشل حذف مسار الترجمة");
@@ -2665,15 +2596,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
 
     try {
-      const res = await apiFetch(`/api/media/files/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/media/files/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("فشل في حذف الملف من السيرفر");
 
       setFiles((prev) => prev.filter((f) => f.id !== id));
-      setFileFolderMap((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
       if (currentFile?.id === id) {
         setCurrentFile(null);
         setIsPlaying(false);
@@ -2698,7 +2624,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
 
     try {
-      const res = await apiFetch(`/api/media/files/${id}`, {
+      const res = await fetch(`/api/media/files/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: editTitleText.trim() })

@@ -45,7 +45,6 @@ import {
 } from "lucide-react";
 import { NoteItem, PaperStyle } from "../types";
 import { ALL_AVAILABLE_MODELS, type AIModelOption } from "./AICorrectorWorkspace";
-import { useAuth } from "../context/AuthContext";
 
 const STORAGE_KEY = "app_user_writings_v2";
 
@@ -207,15 +206,11 @@ interface NotesWorkspaceProps {
 export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
   onToggleSidebar
 }) => {
-  const { currentUser } = useAuth();
-  const userStorageKey = currentUser?.id ? `${STORAGE_KEY}_${currentUser.id}` : STORAGE_KEY;
-
-  // Load user notes from localStorage (strictly scoped per user)
+  // Load user notes from localStorage (strictly no explanatory or dummy notes)
   const [notes, setNotes] = useState<NoteItem[]>(() => {
     try {
-      const uId = currentUser?.id;
-      const key = uId ? `${STORAGE_KEY}_${uId}` : STORAGE_KEY;
-      const savedV2 = localStorage.getItem(key);
+      // Check v2 first
+      const savedV2 = localStorage.getItem(STORAGE_KEY);
       if (savedV2) {
         const parsed = JSON.parse(savedV2);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -495,42 +490,11 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
   // Persist notes
   useEffect(() => {
     try {
-      localStorage.setItem(userStorageKey, JSON.stringify(notes));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
     } catch (e) {
       console.error("Failed to save writings", e);
     }
-  }, [notes, userStorageKey]);
-
-  // Reload notes when user changes
-  useEffect(() => {
-    try {
-      const uId = currentUser?.id;
-      const key = uId ? `${STORAGE_KEY}_${uId}` : STORAGE_KEY;
-      const saved = localStorage.getItem(key);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setNotes(parsed);
-          setActiveNoteId(parsed[0].id);
-          return;
-        }
-      }
-    } catch (e) {}
-
-    const freshNote: NoteItem = {
-      id: `note-${Date.now()}`,
-      title: "",
-      content: "",
-      plainText: "",
-      isPinned: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      paperStyle: "white",
-      zoom: 100
-    };
-    setNotes([freshNote]);
-    setActiveNoteId(freshNote.id);
-  }, [currentUser?.id]);
+  }, [notes]);
 
   // Current active note
   const activeNote = useMemo(() => {
