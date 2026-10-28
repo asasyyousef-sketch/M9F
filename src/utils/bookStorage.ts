@@ -409,7 +409,20 @@ export function uploadBookToServer(
       tracker.startStage(7, "التحقق من تنسيق استجابة السيرفر");
       const pingContentType = pingRes.headers.get("content-type") || "";
       if (!pingRes.ok) {
-        return emitFail(7, `السيرفر أعاد رمز غير طبيعي أثناء الفحص الأولي: ${pingRes.status} ${pingRes.statusText}`);
+        const pingBody = await pingRes.text().catch(() => "");
+        tracker.recordHttpResponse(pingRes.status, pingRes.statusText, pingBody);
+        if (pingRes.status === 404) {
+          return emitFail(
+            7,
+            `السيرفر المحلي أعاد (404 Not Found) لمسار /api/books. السبب الجذري: سيرفر Node.js في شاشة التيرمينال على حاسوبك ما زال يعمل بالنسخة القديمة في ذاكرة الـ RAM ولم يتم عمل ريستارت له بعد تحديث الكود، أو أن المشروع شغال بوضع Vite فقط بدون سيرفر Express. الحل: أوقف السيرفر في التيرمينال عبر (Ctrl+C) ثم شغله مجدداً عبر (npm run dev).`,
+            undefined,
+            { status: 404, statusText: "Not Found", responseBody: pingBody }
+          );
+        }
+        return emitFail(7, `السيرفر أعاد رمز غير طبيعي أثناء الفحص الأولي: ${pingRes.status} ${pingRes.statusText}`, undefined, {
+          status: pingRes.status,
+          responseBody: pingBody
+        });
       }
       if (!pingContentType.includes("application/json")) {
         return emitFail(7, `السيرفر أعاد محتوى ليس JSON (${pingContentType}). قد يكون خادم الـ Proxy غير متزامن`);

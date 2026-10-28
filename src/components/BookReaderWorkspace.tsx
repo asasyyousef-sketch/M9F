@@ -824,6 +824,27 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
                 )}
               </div>
 
+              {/* Actionable Solution Guide for 404 / Stage 7 */}
+              {(diagnosticReport?.failedStageNumber === 7 || uploadError?.includes("404")) && (
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-300 text-amber-950">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="px-2 py-0.5 bg-amber-600 text-white rounded-md text-[11px] font-bold">الحل المباشر</span>
+                    <h5 className="text-sm font-bold text-amber-900">كيف تحل هذه المشكلة في ثوانٍ على لابتوبك الشخصي:</h5>
+                  </div>
+                  <ol className="list-decimal list-inside space-y-1.5 text-xs text-amber-900 leading-relaxed font-sans pr-1">
+                    <li>
+                      <strong>أوقف السيرفر القديم في التيرمينال:</strong> انتقل إلى نافذة موجه الأوامر (Command Prompt / PowerShell / Terminal) التي تشغل بها السيرفر على لابتوبك، واضغط <kbd className="px-1.5 py-0.5 bg-white border border-amber-300 rounded font-mono font-bold text-[11px]">Ctrl + C</kbd> لإيقاف النسخة القديمة العالقة في الذاكرة.
+                    </li>
+                    <li>
+                      <strong>شغل السيرفر مجدداً:</strong> اكتب الأمر <code className="px-2 py-0.5 bg-slate-900 text-emerald-400 rounded font-mono font-bold text-xs">npm run dev</code> واضغط Enter لتحميل مسارات السيرفر الجديدة في ذاكرة الـ RAM.
+                    </li>
+                    <li>
+                      <strong>أعد المحاولة:</strong> حدّث الصفحة في المتصفح وارفع ملف الـ ZIP مجدداً، وستمر المراحل الـ 30 بنجاح تام!
+                    </li>
+                  </ol>
+                </div>
+              )}
+
               {/* Stepper Timeline: All 30 Micro-Stages */}
               <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-xs">
                 <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">

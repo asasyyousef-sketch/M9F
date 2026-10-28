@@ -2482,15 +2482,32 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
 
           if (isZip) {
             let unzipped = false;
-            try {
-              // High-speed native Linux unzip (takes ~1 second for 500MB without RAM spikes)
-              await execFileAsync("unzip", ["-q", "-o", tempPath, "-d", targetDir]);
-              unzipped = true;
-            } catch (e: any) {
-              console.warn("[Books Worker] Native unzip notice, trying JSZip fallback:", e?.message);
+            
+            // 1. Try Windows native tar (Available in Windows 10/11 by default, extracts zip at C-speed)
+            if (process.platform === "win32") {
+              try {
+                await execFileAsync("tar.exe", ["-xf", tempPath, "-C", targetDir]);
+                unzipped = true;
+                console.log(`[Books Worker] Extracted via native Windows tar in seconds`);
+              } catch (winTarErr: any) {
+                console.warn("[Books Worker] Windows tar attempt note:", winTarErr?.message);
+              }
             }
 
+            // 2. Try native Linux unzip
             if (!unzipped) {
+              try {
+                await execFileAsync("unzip", ["-q", "-o", tempPath, "-d", targetDir]);
+                unzipped = true;
+                console.log(`[Books Worker] Extracted via native Linux unzip in seconds`);
+              } catch (e: any) {
+                console.warn("[Books Worker] Native unzip notice, trying fallbacks:", e?.message);
+              }
+            }
+
+            // 3. Fallback: Pure JSZip in chunks
+            if (!unzipped) {
+              console.log(`[Books Worker] Using streaming JSZip fallback...`);
               const zipBuffer = fs.readFileSync(tempPath);
               const zip = await JSZip.loadAsync(zipBuffer);
               for (const rel of Object.keys(zip.files)) {
