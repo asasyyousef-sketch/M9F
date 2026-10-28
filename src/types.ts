@@ -478,6 +478,14 @@ export interface MediaFolder {
   parentId?: string | null;
 }
 
+export interface MediaBookContext {
+  bookId: string;
+  bookTitle?: string;
+  pageIndex: number;
+  pageNumber?: number;
+  displayLabel?: string;
+}
+
 export interface MediaFile {
   id: string;
   filename: string;
@@ -497,6 +505,7 @@ export interface MediaFile {
   primaryTrackId?: string;
   secondaryTrackId?: string;
   showDualSubtitles?: boolean;
+  bookContext?: MediaBookContext;
 }
 
 export type PaperStyle = "plain" | "ruled" | "grid" | "ivory" | "legal" | "dark" | "white";
@@ -569,6 +578,7 @@ export interface BookPageMedia {
   url?: string;
   blob?: Blob;
   pageNumber?: number;
+  subtitles?: MediaSubtitleTrack[];
 }
 
 export interface BookPage {

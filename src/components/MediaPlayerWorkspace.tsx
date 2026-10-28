@@ -72,7 +72,7 @@ import {
   FileSpreadsheet,
   CornerUpRight
 } from "lucide-react";
-import { MediaFile, MediaSubtitleTrack, SubtitleCue, MediaFolder } from "../types";
+import { MediaFile, MediaSubtitleTrack, SubtitleCue, MediaFolder, MediaBookContext } from "../types";
 import {
   parseSubtitleContent,
   formatSecondsToTime,
@@ -512,6 +512,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   // Workspace Tab: Media Files vs Interactive Books
   const [mediaWorkspaceTab, setMediaWorkspaceTab] = useState<"media" | "books">("media");
+  const [activeBookContext, setActiveBookContext] = useState<MediaBookContext | null>(null);
 
   // Subtitle States
   const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
@@ -1386,7 +1387,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   };
 
-  // Close player and return to file manager (Strictly wipe transient sentence chat memory)
+  // Close player and return to file manager or book reader (Strictly wipe transient sentence chat memory)
   const handleBackToFileManager = () => {
     smoothPause();
     setSentenceChatHistories({});
@@ -1402,10 +1403,16 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     } catch (e) {}
     setIsPlayerOpen(false);
     setIsImmersiveMode(false);
+    if (activeBookContext) {
+      setMediaWorkspaceTab("books");
+    }
   };
 
   // Play media track from Interactive Digital Books inside Studio Player
   const handlePlayBookMediaInStudio = (mediaInfo: Partial<MediaFile>) => {
+    if (mediaInfo.bookContext) {
+      setActiveBookContext(mediaInfo.bookContext);
+    }
     // Switch immediately to Media Player tab
     setMediaWorkspaceTab("media");
 
@@ -1418,7 +1425,12 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     );
 
     if (existing) {
-      handleSelectFile(existing, true);
+      const merged: MediaFile = {
+        ...existing,
+        bookContext: mediaInfo.bookContext || existing.bookContext,
+        subtitles: (mediaInfo.subtitles && mediaInfo.subtitles.length > 0) ? mediaInfo.subtitles : existing.subtitles
+      };
+      handleSelectFile(merged, true);
     } else {
       const syntheticFile: MediaFile = {
         id: mediaInfo.id || `book-media-${Date.now()}`,
@@ -1430,7 +1442,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         type: mediaInfo.type || "audio",
         url: mediaInfo.url || "",
         uploadedAt: new Date().toISOString(),
-        subtitles: []
+        subtitles: mediaInfo.subtitles || [],
+        bookContext: mediaInfo.bookContext
       };
       setFiles((prev) => [syntheticFile, ...prev]);
       handleSelectFile(syntheticFile, true);
@@ -3625,24 +3638,12 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const onLoadedMetadata = () => {
       setDuration(el.duration);
       syncAudioGain(volume, isMuted, voiceClarifier);
-      // Prime mobile browser decoders (Android Chrome & iOS Safari) to immediately decode and paint the first frame
-      // instead of showing a black or blank box until play is tapped:
-      if (el.currentTime === 0) {
-        try {
-          el.currentTime = 0.001;
-        } catch {}
-      }
       if (isPlaying) {
         el.play().catch(console.error);
       }
     };
     const onCanPlay = () => {
-      // Ensure first frame is displayed on mobile hardware video decoders
-      if (el.currentTime === 0) {
-        try {
-          el.currentTime = 0.001;
-        } catch {}
-      }
+      // Hardware decoders ready
     };
     const onProgress = () => {
       if (el && el.buffered.length > 0 && (duration > 0 || el.duration > 0)) {
@@ -4463,14 +4464,22 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
               </button>
             )}
 
-            {/* Back to Media Manager Button */}
+            {/* Back to Media Manager or Book Button */}
             <button
               onClick={handleBackToFileManager}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold text-xs transition-colors cursor-pointer"
-              title="العودة لمكتبة الوسائط"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-colors cursor-pointer ${
+                activeBookContext
+                  ? "bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 shadow-2xs"
+                  : "bg-slate-100 hover:bg-slate-200 text-slate-800"
+              }`}
+              title={activeBookContext ? `العودة لصفحة الكتاب (${activeBookContext.pageNumber || activeBookContext.pageIndex + 1})` : "العودة لمكتبة الوسائط"}
             >
-              <ChevronRight className="w-4 h-4" />
-              <span>مكتبة الوسائط</span>
+              {activeBookContext ? <BookOpen className="w-3.5 h-3.5 text-amber-700" /> : <ChevronRight className="w-4 h-4" />}
+              <span>
+                {activeBookContext
+                  ? `العودة للكتاب (ص ${activeBookContext.pageNumber || activeBookContext.pageIndex + 1})`
+                  : "مكتبة الوسائط"}
+              </span>
             </button>
 
             <div className="hidden sm:flex items-center border-r border-slate-200 pr-3 mr-1">
@@ -4672,10 +4681,21 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       <div className="flex items-center gap-2 min-w-0">
                         <button
                           onClick={handleBackToFileManager}
-                          className="w-8 h-8 rounded-full bg-black/60 hover:bg-white/20 active:scale-95 border border-white/20 flex items-center justify-center text-white transition-all cursor-pointer shrink-0 shadow-md"
-                          title="الرجوع لمدير الملفات"
+                          className={`h-8 px-2.5 rounded-full flex items-center gap-1.5 text-xs font-bold transition-all cursor-pointer shrink-0 shadow-md ${
+                            activeBookContext
+                              ? "bg-amber-500/95 hover:bg-amber-400 text-slate-950 font-black border border-amber-300"
+                              : "w-8 h-8 rounded-full bg-black/60 hover:bg-white/20 active:scale-95 border border-white/20 text-white"
+                          }`}
+                          title={activeBookContext ? `العودة للكتاب (ص ${activeBookContext.pageNumber || activeBookContext.pageIndex + 1})` : "الرجوع لمدير الملفات"}
                         >
-                          <ChevronLeft className="w-4 h-4 rtl:rotate-180" />
+                          {activeBookContext ? (
+                            <>
+                              <BookOpen className="w-3.5 h-3.5" />
+                              <span className="hidden xs:inline">العودة للكتاب</span>
+                            </>
+                          ) : (
+                            <ChevronLeft className="w-4 h-4 rtl:rotate-180" />
+                          )}
                         </button>
 
                         <h2 className="text-xs sm:text-sm font-bold text-white truncate max-w-[140px] xs:max-w-[200px] sm:max-w-xs md:max-w-sm">
@@ -5253,7 +5273,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           ? "w-full h-full object-contain pointer-events-none"
                           : "w-full max-h-[500px] object-contain pointer-events-none"
                       }
-                      preload="auto"
+                      preload="metadata"
                       playsInline
                     />
                   ) : (
@@ -5266,7 +5286,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       <audio
                         ref={audioRef}
                         src={resolveMediaStreamUrl(currentFile)}
-                        preload="auto"
+                        preload="metadata"
+                        playsInline
                       />
 
                       {/* Rotating Vinyl Record Graphic */}
@@ -6296,7 +6317,12 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
             {mediaWorkspaceTab === "books" ? (
               <BookReaderWorkspace
                 onPlayMediaInStudio={handlePlayBookMediaInStudio}
-                onBackToMediaExplorer={() => setMediaWorkspaceTab("media")}
+                onBackToMediaExplorer={() => {
+                  setActiveBookContext(null);
+                  setMediaWorkspaceTab("media");
+                }}
+                initialBookId={activeBookContext?.bookId}
+                initialPageIndex={activeBookContext?.pageIndex}
               />
             ) : (
               <MediaExplorerView

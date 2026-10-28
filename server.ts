@@ -317,6 +317,7 @@ async function startServer() {
   const BOOKS_DIR = path.join(process.cwd(), "uploads", "books");
   const MEDIA_META_PATH = path.join(process.cwd(), "media_files.json");
   const MEDIA_FOLDERS_PATH = path.join(process.cwd(), "media_folders.json");
+  const BOOKS_META_PATH = path.join(process.cwd(), "books.json");
 
   if (!fs.existsSync(MEDIA_DIR)) {
     fs.mkdirSync(MEDIA_DIR, { recursive: true });
@@ -1184,9 +1185,13 @@ async function startServer() {
     }
   });
 
-  // 5. Stream media file with HTTP Range support for instant seeking & scrubbing
-  app.get("/api/media/stream/:filename(*)", async (req, res) => {
+  // 5. Stream media file with HTTP Range support for instant seeking & scrubbing (Supports GET & HEAD for iPad Safari)
+  app.all("/api/media/stream/:filename(*)", async (req, res) => {
     try {
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        return res.sendStatus(405);
+      }
+
       let rawParam = req.params.filename || (req.params as any)[0] || "";
       try {
         rawParam = decodeURIComponent(rawParam);
@@ -1277,18 +1282,18 @@ async function startServer() {
                 res.setHeader(key, value);
               }
             });
-        if (remoteRes.body) {
-          const { Readable } = await import("stream");
-          const streamReadable = Readable.fromWeb(remoteRes.body as any);
-          streamReadable.on("error", (sErr: any) => {
-            console.warn("[Media Stream Proxy Notice] Upstream socket ended or closed:", sErr?.message);
-          });
-          res.on("close", () => {
-            streamReadable.destroy();
-          });
-          streamReadable.pipe(res);
-          return;
-        }
+            if (remoteRes.body) {
+              const { Readable } = await import("stream");
+              const streamReadable = Readable.fromWeb(remoteRes.body as any);
+              streamReadable.on("error", (sErr: any) => {
+                console.warn("[Media Stream Proxy Notice] Upstream socket ended or closed:", sErr?.message);
+              });
+              res.on("close", () => {
+                streamReadable.destroy();
+              });
+              streamReadable.pipe(res);
+              return;
+            }
           } catch (proxyErr) {
             console.warn("Proxy stream fallback to redirect:", proxyErr);
           }
@@ -1317,13 +1322,25 @@ async function startServer() {
       // Enable CORS and byte-range headers
       res.setHeader("Accept-Ranges", "bytes");
 
+      // Handle HEAD request for immediate metadata probe on iPad/Safari
+      if (req.method === "HEAD") {
+        const head = {
+          "Content-Length": fileSize,
+          "Content-Type": contentType,
+          "Accept-Ranges": "bytes",
+          "Cache-Control": "public, max-age=86400, no-transform",
+          "Access-Control-Allow-Origin": "*"
+        };
+        res.writeHead(200, head);
+        return res.end();
+      }
+
       if (range) {
         const parts = range.replace(/bytes=/, "").split("-");
         const start = parseInt(parts[0], 10);
         
-        // Use 12MB chunk size if browser didn't specify end range, ensuring ample ahead-of-time buffering
-        // and lightning-fast sentence navigation from browser memory cache without continuous round-trips
-        const CHUNK_SIZE = 1024 * 1024 * 12; // 12 MB
+        // Use 4MB initial chunk for start=0 (instant load on iPad/mobile), and 8MB for scrubbing
+        const CHUNK_SIZE = start === 0 ? 1024 * 1024 * 4 : 1024 * 1024 * 8;
         const requestedEnd = parts[1] ? parseInt(parts[1], 10) : NaN;
         const end = !isNaN(requestedEnd) ? Math.min(requestedEnd, fileSize - 1) : Math.min(start + CHUNK_SIZE, fileSize - 1);
         
@@ -1428,50 +1445,91 @@ async function startServer() {
     }
   });
 
-  // 6. Download media file
-  app.get("/api/media/download/:id", (req, res) => {
+  // 6. Download media file (Supports regular media and interactive book media)
+  app.get("/api/media/download/:id(*)", (req, res) => {
     try {
-      const { id } = req.params;
+      let rawId = req.params.id || (req.params as any)[0] || "";
+      try {
+        rawId = decodeURIComponent(rawId);
+      } catch (e) {}
+
+      const cleanId = rawId.replace(/^book-media-/, "");
       const list = loadMediaMeta();
-      const item = list.find((m) => m.id === id || m.filename === id);
-      if (!item) {
-        return res.status(404).send("File not found");
+      const item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
+      if (item) {
+        const filePath = path.join(MEDIA_DIR, item.filename);
+        if (fs.existsSync(filePath)) {
+          return res.download(filePath, item.originalName || item.filename);
+        }
       }
 
-      const filePath = path.join(MEDIA_DIR, item.filename);
-      if (!fs.existsSync(filePath)) {
-        return res.status(404).send("File not found on disk");
+      // Check in books.json metadata
+      try {
+        const books = loadBooksJson();
+        for (const b of books) {
+          const matched = (b.allMedia || []).find((m: any) =>
+            m.id === rawId ||
+            m.id === cleanId ||
+            m.fileName === rawId ||
+            m.fileName === cleanId ||
+            m.title === rawId
+          );
+          if (matched) {
+            if (matched.url && matched.url.startsWith("/uploads/")) {
+              const localOnDisk = path.join(process.cwd(), matched.url.replace(/^\/+/, ""));
+              if (fs.existsSync(localOnDisk) && fs.statSync(localOnDisk).isFile()) {
+                return res.download(localOnDisk, matched.fileName || path.basename(localOnDisk));
+              }
+            }
+          }
+        }
+      } catch (e) {}
+
+      // Search inside BOOKS_DIR recursively
+      const filename = path.basename(cleanId);
+      const findInDir = (dir: string): string | null => {
+        if (!fs.existsSync(dir)) return null;
+        for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, ent.name);
+          if (ent.isDirectory()) {
+            const sub = findInDir(full);
+            if (sub) return sub;
+          } else {
+            const entLower = ent.name.toLowerCase();
+            const targetLower = filename.toLowerCase();
+            if (entLower === targetLower || entLower.replace(/[^a-z0-9]/g, "") === targetLower.replace(/[^a-z0-9]/g, "")) {
+              return full;
+            }
+          }
+        }
+        return null;
+      };
+
+      const foundBookPath = findInDir(BOOKS_DIR);
+      if (foundBookPath && fs.existsSync(foundBookPath)) {
+        return res.download(foundBookPath, path.basename(foundBookPath));
       }
 
-      res.download(filePath, item.originalName);
+      return res.status(404).send("File not found");
     } catch (e: any) {
+      console.error("Download media error:", e);
       res.status(500).send("Failed to download file");
     }
   });
 
-  // 7. Save / Add / Update Subtitle Track on a Media File
+  // 7. Save / Add / Update Subtitle Track on a Media File or Book Media Track
   app.post("/api/media/:id/subtitles", (req, res) => {
     try {
-      const { id } = req.params;
+      let rawId = req.params.id || "";
+      try {
+        rawId = decodeURIComponent(rawId);
+      } catch (e) {}
+
+      const cleanId = rawId.replace(/^book-media-/, "");
       const { label, language, cues, source, trackId, asPrimary } = req.body;
 
       if (!Array.isArray(cues) || cues.length === 0) {
         return res.status(400).json({ error: "قائمة مقاطع الترجمة (Cues) غير صالحة أو فارغة" });
-      }
-
-      const list = loadMediaMeta();
-      const item = list.find((m) => m.id === id || m.filename === id);
-      if (!item) {
-        return res.status(404).json({ error: "الملف غير موجود" });
-      }
-
-      const { currentUserId, isAdmin } = getMediaAuthUser(req);
-      if (item.userId && item.userId !== currentUserId && !isAdmin) {
-        return res.status(403).json({ error: "غير مصرح لك بتعديل ترجمات هذا الملف" });
-      }
-
-      if (!item.subtitles) {
-        item.subtitles = [];
       }
 
       const cleanCues: ServerSubtitleCue[] = cues.map((c: any, idx: number) => ({
@@ -1479,30 +1537,11 @@ async function startServer() {
         startTime: Math.max(0, parseFloat(c.startTime) || 0),
         endTime: Math.max(0.1, parseFloat(c.endTime) || 1),
         text: (c.text || "").trim()
-      })).filter(c => c.text.length > 0);
-
-      // If updating an existing track by trackId
-      const existingTrackIndex = trackId
-        ? item.subtitles.findIndex((t) => t.id === trackId)
-        : -1;
-
-      if (existingTrackIndex !== -1) {
-        const existing = item.subtitles[existingTrackIndex];
-        existing.cues = cleanCues;
-        if (label?.trim()) existing.label = label.trim();
-        if (language) existing.language = language;
-        saveMediaMeta(list);
-        return res.json({
-          success: true,
-          message: "تم تحديث مسار الترجمة وحفظ التغييرات بنجاح!",
-          track: existing,
-          file: item
-        });
-      }
+      })).filter((c) => c.text.length > 0);
 
       const targetLanguage = language || (source === "transcribe" || label?.includes("_TRN_") ? "de" : "de");
       const newTrack: ServerSubtitleTrack = {
-        id: "sub-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
+        id: trackId || ("sub-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7)),
         label: label?.trim() || formatSubtitleTrackProtocol(source || "UPL", targetLanguage),
         language: targetLanguage,
         cues: cleanCues,
@@ -1510,33 +1549,135 @@ async function startServer() {
         uploadedAt: new Date().toISOString()
       };
 
-      // Determine if this new track should be primary:
-      // When explicitly marked asPrimary, or when it is an audio transcription (source === "transcribe" or TRN)
-      const shouldBePrimary = asPrimary === true || source === "transcribe" || Boolean(label && label.includes("_TRN_"));
+      // 1. Check if this is an interactive book media track in books.json
+      let bookUpdated = false;
+      try {
+        const books = loadBooksJson();
+        for (const b of books) {
+          let bDirty = false;
+          const updateMediaItem = (m: any) => {
+            if (
+              m.id === rawId ||
+              m.id === cleanId ||
+              m.fileName === rawId ||
+              m.fileName === cleanId ||
+              m.title === rawId ||
+              m.title === cleanId
+            ) {
+              if (!Array.isArray(m.subtitles)) {
+                m.subtitles = [];
+              }
+              const existingIdx = m.subtitles.findIndex((t: any) => t.id === newTrack.id);
+              if (existingIdx !== -1) {
+                m.subtitles[existingIdx] = newTrack;
+              } else {
+                m.subtitles.push(newTrack);
+              }
+              bDirty = true;
+              bookUpdated = true;
+            }
+          };
 
-      if (shouldBePrimary) {
-        const oldPrimary = item.primaryTrackId;
-        item.primaryTrackId = newTrack.id;
-        // If there was an existing primary track, preserve it as secondary so existing translations/tracks are kept!
-        if (oldPrimary && oldPrimary !== newTrack.id) {
-          item.secondaryTrackId = oldPrimary;
-          item.showDualSubtitles = true;
+          if (Array.isArray(b.allMedia)) {
+            for (const m of b.allMedia) updateMediaItem(m);
+          }
+          if (Array.isArray(b.pages)) {
+            for (const p of b.pages) {
+              if (Array.isArray(p.media)) {
+                for (const m of p.media) updateMediaItem(m);
+              }
+            }
+          }
+
+          if (bDirty) {
+            saveBooksJson(books);
+          }
         }
-      } else if (!item.primaryTrackId) {
-        item.primaryTrackId = newTrack.id;
-      } else if (!item.secondaryTrackId && item.subtitles.length >= 1) {
-        item.secondaryTrackId = newTrack.id;
-        item.showDualSubtitles = true;
+      } catch (bErr) {
+        console.error("Error updating book subtitles:", bErr);
       }
 
-      item.subtitles.push(newTrack);
-      saveMediaMeta(list);
+      // 2. Check in standard media_files.json
+      const list = loadMediaMeta();
+      const item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
 
-      res.json({
+      if (item) {
+        const { currentUserId, isAdmin } = getMediaAuthUser(req);
+        if (item.userId && item.userId !== currentUserId && !isAdmin) {
+          return res.status(403).json({ error: "غير مصرح لك بتعديل ترجمات هذا الملف" });
+        }
+
+        if (!item.subtitles) {
+          item.subtitles = [];
+        }
+
+        const existingTrackIndex = trackId
+          ? item.subtitles.findIndex((t) => t.id === trackId)
+          : -1;
+
+        if (existingTrackIndex !== -1) {
+          const existing = item.subtitles[existingTrackIndex];
+          existing.cues = cleanCues;
+          if (label?.trim()) existing.label = label.trim();
+          if (language) existing.language = language;
+          saveMediaMeta(list);
+          return res.json({
+            success: true,
+            message: "تم تحديث مسار الترجمة وحفظ التغييرات بنجاح!",
+            track: existing,
+            file: item
+          });
+        }
+
+        const shouldBePrimary = asPrimary === true || source === "transcribe" || Boolean(label && label.includes("_TRN_"));
+        if (shouldBePrimary) {
+          const oldPrimary = item.primaryTrackId;
+          item.primaryTrackId = newTrack.id;
+          if (oldPrimary && oldPrimary !== newTrack.id) {
+            item.secondaryTrackId = oldPrimary;
+            item.showDualSubtitles = true;
+          }
+        } else if (!item.primaryTrackId) {
+          item.primaryTrackId = newTrack.id;
+        } else if (!item.secondaryTrackId && item.subtitles.length >= 1) {
+          item.secondaryTrackId = newTrack.id;
+          item.showDualSubtitles = true;
+        }
+
+        item.subtitles.push(newTrack);
+        saveMediaMeta(list);
+
+        return res.json({
+          success: true,
+          message: "تم حفظ ملف الترجمة بنجاح!",
+          track: newTrack,
+          file: item
+        });
+      }
+
+      if (bookUpdated) {
+        return res.json({
+          success: true,
+          message: "تم حفظ الترجمة وأرشفتها في الكتاب الرقمي بنجاح!",
+          track: newTrack,
+          file: {
+            id: rawId,
+            subtitles: [newTrack],
+            primaryTrackId: newTrack.id
+          }
+        });
+      }
+
+      // If not in media_files.json and not in books.json, still return the created track so client continues
+      return res.json({
         success: true,
-        message: "تم حفظ ملف الترجمة بنجاح!",
+        message: "تم حفظ وتجهيز مسار الترجمة بنجاح",
         track: newTrack,
-        file: item
+        file: {
+          id: rawId,
+          subtitles: [newTrack],
+          primaryTrackId: newTrack.id
+        }
       });
     } catch (e: any) {
       console.error("Save subtitles error:", e);
@@ -2033,7 +2174,6 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
   // 📚 INTERACTIVE BOOKS STORAGE & BACKGROUND JOB PIPELINE (Isolated like Media Player)
   // ==========================================
   const BOOKS_TEMP_DIR = path.join(process.cwd(), "uploads", "temp_books");
-  const BOOKS_META_PATH = path.join(process.cwd(), "books.json");
 
   // Ensure directories exist outside of public/ and src/ (isolated from Vite watcher)
   if (!fs.existsSync(BOOKS_DIR)) {

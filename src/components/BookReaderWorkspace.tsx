@@ -41,11 +41,15 @@ import {
 interface BookReaderWorkspaceProps {
   onPlayMediaInStudio?: (file: Partial<MediaFile>) => void;
   onBackToMediaExplorer?: () => void;
+  initialBookId?: string | null;
+  initialPageIndex?: number;
 }
 
 export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   onPlayMediaInStudio,
-  onBackToMediaExplorer
+  onBackToMediaExplorer,
+  initialBookId,
+  initialPageIndex
 }) => {
   // Books list loaded from server / local storage
   const [books, setBooks] = useState<InteractiveBook[]>([]);
@@ -53,6 +57,10 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   const [selectedBook, setSelectedBook] = useState<InteractiveBook | null>(null);
   const [currentPageIndex, setCurrentPageIndex] = useState<number>(0);
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
+
+  // Page Jump & Search state
+  const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
+  const [pageSearchInput, setPageSearchInput] = useState<string>("");
 
   // Hidden upload inputs and upload state
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -82,10 +90,78 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     try {
       const serverBooks = await fetchBooksFromServer();
       setBooks(serverBooks);
+      if (initialBookId) {
+        const found = serverBooks.find((b) => b.id === initialBookId);
+        if (found) {
+          setSelectedBook(found);
+          if (typeof initialPageIndex === "number" && initialPageIndex >= 0 && initialPageIndex < found.pages.length) {
+            setCurrentPageIndex(initialPageIndex);
+          }
+        }
+      }
     } catch (e) {
       console.error("Error loading books:", e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Sync when initialBookId or initialPageIndex change from props
+  useEffect(() => {
+    if (initialBookId && books.length > 0) {
+      const found = books.find((b) => b.id === initialBookId);
+      if (found) {
+        setSelectedBook(found);
+        if (typeof initialPageIndex === "number" && initialPageIndex >= 0 && initialPageIndex < found.pages.length) {
+          setCurrentPageIndex(initialPageIndex);
+        }
+      }
+    }
+  }, [initialBookId, initialPageIndex, books]);
+
+  // Jump to specific page by number or label
+  const handleJumpToPage = (query: string) => {
+    if (!selectedBook || !query.trim()) return;
+    const clean = query.trim().toLowerCase();
+    const num = parseInt(clean, 10);
+
+    // 1. Try finding by pageNumber
+    if (!isNaN(num)) {
+      const idxByNum = selectedBook.pages.findIndex((p) => p.pageNumber === num);
+      if (idxByNum !== -1) {
+        setCurrentPageIndex(idxByNum);
+        setIsSearchOpen(false);
+        setPageSearchInput("");
+        return;
+      }
+      // Or 1-based index
+      if (num >= 1 && num <= selectedBook.pages.length) {
+        setCurrentPageIndex(num - 1);
+        setIsSearchOpen(false);
+        setPageSearchInput("");
+        return;
+      }
+    }
+
+    // 2. Try finding by displayLabel
+    const idxByLabel = selectedBook.pages.findIndex(
+      (p) => p.displayLabel && p.displayLabel.toLowerCase() === clean
+    );
+    if (idxByLabel !== -1) {
+      setCurrentPageIndex(idxByLabel);
+      setIsSearchOpen(false);
+      setPageSearchInput("");
+      return;
+    }
+
+    // 3. Try partial match on label
+    const idxByPartial = selectedBook.pages.findIndex(
+      (p) => p.displayLabel && p.displayLabel.toLowerCase().includes(clean)
+    );
+    if (idxByPartial !== -1) {
+      setCurrentPageIndex(idxByPartial);
+      setIsSearchOpen(false);
+      setPageSearchInput("");
     }
   };
 
@@ -285,7 +361,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
 
   // Play media directly in studio player (مشغل الوسائط)
   const handlePlayTrack = (media: BookPageMedia) => {
-    if (onPlayMediaInStudio) {
+    if (onPlayMediaInStudio && selectedBook) {
       onPlayMediaInStudio({
         id: `book-media-${media.id}`,
         title: media.title,
@@ -295,7 +371,15 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
         filename: media.fileName,
         mimeType: media.type === "video" ? "video/mp4" : "audio/mpeg",
         size: 1024 * 1024 * 2,
-        uploadedAt: new Date().toISOString()
+        uploadedAt: new Date().toISOString(),
+        subtitles: media.subtitles || [],
+        bookContext: {
+          bookId: selectedBook.id,
+          bookTitle: selectedBook.title,
+          pageIndex: currentPageIndex,
+          pageNumber: activePage?.pageNumber || currentPageIndex + 1,
+          displayLabel: activePage?.displayLabel
+        }
       });
     }
   };
@@ -317,95 +401,139 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   // =========================================================================
   if (selectedBook) {
     return (
-      <div className="w-full h-full bg-white text-slate-900 flex flex-col font-sans select-none overflow-y-auto" dir="ltr">
-        {/* Top Header: Back Arrow + "Book" on left, Search on right */}
-        <div className="h-14 px-4 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setSelectedBook(null)}
-              className="p-1 text-slate-900 hover:text-slate-600 cursor-pointer transition-colors"
-              title="Back"
-            >
-              <ArrowLeft className="w-6 h-6 stroke-[2.2]" />
-            </button>
-            <span className="text-xl font-bold tracking-tight text-slate-900">Book</span>
-          </div>
-
-          <button className="p-1 text-slate-900 hover:text-slate-600 cursor-pointer transition-colors">
-            <Search className="w-5 h-5 stroke-[2.2]" />
-          </button>
-        </div>
-
-        {/* Centered Book Subtitle */}
-        <div className="text-center text-sm font-medium text-slate-900 py-1 px-4">
-          {selectedBook.title}
-        </div>
-
-        {/* 3-Page Carousel Display */}
-        <div className="relative w-full flex items-center justify-center overflow-hidden py-3 px-2 sm:px-6">
-          <div className="flex items-center justify-center gap-4 sm:gap-8 max-w-4xl w-full">
-            {/* Left Page (Previous) */}
-            <div
-              onClick={handlePrevPage}
-              className={`w-1/4 sm:w-1/3 aspect-[3/4] max-h-[290px] rounded-sm overflow-hidden shadow-md border border-slate-200 transition-all cursor-pointer ${
-                prevPage ? "opacity-90 hover:opacity-100" : "opacity-0 pointer-events-none"
-              }`}
-            >
-              {prevPage?.pageImage ? (
-                <img
-                  src={prevPage.pageImage}
-                  alt={`Page ${prevPage.pageNumber}`}
-                  className="w-full h-full object-contain bg-white"
-                />
-              ) : (
-                <div className="w-full h-full bg-white border border-dashed border-slate-300" />
-              )}
+      <div className="w-full h-full bg-white text-slate-900 flex flex-col font-sans select-none overflow-hidden" dir="ltr">
+        {/* Top Pinned Section: Header + Search + 3-Page Carousel + Page Indicator */}
+        <div className="shrink-0 bg-white border-b border-slate-200 shadow-2xs z-10 flex flex-col">
+          {/* Top Header: Back Arrow + "Book" on left, Search on right */}
+          <div className="h-14 px-4 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setSelectedBook(null)}
+                className="p-1 text-slate-900 hover:text-slate-600 cursor-pointer transition-colors"
+                title="Back"
+              >
+                <ArrowLeft className="w-6 h-6 stroke-[2.2]" />
+              </button>
+              <span className="text-xl font-bold tracking-tight text-slate-900">Book</span>
             </div>
 
-            {/* Center Active Page */}
-            <div className="w-1/2 sm:w-2/5 aspect-[3/4] max-h-[360px] rounded-sm overflow-hidden shadow-xl border border-slate-200 bg-white z-10 transition-transform">
-              {activePage?.pageImage ? (
-                <img
-                  src={activePage.pageImage}
-                  alt={`Page ${activePage.pageNumber}`}
-                  className="w-full h-full object-contain bg-white"
-                />
-              ) : (
-                <div className="w-full h-full bg-white flex items-center justify-center text-slate-400 text-xs">
-                  Page {activePage?.pageNumber || currentPageIndex + 1}
+            {/* Search Box / Page Jump */}
+            <div className="flex items-center gap-2">
+              {isSearchOpen ? (
+                <div className="flex items-center gap-1.5 bg-slate-100 border border-slate-300 rounded-xl px-2.5 py-1 animate-scaleUp">
+                  <Search className="w-4 h-4 text-slate-500 shrink-0" />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="رقم الصفحة..."
+                    value={pageSearchInput}
+                    onChange={(e) => setPageSearchInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleJumpToPage(pageSearchInput);
+                      if (e.key === "Escape") setIsSearchOpen(false);
+                    }}
+                    className="w-24 sm:w-32 bg-transparent text-xs font-bold text-slate-800 placeholder-slate-400 outline-none"
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => handleJumpToPage(pageSearchInput)}
+                    className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold cursor-pointer transition-colors"
+                  >
+                    انتقال
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsSearchOpen(false);
+                      setPageSearchInput("");
+                    }}
+                    className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-              )}
-            </div>
-
-            {/* Right Page (Next) */}
-            <div
-              onClick={handleNextPage}
-              className={`w-1/4 sm:w-1/3 aspect-[3/4] max-h-[290px] rounded-sm overflow-hidden shadow-md border border-slate-200 transition-all cursor-pointer ${
-                nextPage ? "opacity-90 hover:opacity-100" : "opacity-0 pointer-events-none"
-              }`}
-            >
-              {nextPage?.pageImage ? (
-                <img
-                  src={nextPage.pageImage}
-                  alt={`Page ${nextPage.pageNumber}`}
-                  className="w-full h-full object-contain bg-white"
-                />
               ) : (
-                <div className="w-full h-full bg-white border border-dashed border-slate-300" />
+                <button
+                  onClick={() => setIsSearchOpen(true)}
+                  className="p-1.5 text-slate-900 hover:text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors"
+                  title="البحث أو الانتقال لرقم صفحة"
+                >
+                  <Search className="w-5 h-5 stroke-[2.2]" />
+                </button>
               )}
             </div>
           </div>
+
+          {/* Centered Book Subtitle */}
+          <div className="text-center text-sm font-medium text-slate-900 py-1 px-4 truncate">
+            {selectedBook.title}
+          </div>
+
+          {/* 3-Page Carousel Display */}
+          <div className="relative w-full flex items-center justify-center overflow-hidden py-2 sm:py-3 px-2 sm:px-6">
+            <div className="flex items-center justify-center gap-4 sm:gap-8 max-w-4xl w-full">
+              {/* Left Page (Previous) */}
+              <div
+                onClick={handlePrevPage}
+                className={`w-1/4 sm:w-1/3 aspect-[3/4] max-h-[200px] sm:max-h-[270px] rounded-sm overflow-hidden shadow-md border border-slate-200 transition-all cursor-pointer ${
+                  prevPage ? "opacity-90 hover:opacity-100" : "opacity-0 pointer-events-none"
+                }`}
+              >
+                {prevPage?.pageImage ? (
+                  <img
+                    src={prevPage.pageImage}
+                    alt={`Page ${prevPage.pageNumber}`}
+                    className="w-full h-full object-contain bg-white"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-white border border-dashed border-slate-300" />
+                )}
+              </div>
+
+              {/* Center Active Page */}
+              <div className="w-1/2 sm:w-2/5 aspect-[3/4] max-h-[240px] sm:max-h-[320px] rounded-sm overflow-hidden shadow-xl border border-slate-200 bg-white z-10 transition-transform">
+                {activePage?.pageImage ? (
+                  <img
+                    src={activePage.pageImage}
+                    alt={`Page ${activePage.pageNumber}`}
+                    className="w-full h-full object-contain bg-white"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-white flex items-center justify-center text-slate-400 text-xs">
+                    Page {activePage?.pageNumber || currentPageIndex + 1}
+                  </div>
+                )}
+              </div>
+
+              {/* Right Page (Next) */}
+              <div
+                onClick={handleNextPage}
+                className={`w-1/4 sm:w-1/3 aspect-[3/4] max-h-[200px] sm:max-h-[270px] rounded-sm overflow-hidden shadow-md border border-slate-200 transition-all cursor-pointer ${
+                  nextPage ? "opacity-90 hover:opacity-100" : "opacity-0 pointer-events-none"
+                }`}
+              >
+                {nextPage?.pageImage ? (
+                  <img
+                    src={nextPage.pageImage}
+                    alt={`Page ${nextPage.pageNumber}`}
+                    className="w-full h-full object-contain bg-white"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-white border border-dashed border-slate-300" />
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Page Number indicator centered below carousel */}
+          <div className="text-center text-xs sm:text-sm font-semibold text-slate-500 py-1 pb-2">
+            Page {activePage?.displayLabel || activePage?.pageNumber || currentPageIndex + 1}
+          </div>
         </div>
 
-        {/* Page Number indicator centered below carousel */}
-        <div className="text-center text-sm font-normal text-slate-400 py-1">
-          {activePage?.displayLabel || activePage?.pageNumber || currentPageIndex + 1}
-        </div>
-
-        {/* Tracks List (Exactly matching image_100aa631.png) */}
-        <div className="flex-1 w-full border-t border-slate-200 divide-y divide-slate-200 bg-white">
+        {/* Tracks List (Only this section scrolls when many audio tracks exist!) */}
+        <div className="flex-1 w-full overflow-y-auto divide-y divide-slate-100 bg-white min-h-0">
           {pageTracks.length === 0 ? (
-            <div className="py-8 text-center text-slate-400 text-sm">
+            <div className="py-12 text-center text-slate-400 text-sm">
               No tracks for this page
             </div>
           ) : (

@@ -374,9 +374,25 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
       setProgressPercent(15);
 
       try {
-        const streamUrl = `/api/media/download/${currentFile.id}`;
-        const response = await fetch(streamUrl);
-        if (!response.ok) {
+        let response: Response | null = null;
+        const candidateUrls = [
+          `/api/media/download/${encodeURIComponent(currentFile.id)}`,
+          currentFile.url,
+          currentFile.filename ? `/api/media/stream/${encodeURIComponent(currentFile.filename)}` : null,
+          currentFile.originalName ? `/api/media/stream/${encodeURIComponent(currentFile.originalName)}` : null
+        ].filter(Boolean) as string[];
+
+        for (const candidate of candidateUrls) {
+          try {
+            const res = await fetch(candidate);
+            if (res.ok) {
+              response = res;
+              break;
+            }
+          } catch {}
+        }
+
+        if (!response || !response.ok) {
           throw new Error("تعذر جلب ملف المقطع لتمريره للسيرفر المحلي.");
         }
         targetFileBlob = await response.blob();
