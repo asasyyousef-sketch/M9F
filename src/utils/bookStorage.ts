@@ -314,6 +314,65 @@ async function uploadFilesToServerDisk(
 }
 
 /**
+ * Direct High-Speed Single-Stream Upload to Server Disk (/api/books/upload)
+ * Zero browser memory allocation, instant native Linux unzipping on server hard drive.
+ */
+export function uploadBookDirectToServer(
+  file: File,
+  title?: string,
+  onProgress?: (percent: number, statusText?: string) => void
+): Promise<InteractiveBook> {
+  return new Promise((resolve, reject) => {
+    if (onProgress) onProgress(5, "جاري رفع حزمة الكتاب إلى السيرفر مباشرة...");
+
+    const xhr = new XMLHttpRequest();
+    const formData = new FormData();
+    formData.append("file", file);
+    if (title && title.trim()) {
+      formData.append("title", title.trim());
+    }
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) {
+        const percent = Math.round((event.loaded / event.total) * 88);
+        onProgress(Math.max(5, percent), `جاري نقل الملف إلى القرص الصلب: ${percent}%`);
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const res = JSON.parse(xhr.responseText);
+          if (res.success && res.book) {
+            if (onProgress) onProgress(100, "تم استخراج وفهرسة الكتاب وحفظه على القرص الصلب بنجاح!");
+            saveBookToDB(res.book);
+            resolve(res.book);
+          } else {
+            reject(new Error(res.error || "فشل معالجة وحفظ الكتاب في السيرفر"));
+          }
+        } catch (e) {
+          reject(new Error("رد غير صالح من سيرفر الكتب"));
+        }
+      } else {
+        let errMsg = `فشل رفع واستخراج الكتاب (رمز السيرفر: ${xhr.status})`;
+        try {
+          const parsed = JSON.parse(xhr.responseText);
+          if (parsed.error) errMsg = parsed.error;
+        } catch (e) {}
+        reject(new Error(errMsg));
+      }
+    };
+
+    xhr.onerror = () => {
+      reject(new Error("حدث انقطاع في الاتصال بالسيرفر أثناء رفع الكتاب"));
+    };
+
+    xhr.open("POST", "/api/books/upload", true);
+    xhr.send(formData);
+  });
+}
+
+/**
  * 1. Upload & Extract ZIP archive into the server's hard drive
  */
 export async function uploadBookToServer(
@@ -321,22 +380,29 @@ export async function uploadBookToServer(
   _title?: string,
   onProgress?: (percent: number, statusText?: string) => void
 ): Promise<InteractiveBook> {
-  if (onProgress) onProgress(5, "جاري قراءة حزمة الـ ZIP بسرعة فائقة...");
-  const zip = await JSZip.loadAsync(file);
-  const rawFiles: RawFileEntry[] = [];
+  // Try direct single-request upload first (fastest, uses zero RAM)
+  try {
+    return await uploadBookDirectToServer(file, _title, onProgress);
+  } catch (directErr: any) {
+    console.warn("[Books] Direct upload failed, falling back to batch file extraction:", directErr?.message);
+    if (onProgress) onProgress(10, "جاري استخدام مسار الاستخراج البديل...");
 
-  const entries = Object.keys(zip.files);
-  for (const rel of entries) {
-    const entry = zip.files[rel];
-    if (entry.dir || rel.includes("__MACOSX") || rel.includes(".DS_Store")) continue;
-    rawFiles.push({
-      name: rel,
-      getBlob: () => entry.async("blob")
-    });
+    const zip = await JSZip.loadAsync(file);
+    const rawFiles: RawFileEntry[] = [];
+
+    const entries = Object.keys(zip.files);
+    for (const rel of entries) {
+      const entry = zip.files[rel];
+      if (entry.dir || rel.includes("__MACOSX") || rel.includes(".DS_Store")) continue;
+      rawFiles.push({
+        name: rel,
+        getBlob: () => entry.async("blob")
+      });
+    }
+
+    const defaultTitle = file.name.replace(/\.zip$/i, "").replace(/[_-]/g, " ");
+    return uploadFilesToServerDisk(rawFiles, defaultTitle, onProgress);
   }
-
-  const defaultTitle = file.name.replace(/\.zip$/i, "").replace(/[_-]/g, " ");
-  return uploadFilesToServerDisk(rawFiles, defaultTitle, onProgress);
 }
 
 /**
