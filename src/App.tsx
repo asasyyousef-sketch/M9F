@@ -120,7 +120,8 @@ function MainStudyApp() {
   // YouTube transcripts (spT) state
   const [transcripts, setTranscripts] = useState<TranscriptDocument[]>(() => {
     try {
-      const cached = localStorage.getItem("cached_transcripts");
+      const uId = currentUser?.id;
+      const cached = uId ? localStorage.getItem(`cached_transcripts_${uId}`) : null;
       return cached ? JSON.parse(cached) : [];
     } catch {
       return [];
@@ -130,10 +131,11 @@ function MainStudyApp() {
   // Selected transcript Lego piece when navigating to AI Workspace
   const [initialSelectedTranscriptId, setInitialSelectedTranscriptId] = useState<string | null>(null);
 
-  // Recycle Bin / Trash states
+  // Recycle Bin / Trash states (Strictly scoped per user to prevent cross-account leakage)
   const [trashFolders, setTrashFolders] = useState<Folder[]>(() => {
     try {
-      const saved = localStorage.getItem("trash_folders");
+      const uId = currentUser?.id;
+      const saved = uId ? localStorage.getItem(`trash_folders_${uId}`) : null;
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -142,7 +144,8 @@ function MainStudyApp() {
 
   const [trashCards, setTrashCards] = useState<Flashcard[]>(() => {
     try {
-      const saved = localStorage.getItem("trash_cards");
+      const uId = currentUser?.id;
+      const saved = uId ? localStorage.getItem(`trash_cards_${uId}`) : null;
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -151,7 +154,8 @@ function MainStudyApp() {
 
   const [trashAiFolders, setTrashAiFolders] = useState<AIFolder[]>(() => {
     try {
-      const saved = localStorage.getItem("trash_ai_folders");
+      const uId = currentUser?.id;
+      const saved = uId ? localStorage.getItem(`trash_ai_folders_${uId}`) : null;
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -160,29 +164,38 @@ function MainStudyApp() {
 
   const [trashAiCards, setTrashAiCards] = useState<AICard[]>(() => {
     try {
-      const saved = localStorage.getItem("trash_ai_cards");
+      const uId = currentUser?.id;
+      const saved = uId ? localStorage.getItem(`trash_ai_cards_${uId}`) : null;
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
     }
   });
 
-  // Sync Trash states to localStorage
+  // Sync Trash states to localStorage with user scoping
   useEffect(() => {
-    localStorage.setItem("trash_folders", JSON.stringify(trashFolders));
-  }, [trashFolders]);
+    if (currentUser?.id) {
+      localStorage.setItem(`trash_folders_${currentUser.id}`, JSON.stringify(trashFolders));
+    }
+  }, [trashFolders, currentUser?.id]);
 
   useEffect(() => {
-    localStorage.setItem("trash_cards", JSON.stringify(trashCards));
-  }, [trashCards]);
+    if (currentUser?.id) {
+      localStorage.setItem(`trash_cards_${currentUser.id}`, JSON.stringify(trashCards));
+    }
+  }, [trashCards, currentUser?.id]);
 
   useEffect(() => {
-    localStorage.setItem("trash_ai_folders", JSON.stringify(trashAiFolders));
-  }, [trashAiFolders]);
+    if (currentUser?.id) {
+      localStorage.setItem(`trash_ai_folders_${currentUser.id}`, JSON.stringify(trashAiFolders));
+    }
+  }, [trashAiFolders, currentUser?.id]);
 
   useEffect(() => {
-    localStorage.setItem("trash_ai_cards", JSON.stringify(trashAiCards));
-  }, [trashAiCards]);
+    if (currentUser?.id) {
+      localStorage.setItem(`trash_ai_cards_${currentUser.id}`, JSON.stringify(trashAiCards));
+    }
+  }, [trashAiCards, currentUser?.id]);
 
   // AI Refinement of an existing library folder
   const [aiRefineFolderId, setAiRefineFolderId] = useState<string | null>(null);
@@ -250,6 +263,10 @@ function MainStudyApp() {
       setFolders([]);
       setCards([]);
       setTranscripts([]);
+      setTrashFolders([]);
+      setTrashCards([]);
+      setTrashAiFolders([]);
+      setTrashAiCards([]);
       setActiveFolderId("");
       setHasFetched(false);
       return;
@@ -267,6 +284,15 @@ function MainStudyApp() {
       const savedFolder = localStorage.getItem(`active_folder_id_${currentUser.id}`);
       if (savedFolder) setActiveFolderId(savedFolder);
       else setActiveFolderId("");
+
+      const uTF = localStorage.getItem(`trash_folders_${currentUser.id}`);
+      setTrashFolders(uTF ? JSON.parse(uTF) : []);
+      const uTC = localStorage.getItem(`trash_cards_${currentUser.id}`);
+      setTrashCards(uTC ? JSON.parse(uTC) : []);
+      const uTAF = localStorage.getItem(`trash_ai_folders_${currentUser.id}`);
+      setTrashAiFolders(uTAF ? JSON.parse(uTAF) : []);
+      const uTAC = localStorage.getItem(`trash_ai_cards_${currentUser.id}`);
+      setTrashAiCards(uTAC ? JSON.parse(uTAC) : []);
     } catch (e) {}
 
     authFetch("/api/data")
@@ -1023,12 +1049,14 @@ function MainStudyApp() {
     setFolders(newFolders);
     setCards(newCards);
     try {
-      localStorage.setItem("cached_folders", JSON.stringify(newFolders));
-      localStorage.setItem("cached_cards", JSON.stringify(newCards));
+      if (currentUser?.id) {
+        localStorage.setItem(`cached_folders_${currentUser.id}`, JSON.stringify(newFolders));
+        localStorage.setItem(`cached_cards_${currentUser.id}`, JSON.stringify(newCards));
+      }
     } catch (e) {
       console.error(e);
     }
-  }, []);
+  }, [currentUser?.id]);
 
   const handleAiBackToLibrary = useCallback(() => {
     setAiRefineFolderId(null);

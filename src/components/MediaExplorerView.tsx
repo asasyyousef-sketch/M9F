@@ -94,15 +94,23 @@ const mediaMetadataCache: Record<string, { duration: number; width?: number; hei
 // Helper to resolve media stream URL for inspector and thumbnails
 export function resolveMediaFileUrl(file: MediaFile | null | undefined): string {
   if (!file) return "";
-  if (file.url && file.url.startsWith("blob:")) return file.url;
-  // Local server storage has absolute priority - external requests eliminated completely
+  if (file.url && (
+    file.url.startsWith("blob:") ||
+    file.url.startsWith("/uploads/") ||
+    file.url.startsWith("http://") ||
+    file.url.startsWith("https://") ||
+    file.url.startsWith("data:") ||
+    file.url.startsWith("/api/media/stream/")
+  )) {
+    return file.url;
+  }
+  if (file.url && file.url.trim() !== "") {
+    return file.url;
+  }
   if (file.filename) {
     return `/api/media/stream/${encodeURIComponent(file.filename)}`;
   }
-  if (file.url && file.url.startsWith("/api/media/stream/")) {
-    return file.url;
-  }
-  return file.url || "";
+  return "";
 }
 
 export const MediaExplorerView: React.FC<MediaExplorerViewProps> = ({

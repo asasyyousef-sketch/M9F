@@ -3,17 +3,19 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import crypto from "crypto";
-import { spawn } from "child_process";
+import { spawn, execSync, execFile } from "child_process";
+import { promisify } from "util";
+const execFileAsync = promisify(execFile);
 import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from "url";
 import multer from "multer";
 import { pipeline } from "stream";
+import JSZip from "jszip";
 import { initialFolders, initialCards } from "./src/data/seed";
 import { getSupabase, SUPABASE_SQL_SCHEMA } from "./src/supabaseClient";
 import { formatSubtitleTrackProtocol } from "./src/utils/subtitleNaming";
 import { GoogleGenAI, Type } from "@google/genai";
 import { authMiddleware, registerAuthRoutes, loadUsers, syncUsersWithSupabase } from "./serverAuth";
-import { registerServerBookRoutes } from "./serverBooks";
 
 // ─── Crash & Unhandled Rejection Immunity ───────────────────────────────────────
 // Prevents server crashes from remote sockets (e.g. Gradio / Python / Whisper server disconnecting mid-stream)
@@ -236,7 +238,7 @@ async function startServer() {
   // Enable CORS middleware for absolute localhost:3000 calls from custom frontend ports
   app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    res.header("Access-Control-Allow-Headers", "*");
     res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     if (req.method === "OPTIONS") {
       return res.sendStatus(200);
@@ -265,9 +267,6 @@ async function startServer() {
       console.error("Failed to link existing data to primary admin:", e);
     }
   });
-
-  // Mount Interactive Books server routes & persistence
-  registerServerBookRoutes(app);
 
   // Migrate old db.json if it exists
   if (!fs.existsSync(DB_PATH) && fs.existsSync(OLD_DB_PATH)) {
@@ -315,11 +314,17 @@ async function startServer() {
   // 🎬 MEDIA PLAYER STORAGE & API ROUTES (Audio & Video)
   // ==========================================
   const MEDIA_DIR = path.join(process.cwd(), "uploads", "media");
+  const BOOKS_DIR = path.join(process.cwd(), "uploads", "books");
   const MEDIA_META_PATH = path.join(process.cwd(), "media_files.json");
   const MEDIA_FOLDERS_PATH = path.join(process.cwd(), "media_folders.json");
 
   if (!fs.existsSync(MEDIA_DIR)) {
     fs.mkdirSync(MEDIA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(BOOKS_DIR)) {
+    try {
+      fs.mkdirSync(BOOKS_DIR, { recursive: true });
+    } catch (e) {}
   }
 
   interface ServerSubtitleCue {
@@ -344,6 +349,7 @@ async function startServer() {
     color?: string;
     createdAt: string;
     parentId?: string | null;
+    userId?: string;
   }
 
   interface ServerMediaFoldersData {
@@ -400,6 +406,7 @@ async function startServer() {
     secondaryTrackId?: string;
     showDualSubtitles?: boolean;
     folderId?: string;
+    userId?: string;
   }
 
   function loadMediaMeta(): ServerMediaFile[] {
@@ -410,15 +417,24 @@ async function startServer() {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed)) {
             let dirty = false;
-            // Every media item MUST physically exist in MEDIA_DIR on local disk
+            const seenIds = new Set<string>();
+            const seenFilenames = new Set<string>();
+
+            // Every media item MUST physically exist in MEDIA_DIR on local disk and have unique id & filename
             const valid = parsed.filter((item: ServerMediaFile) => {
               if (!item || !item.filename) return false;
+              if (seenIds.has(item.id) || seenFilenames.has(item.filename)) {
+                dirty = true;
+                return false;
+              }
               const filePath = path.join(MEDIA_DIR, item.filename);
               const exists = fs.existsSync(filePath);
               if (!exists) {
                 dirty = true;
                 return false;
               }
+              seenIds.add(item.id);
+              seenFilenames.add(item.filename);
               // Ensure its url points to local stream, cancelling external streaming
               if (!item.url || item.url.startsWith("http://") || item.url.startsWith("https://")) {
                 item.url = `/api/media/stream/${encodeURIComponent(item.filename)}`;
@@ -475,21 +491,45 @@ async function startServer() {
     }
   }));
 
-  // 1. Get all media files
+  // Helper to extract authenticated user for media & folder operations
+  function getMediaAuthUser(req: any) {
+    const currentUser = (req as any).user;
+    const currentUserId: string | null = currentUser ? (currentUser.userId || currentUser.id) : null;
+    const users = loadUsers(DB_PATH);
+    const isAdmin = currentUser ? currentUser.role === "admin" : (users.length === 0);
+    return { currentUserId, isAdmin, currentUser };
+  }
+
+  // 1. Get media files for authenticated user (Strict per-user isolation)
   app.get("/api/media/files", (req, res) => {
     try {
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
       const list = loadMediaMeta();
+
+      // Return only files belonging to current user (or unassigned files if admin)
+      const userFiles = list.filter((f) => {
+        if (!currentUserId) return false;
+        if (f.userId === currentUserId) return true;
+        if (!f.userId && isAdmin) return true;
+        return false;
+      });
+
       // Sort newest first
-      list.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
-      res.json({ files: list });
+      userFiles.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+      res.json({ files: userFiles });
     } catch (e: any) {
       res.status(500).json({ error: e.message || "Failed to load media files" });
     }
   });
 
-  // 2. Upload media files (supports single or multiple)
+  // 2. Upload media files (Assigned strictly to current authenticated user)
   app.post("/api/media/upload", mediaUpload.array("files", 10), (req, res) => {
     try {
+      const { currentUserId } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لرفع الملفات إلى حسابك" });
+      }
+
       const uploadedFiles = req.files as Express.Multer.File[];
       if (!uploadedFiles || uploadedFiles.length === 0) {
         return res.status(400).json({ error: "لم يتم اختيار أي ملفات للرفع" });
@@ -518,7 +558,8 @@ async function startServer() {
           mimeType: file.mimetype || (isVideo ? "video/mp4" : "audio/mpeg"),
           type: mediaType,
           uploadedAt: new Date().toISOString(),
-          url: `/api/media/stream/${file.filename}`
+          url: `/api/media/stream/${file.filename}`,
+          userId: currentUserId
         };
 
         newItems.push(item);
@@ -538,19 +579,32 @@ async function startServer() {
     }
   });
 
-  // 3. Delete media file (Directly unlinks physical file from server directory immediately)
+  // 3. Delete media file (Ownership check + directly unlinks physical file permanently)
   app.delete("/api/media/files/:id", (req, res) => {
     try {
       const { id } = req.params;
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لحذف الملف" });
+      }
+
       const list = loadMediaMeta();
       const targetIndex = list.findIndex((m) => m.id === id || m.filename === id);
 
-      let removedFilename = id;
-      if (targetIndex !== -1) {
-        const [removed] = list.splice(targetIndex, 1);
-        removedFilename = removed.filename;
-        saveMediaMeta(list);
+      if (targetIndex === -1) {
+        return res.status(404).json({ error: "الملف غير موجود أو تم حذفه مسبقاً" });
       }
+
+      const targetFile = list[targetIndex];
+      // Ownership check: User can only delete their own files unless admin
+      if (targetFile.userId && targetFile.userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "غير مصرح لك بحذف ملف تابع لمستخدم آخر" });
+      }
+
+      list.splice(targetIndex, 1);
+      saveMediaMeta(list);
+
+      const removedFilename = targetFile.filename;
 
       // Directly remove physical files from MEDIA_DIR so files never pile up
       const filesToUnlink = new Set([
@@ -608,6 +662,11 @@ async function startServer() {
   app.post("/api/media/files/batch-delete", (req, res) => {
     try {
       const { fileIds } = req.body;
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لحذف الملفات" });
+      }
+
       if (!Array.isArray(fileIds) || fileIds.length === 0) {
         return res.status(400).json({ error: "قائمة معرفات الملفات مطلوبة" });
       }
@@ -619,7 +678,12 @@ async function startServer() {
 
       for (const item of list) {
         if (idsSet.has(item.id) || idsSet.has(item.filename)) {
-          removedFiles.push(item);
+          // Ownership check
+          if (!item.userId || item.userId === currentUserId || isAdmin) {
+            removedFiles.push(item);
+          } else {
+            remaining.push(item);
+          }
         } else {
           remaining.push(item);
         }
@@ -662,9 +726,13 @@ async function startServer() {
         const foldersData = loadMediaFoldersData();
         if (foldersData.fileFolderMap) {
           let dirty = false;
-          for (const fid of fileIds) {
-            if (foldersData.fileFolderMap[fid]) {
-              delete foldersData.fileFolderMap[fid];
+          for (const item of removedFiles) {
+            if (foldersData.fileFolderMap[item.id]) {
+              delete foldersData.fileFolderMap[item.id];
+              dirty = true;
+            }
+            if (foldersData.fileFolderMap[item.filename]) {
+              delete foldersData.fileFolderMap[item.filename];
               dirty = true;
             }
           }
@@ -676,7 +744,7 @@ async function startServer() {
 
       res.json({
         success: true,
-        message: `تم حذف ${removedFiles.length || fileIds.length} ملف نهائياً من السيرفر والقرص`,
+        message: `تم حذف ${removedFiles.length} ملف نهائياً من السيرفر والقرص`,
         deletedCount: removedFiles.length
       });
     } catch (e: any) {
@@ -689,6 +757,11 @@ async function startServer() {
     try {
       const { id } = req.params;
       const { title } = req.body;
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لتعديل اسم الملف" });
+      }
+
       if (!title || typeof title !== "string") {
         return res.status(400).json({ error: "عنوان الملف مطلوب" });
       }
@@ -697,6 +770,10 @@ async function startServer() {
       const item = list.find((m) => m.id === id || m.filename === id);
       if (!item) {
         return res.status(404).json({ error: "الملف غير موجود" });
+      }
+
+      if (item.userId && item.userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "غير مصرح لك بتعديل هذا الملف" });
       }
 
       item.title = title.trim();
@@ -708,16 +785,36 @@ async function startServer() {
   });
 
   // ==========================================
-  // 📂 MEDIA FOLDERS MANAGEMENT (Server-Side Persistent)
+  // 📂 MEDIA FOLDERS MANAGEMENT (Server-Side Persistent & User Isolated)
   // ==========================================
-  // 1. Get all folders and file-to-folder mapping
+  // 1. Get all folders and file-to-folder mapping for authenticated user
   app.get("/api/media/folders", (req, res) => {
     try {
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
       const data = loadMediaFoldersData();
+
+      const userFolders = data.folders.filter((f) => {
+        if (!currentUserId) return false;
+        if (f.userId === currentUserId) return true;
+        if (!f.userId && isAdmin) return true;
+        return false;
+      });
+
+      const allFiles = loadMediaMeta();
+      const userFileIds = new Set(allFiles.filter(f => f.userId === currentUserId || (!f.userId && isAdmin)).map(f => f.id));
+      const userFolderIds = new Set(userFolders.map(f => f.id));
+
+      const filteredMap: Record<string, string> = {};
+      Object.entries(data.fileFolderMap || {}).forEach(([fId, foldId]) => {
+        if (userFileIds.has(fId) && userFolderIds.has(foldId)) {
+          filteredMap[fId] = foldId;
+        }
+      });
+
       res.json({
         success: true,
-        folders: data.folders,
-        fileFolderMap: data.fileFolderMap
+        folders: userFolders,
+        fileFolderMap: filteredMap
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message || "فشل في جلب قائمة المجلدات" });
@@ -728,6 +825,11 @@ async function startServer() {
   app.post("/api/media/folders", (req, res) => {
     try {
       const { id, name, parentId, color } = req.body;
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لإنشاء مجلد" });
+      }
+
       if (!name || typeof name !== "string") {
         return res.status(400).json({ error: "اسم المجلد مطلوب" });
       }
@@ -741,17 +843,20 @@ async function startServer() {
         name: cleanName,
         parentId: parentId || null,
         color: color || "#3b82f6",
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        userId: currentUserId
       };
 
       data.folders.push(newFolder);
       saveMediaFoldersData(data);
 
+      const userFolders = data.folders.filter(f => f.userId === currentUserId || (!f.userId && isAdmin));
+
       res.json({
         success: true,
         message: `تم إنشاء مجلد "${cleanName}" بنجاح`,
         folder: newFolder,
-        folders: data.folders,
+        folders: userFolders,
         fileFolderMap: data.fileFolderMap
       });
     } catch (e: any) {
@@ -764,11 +869,19 @@ async function startServer() {
     try {
       const { id } = req.params;
       const { name, color, parentId } = req.body;
-      const data = loadMediaFoldersData();
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لتعديل المجلد" });
+      }
 
+      const data = loadMediaFoldersData();
       const folder = data.folders.find((f) => f.id === id);
       if (!folder) {
         return res.status(404).json({ error: "المجلد غير موجود" });
+      }
+
+      if (folder.userId && folder.userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "غير مصرح لك بتعديل هذا المجلد" });
       }
 
       if (name && typeof name === "string") folder.name = name.trim();
@@ -776,10 +889,12 @@ async function startServer() {
       if (parentId !== undefined) folder.parentId = parentId;
 
       saveMediaFoldersData(data);
+      const userFolders = data.folders.filter(f => f.userId === currentUserId || (!f.userId && isAdmin));
+
       res.json({
         success: true,
         folder,
-        folders: data.folders,
+        folders: userFolders,
         fileFolderMap: data.fileFolderMap
       });
     } catch (e: any) {
@@ -791,7 +906,20 @@ async function startServer() {
   app.delete("/api/media/folders/:id", (req, res) => {
     try {
       const { id } = req.params;
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لحذف المجلد" });
+      }
+
       const data = loadMediaFoldersData();
+      const targetFolder = data.folders.find((f) => f.id === id);
+      if (!targetFolder) {
+        return res.status(404).json({ error: "المجلد غير موجود" });
+      }
+
+      if (targetFolder.userId && targetFolder.userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "غير مصرح لك بحذف هذا المجلد" });
+      }
 
       // Recursive descendant helper
       const getDescendants = (targetId: string, all: ServerMediaFolder[]): string[] => {
@@ -810,11 +938,13 @@ async function startServer() {
       });
 
       saveMediaFoldersData(data);
+      const userFolders = data.folders.filter(f => f.userId === currentUserId || (!f.userId && isAdmin));
+
       res.json({
         success: true,
         message: "تم حذف المجلد وتفريغ الملفات للمجلد الرئيسي",
         deletedFolderIds: Array.from(idsToDelete),
-        folders: data.folders,
+        folders: userFolders,
         fileFolderMap: data.fileFolderMap
       });
     } catch (e: any) {
@@ -826,12 +956,21 @@ async function startServer() {
   app.post("/api/media/folders/move-files", (req, res) => {
     try {
       const { fileIds, targetFolderId } = req.body;
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لنقل الملفات" });
+      }
+
       if (!Array.isArray(fileIds) || fileIds.length === 0) {
         return res.status(400).json({ error: "قائمة الملفات مطلوبة" });
       }
 
+      const allFiles = loadMediaMeta();
+      const userFileIds = new Set(allFiles.filter(f => f.userId === currentUserId || (!f.userId && isAdmin)).map(f => f.id));
+
       const data = loadMediaFoldersData();
       for (const fileId of fileIds) {
+        if (!userFileIds.has(fileId)) continue;
         if (!targetFolderId || targetFolderId === "uncategorized") {
           delete data.fileFolderMap[fileId];
         } else {
@@ -840,11 +979,13 @@ async function startServer() {
       }
 
       saveMediaFoldersData(data);
+      const userFolders = data.folders.filter(f => f.userId === currentUserId || (!f.userId && isAdmin));
+
       res.json({
         success: true,
         message: `تم نقل ${fileIds.length} ملف بنجاح`,
         fileFolderMap: data.fileFolderMap,
-        folders: data.folders
+        folders: userFolders
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message || "فشل نقل الملفات" });
@@ -855,16 +996,31 @@ async function startServer() {
   app.post("/api/media/folders/sync", (req, res) => {
     try {
       const { folders, fileFolderMap } = req.body;
-      const data: ServerMediaFoldersData = {
-        folders: Array.isArray(folders) ? folders : [],
-        fileFolderMap: fileFolderMap && typeof fileFolderMap === "object" ? fileFolderMap : {}
-      };
-      saveMediaFoldersData(data);
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول" });
+      }
+
+      const existingData = loadMediaFoldersData();
+      const otherFolders = existingData.folders.filter(f => f.userId && f.userId !== currentUserId);
+
+      const incomingFolders: ServerMediaFolder[] = Array.isArray(folders)
+        ? folders.map((f: any) => ({ ...f, userId: currentUserId }))
+        : [];
+
+      const mergedFolders = [...otherFolders, ...incomingFolders];
+      const mergedMap = { ...existingData.fileFolderMap, ...(fileFolderMap || {}) };
+
+      saveMediaFoldersData({
+        folders: mergedFolders,
+        fileFolderMap: mergedMap
+      });
+
       res.json({
         success: true,
         message: "تمت مزامنة المجلدات على السيرفر بنجاح",
-        folders: data.folders,
-        fileFolderMap: data.fileFolderMap
+        folders: incomingFolders,
+        fileFolderMap: fileFolderMap || {}
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message || "فشل مزامنة المجلدات" });
@@ -875,6 +1031,11 @@ async function startServer() {
   app.post("/api/media/from-youtube", async (req, res) => {
     try {
       const { title, videoUrl, videoId, srtText, cues, duration, thumbnailUrl, formatId, author, description } = req.body;
+      const { currentUserId } = getMediaAuthUser(req);
+      if (!currentUserId) {
+        return res.status(401).json({ error: "يجب تسجيل الدخول لتنزيل وحفظ الفيديو" });
+      }
+
       if (!title && !videoId) {
         return res.status(400).json({ error: "بيانات الفيديو غير مكتملة" });
       }
@@ -1005,7 +1166,8 @@ async function startServer() {
         author: author || undefined,
         description: description || undefined,
         subtitles: cleanCues.length > 0 ? [subTrack] : [],
-        primaryTrackId: cleanCues.length > 0 ? subTrack.id : undefined
+        primaryTrackId: cleanCues.length > 0 ? subTrack.id : undefined,
+        userId: currentUserId
       };
 
       currentList.unshift(newItem);
@@ -1023,15 +1185,80 @@ async function startServer() {
   });
 
   // 5. Stream media file with HTTP Range support for instant seeking & scrubbing
-  app.get("/api/media/stream/:filename", async (req, res) => {
+  app.get("/api/media/stream/:filename(*)", async (req, res) => {
     try {
-      const filename = path.basename(req.params.filename);
-      const filePath = path.join(MEDIA_DIR, filename);
+      let rawParam = req.params.filename || (req.params as any)[0] || "";
+      try {
+        rawParam = decodeURIComponent(rawParam);
+      } catch (e) {}
+
+      const filename = path.basename(rawParam);
+      let filePath = path.join(MEDIA_DIR, filename);
 
       // Always set CORS headers for media streaming
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type, Accept");
+
+      // If file not found directly in MEDIA_DIR, check inside BOOKS_DIR
+      if (!fs.existsSync(filePath)) {
+        // 1. Check direct relative path inside BOOKS_DIR
+        const directBookPath = path.join(BOOKS_DIR, rawParam);
+        if (fs.existsSync(directBookPath) && fs.statSync(directBookPath).isFile()) {
+          filePath = directBookPath;
+        } else {
+          // 2. Search recursively inside BOOKS_DIR for this filename
+          const findInDir = (dir: string): string | null => {
+            if (!fs.existsSync(dir)) return null;
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const ent of entries) {
+              const full = path.join(dir, ent.name);
+              if (ent.isDirectory()) {
+                const sub = findInDir(full);
+                if (sub) return sub;
+              } else {
+                const entNameLower = ent.name.toLowerCase();
+                const targetLower = filename.toLowerCase();
+                if (
+                  entNameLower === targetLower ||
+                  entNameLower.replace(/[^a-z0-9]/g, "") === targetLower.replace(/[^a-z0-9]/g, "")
+                ) {
+                  return full;
+                }
+              }
+            }
+            return null;
+          };
+
+          const foundInBook = findInDir(BOOKS_DIR);
+          if (foundInBook) {
+            filePath = foundInBook;
+          }
+        }
+      }
+
+      // 3. Fallback: check books.json metadata mapping
+      if (!fs.existsSync(filePath)) {
+        try {
+          const books = loadBooksJson();
+          for (const b of books) {
+            if (Array.isArray(b.allMedia)) {
+              const matched = b.allMedia.find((m: any) =>
+                m.fileName === filename ||
+                m.fileName === rawParam ||
+                (m.fileName && m.fileName.toLowerCase() === filename.toLowerCase())
+              );
+              if (matched && matched.url && matched.url.startsWith("/uploads/")) {
+                const localOnDisk = path.join(process.cwd(), matched.url.replace(/^\/+/, ""));
+                if (fs.existsSync(localOnDisk) && fs.statSync(localOnDisk).isFile()) {
+                  filePath = localOnDisk;
+                  break;
+                }
+              }
+            }
+          }
+        } catch (e) {}
+      }
 
       if (!fs.existsSync(filePath)) {
         // Check if this is an external/YouTube media file with a remote URL
@@ -1238,6 +1465,11 @@ async function startServer() {
         return res.status(404).json({ error: "الملف غير موجود" });
       }
 
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (item.userId && item.userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "غير مصرح لك بتعديل ترجمات هذا الملف" });
+      }
+
       if (!item.subtitles) {
         item.subtitles = [];
       }
@@ -1328,6 +1560,11 @@ async function startServer() {
         return res.status(404).json({ error: "الملف غير موجود" });
       }
 
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (item.userId && item.userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "غير مصرح لك بتعديل ترجمات هذا الملف" });
+      }
+
       if (!item.subtitles) {
         item.subtitles = [];
       }
@@ -1372,6 +1609,11 @@ async function startServer() {
         return res.status(404).json({ error: "الملف غير موجود" });
       }
 
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (item.userId && item.userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "غير مصرح لك بتعديل خيارات هذا الملف" });
+      }
+
       if (primaryTrackId !== undefined) {
         item.primaryTrackId = primaryTrackId || undefined;
       }
@@ -1402,6 +1644,11 @@ async function startServer() {
       const item = list.find((m) => m.id === id || m.filename === id);
       if (!item) {
         return res.status(404).json({ error: "الملف غير موجود" });
+      }
+
+      const { currentUserId, isAdmin } = getMediaAuthUser(req);
+      if (item.userId && item.userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "غير مصرح لك بحذف ترجمات هذا الملف" });
       }
 
       if (item.subtitles) {
@@ -1779,6 +2026,794 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
     } catch (e: any) {
       console.error("Translate shadowing sentences error:", e);
       res.status(500).json({ error: e.message || "حدث خطأ أثناء ترجمة جمل الشادوينج" });
+    }
+  });
+
+  // ==========================================
+  // 📚 INTERACTIVE BOOKS STORAGE & BACKGROUND JOB PIPELINE (Isolated like Media Player)
+  // ==========================================
+  const BOOKS_TEMP_DIR = path.join(process.cwd(), "uploads", "temp_books");
+  const BOOKS_META_PATH = path.join(process.cwd(), "books.json");
+
+  // Ensure directories exist outside of public/ and src/ (isolated from Vite watcher)
+  if (!fs.existsSync(BOOKS_DIR)) {
+    try {
+      fs.mkdirSync(BOOKS_DIR, { recursive: true });
+    } catch (e) {}
+  }
+  if (!fs.existsSync(BOOKS_TEMP_DIR)) {
+    try {
+      fs.mkdirSync(BOOKS_TEMP_DIR, { recursive: true });
+    } catch (e) {}
+  }
+
+  // Initial reference books matching Hueber format
+  const INITIAL_SERVER_BOOKS = [
+    {
+      id: "miteinander-a1-1",
+      title: "Miteinander! A1.1 KB+AB",
+      subtitle: "Kurs- und Arbeitsbuch",
+      author: "Hueber Verlag",
+      coverImage: "/assets/aistudio/covers/cover_a1_1.png",
+      totalPages: 186,
+      createdAt: "2024-06-10T10:00:00.000Z",
+      pages: [
+        {
+          pageNumber: 184,
+          displayLabel: "184",
+          pageImage: "/assets/aistudio/sample_pages/page_left.png",
+          media: []
+        },
+        {
+          pageNumber: 185,
+          displayLabel: "185",
+          pageImage: "/assets/aistudio/sample_pages/page_left.png",
+          media: []
+        },
+        {
+          pageNumber: 186,
+          displayLabel: "186",
+          pageImage: "/assets/aistudio/sample_pages/page_center.png",
+          media: [
+            {
+              id: "m-186-1",
+              trackNumber: "2/43",
+              title: "2/43 – Audio: L8, 14b",
+              type: "audio",
+              fileName: "2_43_Audio_L8_14b.mp3",
+              url: "/uploads/media/audio.mp3",
+              pageNumber: 186
+            },
+            {
+              id: "m-186-2",
+              trackNumber: "2/44",
+              title: "2/44 – Audio: L8, 14c",
+              type: "audio",
+              fileName: "2_44_Audio_L8_14c.mp3",
+              url: "/uploads/media/audio.mp3",
+              pageNumber: 186
+            },
+            {
+              id: "m-186-3",
+              trackNumber: "L8, 14a",
+              title: "L8, 14a, Aussprache",
+              type: "video",
+              fileName: "L8_14a_Aussprache.mp4",
+              url: "/uploads/media/video.mp4",
+              pageNumber: 186
+            }
+          ]
+        },
+        {
+          pageNumber: 187,
+          displayLabel: "187",
+          pageImage: "/assets/aistudio/sample_pages/page_right.png",
+          media: []
+        }
+      ],
+      allMedia: [
+        {
+          id: "m-186-1",
+          trackNumber: "2/43",
+          title: "2/43 – Audio: L8, 14b",
+          type: "audio",
+          fileName: "2_43_Audio_L8_14b.mp3",
+          url: "/uploads/media/audio.mp3",
+          pageNumber: 186
+        },
+        {
+          id: "m-186-2",
+          trackNumber: "2/44",
+          title: "2/44 – Audio: L8, 14c",
+          type: "audio",
+          fileName: "2_44_Audio_L8_14c.mp3",
+          url: "/uploads/media/audio.mp3",
+          pageNumber: 186
+        },
+        {
+          id: "m-186-3",
+          trackNumber: "L8, 14a",
+          title: "L8, 14a, Aussprache",
+          type: "video",
+          fileName: "L8_14a_Aussprache.mp4",
+          url: "/uploads/media/video.mp4",
+          pageNumber: 186
+        }
+      ]
+    },
+    {
+      id: "miteinander-a1-2",
+      title: "Miteinander! A1.2 KB+AB",
+      subtitle: "Kurs- und Arbeitsbuch",
+      author: "Hueber Verlag",
+      coverImage: "/assets/aistudio/covers/cover_a1_2.png",
+      totalPages: 180,
+      createdAt: "2024-06-11T10:00:00.000Z",
+      pages: [
+        {
+          pageNumber: 1,
+          displayLabel: "1",
+          pageImage: "/assets/aistudio/covers/cover_a1_2.png",
+          media: []
+        }
+      ],
+      allMedia: []
+    },
+    {
+      id: "miteinander-a2-1",
+      title: "Miteinander! A2.1 KB+AB",
+      subtitle: "Kurs- und Arbeitsbuch",
+      author: "Hueber Verlag",
+      coverImage: "/assets/aistudio/covers/cover_a2_1.png",
+      totalPages: 180,
+      createdAt: "2024-06-12T10:00:00.000Z",
+      pages: [
+        {
+          pageNumber: 1,
+          displayLabel: "1",
+          pageImage: "/assets/aistudio/covers/cover_a2_1.png",
+          media: []
+        }
+      ],
+      allMedia: []
+    },
+    {
+      id: "miteinander-a2-2",
+      title: "Miteinander! A2.2 KB+AB",
+      subtitle: "Kurs- und Arbeitsbuch",
+      author: "Hueber Verlag",
+      coverImage: "/assets/aistudio/covers/cover_a2_2.png",
+      totalPages: 180,
+      createdAt: "2024-06-13T10:00:00.000Z",
+      pages: [
+        {
+          pageNumber: 1,
+          displayLabel: "1",
+          pageImage: "/assets/aistudio/covers/cover_a2_2.png",
+          media: []
+        }
+      ],
+      allMedia: []
+    }
+  ];
+
+  function loadBooksJson(): any[] {
+    try {
+      if (fs.existsSync(BOOKS_META_PATH)) {
+        const raw = fs.readFileSync(BOOKS_META_PATH, "utf-8").trim();
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn("Failed reading books.json:", e);
+    }
+    try {
+      fs.writeFileSync(BOOKS_META_PATH, JSON.stringify(INITIAL_SERVER_BOOKS, null, 2), "utf-8");
+    } catch (e) {}
+    return INITIAL_SERVER_BOOKS;
+  }
+
+  function saveBooksJson(list: any[]) {
+    try {
+      fs.writeFileSync(BOOKS_META_PATH, JSON.stringify(list, null, 2), "utf-8");
+    } catch (e) {
+      console.error("Error saving books.json:", e);
+    }
+  }
+
+  loadBooksJson();
+
+  // Serve static files in /uploads/books with HTTP Byte-Range Streaming and CORS (Same as Media Player)
+  app.use(
+    "/uploads/books",
+    express.static(BOOKS_DIR, {
+      setHeaders: (res) => {
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+      }
+    })
+  );
+
+  // Fallback for public/uploads/books legacy paths
+  const LEGACY_BOOKS_DIR = path.join(process.cwd(), "public", "uploads", "books");
+  if (fs.existsSync(LEGACY_BOOKS_DIR)) {
+    app.use(
+      "/uploads/books",
+      express.static(LEGACY_BOOKS_DIR, {
+        setHeaders: (res) => {
+          res.setHeader("Accept-Ranges", "bytes");
+          res.setHeader("Access-Control-Allow-Origin", "*");
+        }
+      })
+    );
+  }
+
+  // Natural string sort
+  function naturalSort(a: string, b: string): number {
+    return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+  }
+
+  // Recursive directory scanner
+  function listAllFiles(dir: string, baseDir: string = dir): string[] {
+    let out: string[] = [];
+    if (!fs.existsSync(dir)) return out;
+    const items = fs.readdirSync(dir);
+    for (const item of items) {
+      const full = path.join(dir, item);
+      const st = fs.statSync(full);
+      if (st.isDirectory()) {
+        out = out.concat(listAllFiles(full, baseDir));
+      } else {
+        out.push(path.relative(baseDir, full).replace(/\\/g, "/"));
+      }
+    }
+    return out;
+  }
+
+  // In-memory background jobs registry (The YouTube Pattern)
+  interface BookUploadJob {
+    jobId: string;
+    bookId: string;
+    status: "uploading" | "extracting" | "indexing" | "completed" | "error";
+    progress: number;
+    message: string;
+    book?: any;
+    error?: string;
+    createdAt: number;
+  }
+  const bookUploadJobs = new Map<string, BookUploadJob>();
+
+  // Cleanup old jobs after 1 hour
+  setInterval(() => {
+    const oneHourAgo = Date.now() - 3600 * 1000;
+    for (const [id, j] of bookUploadJobs.entries()) {
+      if (j.createdAt < oneHourAgo) bookUploadJobs.delete(id);
+    }
+  }, 10 * 60 * 1000);
+
+  // Helper: Assemble Book from extracted folder
+  function catalogBookFromFolder(bookId: string, targetDir: string, defaultTitle?: string): any {
+    const allFiles = listAllFiles(targetDir);
+
+    let parsedManifest: any = null;
+    let parsedContent: any = null;
+
+    for (const rel of allFiles) {
+      const lower = rel.toLowerCase();
+      if (lower.endsWith("book.json") || lower.endsWith("_book.json")) {
+        try {
+          parsedManifest = JSON.parse(fs.readFileSync(path.join(targetDir, rel), "utf-8"));
+        } catch (e) {}
+      }
+      if (lower.endsWith("content.json") || lower.endsWith("_content.json")) {
+        try {
+          parsedContent = JSON.parse(fs.readFileSync(path.join(targetDir, rel), "utf-8"));
+        } catch (e) {}
+      }
+    }
+
+    const imgExts = [".jpg", ".jpeg", ".png", ".webp", ".svg"];
+    const audExts = [".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac"];
+    const vidExts = [".mp4", ".webm", ".mov", ".mkv", ".m4v"];
+
+    const imageFiles: string[] = [];
+    const audioFiles: string[] = [];
+    const videoFiles: string[] = [];
+
+    for (const rel of allFiles) {
+      const ext = path.extname(rel).toLowerCase();
+      if (imgExts.includes(ext)) imageFiles.push(rel);
+      else if (audExts.includes(ext)) audioFiles.push(rel);
+      else if (vidExts.includes(ext)) videoFiles.push(rel);
+    }
+
+    imageFiles.sort(naturalSort);
+    audioFiles.sort(naturalSort);
+    videoFiles.sort(naturalSort);
+
+    const allMedia: any[] = [];
+
+    audioFiles.forEach((rel, idx) => {
+      const filename = path.basename(rel);
+      const nameWithoutExt = path.basename(rel, path.extname(rel));
+      const numMatch = filename.match(/\d+/);
+      const trackNum = numMatch ? numMatch[0] : String(idx + 1).padStart(2, "0");
+
+      let pageNum: number | undefined;
+      const pageMatch = filename.match(/(?:page|seite|p|s)[-_]?0*(\d+)/i);
+      if (pageMatch) pageNum = parseInt(pageMatch[1], 10);
+
+      allMedia.push({
+        id: `media-audio-${idx + 1}-${Date.now()}`,
+        trackNumber: trackNum,
+        title: nameWithoutExt.replace(/[_-]/g, " "),
+        type: "audio",
+        fileName: filename,
+        url: `/uploads/books/${bookId}/${rel}`,
+        pageNumber: pageNum
+      });
+    });
+
+    videoFiles.forEach((rel, idx) => {
+      const filename = path.basename(rel);
+      const nameWithoutExt = path.basename(rel, path.extname(rel));
+      allMedia.push({
+        id: `media-video-${idx + 1}-${Date.now()}`,
+        title: nameWithoutExt.replace(/[_-]/g, " "),
+        type: "video",
+        fileName: filename,
+        url: `/uploads/books/${bookId}/${rel}`
+      });
+    });
+
+    const pages: any[] = [];
+
+    if (parsedContent && Array.isArray(parsedContent.book_parts) && parsedContent.book_parts[0]?.pages) {
+      const publisherPages = parsedContent.book_parts[0].pages;
+      publisherPages.forEach((p: any) => {
+        const imgRel = imageFiles.find((f) => path.basename(f) === p.page_img) || "";
+        const pageMediaList: any[] = [];
+
+        if (Array.isArray(p.media)) {
+          p.media.forEach((m: any, mIdx: number) => {
+            const fileRel = [...audioFiles, ...videoFiles].find((f) => path.basename(f) === m.file_name);
+            const mUrl = fileRel ? `/uploads/books/${bookId}/${fileRel}` : `/uploads/media/audio.mp3`;
+
+            const mediaItem: any = {
+              id: m.media_id || `media-${p.page}-${mIdx}`,
+              trackNumber: m.title ? m.title.split("–")[0]?.trim() : String(mIdx + 1),
+              title: m.title || m.file_name || "مقطع صوتي",
+              type: m.type === "video" ? "video" : "audio",
+              fileName: m.file_name || "track.mp3",
+              url: mUrl,
+              pageNumber: p.page
+            };
+            pageMediaList.push(mediaItem);
+            if (!allMedia.some((existing) => existing.id === mediaItem.id)) {
+              allMedia.push(mediaItem);
+            }
+          });
+        }
+
+        pages.push({
+          pageNumber: p.page,
+          displayLabel: String(p.page),
+          pageImage: imgRel ? `/uploads/books/${bookId}/${imgRel}` : "",
+          media: pageMediaList
+        });
+      });
+    } else if (imageFiles.length > 0) {
+      imageFiles.forEach((rel, idx) => {
+        const pageNum = idx + 1;
+        const pageMedia = allMedia.filter(
+          (m) => m.pageNumber === pageNum || (m.trackNumber && parseInt(m.trackNumber, 10) === pageNum)
+        );
+
+        pages.push({
+          pageNumber: pageNum,
+          displayLabel: String(pageNum),
+          pageImage: `/uploads/books/${bookId}/${rel}`,
+          media: pageMedia
+        });
+      });
+    } else {
+      pages.push({
+        pageNumber: 1,
+        displayLabel: "1",
+        pageImage: "",
+        media: allMedia
+      });
+    }
+
+    let bookTitle = defaultTitle && defaultTitle.trim() ? defaultTitle.trim() : "";
+    let bookSubtitle = "Kurs- und Arbeitsbuch";
+
+    if (parsedManifest) {
+      if (!bookTitle && parsedManifest.title) bookTitle = parsedManifest.title;
+      if (parsedManifest.subtitle) bookSubtitle = parsedManifest.subtitle;
+    }
+    if (!bookTitle) {
+      bookTitle = "كتاب تفاعلي";
+    }
+
+    let coverUrl = "";
+    if (parsedManifest?.cover_img) {
+      const foundCover = imageFiles.find((f) => path.basename(f) === parsedManifest.cover_img);
+      if (foundCover) coverUrl = `/uploads/books/${bookId}/${foundCover}`;
+    }
+    if (!coverUrl && imageFiles.length > 0) {
+      coverUrl = `/uploads/books/${bookId}/${imageFiles[0]}`;
+    }
+
+    return {
+      id: bookId,
+      title: bookTitle,
+      subtitle: bookSubtitle,
+      author: parsedManifest?.author || "Hueber Verlag",
+      coverImage: coverUrl,
+      totalPages: pages.length,
+      pages: pages,
+      allMedia: allMedia,
+      createdAt: new Date().toISOString()
+    };
+  }
+
+  // Multer disk storage for raw streaming uploads to isolated temp_books folder
+  const diskJobStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      if (!fs.existsSync(BOOKS_TEMP_DIR)) {
+        fs.mkdirSync(BOOKS_TEMP_DIR, { recursive: true });
+      }
+      cb(null, BOOKS_TEMP_DIR);
+    },
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      const unique = Date.now() + "-" + Math.round(Math.random() * 1e6);
+      cb(null, `book-job-${unique}${ext}`);
+    }
+  });
+
+  const uploadJobMulter = multer({
+    storage: diskJobStorage,
+    limits: { fileSize: 2048 * 1024 * 1024 } // 2GB max
+  });
+
+  // 1. GET ALL BOOKS
+  app.get("/api/books", (req, res) => {
+    try {
+      const books = loadBooksJson();
+      res.json({ success: true, books });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed loading books" });
+    }
+  });
+
+  // 2. GET SINGLE BOOK
+  app.get("/api/books/:id", (req, res) => {
+    try {
+      const books = loadBooksJson();
+      const found = books.find((b: any) => b.id === req.params.id);
+      if (!found) {
+        return res.status(404).json({ error: "الكتاب غير موجود" });
+      }
+      res.json({ success: true, book: found });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed loading book" });
+    }
+  });
+
+  // 3. 🚀 HIGH-SPEED 2-PHASE UPLOAD ENDPOINT (The YouTube Pattern)
+  // Phase 1: Receives file onto disk and replies with 200 OK within 20ms of reaching 100%
+  // Phase 2: Background worker unpacks and indexes on disk without holding or dropping HTTP sockets
+  app.post("/api/books/upload-job", uploadJobMulter.single("file"), (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "الرجاء اختيار ملف الكتاب للرفع" });
+      }
+
+      const jobId = `job-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const bookId = `book-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const tempPath = req.file.path;
+      const originalName = req.file.originalname;
+      const customTitle = (req.body.title && typeof req.body.title === "string") ? req.body.title.trim() : "";
+
+      const initialJob: BookUploadJob = {
+        jobId,
+        bookId,
+        status: "extracting",
+        progress: 10,
+        message: "تم استلام الحزمة بنجاح على القرص الصلب، جاري فك الضغط التلقائي...",
+        createdAt: Date.now()
+      };
+      bookUploadJobs.set(jobId, initialJob);
+
+      // IMMEDIATELY RETURN 200 OK TO THE BROWSER!
+      // This guarantees the upload socket is gracefully closed with success (never timeouts or 404s at 100%)
+      res.json({
+        success: true,
+        jobId,
+        bookId,
+        message: "تم استلام الملف بنجاح وبدأت المعالجة على القرص الصلب"
+      });
+
+      // ─── Phase 2: Background Worker (Non-blocking) ─────────────────────────
+      (async () => {
+        try {
+          const targetDir = path.join(BOOKS_DIR, bookId);
+          if (!fs.existsSync(targetDir)) {
+            fs.mkdirSync(targetDir, { recursive: true });
+          }
+
+          const isZip = originalName.toLowerCase().endsWith(".zip") ||
+            originalName.toLowerCase().endsWith(".epub") ||
+            req.file?.mimetype?.includes("zip");
+
+          if (isZip) {
+            let unzipped = false;
+            
+            // 1. Try Windows native tar (Available in Windows 10/11 by default, extracts zip at C-speed)
+            if (process.platform === "win32") {
+              try {
+                await execFileAsync("tar.exe", ["-xf", tempPath, "-C", targetDir]);
+                unzipped = true;
+                console.log(`[Books Worker] Extracted via native Windows tar in seconds`);
+              } catch (winTarErr: any) {
+                console.warn("[Books Worker] Windows tar attempt note:", winTarErr?.message);
+              }
+            }
+
+            // 2. Try native Linux unzip
+            if (!unzipped) {
+              try {
+                await execFileAsync("unzip", ["-q", "-o", tempPath, "-d", targetDir]);
+                unzipped = true;
+                console.log(`[Books Worker] Extracted via native Linux unzip in seconds`);
+              } catch (e: any) {
+                console.warn("[Books Worker] Native unzip notice, trying fallbacks:", e?.message);
+              }
+            }
+
+            // 3. Fallback: Pure JSZip in chunks
+            if (!unzipped) {
+              console.log(`[Books Worker] Using streaming JSZip fallback...`);
+              const zipBuffer = fs.readFileSync(tempPath);
+              const zip = await JSZip.loadAsync(zipBuffer);
+              for (const rel of Object.keys(zip.files)) {
+                const entry = zip.files[rel];
+                if (entry.dir || rel.includes("__MACOSX") || rel.includes(".DS_Store")) continue;
+                const cleanRel = rel.replace(/^(\.\/|\/)+/, "");
+                const dest = path.join(targetDir, cleanRel);
+                const parent = path.dirname(dest);
+                if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
+                fs.writeFileSync(dest, await entry.async("nodebuffer"));
+              }
+            }
+          } else {
+            // Direct file uploaded
+            fs.copyFileSync(tempPath, path.join(targetDir, originalName));
+          }
+
+          // Cleanup raw temp file
+          try {
+            if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+          } catch (e) {}
+
+          const currentJob = bookUploadJobs.get(jobId);
+          if (currentJob) {
+            currentJob.status = "indexing";
+            currentJob.progress = 80;
+            currentJob.message = "جاري فهرسة صفحات الكتاب وربط الصوتيات والفيديوهات...";
+          }
+
+          // Catalog pages & manifest
+          const finalBook = catalogBookFromFolder(bookId, targetDir, customTitle || path.basename(originalName, path.extname(originalName)).replace(/[_-]/g, " "));
+
+          const existingList = loadBooksJson();
+          existingList.unshift(finalBook);
+          saveBooksJson(existingList);
+
+          if (currentJob) {
+            currentJob.status = "completed";
+            currentJob.progress = 100;
+            currentJob.message = "تم حفظ وفهرسة الكتاب بنجاح!";
+            currentJob.book = finalBook;
+          }
+
+          console.log(`[Books Server] Job ${jobId} completed successfully! Book "${finalBook.title}" (${finalBook.pages.length} pages, ${finalBook.allMedia.length} tracks)`);
+        } catch (workerErr: any) {
+          console.error(`[Books Server] Job ${jobId} failed in background:`, workerErr);
+          const currentJob = bookUploadJobs.get(jobId);
+          if (currentJob) {
+            currentJob.status = "error";
+            currentJob.error = workerErr?.message || "فشل فك ضغط أو فهرسة الكتاب على السيرفر";
+          }
+        }
+      })();
+    } catch (err: any) {
+      console.error("[Books Server] Failed accepting book upload:", err);
+      res.status(500).json({ error: err?.message || "فشل بدء مهمة رفع الكتاب" });
+    }
+  });
+
+  // 4. GET JOB STATUS
+  app.get("/api/books/jobs/:jobId", (req, res) => {
+    const job = bookUploadJobs.get(req.params.jobId);
+    if (!job) {
+      return res.status(404).json({ error: "المهمة غير موجودة أو انتهت مهلتها" });
+    }
+    res.json({ success: true, job });
+  });
+
+  // 5. DIRECT UPLOAD FALLBACK (Synchronous single request)
+  app.post("/api/books/upload", uploadJobMulter.any(), async (req, res) => {
+    try {
+      const files = req.files as Express.Multer.File[];
+      if (!files || files.length === 0) {
+        return res.status(400).json({ error: "لم يتم اختيار أي ملفات" });
+      }
+
+      const primary = files[0];
+      const bookId = `book-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const targetDir = path.join(BOOKS_DIR, bookId);
+      if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+      const isZip = primary.originalname.toLowerCase().endsWith(".zip") || primary.mimetype.includes("zip");
+      if (isZip) {
+        let unzipOk = false;
+        try {
+          await execFileAsync("unzip", ["-q", "-o", primary.path, "-d", targetDir]);
+          unzipOk = true;
+        } catch (e) {}
+
+        if (!unzipOk) {
+          const zipData = fs.readFileSync(primary.path);
+          const zip = await JSZip.loadAsync(zipData);
+          for (const rel of Object.keys(zip.files)) {
+            const entry = zip.files[rel];
+            if (entry.dir || rel.includes("__MACOSX")) continue;
+            const dest = path.join(targetDir, rel.replace(/^(\.\/|\/)+/, ""));
+            const p = path.dirname(dest);
+            if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+            fs.writeFileSync(dest, await entry.async("nodebuffer"));
+          }
+        }
+      } else {
+        for (const f of files) {
+          fs.copyFileSync(f.path, path.join(targetDir, f.originalname));
+        }
+      }
+
+      for (const f of files) {
+        try { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); } catch (e) {}
+      }
+
+      const newBook = catalogBookFromFolder(bookId, targetDir, path.basename(primary.originalname, path.extname(primary.originalname)).replace(/[_-]/g, " "));
+      const existingBooks = loadBooksJson();
+      existingBooks.unshift(newBook);
+      saveBooksJson(existingBooks);
+
+      res.json({ success: true, book: newBook });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed archive upload" });
+    }
+  });
+
+  // 6. FOLDER UPLOAD ENDPOINTS (For directly selecting an uncompressed folder on disk)
+  app.post("/api/books/init-folder-upload", express.json(), (req, res) => {
+    try {
+      const defaultTitle = req.body.title || "كتاب تفاعلي";
+      const bookId = `book-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const targetDir = path.join(BOOKS_DIR, bookId);
+
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+
+      console.log(`[Books Server] Initialized book upload directory on disk: ${bookId}`);
+      res.json({ success: true, bookId, title: defaultTitle });
+    } catch (err: any) {
+      console.error("[Books Server] Failed to initialize book upload:", err);
+      res.status(500).json({ error: err?.message || "فشل تهيئة مجلد الكتاب على السيرفر" });
+    }
+  });
+
+  const singleFileMulter = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 500 * 1024 * 1024 }
+  });
+
+  app.post("/api/books/:bookId/upload-file", singleFileMulter.single("file"), (req, res) => {
+    try {
+      const { bookId } = req.params;
+      const targetDir = path.join(BOOKS_DIR, bookId);
+
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+
+      const rawRelativePath = req.headers["x-relative-path"] as string;
+      const cleanRelativePath = rawRelativePath
+        ? decodeURIComponent(rawRelativePath).replace(/^(\.\/|\/)+/, "")
+        : req.file?.originalname || "file";
+
+      if (!req.file || !req.file.buffer) {
+        return res.status(400).json({ error: "لا يوجد محتوى للملف" });
+      }
+
+      const destPath = path.join(targetDir, cleanRelativePath);
+      const destDir = path.dirname(destPath);
+      if (!fs.existsSync(destDir)) {
+        fs.mkdirSync(destDir, { recursive: true });
+      }
+
+      fs.writeFileSync(destPath, req.file.buffer);
+      res.json({ success: true, path: cleanRelativePath });
+    } catch (err: any) {
+      console.error("[Books Server] Failed to save book file:", err);
+      res.status(500).json({ error: err?.message || "فشل حفظ الملف على السيرفر" });
+    }
+  });
+
+  app.post("/api/books/:bookId/finalize-folder-upload", express.json(), (req, res) => {
+    try {
+      const { bookId } = req.params;
+      const targetDir = path.join(BOOKS_DIR, bookId);
+
+      if (!fs.existsSync(targetDir)) {
+        return res.status(404).json({ error: "مجلد الكتاب غير موجود على السيرفر" });
+      }
+
+      const newBook = catalogBookFromFolder(bookId, targetDir, req.body.title);
+      const existingBooks = loadBooksJson();
+      existingBooks.unshift(newBook);
+      saveBooksJson(existingBooks);
+
+      console.log(`[Books Server] Finalized folder book: "${newBook.title}"`);
+      res.json({ success: true, book: newBook });
+    } catch (err: any) {
+      console.error("[Books Server] Failed to finalize book upload:", err);
+      res.status(500).json({ error: err?.message || "فشل اعتماد وفهرسة الكتاب على السيرفر" });
+    }
+  });
+
+  // 7. DELETE BOOK
+  app.delete("/api/books/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const list = loadBooksJson();
+      const updated = list.filter((b: any) => b.id !== id);
+      saveBooksJson(updated);
+
+      const targetDir = path.join(BOOKS_DIR, id);
+      if (fs.existsSync(targetDir)) {
+        try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch (e) {}
+      }
+
+      res.json({ success: true, message: "تم حذف الكتاب من السيرفر بنجاح" });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed deleting book" });
+    }
+  });
+
+  // 8. UPDATE BOOK METADATA
+  app.patch("/api/books/:id", express.json(), (req, res) => {
+    try {
+      const { id } = req.params;
+      const { title, subtitle, author } = req.body;
+      const list = loadBooksJson();
+      const book = list.find((b: any) => b.id === id);
+      if (!book) return res.status(404).json({ error: "الكتاب غير موجود" });
+
+      if (title) book.title = title.trim();
+      if (subtitle !== undefined) book.subtitle = subtitle;
+      if (author !== undefined) book.author = author;
+
+      saveBooksJson(list);
+      res.json({ success: true, book });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed updating book" });
     }
   });
 
