@@ -12,17 +12,31 @@ import {
   Zap,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Loader2,
   Clock,
-  UploadCloud
+  UploadCloud,
+  Copy,
+  Terminal,
+  FileText,
+  ChevronDown,
+  ChevronUp,
+  RefreshCw,
+  Bug
 } from "lucide-react";
 import { InteractiveBook, BookPage, BookPageMedia, MediaFile } from "../types";
 import {
   fetchBooksFromServer,
   uploadBookToServer,
   uploadBookFolderToServer,
-  deleteBookFromServer
+  deleteBookFromServer,
+  UploadDiagnosticException
 } from "../utils/bookStorage";
+import {
+  DiagnosticReport,
+  MicroStage,
+  INITIAL_30_STAGES
+} from "../utils/bookUploadDiagnostics";
 
 interface BookReaderWorkspaceProps {
   onPlayMediaInStudio?: (file: Partial<MediaFile>) => void;
@@ -50,6 +64,14 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   const [uploadStatusText, setUploadStatusText] = useState<string>("");
   const [uploadError, setUploadError] = useState<string | null>(null);
 
+  // 🔬 30-Micro-Stage Deep Diagnostics State
+  const [stages, setStages] = useState<MicroStage[]>(INITIAL_30_STAGES);
+  const [currentStage, setCurrentStage] = useState<MicroStage | null>(null);
+  const [diagnosticReport, setDiagnosticReport] = useState<DiagnosticReport | null>(null);
+  const [copiedReport, setCopiedReport] = useState<boolean>(false);
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState<boolean>(false);
+  const [expandRealtimeStages, setExpandRealtimeStages] = useState<boolean>(true);
+
   // Load books on mount
   useEffect(() => {
     loadBooks();
@@ -67,21 +89,99 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     }
   };
 
+  // 📋 Copy Complete 30-Stage Diagnostic Report to Clipboard
+  const copyFullDiagnosticReport = () => {
+    if (!diagnosticReport) {
+      if (uploadError) {
+        navigator.clipboard?.writeText(uploadError);
+        setCopiedReport(true);
+        setTimeout(() => setCopiedReport(false), 3000);
+      }
+      return;
+    }
+
+    const jsonReport = JSON.stringify(diagnosticReport, null, 2);
+    const textReport = [
+      `=================================================================`,
+      `📋 تقرير تشخيص رفع الكتاب التفاعلي (30 مرحلة فحص مجهرية)`,
+      `=================================================================`,
+      `معرف التقرير: ${diagnosticReport.reportId}`,
+      `توقيت التوليد: ${diagnosticReport.generatedAt}`,
+      `اسم الملف: ${diagnosticReport.fileName} (${diagnosticReport.fileSizeFormatted})`,
+      `حجم البايتات: ${diagnosticReport.fileSizeBytes}`,
+      `نوع الملف: ${diagnosticReport.fileType}`,
+      `المسار المستهدف: ${diagnosticReport.targetEndpoint || "N/A"}`,
+      `-----------------------------------------------------------------`,
+      `❌ المرحلة التي توقف عندها النظام: مرحلة ${diagnosticReport.failedStageNumber} / 30`,
+      `عنوان المرحلة: ${diagnosticReport.failedStageTitle}`,
+      `سبب التوقف: ${diagnosticReport.errorMessage}`,
+      `رمز الاستجابة HTTP: ${diagnosticReport.httpStatus ?? "None"} ${diagnosticReport.httpStatusText || ""}`,
+      `استجابة السيرفر الخام: ${diagnosticReport.rawServerResponse || "No body response"}`,
+      `معلومات المتصفح: ${diagnosticReport.clientInfo.userAgent}`,
+      `متصل بالإنترنت: ${diagnosticReport.clientInfo.isOnline ? "نعم" : "لا"}`,
+      `-----------------------------------------------------------------`,
+      `سجل المراحل الـ 30 المفصل:`,
+      ...diagnosticReport.stagesLog.map((s) => {
+        const mark = s.status === "completed" ? "✓ [ناجحة]" : s.status === "failed" ? "✗ [فاشلة]" : s.status === "running" ? "⏳ [جارية]" : "○ [لم تبدأ]";
+        return `${s.id.toString().padStart(2, "0")}. ${mark} ${s.titleAr} (${s.durationMs ? s.durationMs + "ms" : "-"}) - ${s.details || ""}${s.error ? " | خطأ: " + s.error : ""}`;
+      }),
+      `-----------------------------------------------------------------`,
+      `الكود البرمجي الخام (JSON):`,
+      jsonReport,
+      `=================================================================`
+    ].join("\n");
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(textReport).then(() => {
+          setCopiedReport(true);
+          setTimeout(() => setCopiedReport(false), 3500);
+        });
+      } else {
+        throw new Error("Clipboard API unavailable");
+      }
+    } catch {
+      const textArea = document.createElement("textarea");
+      textArea.value = textReport;
+      textArea.style.position = "fixed";
+      textArea.style.opacity = "0";
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textArea);
+      setCopiedReport(true);
+      setTimeout(() => setCopiedReport(false), 3500);
+    }
+  };
+
   // ⚡ Handle uploading ZIP (Super-fast client-side unzip + IndexedDB storage)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setUploading(true);
-    setUploadProgress(10);
-    setUploadStatusText("جاري فك ضغط الملف ومعالجة المحتويات...");
+    setUploadProgress(0);
+    setUploadStatusText("بدء نظام الفحص المجهري (30 مرحلة تشخيصية)...");
     setUploadError(null);
+    setDiagnosticReport(null);
+    setCopiedReport(false);
+    setStages(INITIAL_30_STAGES.map((s) => ({ ...s })));
+    setCurrentStage(INITIAL_30_STAGES[0]);
     setShowUploadModal(false);
 
     try {
-      const newBook = await uploadBookToServer(file, "", (pct, status) => {
-        setUploadProgress(pct);
-        if (status) setUploadStatusText(status);
+      const newBook = await uploadBookToServer(file, {
+        onProgress: (pct, status) => {
+          setUploadProgress(pct);
+          if (status) setUploadStatusText(status);
+        },
+        onStageUpdate: (updatedStages, activeStage) => {
+          setStages([...updatedStages]);
+          setCurrentStage(activeStage);
+        },
+        onDiagnosticReport: (report) => {
+          setDiagnosticReport(report);
+        }
       });
 
       const updatedList = await fetchBooksFromServer();
@@ -94,7 +194,16 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
         setCurrentPageIndex(mediaIdx >= 0 ? mediaIdx : 0);
       }, 500);
     } catch (err: any) {
-      setUploadError(err?.message || "حدث خطأ أثناء معالجة ملف الكتاب");
+      console.error("[Book Upload Error Caught]:", err);
+      if (err instanceof UploadDiagnosticException && err.report) {
+        setDiagnosticReport(err.report);
+        setUploadError(`توقف الفحص عند المرحلة ${err.report.failedStageNumber || "?"} (${err.report.failedStageTitle || ""}): ${err.message}`);
+      } else if (err.report) {
+        setDiagnosticReport(err.report);
+        setUploadError(err.message || "حدث خطأ أثناء معالجة ملف الكتاب");
+      } else {
+        setUploadError(err?.message || "حدث خطأ أثناء معالجة ملف الكتاب");
+      }
       setUploading(false);
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -490,60 +599,363 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
         </div>
       )}
 
-      {/* 🚀 Fast & Simple Upload Progress Modal */}
-      {(uploading || uploadError) && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-sm w-full shadow-2xl border border-slate-100 overflow-hidden text-right p-6 flex flex-col items-center" dir="rtl">
-            {uploadError ? (
-              <>
-                <div className="p-3 bg-rose-100 text-rose-600 rounded-2xl mb-3">
-                  <AlertCircle className="w-8 h-8" />
+      {/* 🚀 Real-Time 30-Stage Upload Stepper Modal (When Uploading) */}
+      {uploading && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-100 overflow-hidden text-right p-6 flex flex-col" dir="rtl">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl">
+                  <Loader2 className="w-6 h-6 animate-spin" />
                 </div>
-                <h3 className="text-base font-bold text-slate-900 mb-1">تعذر تجهيز الكتاب</h3>
-                <p className="text-xs text-rose-700 text-center mb-5 leading-relaxed bg-rose-50 p-3 rounded-xl border border-rose-100 w-full font-mono">
-                  {uploadError}
-                </p>
-                <div className="flex gap-2 w-full">
-                  <button
-                    onClick={() => {
-                      setUploadError(null);
-                      setShowUploadModal(true);
-                    }}
-                    className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition cursor-pointer"
-                  >
-                    تجربة مجلد أو ملف آخر
-                  </button>
-                  <button
-                    onClick={() => setUploadError(null)}
-                    className="py-2.5 px-4 text-slate-600 hover:text-slate-900 text-xs font-semibold cursor-pointer"
-                  >
-                    إلغاء
-                  </button>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">نظام الرفع والمعالجة المجهري (30 مرحلة)</h3>
+                  <p className="text-xs text-slate-500">جاري فحص وتدفق الحزمة بدقة متناهية...</p>
                 </div>
-              </>
-            ) : (
-              <>
-                <div className="p-3.5 bg-blue-50 text-blue-600 rounded-2xl mb-4 relative">
-                  <Loader2 className="w-8 h-8 animate-spin" />
-                </div>
-                <h3 className="text-base font-bold text-slate-900 mb-1">جاري تجهيز الكتاب التفاعلي...</h3>
-                <p className="text-xs text-slate-500 text-center mb-4 leading-relaxed">
-                  {uploadStatusText || "جاري معالجة الصفحات والملفات الصوتية بسرعة فائقة..."}
-                </p>
+              </div>
+              <span className="text-xs font-mono font-bold bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full">
+                {uploadProgress}%
+              </span>
+            </div>
 
-                {/* Progress bar */}
-                <div className="w-full bg-slate-100 rounded-full h-3 mb-2 overflow-hidden">
-                  <div
-                    className="bg-gradient-to-r from-blue-600 to-indigo-600 h-full rounded-full transition-all duration-300"
-                    style={{ width: `${Math.max(uploadProgress, 12)}%` }}
-                  />
+            {/* Current Active Micro-Stage Banner */}
+            <div className="my-4 p-3.5 bg-blue-50/70 border border-blue-200/60 rounded-2xl flex items-start gap-3">
+              <Zap className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-blue-900">
+                    مرحلة {currentStage?.id || 1} من 30: {currentStage?.titleAr || "جاري التنفيذ..."}
+                  </span>
+                  <span className="text-[10px] text-blue-600 font-mono">
+                    {currentStage?.durationMs ? `${currentStage.durationMs}ms` : "نشطة الآن"}
+                  </span>
                 </div>
-                <div className="flex justify-between w-full text-[11px] font-mono text-slate-400">
-                  <span>ثوانٍ معدودة فقط</span>
-                  <span className="font-bold text-blue-600">{uploadProgress}%</span>
+                <p className="text-xs text-blue-700 mt-0.5 leading-snug">
+                  {currentStage?.details || uploadStatusText || "جاري التحقق والمعالجة في السيرفر..."}
+                </p>
+              </div>
+            </div>
+
+            {/* Progress Bar */}
+            <div className="w-full bg-slate-100 rounded-full h-3 mb-2 overflow-hidden">
+              <div
+                className="bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 h-full rounded-full transition-all duration-300 shadow-sm"
+                style={{ width: `${Math.max(uploadProgress, 8)}%` }}
+              />
+            </div>
+
+            <div className="flex justify-between items-center text-[11px] font-mono text-slate-400 mb-4">
+              <span>يتم النقل والتخزين المباشر على القرص الصلب</span>
+              <span className="font-bold text-blue-600">{uploadProgress}% مكتمل</span>
+            </div>
+
+            {/* Realtime 30 Stages Mini Scrollable Stepper */}
+            <div className="border border-slate-200 rounded-2xl overflow-hidden bg-slate-50/50">
+              <button
+                type="button"
+                onClick={() => setExpandRealtimeStages(!expandRealtimeStages)}
+                className="w-full px-3 py-2 bg-slate-100/70 hover:bg-slate-100 flex items-center justify-between text-xs font-semibold text-slate-700 cursor-pointer transition-colors"
+              >
+                <span>متابعة المراحل الـ 30 لحظياً</span>
+                {expandRealtimeStages ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+
+              {expandRealtimeStages && (
+                <div className="max-h-48 overflow-y-auto divide-y divide-slate-100 p-2 text-xs">
+                  {stages.map((stg) => (
+                    <div
+                      key={stg.id}
+                      className={`py-1.5 px-2 flex items-center justify-between rounded-lg transition-colors ${
+                        stg.status === "running"
+                          ? "bg-blue-100/70 font-semibold text-blue-900"
+                          : stg.status === "completed"
+                          ? "text-slate-600 hover:bg-white"
+                          : "text-slate-400 opacity-60"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        {stg.status === "completed" ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        ) : stg.status === "running" ? (
+                          <Loader2 className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
+                        ) : (
+                          <div className="w-4 h-4 rounded-full border border-slate-300 shrink-0 flex items-center justify-center text-[9px] text-slate-400 font-mono">
+                            {stg.id}
+                          </div>
+                        )}
+                        <span className="truncate">{stg.id}. {stg.titleAr}</span>
+                      </div>
+                      <span className="text-[10px] font-mono shrink-0 pl-1">
+                        {stg.durationMs ? `${stg.durationMs}ms` : stg.status === "running" ? "⏳" : ""}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              </>
-            )}
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🔬 Deep 30-Stage Diagnostic Error Modal with Copy Button */}
+      {uploadError && !uploading && (
+        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
+          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[92vh] shadow-2xl border border-rose-100 overflow-hidden flex flex-col text-right animate-in fade-in zoom-in-95 duration-200" dir="rtl">
+            {/* Modal Header */}
+            <div className="px-6 py-4 bg-gradient-to-r from-rose-50 to-orange-50 border-b border-rose-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-rose-600 text-white rounded-2xl shadow-sm">
+                  <Bug className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-slate-900">
+                    تقرير تشخيص الرفع المجهري (30 مرحلة)
+                  </h3>
+                  <p className="text-xs text-rose-700 font-medium">
+                    توقف النظام وحدد بالضبط أين وكيف حدث الخلل
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setUploadError(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-xl hover:bg-white/80 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Scrollable Body */}
+            <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
+              {/* 🌟 PROMINENT ONE-CLICK COPY REPORT ACTION */}
+              <div className="p-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 rounded-2xl text-white shadow-lg flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="flex items-center gap-3 text-right">
+                  <div className="p-2 bg-white/20 rounded-xl shrink-0">
+                    <FileText className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold">تقرير تشخيصي متكامل جاهز للمطور</h4>
+                    <p className="text-xs text-blue-100 leading-snug">
+                      اضغط على الزر لنسخ التقرير الشامل ومشاركته لحل المشكلة فوراً.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={copyFullDiagnosticReport}
+                  className={`w-full sm:w-auto px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer shrink-0 ${
+                    copiedReport
+                      ? "bg-emerald-500 text-white ring-2 ring-emerald-300"
+                      : "bg-white text-blue-700 hover:bg-blue-50 active:scale-95"
+                  }`}
+                >
+                  {copiedReport ? (
+                    <>
+                      <Check className="w-4 h-4 stroke-[3]" />
+                      <span>تم النسخ بنجاح! الصقه هنا</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4 stroke-[2.5]" />
+                      <span>نسخ التقرير التشخيصي الكامل</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Summary Metrics Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {/* Metric 1: Failed Stage */}
+                <div className="p-3 rounded-2xl bg-rose-50/70 border border-rose-200">
+                  <span className="text-[11px] font-bold text-rose-800 block">المرحلة المتوقفة</span>
+                  <div className="flex items-baseline gap-1 mt-0.5">
+                    <span className="text-xl font-black text-rose-600 font-mono">
+                      #{diagnosticReport?.failedStageNumber || "?"}
+                    </span>
+                    <span className="text-xs font-bold text-rose-900 truncate">
+                      {diagnosticReport?.failedStageTitle || "غير محدد"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Metric 2: HTTP Status */}
+                <div className="p-3 rounded-2xl bg-amber-50/70 border border-amber-200">
+                  <span className="text-[11px] font-bold text-amber-800 block">رمز استجابة السيرفر</span>
+                  <div className="flex items-baseline gap-1 mt-0.5">
+                    <span className="text-xl font-black text-amber-700 font-mono">
+                      {diagnosticReport?.httpStatus ?? "None"}
+                    </span>
+                    <span className="text-xs text-amber-800 truncate">
+                      {diagnosticReport?.httpStatusText || "انقطاع أو إجهاض"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Metric 3: File Size */}
+                <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
+                  <span className="text-[11px] font-bold text-slate-600 block">حجم الحزمة</span>
+                  <div className="flex items-baseline gap-1 mt-0.5">
+                    <span className="text-xl font-black text-slate-800 font-mono">
+                      {diagnosticReport?.fileSizeFormatted || "N/A"}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      ({diagnosticReport?.fileName || "ملف"})
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Error Explanation Box */}
+              <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900">
+                <div className="flex items-center gap-2 mb-1">
+                  <AlertCircle className="w-4 h-4 text-rose-600" />
+                  <span className="text-xs font-bold">السبب الفعلي للتوقف:</span>
+                </div>
+                <p className="text-xs font-mono font-medium leading-relaxed bg-white/70 p-2.5 rounded-xl border border-rose-200/60 break-words">
+                  {diagnosticReport?.errorMessage || uploadError}
+                </p>
+                {diagnosticReport?.rawServerResponse && (
+                  <div className="mt-2 text-[11px]">
+                    <span className="text-rose-700 font-bold block mb-1">نص استجابة السيرفر:</span>
+                    <pre className="bg-slate-900 text-slate-100 p-2 rounded-lg font-mono text-[10px] overflow-x-auto max-h-24">
+                      {diagnosticReport.rawServerResponse}
+                    </pre>
+                  </div>
+                )}
+              </div>
+
+              {/* Stepper Timeline: All 30 Micro-Stages */}
+              <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-xs">
+                <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-800 flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-slate-500" />
+                    <span>سجل فحص المراحل الـ 30 بالتسلسل الدقيق</span>
+                  </h4>
+                  <span className="text-[10px] font-mono text-slate-500">
+                    مكتمل: {stages.filter((s) => s.status === "completed").length} | فاشل: {stages.filter((s) => s.status === "failed").length}
+                  </span>
+                </div>
+
+                <div className="max-h-60 overflow-y-auto divide-y divide-slate-100">
+                  {stages.map((stg) => {
+                    const isFailed = stg.status === "failed" || stg.id === diagnosticReport?.failedStageNumber;
+                    const isCompleted = stg.status === "completed";
+                    const isRunning = stg.status === "running";
+
+                    return (
+                      <div
+                        key={stg.id}
+                        className={`p-3 flex items-start gap-3 transition-colors ${
+                          isFailed
+                            ? "bg-rose-50/80 border-r-4 border-rose-600"
+                            : isCompleted
+                            ? "hover:bg-slate-50/50"
+                            : "opacity-50"
+                        }`}
+                      >
+                        {/* Status Icon */}
+                        <div className="shrink-0 mt-0.5">
+                          {isFailed ? (
+                            <div className="w-5 h-5 rounded-full bg-rose-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                              ✕
+                            </div>
+                          ) : isCompleted ? (
+                            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                          ) : isRunning ? (
+                            <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                          ) : (
+                            <div className="w-5 h-5 rounded-full border border-slate-300 flex items-center justify-center text-[10px] text-slate-400 font-mono">
+                              {stg.id}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Stage Info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <span className={`text-xs font-bold ${isFailed ? "text-rose-900" : isCompleted ? "text-slate-900" : "text-slate-400"}`}>
+                              مرحلة {stg.id}: {stg.titleAr}
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                              {stg.durationMs ? `${stg.durationMs}ms` : ""}
+                            </span>
+                          </div>
+
+                          <p className={`text-[11px] mt-0.5 ${isFailed ? "text-rose-800 font-medium" : "text-slate-500"}`}>
+                            {stg.descriptionAr}
+                          </p>
+
+                          {stg.details && (
+                            <p className="text-[10px] text-slate-600 bg-slate-100/70 p-1.5 rounded-md mt-1 font-mono">
+                              {stg.details}
+                            </p>
+                          )}
+
+                          {isFailed && stg.error && (
+                            <p className="text-[11px] text-rose-700 bg-rose-100 p-2 rounded-md mt-1 font-mono font-bold">
+                              خطأ المرحلة: {stg.error}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Collapsible Full Technical Details / JSON */}
+              <div className="border border-slate-200 rounded-2xl overflow-hidden bg-slate-50">
+                <button
+                  type="button"
+                  onClick={() => setShowTechnicalDetails(!showTechnicalDetails)}
+                  className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-semibold text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  <span className="flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-slate-500" />
+                    <span>عرض البيانات التقنية الخام (JSON / Headers / Stack)</span>
+                  </span>
+                  {showTechnicalDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+
+                {showTechnicalDetails && (
+                  <div className="p-3 bg-slate-900 text-slate-100 text-[10px] font-mono overflow-x-auto max-h-56">
+                    <pre>{JSON.stringify(diagnosticReport || { error: uploadError }, null, 2)}</pre>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Bottom Actions */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row gap-2 justify-end">
+              <button
+                type="button"
+                onClick={copyFullDiagnosticReport}
+                className="py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+              >
+                {copiedReport ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                <span>{copiedReport ? "تم نسخ التقرير!" : "نسخ التقرير التشخيصي"}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setUploadError(null);
+                  setShowUploadModal(true);
+                }}
+                className="py-2.5 px-4 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>محاولة أخرى</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setUploadError(null)}
+                className="py-2.5 px-4 text-slate-500 hover:text-slate-800 text-xs font-semibold transition cursor-pointer"
+              >
+                إغلاق
+              </button>
+            </div>
           </div>
         </div>
       )}
