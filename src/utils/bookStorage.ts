@@ -2,15 +2,16 @@ import JSZip from "jszip";
 import { InteractiveBook, BookPage, BookPageMedia } from "../types";
 
 // =========================================================================
-// 🚀 High-Speed In-Memory & IndexedDB Storage (0-Network Dependency)
-// Works 100% locally on your laptop, offline, or with server
+// 🚀 High-Reliability Permanent Hard-Drive Storage Engine (Like YouTube)
+// Files physically reside on the server disk (/uploads/books/...)
+// Persists permanently across page refreshes, reboots, and multiple users
 // =========================================================================
 
 const DB_NAME = "InteractiveBooksDB";
 const STORE_NAME = "books";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
-// Default initial sample books
+// Default sample books
 const INITIAL_BOOKS: InteractiveBook[] = [
   {
     id: "miteinander-a1-1",
@@ -109,7 +110,7 @@ const INITIAL_BOOKS: InteractiveBook[] = [
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === "undefined") {
-      reject(new Error("IndexedDB is not supported in this browser"));
+      reject(new Error("IndexedDB is not supported"));
       return;
     }
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -127,8 +128,32 @@ function openDB(): Promise<IDBDatabase> {
 // In-memory cache for fast instant rendering
 let memoryBooksCache: InteractiveBook[] = [...INITIAL_BOOKS];
 
-// Get all books: loads from IndexedDB (instant) + optional background server sync
+/**
+ * Fetch all books from the server disk (books.json).
+ * Server is the primary authority so refresh always shows permanent disk files.
+ */
 export async function fetchBooksFromServer(): Promise<InteractiveBook[]> {
+  try {
+    const res = await fetch("/api/books");
+    if (res.ok) {
+      const data = await res.json();
+      if (data && Array.isArray(data.books)) {
+        memoryBooksCache = data.books;
+        // Cache to IndexedDB for offline resilience
+        try {
+          const db = await openDB();
+          const tx = db.transaction(STORE_NAME, "readwrite");
+          const store = tx.objectStore(STORE_NAME);
+          data.books.forEach((b: InteractiveBook) => store.put(b));
+        } catch (e) {}
+        return data.books;
+      }
+    }
+  } catch (err) {
+    console.warn("[Books] Server fetch failed, falling back to local cache:", err);
+  }
+
+  // Offline fallback: load from IndexedDB
   try {
     const db = await openDB();
     const books = await new Promise<InteractiveBook[]>((resolve) => {
@@ -141,30 +166,9 @@ export async function fetchBooksFromServer(): Promise<InteractiveBook[]> {
 
     if (Array.isArray(books) && books.length > 0) {
       memoryBooksCache = books;
-    } else {
-      // Seed default initial books into IndexedDB
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      const store = tx.objectStore(STORE_NAME);
-      INITIAL_BOOKS.forEach((b) => store.put(b));
-      memoryBooksCache = INITIAL_BOOKS;
+      return books;
     }
-  } catch (e) {
-    console.warn("[Book Storage] IndexedDB notice, using memory cache:", e);
-  }
-
-  // Background non-blocking check from server (if server /api/books exists)
-  fetch("/api/books")
-    .then((r) => (r.ok ? r.json() : null))
-    .then((data) => {
-      if (data && Array.isArray(data.books)) {
-        const idbIds = new Set(memoryBooksCache.map((b) => b.id));
-        const newServerBooks = data.books.filter((b: InteractiveBook) => !idbIds.has(b.id));
-        if (newServerBooks.length > 0) {
-          memoryBooksCache = [...memoryBooksCache, ...newServerBooks];
-        }
-      }
-    })
-    .catch(() => {});
+  } catch (e) {}
 
   return memoryBooksCache;
 }
@@ -180,9 +184,7 @@ export async function saveBookToDB(book: InteractiveBook): Promise<void> {
     const db = await openDB();
     const tx = db.transaction(STORE_NAME, "readwrite");
     tx.objectStore(STORE_NAME).put(book);
-  } catch (e) {
-    console.warn("[Book Storage] Could not write to IndexedDB:", e);
-  }
+  } catch (e) {}
 }
 
 export async function deleteBookFromServer(id: string): Promise<boolean> {
@@ -193,8 +195,10 @@ export async function deleteBookFromServer(id: string): Promise<boolean> {
     tx.objectStore(STORE_NAME).delete(id);
   } catch (e) {}
 
-  // Attempt server delete in background
-  fetch(`/api/books/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
+  try {
+    await fetch(`/api/books/${encodeURIComponent(id)}`, { method: "DELETE" });
+  } catch (e) {}
+
   return true;
 }
 
@@ -211,18 +215,15 @@ export async function updateBookMetadataOnServer(
   if (updates.author !== undefined) book.author = updates.author;
 
   await saveBookToDB(book);
-  fetch(`/api/books/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates)
-  }).catch(() => {});
+  try {
+    await fetch(`/api/books/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates)
+    });
+  } catch (e) {}
 
   return book;
-}
-
-// Natural sort for filenames
-function naturalCompare(a: string, b: string): number {
-  return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 }
 
 interface RawFileEntry {
@@ -231,155 +232,96 @@ interface RawFileEntry {
 }
 
 /**
- * Super-fast Universal Parser & Saver (Processes in 2-4 seconds!)
- * Works directly from ZIP file or selected Folder
+ * ⚡ Direct Server Hard-Drive Storage Pipeline:
+ * Transmits each file into the server's permanent disk directory (/public/uploads/books/[bookId]/).
+ * Finalizes book manifest so all images and media are permanent HTTP URLs (like YouTube).
  */
-async function parseAndSaveBook(
-  rawFiles: RawFileEntry[],
-  defaultTitle: string,
-  onProgress?: (pct: number, statusText?: string) => void
+async function uploadFilesToServerDisk(
+  files: RawFileEntry[],
+  defaultTitle?: string,
+  onProgress?: (percent: number, statusText?: string) => void
 ): Promise<InteractiveBook> {
-  if (onProgress) onProgress(15, "جاري فحص ومطابقة ملفات الكتاب...");
+  if (onProgress) onProgress(5, "تهيئة مساحة الكتاب على القرص الصلب للسيرفر...");
 
-  const fileMap = new Map<string, RawFileEntry>();
-  for (const f of rawFiles) {
-    const base = f.name.split("/").pop()?.toLowerCase() || "";
-    fileMap.set(base, f);
+  // 1. Initialize book directory on server disk
+  const initRes = await fetch("/api/books/init-folder-upload", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: defaultTitle })
+  });
+
+  if (!initRes.ok) {
+    const errText = await initRes.text();
+    throw new Error(`فشل تهيئة مجلد الكتاب على السيرفر: ${errText || initRes.statusText}`);
   }
 
-  // 1. Locate manifests (Hueber book.json & content.json)
-  let contentJson: any = null;
-  let bookJson: any = null;
+  const { bookId } = await initRes.json();
+  const totalFiles = files.length;
+  let uploadedCount = 0;
 
-  for (const f of rawFiles) {
-    const base = f.name.split("/").pop()?.toLowerCase() || "";
-    if (base.endsWith("content.json") || base === "content.json") {
-      try {
-        const b = await f.getBlob();
-        contentJson = JSON.parse(await b.text());
-      } catch (e) {}
-    }
-    if (base.endsWith("book.json") || base === "book.json") {
-      try {
-        const b = await f.getBlob();
-        bookJson = JSON.parse(await b.text());
-      } catch (e) {}
-    }
-  }
+  // 2. Upload files in parallel batches (4 concurrent requests)
+  const BATCH_SIZE = 4;
+  for (let i = 0; i < files.length; i += BATCH_SIZE) {
+    const batch = files.slice(i, i + BATCH_SIZE);
+    await Promise.all(
+      batch.map(async (entry) => {
+        const blob = await entry.getBlob();
+        const formData = new FormData();
+        const baseName = entry.name.split("/").pop() || "file";
+        formData.append("file", blob, baseName);
 
-  if (onProgress) onProgress(40, "جاري ربط الصفحات والمقاطع الصوتية والفيديوهات...");
+        const uploadRes = await fetch(`/api/books/${encodeURIComponent(bookId)}/upload-file`, {
+          method: "POST",
+          headers: {
+            "x-relative-path": encodeURIComponent(entry.name)
+          },
+          body: formData
+        });
 
-  const bookId = `book-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-  const pages: BookPage[] = [];
-  const allMedia: BookPageMedia[] = [];
-
-  const publisherPages = contentJson?.book_parts?.[0]?.pages;
-  if (Array.isArray(publisherPages) && publisherPages.length > 0) {
-    // Exact publisher structure (Hueber format)
-    for (const [idx, p] of publisherPages.entries()) {
-      let pageImageUrl = "";
-      if (p.page_img) {
-        const entry = fileMap.get(p.page_img.toLowerCase());
-        if (entry) {
-          const blob = await entry.getBlob();
-          pageImageUrl = URL.createObjectURL(blob);
+        if (!uploadRes.ok) {
+          throw new Error(`فشل حفظ الملف ${entry.name} على السيرفر (${uploadRes.status})`);
         }
-      }
 
-      const pageMediaList: BookPageMedia[] = [];
-      if (Array.isArray(p.media)) {
-        for (const [mIdx, m] of p.media.entries()) {
-          let mediaUrl = "";
-          if (m.file_name) {
-            const entry = fileMap.get(m.file_name.toLowerCase());
-            if (entry) {
-              const blob = await entry.getBlob();
-              mediaUrl = URL.createObjectURL(blob);
-            }
-          }
-
-          const isVideo = m.type === "video" || (m.file_name && m.file_name.toLowerCase().endsWith(".mp4"));
-          const mediaItem: BookPageMedia = {
-            id: m.media_id || `m-${p.page || idx + 1}-${mIdx + 1}`,
-            trackNumber: m.title && m.title.includes("–") ? m.title.split("–")[0].trim() : String(mIdx + 1),
-            title: m.title || m.file_name || (isVideo ? "مقطع فيديو" : "مقطع صوتي"),
-            type: isVideo ? "video" : "audio",
-            fileName: m.file_name || (isVideo ? "video.mp4" : "audio.mp3"),
-            url: mediaUrl,
-            pageNumber: p.page || p.page_absolute || idx + 1
-          };
-
-          pageMediaList.push(mediaItem);
-          if (!allMedia.some((existing) => existing.id === mediaItem.id)) {
-            allMedia.push(mediaItem);
-          }
+        uploadedCount++;
+        const pct = Math.min(88, Math.round(10 + (uploadedCount / totalFiles) * 78));
+        if (onProgress) {
+          onProgress(pct, `جاري حفظ الملفات بالقرص الصلب: ${uploadedCount} من ${totalFiles}...`);
         }
-      }
-
-      pages.push({
-        pageNumber: p.page || p.page_absolute || idx + 1,
-        displayLabel: p.page_name ? String(p.page_name) : String(p.page || idx + 1),
-        pageImage: pageImageUrl,
-        media: pageMediaList
-      });
-    }
-  } else {
-    // Generic fallback for any scanned images and audio files
-    const imageEntries = rawFiles.filter((f) => /\.(jpg|jpeg|png|webp|svg)$/i.test(f.name));
-    imageEntries.sort((a, b) => naturalCompare(a.name, b.name));
-
-    for (const [idx, f] of imageEntries.entries()) {
-      const blob = await f.getBlob();
-      pages.push({
-        pageNumber: idx + 1,
-        displayLabel: String(idx + 1),
-        pageImage: URL.createObjectURL(blob),
-        media: []
-      });
-    }
+      })
+    );
   }
 
-  if (onProgress) onProgress(80, "جاري حفظ وتخزين الكتاب...");
+  // 3. Finalize book on server: catalogs manifest & pages on disk, creates permanent URLs
+  if (onProgress) onProgress(92, "فهرسة الكتاب واعتماده نهائياً على القرص الصلب...");
+  const finalRes = await fetch(`/api/books/${encodeURIComponent(bookId)}/finalize-folder-upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: defaultTitle })
+  });
 
-  // Cover image resolution
-  let coverImage = "";
-  if (bookJson?.cover_img) {
-    const entry = fileMap.get(bookJson.cover_img.toLowerCase());
-    if (entry) {
-      const blob = await entry.getBlob();
-      coverImage = URL.createObjectURL(blob);
-    }
-  }
-  if (!coverImage && pages.length > 0) {
-    coverImage = pages[0].pageImage;
+  if (!finalRes.ok) {
+    const errText = await finalRes.text();
+    throw new Error(`فشل فهرسة الكتاب على السيرفر: ${errText || finalRes.statusText}`);
   }
 
-  const newBook: InteractiveBook = {
-    id: bookId,
-    title: bookJson?.title || bookJson?.series || defaultTitle || "كتاب تفاعلي",
-    subtitle: bookJson?.subtitle || "Kurs- und Arbeitsbuch",
-    author: bookJson?.author || "Hueber Verlag",
-    coverImage,
-    totalPages: pages.length,
-    pages,
-    allMedia,
-    createdAt: new Date().toISOString()
-  };
+  const { book } = await finalRes.json();
 
-  // Save to IndexedDB (takes < 100ms!)
-  await saveBookToDB(newBook);
+  // Save to local cache as well
+  await saveBookToDB(book);
 
-  if (onProgress) onProgress(100, "تم حفظ الكتاب بنجاح!");
-  return newBook;
+  if (onProgress) onProgress(100, "تم حفظ الكتاب بالكامل على القرص الصلب بنجاح!");
+  return book;
 }
 
-// 1. Upload & Extract ZIP archive directly in seconds
+/**
+ * 1. Upload & Extract ZIP archive into the server's hard drive
+ */
 export async function uploadBookToServer(
   file: File,
   _title?: string,
   onProgress?: (percent: number, statusText?: string) => void
 ): Promise<InteractiveBook> {
-  if (onProgress) onProgress(5, "جاري قراءة ملف الـ ZIP بسرعة فائقة...");
+  if (onProgress) onProgress(5, "جاري قراءة حزمة الـ ZIP بسرعة فائقة...");
   const zip = await JSZip.loadAsync(file);
   const rawFiles: RawFileEntry[] = [];
 
@@ -394,10 +336,12 @@ export async function uploadBookToServer(
   }
 
   const defaultTitle = file.name.replace(/\.zip$/i, "").replace(/[_-]/g, " ");
-  return parseAndSaveBook(rawFiles, defaultTitle, onProgress);
+  return uploadFilesToServerDisk(rawFiles, defaultTitle, onProgress);
 }
 
-// 2. Upload Folder directly without compression in seconds
+/**
+ * 2. Upload Folder directly into the server's hard drive
+ */
 export async function uploadBookFolderToServer(
   files: FileList | File[],
   options?: { onProgress?: (pct: number, statusText?: string) => void }
@@ -415,10 +359,10 @@ export async function uploadBookFolderToServer(
   }
 
   const defaultTitle = rawFiles[0]?.name.split("/")[0] || "كتاب تفاعلي";
-  return parseAndSaveBook(rawFiles, defaultTitle, options?.onProgress);
+  return uploadFilesToServerDisk(rawFiles, defaultTitle, options?.onProgress);
 }
 
-// Aliases for compatibility
+// Aliases for full compatibility
 export interface UploadStageInfo {
   stageNumber: number;
   stageName: string;
@@ -437,10 +381,10 @@ export async function uploadBookWithDiagnostics(
   const onProgress = (pct: number, statusText?: string) => {
     if (options?.onStageUpdate) {
       options.onStageUpdate({
-        stageNumber: pct < 40 ? 1 : pct < 70 ? 2 : 3,
-        stageName: pct < 40 ? "فك واستخراج البيانات" : pct < 80 ? "ربط الصفحات بالصوت والفيديو" : "حفظ الكتاب محلياً في الذاكرة",
+        stageNumber: pct < 40 ? 1 : pct < 85 ? 2 : 3,
+        stageName: pct < 40 ? "تهيئة وتجهيز المساحة" : pct < 85 ? "حفظ الملفات على القرص الصلب" : "الفهرسة والاعتماد النهائي",
         status: pct >= 100 ? "completed" : "processing",
-        details: statusText || "جاري المعالجة السريعة...",
+        details: statusText || "جاري الحفظ على القرص الصلب...",
         percentage: pct
       });
     }

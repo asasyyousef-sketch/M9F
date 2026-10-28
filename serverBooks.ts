@@ -638,19 +638,19 @@ export function registerServerBookRoutes(app: express.Express) {
   const singleFileDiskStorage = multer.diskStorage({
     destination: (req, file, cb) => {
       const bookId = req.params.id;
-      const targetDir = path.join(BOOKS_DIR, bookId);
-      cb(null, targetDir);
-    },
-    filename: (req, file, cb) => {
-      // Relative path sent via header
       const rawRelPath = (req.headers["x-relative-path"] as string) || file.originalname;
       const cleanRelPath = decodeURIComponent(rawRelPath).replace(/^(\.\/|\/)+/, "");
-      const fullPath = path.join(BOOKS_DIR, req.params.id, cleanRelPath);
+      const fullPath = path.join(BOOKS_DIR, bookId, cleanRelPath);
       const destDir = path.dirname(fullPath);
       if (!fs.existsSync(destDir)) {
         fs.mkdirSync(destDir, { recursive: true });
       }
-      cb(null, cleanRelPath);
+      cb(null, destDir);
+    },
+    filename: (req, file, cb) => {
+      const rawRelPath = (req.headers["x-relative-path"] as string) || file.originalname;
+      const cleanRelPath = decodeURIComponent(rawRelPath).replace(/^(\.\/|\/)+/, "");
+      cb(null, path.basename(cleanRelPath));
     }
   });
 
