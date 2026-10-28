@@ -522,6 +522,7 @@ export const NotesWorkspace: React.FC<NotesWorkspaceProps> = ({
       title: "",
       content: "",
       plainText: "",
+      isPinned: false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       paperStyle: "white",

@@ -19,8 +19,8 @@ import {
 import { InteractiveBook, BookPage, BookPageMedia, MediaFile } from "../types";
 import {
   fetchBooksFromServer,
-  uploadBookWithDiagnostics,
-  UploadStageInfo,
+  uploadBookToServer,
+  uploadBookFolderToServer,
   deleteBookFromServer
 } from "../utils/bookStorage";
 
@@ -29,20 +29,11 @@ interface BookReaderWorkspaceProps {
   onBackToMediaExplorer?: () => void;
 }
 
-const INITIAL_STAGES: Record<number, UploadStageInfo> = {
-  1: { stageNumber: 1, stageName: "المرحلة 1: فحص واستخراج محتويات الحزمة", status: "pending", details: "في انتظار بدء التحليل الموضعي...", percentage: 0 },
-  2: { stageNumber: 2, stageName: "المرحلة 2: قراءة بيانات الكتاب والتنسيق (JSON)", status: "pending", details: "في انتظار مطابقة الفهرس...", percentage: 0 },
-  3: { stageNumber: 3, stageName: "المرحلة 3: تهيئة مساحة الكتاب على السيرفر", status: "pending", details: "في انتظار حجز المجلد بالسيرفر...", percentage: 0 },
-  4: { stageNumber: 4, stageName: "المرحلة 4: حفظ صور الصفحات وملفات التنسيق", status: "pending", details: "في انتظار نقل الصفحات...", percentage: 0 },
-  5: { stageNumber: 5, stageName: "المرحلة 5: حفظ الصوتيات والفيديوهات (تجزئة آمنة)", status: "pending", details: "في انتظار نقل الوسائط بالتجزئة...", percentage: 0 },
-  6: { stageNumber: 6, stageName: "المرحلة 6: الاعتماد النهائي وفهرسة الكتاب", status: "pending", details: "في انتظار اعتماد الفهرس...", percentage: 0 }
-};
-
 export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   onPlayMediaInStudio,
   onBackToMediaExplorer
 }) => {
-  // Books list loaded from server
+  // Books list loaded from server / local storage
   const [books, setBooks] = useState<InteractiveBook[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [selectedBook, setSelectedBook] = useState<InteractiveBook | null>(null);
@@ -53,19 +44,13 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
-  const [skipVideos, setSkipVideos] = useState<boolean>(false);
-
-  // Stages Diagnostic Tracking State
-  const [showDiagnosticsModal, setShowDiagnosticsModal] = useState<boolean>(false);
-  const [stages, setStages] = useState<Record<number, UploadStageInfo>>(INITIAL_STAGES);
-  const [currentStageNum, setCurrentStageNum] = useState<number>(1);
 
   const [uploading, setUploading] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [uploadStatusText, setUploadStatusText] = useState<string>("");
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  // Load books from server on mount
+  // Load books on mount
   useEffect(() => {
     loadBooks();
   }, []);
@@ -76,81 +61,62 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
       const serverBooks = await fetchBooksFromServer();
       setBooks(serverBooks);
     } catch (e) {
-      console.error("Error loading books from server:", e);
+      console.error("Error loading books:", e);
     } finally {
       setLoading(false);
     }
   };
 
-  const resetStages = () => {
-    setStages(JSON.parse(JSON.stringify(INITIAL_STAGES)));
-    setCurrentStageNum(1);
-    setUploadError(null);
-  };
-
-  // Handle uploading ZIP to server with Stage Diagnostics & Chunking
+  // ⚡ Handle uploading ZIP (Super-fast client-side unzip + IndexedDB storage)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    resetStages();
     setUploading(true);
+    setUploadProgress(10);
+    setUploadStatusText("جاري فك ضغط الملف ومعالجة المحتويات...");
+    setUploadError(null);
     setShowUploadModal(false);
-    setShowDiagnosticsModal(true);
 
     try {
-      const newBook = await uploadBookWithDiagnostics(file, {
-        skipVideos: skipVideos,
-        onStageUpdate: (info) => {
-          setStages((prev) => ({
-            ...prev,
-            [info.stageNumber]: info
-          }));
-          setCurrentStageNum(info.stageNumber);
-          setUploadProgress(info.percentage);
-          setUploadStatusText(`${info.stageName}: ${info.details}`);
-        }
+      const newBook = await uploadBookToServer(file, "", (pct, status) => {
+        setUploadProgress(pct);
+        if (status) setUploadStatusText(status);
       });
 
-      // Reload books from server to ensure complete persistence
       const updatedList = await fetchBooksFromServer();
       setBooks(updatedList);
 
       setTimeout(() => {
-        setShowDiagnosticsModal(false);
+        setUploading(false);
         setSelectedBook(newBook);
         const mediaIdx = newBook.pages.findIndex((p) => p.media && p.media.length > 0);
         setCurrentPageIndex(mediaIdx >= 0 ? mediaIdx : 0);
-      }, 1200);
+      }, 500);
     } catch (err: any) {
-      setUploadError(err?.message || "حدث خطأ أثناء تنفيذ مراحل حفظ الكتاب");
-    } finally {
+      setUploadError(err?.message || "حدث خطأ أثناء معالجة ملف الكتاب");
       setUploading(false);
+    } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
-  // Handle uploading Book Folder directly with Stage Diagnostics & Chunking
+  // ⚡ Handle uploading Book Folder directly (Fastest, zero compression overhead)
   const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    resetStages();
     setUploading(true);
+    setUploadProgress(10);
+    setUploadStatusText("جاري قراءة مجلد الكتاب وربط الصوتيات والفيديوهات بالصفحات...");
+    setUploadError(null);
     setShowUploadModal(false);
-    setShowDiagnosticsModal(true);
 
     try {
-      const newBook = await uploadBookWithDiagnostics(files, {
-        skipVideos: skipVideos,
-        onStageUpdate: (info) => {
-          setStages((prev) => ({
-            ...prev,
-            [info.stageNumber]: info
-          }));
-          setCurrentStageNum(info.stageNumber);
-          setUploadProgress(info.percentage);
-          setUploadStatusText(`${info.stageName}: ${info.details}`);
+      const newBook = await uploadBookFolderToServer(files, {
+        onProgress: (pct, status) => {
+          setUploadProgress(pct);
+          if (status) setUploadStatusText(status);
         }
       });
 
@@ -158,15 +124,15 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
       setBooks(updatedList);
 
       setTimeout(() => {
-        setShowDiagnosticsModal(false);
+        setUploading(false);
         setSelectedBook(newBook);
         const mediaIdx = newBook.pages.findIndex((p) => p.media && p.media.length > 0);
         setCurrentPageIndex(mediaIdx >= 0 ? mediaIdx : 0);
-      }, 1200);
+      }, 500);
     } catch (err: any) {
-      setUploadError(err?.message || "فشل حفظ وفهرسة مجلد الكتاب على السيرفر");
-    } finally {
+      setUploadError(err?.message || "حدث خطأ أثناء قراءة مجلد الكتاب");
       setUploading(false);
+    } finally {
       if (folderInputRef.current) folderInputRef.current.value = "";
     }
   };
@@ -475,228 +441,109 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
               <h3 className="text-base font-bold text-slate-900">إضافة كتاب تفاعلي إلى السيرفر</h3>
             </div>
 
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-3.5">
               <p className="text-xs text-slate-500 leading-relaxed">
-                تم تحديث محرك السيرفر ليعمل بدون استهلاك الذاكرة المؤقتة (RAM) نهائياً مع فك ضغط فوري وحفظ مباشر على القرص:
+                اختر الطريقة المناسبة لك (تتم المعالجة والفهرسة محلياً وفورياً في ثوانٍ معدودة):
               </p>
 
-              {/* Option 1: Direct Folder Upload */}
-              <button
-                type="button"
-                onClick={() => folderInputRef.current?.click()}
-                className="w-full p-4 rounded-xl border-2 border-blue-500/30 hover:border-blue-600 bg-blue-50/50 hover:bg-blue-50 text-right transition-all flex items-start gap-3 cursor-pointer group"
-              >
-                <div className="p-2.5 rounded-lg bg-blue-600 text-white shrink-0 group-hover:scale-105 transition-transform">
-                  <FolderUp className="w-5 h-5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-sm font-bold text-blue-950">رفع مجلد الكتاب المباشر (الأفضل والأنصح)</h4>
-                    <span className="text-[10px] font-bold bg-blue-200/80 text-blue-800 px-1.5 py-0.5 rounded">موصى به</span>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1 leading-snug">
-                    اختر مجلد <span className="font-mono font-bold text-slate-700">prod</span> المفكوك مباشرة من حاسوبك بدون الحاجة لضغطه.
-                  </p>
-                </div>
-              </button>
-
-              {/* Option 2: High-Speed Native ZIP Upload */}
+              {/* Option 1: High-Speed Native ZIP Upload */}
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full p-4 rounded-xl border border-slate-200 hover:border-slate-400 bg-white hover:bg-slate-50 text-right transition-all flex items-start gap-3 cursor-pointer group"
+                className="w-full p-4 rounded-xl border-2 border-blue-500/30 hover:border-blue-600 bg-blue-50/50 hover:bg-blue-50 text-right transition-all flex items-start gap-3 cursor-pointer group"
               >
-                <div className="p-2.5 rounded-lg bg-slate-800 text-white shrink-0 group-hover:scale-105 transition-transform">
+                <div className="p-2.5 rounded-lg bg-blue-600 text-white shrink-0 group-hover:scale-105 transition-transform">
                   <FileArchive className="w-5 h-5" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <h4 className="text-sm font-bold text-slate-900">رفع ملف ZIP مضغوط</h4>
-                    <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">فك فوري بالقرص</span>
+                    <h4 className="text-sm font-bold text-blue-950">رفع ملف ZIP مضغوط (مثل 530_25460.zip)</h4>
+                    <span className="text-[10px] font-bold bg-blue-200/80 text-blue-800 px-1.5 py-0.5 rounded">فوري وسهل</span>
                   </div>
                   <p className="text-xs text-slate-500 mt-1 leading-snug">
-                    رفع ملف الـ ZIP مباشرة عبر معالج النظام فائق السرعة وبدون أي استهلاك للـ RAM.
+                    ارفع ملف الـ ZIP مباشرة، سيتم فك الحزمة وفهرسة الصفحات والصوتيات والفيديوهات وفتح الكتاب خلال ثوانٍ.
                   </p>
                 </div>
               </button>
 
-              {/* Fast mode: Skip bulky video files (optional) */}
-              <label className="flex items-center gap-2.5 pt-2 px-1 text-xs text-slate-700 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={skipVideos}
-                  onChange={(e) => setSkipVideos(e.target.checked)}
-                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
-                />
-                <span className="flex items-center gap-1.5">
-                  <Zap className="w-3.5 h-3.5 text-amber-500" />
-                  <span>تخطي الفيديوهات الضخمة لتسريع الرفع 10 أضعاف (رفع الصفحات والأصوات فقط)</span>
-                </span>
-              </label>
+              {/* Option 2: Direct Folder Upload */}
+              <button
+                type="button"
+                onClick={() => folderInputRef.current?.click()}
+                className="w-full p-4 rounded-xl border border-slate-200 hover:border-slate-400 bg-white hover:bg-slate-50 text-right transition-all flex items-start gap-3 cursor-pointer group"
+              >
+                <div className="p-2.5 rounded-lg bg-slate-800 text-white shrink-0 group-hover:scale-105 transition-transform">
+                  <FolderUp className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-bold text-slate-900">رفع مجلد الكتاب المباشر (prod)</h4>
+                    <span className="text-[10px] font-bold bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">بدون ضغط</span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1 leading-snug">
+                    اختر مجلد <span className="font-mono font-bold text-slate-700">prod</span> المفكوك على حاسوبك لقراءته فوراً.
+                  </p>
+                </div>
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Live Stage Diagnostics & Error Handling Modal */}
-      {showDiagnosticsModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-100 overflow-hidden text-right flex flex-col max-h-[90vh]" dir="rtl">
-            {/* Modal Header */}
-            <div className="p-4 px-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
-              <div className="flex items-center gap-2.5">
-                <div className={`p-2 rounded-xl ${uploadError ? 'bg-rose-100 text-rose-600' : uploading ? 'bg-blue-100 text-blue-600 animate-pulse' : 'bg-emerald-100 text-emerald-600'}`}>
-                  {uploadError ? <AlertCircle className="w-5 h-5" /> : uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
+      {/* 🚀 Fast & Simple Upload Progress Modal */}
+      {(uploading || uploadError) && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full shadow-2xl border border-slate-100 overflow-hidden text-right p-6 flex flex-col items-center" dir="rtl">
+            {uploadError ? (
+              <>
+                <div className="p-3 bg-rose-100 text-rose-600 rounded-2xl mb-3">
+                  <AlertCircle className="w-8 h-8" />
                 </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">تشخيص وتقييم مراحل حفظ الكتاب</h3>
-                  <p className="text-[11px] text-slate-400 font-medium">متابعة لحظية لكل مرحلة لضمان عدم انقطاع الاتصال بالسيرفر</p>
-                </div>
-              </div>
-              {(!uploading || uploadError) && (
-                <button
-                  onClick={() => setShowDiagnosticsModal(false)}
-                  className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              )}
-            </div>
-
-            {/* Error Banner if any stage failed */}
-            {uploadError && (
-              <div className="m-4 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 text-xs">
-                <div className="flex items-start gap-2.5">
-                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-                  <div className="space-y-1">
-                    <p className="font-bold text-sm text-rose-800">توقف الحفظ عند {stages[currentStageNum]?.stageName}</p>
-                    <p className="font-mono text-rose-700 text-[11px] leading-relaxed break-all">{uploadError}</p>
-                    <p className="text-slate-600 text-[11px] mt-1 pt-1 border-t border-rose-200/60">
-                      سبب محتمل: إذا كان حجم الحزمة كبيراً جداً، جرّب <b>"رفع مجلد الكتاب المباشر"</b> مع تفعيل <b>"تخطي الفيديوهات"</b> لتقليل الحجم من 1GB إلى 130MB فقط.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Overall Progress Bar */}
-            <div className="px-5 pt-3 pb-1">
-              <div className="flex items-center justify-between text-xs font-semibold text-slate-600 mb-1.5">
-                <span>التقدم الإجمالي</span>
-                <span className="font-mono font-bold text-blue-600">{uploadProgress}%</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-300 ${uploadError ? 'bg-rose-500' : 'bg-gradient-to-r from-blue-600 to-indigo-600'}`}
-                  style={{ width: `${uploadProgress}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Stages Timeline List */}
-            <div className="p-5 space-y-3 overflow-y-auto flex-1">
-              {[1, 2, 3, 4, 5, 6].map((num) => {
-                const stage = stages[num];
-                const isCurrent = currentStageNum === num && uploading && !uploadError;
-                const isCompleted = stage.status === "completed";
-                const isError = stage.status === "error";
-
-                return (
-                  <div
-                    key={num}
-                    className={`p-3.5 rounded-2xl border transition-all ${
-                      isError
-                        ? "border-rose-300 bg-rose-50/60 shadow-xs"
-                        : isCurrent
-                        ? "border-blue-400 bg-blue-50/50 shadow-md ring-2 ring-blue-500/10"
-                        : isCompleted
-                        ? "border-emerald-200 bg-emerald-50/40"
-                        : "border-slate-100 bg-slate-50/50 opacity-60"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-2.5 flex-1 min-w-0">
-                        {/* Status Icon */}
-                        <div className="mt-0.5 shrink-0">
-                          {isError ? (
-                            <AlertCircle className="w-4 h-4 text-rose-600" />
-                          ) : isCompleted ? (
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                          ) : isCurrent ? (
-                            <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
-                          ) : (
-                            <Clock className="w-4 h-4 text-slate-400" />
-                          )}
-                        </div>
-
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between">
-                            <h4 className={`text-xs font-bold ${isError ? 'text-rose-900' : isCompleted ? 'text-emerald-900' : isCurrent ? 'text-blue-900' : 'text-slate-600'}`}>
-                              {stage.stageName}
-                            </h4>
-                            <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-white/80 border border-slate-200/60 text-slate-600">
-                              {isError ? 'خطأ' : isCompleted ? 'اكتملت 100%' : isCurrent ? `${stage.percentage}%` : 'قيد الانتظار'}
-                            </span>
-                          </div>
-
-                          <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                            {stage.details}
-                          </p>
-
-                          {/* Live mini progress bar for active stage */}
-                          {isCurrent && stage.percentage > 0 && (
-                            <div className="w-full bg-blue-100 rounded-full h-1.5 mt-2 overflow-hidden">
-                              <div
-                                className="bg-blue-600 h-full rounded-full transition-all duration-200"
-                                style={{ width: `${stage.percentage}%` }}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-              {uploadError ? (
-                <div className="flex items-center justify-between w-full">
+                <h3 className="text-base font-bold text-slate-900 mb-1">تعذر تجهيز الكتاب</h3>
+                <p className="text-xs text-rose-700 text-center mb-5 leading-relaxed bg-rose-50 p-3 rounded-xl border border-rose-100 w-full font-mono">
+                  {uploadError}
+                </p>
+                <div className="flex gap-2 w-full">
                   <button
                     onClick={() => {
-                      setShowDiagnosticsModal(false);
+                      setUploadError(null);
                       setShowUploadModal(true);
                     }}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors cursor-pointer"
+                    className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition cursor-pointer"
                   >
-                    تجربة طريقة رفع أخرى (مجلد أو خفيف)
+                    تجربة مجلد أو ملف آخر
                   </button>
                   <button
-                    onClick={() => setShowDiagnosticsModal(false)}
-                    className="px-3 py-2 text-slate-600 hover:text-slate-900 text-xs font-semibold cursor-pointer"
+                    onClick={() => setUploadError(null)}
+                    className="py-2.5 px-4 text-slate-600 hover:text-slate-900 text-xs font-semibold cursor-pointer"
                   >
-                    إغلاق النافذة
+                    إلغاء
                   </button>
                 </div>
-              ) : uploading ? (
-                <div className="flex items-center gap-2 text-xs text-blue-700 font-medium">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>جاري تنفيذ النقل والتجزئة بأمان تام...</span>
+              </>
+            ) : (
+              <>
+                <div className="p-3.5 bg-blue-50 text-blue-600 rounded-2xl mb-4 relative">
+                  <Loader2 className="w-8 h-8 animate-spin" />
                 </div>
-              ) : (
-                <div className="flex items-center justify-between w-full text-xs text-emerald-700 font-bold">
-                  <span>تم حفظ وفهرسة الكتاب التفاعلي بالكامل على السيرفر!</span>
-                  <button
-                    onClick={() => setShowDiagnosticsModal(false)}
-                    className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors cursor-pointer"
-                  >
-                    فتح الكتاب
-                  </button>
+                <h3 className="text-base font-bold text-slate-900 mb-1">جاري تجهيز الكتاب التفاعلي...</h3>
+                <p className="text-xs text-slate-500 text-center mb-4 leading-relaxed">
+                  {uploadStatusText || "جاري معالجة الصفحات والملفات الصوتية بسرعة فائقة..."}
+                </p>
+
+                {/* Progress bar */}
+                <div className="w-full bg-slate-100 rounded-full h-3 mb-2 overflow-hidden">
+                  <div
+                    className="bg-gradient-to-r from-blue-600 to-indigo-600 h-full rounded-full transition-all duration-300"
+                    style={{ width: `${Math.max(uploadProgress, 12)}%` }}
+                  />
                 </div>
-              )}
-            </div>
+                <div className="flex justify-between w-full text-[11px] font-mono text-slate-400">
+                  <span>ثوانٍ معدودة فقط</span>
+                  <span className="font-bold text-blue-600">{uploadProgress}%</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
