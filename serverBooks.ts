@@ -667,6 +667,39 @@ export function registerServerBookRoutes(app: express.Express) {
     }
   });
 
+  // 3c-2. Chunked file upload (for large files to guarantee each request is < 10MB to comply with Cloud Run limits)
+  app.post("/api/books/:id/upload-chunk", express.raw({ type: "*/*", limit: "35mb" }), (req, res) => {
+    try {
+      const bookId = req.params.id;
+      const rawRelPath = (req.headers["x-relative-path"] as string) || "file.dat";
+      const chunkIndex = parseInt((req.headers["x-chunk-index"] as string) || "0", 10);
+      const totalChunks = parseInt((req.headers["x-total-chunks"] as string) || "1", 10);
+      const cleanRelPath = decodeURIComponent(rawRelPath).replace(/^(\.\/|\/)+/, "");
+      const fullPath = path.join(BOOKS_DIR, bookId, cleanRelPath);
+      const destDir = path.dirname(fullPath);
+
+      if (!fs.existsSync(destDir)) {
+        fs.mkdirSync(destDir, { recursive: true });
+      }
+
+      if (chunkIndex === 0) {
+        fs.writeFileSync(fullPath, req.body as Buffer);
+      } else {
+        fs.appendFileSync(fullPath, req.body as Buffer);
+      }
+
+      res.json({
+        success: true,
+        chunkIndex,
+        totalChunks,
+        isComplete: chunkIndex === totalChunks - 1
+      });
+    } catch (err: any) {
+      console.error("[Books Server] Chunk upload error:", err);
+      res.status(500).json({ error: err?.message || "Failed to save file chunk" });
+    }
+  });
+
   // 3d. Folder Upload - Step 3: Finalize & Catalog Book
   app.post("/api/books/:id/finalize-folder-upload", express.json(), (req, res) => {
     try {

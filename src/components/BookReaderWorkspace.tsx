@@ -1,10 +1,26 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { ArrowLeft, Search, ChevronRight, Info, Pencil, Check, FolderUp, FileArchive, X, Zap } from "lucide-react";
+import {
+  ArrowLeft,
+  Search,
+  ChevronRight,
+  Info,
+  Pencil,
+  Check,
+  FolderUp,
+  FileArchive,
+  X,
+  Zap,
+  CheckCircle2,
+  AlertCircle,
+  Loader2,
+  Clock,
+  UploadCloud
+} from "lucide-react";
 import { InteractiveBook, BookPage, BookPageMedia, MediaFile } from "../types";
 import {
   fetchBooksFromServer,
-  uploadBookToServer,
-  uploadBookFolderToServer,
+  uploadBookWithDiagnostics,
+  UploadStageInfo,
   deleteBookFromServer
 } from "../utils/bookStorage";
 
@@ -12,6 +28,15 @@ interface BookReaderWorkspaceProps {
   onPlayMediaInStudio?: (file: Partial<MediaFile>) => void;
   onBackToMediaExplorer?: () => void;
 }
+
+const INITIAL_STAGES: Record<number, UploadStageInfo> = {
+  1: { stageNumber: 1, stageName: "المرحلة 1: فحص واستخراج محتويات الحزمة", status: "pending", details: "في انتظار بدء التحليل الموضعي...", percentage: 0 },
+  2: { stageNumber: 2, stageName: "المرحلة 2: قراءة بيانات الكتاب والتنسيق (JSON)", status: "pending", details: "في انتظار مطابقة الفهرس...", percentage: 0 },
+  3: { stageNumber: 3, stageName: "المرحلة 3: تهيئة مساحة الكتاب على السيرفر", status: "pending", details: "في انتظار حجز المجلد بالسيرفر...", percentage: 0 },
+  4: { stageNumber: 4, stageName: "المرحلة 4: حفظ صور الصفحات وملفات التنسيق", status: "pending", details: "في انتظار نقل الصفحات...", percentage: 0 },
+  5: { stageNumber: 5, stageName: "المرحلة 5: حفظ الصوتيات والفيديوهات (تجزئة آمنة)", status: "pending", details: "في انتظار نقل الوسائط بالتجزئة...", percentage: 0 },
+  6: { stageNumber: 6, stageName: "المرحلة 6: الاعتماد النهائي وفهرسة الكتاب", status: "pending", details: "في انتظار اعتماد الفهرس...", percentage: 0 }
+};
 
 export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   onPlayMediaInStudio,
@@ -29,6 +54,11 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
   const [skipVideos, setSkipVideos] = useState<boolean>(false);
+
+  // Stages Diagnostic Tracking State
+  const [showDiagnosticsModal, setShowDiagnosticsModal] = useState<boolean>(false);
+  const [stages, setStages] = useState<Record<number, UploadStageInfo>>(INITIAL_STAGES);
+  const [currentStageNum, setCurrentStageNum] = useState<number>(1);
 
   const [uploading, setUploading] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
@@ -52,65 +82,87 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     }
   };
 
-  // Handle uploading ZIP to server (Fast disk-based stream + native unzip)
+  const resetStages = () => {
+    setStages(JSON.parse(JSON.stringify(INITIAL_STAGES)));
+    setCurrentStageNum(1);
+    setUploadError(null);
+  };
+
+  // Handle uploading ZIP to server with Stage Diagnostics & Chunking
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    resetStages();
     setUploading(true);
-    setUploadProgress(0);
-    setUploadStatusText("جاري تحضير ورفع الملف المضغوط إلى السيرفر...");
-    setUploadError(null);
     setShowUploadModal(false);
+    setShowDiagnosticsModal(true);
 
     try {
-      const newBook = await uploadBookToServer(file, "", (pct, status) => {
-        setUploadProgress(pct);
-        if (status) setUploadStatusText(status);
+      const newBook = await uploadBookWithDiagnostics(file, {
+        skipVideos: skipVideos,
+        onStageUpdate: (info) => {
+          setStages((prev) => ({
+            ...prev,
+            [info.stageNumber]: info
+          }));
+          setCurrentStageNum(info.stageNumber);
+          setUploadProgress(info.percentage);
+          setUploadStatusText(`${info.stageName}: ${info.details}`);
+        }
       });
 
       // Reload books from server to ensure complete persistence
       const updatedList = await fetchBooksFromServer();
       setBooks(updatedList);
 
-      // Open newly uploaded book
-      setSelectedBook(newBook);
-      const mediaIdx = newBook.pages.findIndex((p) => p.media && p.media.length > 0);
-      setCurrentPageIndex(mediaIdx >= 0 ? mediaIdx : 0);
+      setTimeout(() => {
+        setShowDiagnosticsModal(false);
+        setSelectedBook(newBook);
+        const mediaIdx = newBook.pages.findIndex((p) => p.media && p.media.length > 0);
+        setCurrentPageIndex(mediaIdx >= 0 ? mediaIdx : 0);
+      }, 1200);
     } catch (err: any) {
-      setUploadError(err?.message || "فشل رفع واستخراج الكتاب على السيرفر");
+      setUploadError(err?.message || "حدث خطأ أثناء تنفيذ مراحل حفظ الكتاب");
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
-  // Handle uploading Book Folder directly (prod folder with book/, audio/, video/)
+  // Handle uploading Book Folder directly with Stage Diagnostics & Chunking
   const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
+    resetStages();
     setUploading(true);
-    setUploadProgress(0);
-    setUploadStatusText("جاري فحص ملفات مجلد الكتاب...");
-    setUploadError(null);
     setShowUploadModal(false);
+    setShowDiagnosticsModal(true);
 
     try {
-      const newBook = await uploadBookFolderToServer(files, {
+      const newBook = await uploadBookWithDiagnostics(files, {
         skipVideos: skipVideos,
-        onProgress: (pct, status) => {
-          setUploadProgress(pct);
-          setUploadStatusText(status);
+        onStageUpdate: (info) => {
+          setStages((prev) => ({
+            ...prev,
+            [info.stageNumber]: info
+          }));
+          setCurrentStageNum(info.stageNumber);
+          setUploadProgress(info.percentage);
+          setUploadStatusText(`${info.stageName}: ${info.details}`);
         }
       });
 
       const updatedList = await fetchBooksFromServer();
       setBooks(updatedList);
 
-      setSelectedBook(newBook);
-      const mediaIdx = newBook.pages.findIndex((p) => p.media && p.media.length > 0);
-      setCurrentPageIndex(mediaIdx >= 0 ? mediaIdx : 0);
+      setTimeout(() => {
+        setShowDiagnosticsModal(false);
+        setSelectedBook(newBook);
+        const mediaIdx = newBook.pages.findIndex((p) => p.media && p.media.length > 0);
+        setCurrentPageIndex(mediaIdx >= 0 ? mediaIdx : 0);
+      }, 1200);
     } catch (err: any) {
       setUploadError(err?.message || "فشل حفظ وفهرسة مجلد الكتاب على السيرفر");
     } finally {
@@ -481,6 +533,169 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
                   <span>تخطي الفيديوهات الضخمة لتسريع الرفع 10 أضعاف (رفع الصفحات والأصوات فقط)</span>
                 </span>
               </label>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Live Stage Diagnostics & Error Handling Modal */}
+      {showDiagnosticsModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-100 overflow-hidden text-right flex flex-col max-h-[90vh]" dir="rtl">
+            {/* Modal Header */}
+            <div className="p-4 px-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+              <div className="flex items-center gap-2.5">
+                <div className={`p-2 rounded-xl ${uploadError ? 'bg-rose-100 text-rose-600' : uploading ? 'bg-blue-100 text-blue-600 animate-pulse' : 'bg-emerald-100 text-emerald-600'}`}>
+                  {uploadError ? <AlertCircle className="w-5 h-5" /> : uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">تشخيص وتقييم مراحل حفظ الكتاب</h3>
+                  <p className="text-[11px] text-slate-400 font-medium">متابعة لحظية لكل مرحلة لضمان عدم انقطاع الاتصال بالسيرفر</p>
+                </div>
+              </div>
+              {(!uploading || uploadError) && (
+                <button
+                  onClick={() => setShowDiagnosticsModal(false)}
+                  className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+
+            {/* Error Banner if any stage failed */}
+            {uploadError && (
+              <div className="m-4 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 text-xs">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold text-sm text-rose-800">توقف الحفظ عند {stages[currentStageNum]?.stageName}</p>
+                    <p className="font-mono text-rose-700 text-[11px] leading-relaxed break-all">{uploadError}</p>
+                    <p className="text-slate-600 text-[11px] mt-1 pt-1 border-t border-rose-200/60">
+                      سبب محتمل: إذا كان حجم الحزمة كبيراً جداً، جرّب <b>"رفع مجلد الكتاب المباشر"</b> مع تفعيل <b>"تخطي الفيديوهات"</b> لتقليل الحجم من 1GB إلى 130MB فقط.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Overall Progress Bar */}
+            <div className="px-5 pt-3 pb-1">
+              <div className="flex items-center justify-between text-xs font-semibold text-slate-600 mb-1.5">
+                <span>التقدم الإجمالي</span>
+                <span className="font-mono font-bold text-blue-600">{uploadProgress}%</span>
+              </div>
+              <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${uploadError ? 'bg-rose-500' : 'bg-gradient-to-r from-blue-600 to-indigo-600'}`}
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Stages Timeline List */}
+            <div className="p-5 space-y-3 overflow-y-auto flex-1">
+              {[1, 2, 3, 4, 5, 6].map((num) => {
+                const stage = stages[num];
+                const isCurrent = currentStageNum === num && uploading && !uploadError;
+                const isCompleted = stage.status === "completed";
+                const isError = stage.status === "error";
+
+                return (
+                  <div
+                    key={num}
+                    className={`p-3.5 rounded-2xl border transition-all ${
+                      isError
+                        ? "border-rose-300 bg-rose-50/60 shadow-xs"
+                        : isCurrent
+                        ? "border-blue-400 bg-blue-50/50 shadow-md ring-2 ring-blue-500/10"
+                        : isCompleted
+                        ? "border-emerald-200 bg-emerald-50/40"
+                        : "border-slate-100 bg-slate-50/50 opacity-60"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                        {/* Status Icon */}
+                        <div className="mt-0.5 shrink-0">
+                          {isError ? (
+                            <AlertCircle className="w-4 h-4 text-rose-600" />
+                          ) : isCompleted ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          ) : isCurrent ? (
+                            <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+                          ) : (
+                            <Clock className="w-4 h-4 text-slate-400" />
+                          )}
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <h4 className={`text-xs font-bold ${isError ? 'text-rose-900' : isCompleted ? 'text-emerald-900' : isCurrent ? 'text-blue-900' : 'text-slate-600'}`}>
+                              {stage.stageName}
+                            </h4>
+                            <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-white/80 border border-slate-200/60 text-slate-600">
+                              {isError ? 'خطأ' : isCompleted ? 'اكتملت 100%' : isCurrent ? `${stage.percentage}%` : 'قيد الانتظار'}
+                            </span>
+                          </div>
+
+                          <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                            {stage.details}
+                          </p>
+
+                          {/* Live mini progress bar for active stage */}
+                          {isCurrent && stage.percentage > 0 && (
+                            <div className="w-full bg-blue-100 rounded-full h-1.5 mt-2 overflow-hidden">
+                              <div
+                                className="bg-blue-600 h-full rounded-full transition-all duration-200"
+                                style={{ width: `${stage.percentage}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+              {uploadError ? (
+                <div className="flex items-center justify-between w-full">
+                  <button
+                    onClick={() => {
+                      setShowDiagnosticsModal(false);
+                      setShowUploadModal(true);
+                    }}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors cursor-pointer"
+                  >
+                    تجربة طريقة رفع أخرى (مجلد أو خفيف)
+                  </button>
+                  <button
+                    onClick={() => setShowDiagnosticsModal(false)}
+                    className="px-3 py-2 text-slate-600 hover:text-slate-900 text-xs font-semibold cursor-pointer"
+                  >
+                    إغلاق النافذة
+                  </button>
+                </div>
+              ) : uploading ? (
+                <div className="flex items-center gap-2 text-xs text-blue-700 font-medium">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>جاري تنفيذ النقل والتجزئة بأمان تام...</span>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between w-full text-xs text-emerald-700 font-bold">
+                  <span>تم حفظ وفهرسة الكتاب التفاعلي بالكامل على السيرفر!</span>
+                  <button
+                    onClick={() => setShowDiagnosticsModal(false)}
+                    className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors cursor-pointer"
+                  >
+                    فتح الكتاب
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
