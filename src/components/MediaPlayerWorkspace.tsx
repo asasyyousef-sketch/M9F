@@ -760,13 +760,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   // Selected AI Model (Same models as in AI Corrector / قسم صحح)
   const [selectedAiModel, setSelectedAiModel] = useState<string>(() => {
     if (typeof window !== "undefined") {
-      return (
-        localStorage.getItem("media_player_selected_ai_model") ||
-        localStorage.getItem("ai_corrector_selected_model") ||
-        "gemini-3.6-flash"
-      );
+      const saved = localStorage.getItem("media_player_selected_ai_model") || localStorage.getItem("ai_corrector_selected_model");
+      if (saved && saved !== "gemini-3.6-flash" && saved !== "gemini-2.5-flash" && !saved.includes("1.5")) {
+        return saved;
+      }
+      return "gemini-3.8-flash";
     }
-    return "gemini-3.6-flash";
+    return "gemini-3.8-flash";
   });
 
   const handleSelectAiModel = (m: string) => {
@@ -2001,6 +2001,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         },
         body: JSON.stringify({
           trackId: activeTrack.id,
+          cues: activeTrack.cues,
           targetLanguage: targetLang,
           sourceLanguage: activeTrack.language || "de",
           selectedModel: selectedAiModel,
@@ -2019,8 +2020,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       setSuccessMsg(data.message || `تم إنشاء الترجمة العربية بنجاح وتفعيل الترجمة المزدوجة! 🇸🇦⚡`);
 
       if (data.file) {
-        setCurrentFile(data.file);
-        setFiles(prev => prev.map(f => f.id === data.file.id ? data.file : f));
+        setCurrentFile((prev) => (prev ? { ...prev, ...data.file } : data.file));
+        setFiles((prev) => prev.map((f) => (f.id === currentFile.id || f.id === data.file.id ? { ...f, ...data.file } : f)));
       }
 
       // Automatically set the new translated track as secondary track for dual subtitles!
@@ -2032,6 +2033,21 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         setShowDualSubtitles(true);
         saveSubtitlePreferences(currentFile.id, primaryId, secondaryId);
         saveSubtitlePreferencesToServer(currentFile.id, primaryId, secondaryId, true);
+
+        setCurrentFile((prev) => {
+          if (!prev) return prev;
+          const currentSubs = prev.subtitles ? [...prev.subtitles] : [];
+          if (!currentSubs.some((t) => t.id === data.track.id)) {
+            currentSubs.push(data.track);
+          }
+          return {
+            ...prev,
+            subtitles: currentSubs,
+            primaryTrackId: primaryId || prev.primaryTrackId,
+            secondaryTrackId: secondaryId,
+            showDualSubtitles: true
+          };
+        });
       }
       setShowTranslateModal(false);
     } catch (err: any) {
