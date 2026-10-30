@@ -1829,10 +1829,58 @@ async function startServer() {
       try { rawId = decodeURIComponent(rawId); } catch (e) {}
       const cleanId = rawId.replace(/^book-media-/, "");
 
-      const { language = "ar", promptHint = "", fullText = "", selectedModel = "gemini-3.6-flash", customApiKey, geminiApiKey } = req.body;
+      const { language = "ar", promptHint = "", fullText = "", selectedModel = "gemini-3.8-flash", customApiKey, geminiApiKey } = req.body;
 
       const list = loadMediaMeta();
-      const item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
+      let item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
+      let isBookMedia = false;
+
+      if (!item) {
+        try {
+          const books = loadBooksJson();
+          for (const b of books) {
+            const findMedia = (mList: any[]) => {
+              if (!Array.isArray(mList)) return null;
+              return mList.find((m: any) =>
+                m.id === rawId ||
+                m.id === cleanId ||
+                m.fileName === rawId ||
+                m.fileName === cleanId ||
+                m.title === rawId ||
+                m.title === cleanId
+              );
+            };
+
+            let foundInBook = findMedia(b.allMedia);
+            if (!foundInBook && Array.isArray(b.pages)) {
+              for (const p of b.pages) {
+                foundInBook = findMedia(p.media);
+                if (foundInBook) break;
+              }
+            }
+
+            if (foundInBook) {
+              isBookMedia = true;
+              item = {
+                id: rawId,
+                title: foundInBook.title || foundInBook.fileName || "مقطع الكتاب",
+                originalName: foundInBook.fileName || "audio.mp3",
+                filename: foundInBook.fileName || "audio.mp3",
+                type: foundInBook.type || "audio",
+                size: 0,
+                mimeType: foundInBook.type === "video" ? "video/mp4" : "audio/mpeg",
+                uploadedAt: new Date().toISOString(),
+                url: foundInBook.url || "",
+                subtitles: foundInBook.subtitles || []
+              };
+              break;
+            }
+          }
+        } catch (e) {
+          console.error("Error finding book media for generate-subtitles:", e);
+        }
+      }
+
       if (!item) {
         return res.status(404).json({ error: "الملف غير موجود" });
       }
@@ -1880,19 +1928,34 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
 ]
 `;
 
-      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
+      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.8-flash";
       let rawJson = "[]";
       let usedModel = primaryModel;
 
-      const response = await aiClient.models.generateContent({
-        model: primaryModel,
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json"
+      try {
+        const response = await aiClient.models.generateContent({
+          model: primaryModel,
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json"
+          }
+        });
+        if (response.text) {
+          rawJson = response.text;
         }
-      });
-      if (response.text) {
-        rawJson = response.text;
+      } catch (genErr: any) {
+        console.warn(`[Generate Subtitles AI] Model ${primaryModel} failed, trying gemini-3.8-flash fallback:`, genErr?.message || genErr);
+        usedModel = "gemini-3.8-flash";
+        const fallbackRes = await aiClient.models.generateContent({
+          model: "gemini-3.8-flash",
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json"
+          }
+        });
+        if (fallbackRes.text) {
+          rawJson = fallbackRes.text;
+        }
       }
 
       let parsedCues: any[] = [];
@@ -1920,15 +1983,63 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
         uploadedAt: new Date().toISOString()
       };
 
-      if (!item.subtitles) item.subtitles = [];
-      item.subtitles.unshift(newTrack);
-      saveMediaMeta(list);
+      if (isBookMedia) {
+        try {
+          const books = loadBooksJson();
+          for (const b of books) {
+            let bDirty = false;
+            const updateMediaItem = (m: any) => {
+              if (
+                m.id === rawId ||
+                m.id === cleanId ||
+                m.fileName === rawId ||
+                m.fileName === cleanId ||
+                m.title === rawId ||
+                m.title === cleanId
+              ) {
+                if (!Array.isArray(m.subtitles)) {
+                  m.subtitles = [];
+                }
+                m.subtitles.unshift(newTrack);
+                m.primaryTrackId = newTrack.id;
+                bDirty = true;
+              }
+            };
+
+            if (Array.isArray(b.allMedia)) {
+              for (const m of b.allMedia) updateMediaItem(m);
+            }
+            if (Array.isArray(b.pages)) {
+              for (const p of b.pages) {
+                if (Array.isArray(p.media)) {
+                  for (const m of p.media) updateMediaItem(m);
+                }
+              }
+            }
+
+            if (bDirty) {
+              saveBooksJson(books);
+            }
+          }
+        } catch (bErr) {
+          console.error("Error saving generated track to books.json:", bErr);
+        }
+      } else {
+        if (!item.subtitles) item.subtitles = [];
+        item.subtitles.unshift(newTrack);
+        item.primaryTrackId = newTrack.id;
+        saveMediaMeta(list);
+      }
 
       res.json({
         success: true,
         message: `تم توليد الترجمة الذكية بنجاح عبر نموذج ${usedModel}!`,
         track: newTrack,
-        file: item
+        file: {
+          ...item,
+          subtitles: [newTrack, ...(item.subtitles || [])],
+          primaryTrackId: newTrack.id
+        }
       });
     } catch (e: any) {
       console.error("Generate subtitles error:", e);
@@ -1937,20 +2048,110 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
   });
 
   // 10. Translate Existing Subtitle Track with Gemini (Dual Subtitle Translation)
-  app.post("/api/media/:id/translate-subtitles", async (req, res) => {
+  app.post("/api/media/:id(*)/translate-subtitles", async (req, res) => {
     try {
-      const { id } = req.params;
-      const { trackId, targetLanguage = "ar", sourceLanguage = "de", selectedModel = "gemini-3.6-flash", customApiKey, geminiApiKey } = req.body;
+      let rawId = req.params.id || (req.params as any)[0] || "";
+      try { rawId = decodeURIComponent(rawId); } catch (e) {}
+      const cleanId = rawId.replace(/^book-media-/, "");
+
+      const { trackId, targetLanguage = "ar", sourceLanguage = "de", selectedModel = "gemini-3.8-flash", customApiKey, geminiApiKey, cues, fullText, text } = req.body;
 
       const list = loadMediaMeta();
-      const item = list.find((m) => m.id === id || m.filename === id);
+      let item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId || m.originalName === cleanId);
+      let isBookMedia = false;
+
       if (!item) {
-        return res.status(404).json({ error: "الملف غير موجود" });
+        try {
+          const books = loadBooksJson();
+          for (const b of books) {
+            const findMedia = (mList: any[]) => {
+              if (!Array.isArray(mList)) return null;
+              return mList.find((m: any) =>
+                m.id === rawId ||
+                m.id === cleanId ||
+                m.fileName === rawId ||
+                m.fileName === cleanId ||
+                m.title === rawId ||
+                m.title === cleanId
+              );
+            };
+
+            let foundInBook = findMedia(b.allMedia);
+            if (!foundInBook && Array.isArray(b.pages)) {
+              for (const p of b.pages) {
+                foundInBook = findMedia(p.media);
+                if (foundInBook) break;
+              }
+            }
+
+            if (foundInBook) {
+              isBookMedia = true;
+              item = {
+                id: rawId,
+                title: foundInBook.title || foundInBook.fileName || "مقطع الكتاب",
+                originalName: foundInBook.fileName || "audio.mp3",
+                filename: foundInBook.fileName || "audio.mp3",
+                type: foundInBook.type || "audio",
+                size: 0,
+                mimeType: foundInBook.type === "video" ? "video/mp4" : "audio/mpeg",
+                uploadedAt: new Date().toISOString(),
+                url: foundInBook.url || "",
+                subtitles: foundInBook.subtitles || []
+              };
+              break;
+            }
+          }
+        } catch (e) {
+          console.error("Error finding book media for translation:", e);
+        }
       }
 
-      const sourceTrack = item.subtitles?.find((t) => t.id === trackId) || item.subtitles?.[0];
-      if (!sourceTrack || !Array.isArray(sourceTrack.cues) || sourceTrack.cues.length === 0) {
-        return res.status(400).json({ error: "لا يوجد مسار ترجمة أصلي لترجمته" });
+      // Find source cues to translate
+      let cuesToTranslate: any[] = [];
+      let sourceTrack: any = null;
+
+      if (item && Array.isArray(item.subtitles) && item.subtitles.length > 0) {
+        sourceTrack = (trackId ? item.subtitles.find((t: any) => t.id === trackId) : null) || item.subtitles[0];
+        if (sourceTrack && Array.isArray(sourceTrack.cues) && sourceTrack.cues.length > 0) {
+          cuesToTranslate = sourceTrack.cues.map((c: any) => ({
+            id: c.id,
+            startTime: c.startTime,
+            endTime: c.endTime,
+            text: c.text
+          }));
+        }
+      }
+
+      // Fallback 1: if no track found on item, check if `cues` were provided directly in req.body
+      if (cuesToTranslate.length === 0 && Array.isArray(cues) && cues.length > 0) {
+        cuesToTranslate = cues.map((c: any, idx: number) => ({
+          id: c.id || `cue-${idx + 1}`,
+          startTime: Math.max(0, parseFloat(c.startTime) || 0),
+          endTime: Math.max(0.1, parseFloat(c.endTime) || 1),
+          text: (c.text || "").trim()
+        })).filter((c: any) => c.text.length > 0);
+      }
+
+      // Fallback 2: if fullText or text provided directly in req.body
+      const providedText = (fullText || text || "").trim();
+      if (cuesToTranslate.length === 0 && providedText) {
+        const sentences = providedText.split(/(?<=[.!?\n])\s+/).filter((s: string) => s.trim().length > 0);
+        let currentTime = 0;
+        cuesToTranslate = sentences.map((s: string, idx: number) => {
+          const duration = Math.max(2, Math.round(s.length / 15));
+          const cue = {
+            id: `cue-${idx + 1}`,
+            startTime: currentTime,
+            endTime: currentTime + duration,
+            text: s.trim()
+          };
+          currentTime += duration + 0.5;
+          return cue;
+        });
+      }
+
+      if (cuesToTranslate.length === 0) {
+        return res.status(400).json({ error: "لا يوجد نص أو مسار ترجمة أصلي لترجمته إلى العربية" });
       }
 
       const headerAuth = req.headers.authorization?.startsWith("Bearer ")
@@ -1985,39 +2186,54 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
       const targetLangName = langNameMap[targetLanguage] || targetLanguage;
       const sourceLangName = langNameMap[sourceLanguage] || sourceLanguage;
 
-      const prompt = `أنت مترجم فوري ومحترف لترجمة محتوى الفيديو والملفات الصوتية بدقة لغوية وتعبيرية وسياقية فائقة.
+      const prompt = `أنت مترجم فوري ومحترف لترجمة محتوى الكتيبات المدرسية والفيديوهات والملفات الصوتية بدقة لغوية وتعبيرية وسياقية فائقة.
 المهمة:
-قم بترجمة مقاطع الترجمة التالية بدقة من ${sourceLangName} إلى ${targetLangName}.
+قم بترجمة مقاطع النص التالية بدقة عالية من ${sourceLangName} إلى ${targetLangName}.
 حافظ بدقة على نفس أوقات البداية والنهاية (startTime و endTime) ونفس المعرفات (id).
 
 المقاطع الأصلية المطلوب ترجمتها:
-${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, endTime: c.endTime, text: c.text })), null, 2)}
+${JSON.stringify(cuesToTranslate, null, 2)}
 
 الشروط:
-1. حافظ على المعنى السياقي السليم والمناسب للترجمة المرئية.
+1. حافظ على المعنى السياقي السليم والمناسب للترجمة المرئية والتعليمية.
 2. أرجع النتيجة حصراً كمصفوفة JSON بالتنسيق التالي:
 [
   {
     "id": "معرف المقطع",
     "startTime": 0.0,
     "endTime": 3.5,
-    "text": "الترجمة هنا باللغة المستهدفة"
+    "text": "الترجمة الدقيقة باللغة العربية المستهدفة"
   }
 ]`;
 
-      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
+      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.8-flash";
       let rawJson = "[]";
       let usedModel = primaryModel;
 
-      const response = await aiClient.models.generateContent({
-        model: primaryModel,
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json"
+      try {
+        const response = await aiClient.models.generateContent({
+          model: primaryModel,
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json"
+          }
+        });
+        if (response.text) {
+          rawJson = response.text;
         }
-      });
-      if (response.text) {
-        rawJson = response.text;
+      } catch (genErr: any) {
+        console.warn(`[Translate AI] Model ${primaryModel} failed, trying gemini-3.8-flash fallback:`, genErr?.message || genErr);
+        usedModel = "gemini-3.8-flash";
+        const fallbackRes = await aiClient.models.generateContent({
+          model: "gemini-3.8-flash",
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json"
+          }
+        });
+        if (fallbackRes.text) {
+          rawJson = fallbackRes.text;
+        }
       }
 
       let translatedCues: any[] = [];
@@ -2034,7 +2250,7 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
       const translatedTrack: ServerSubtitleTrack = {
         id: "sub-trans-" + Date.now(),
         label: formatSubtitleTrackProtocol("GEM", targetLanguage || "ar"),
-        language: targetLanguage,
+        language: targetLanguage || "ar",
         cues: translatedCues.map((c, idx) => ({
           id: c.id || `cue-trans-${idx + 1}`,
           startTime: Math.max(0, parseFloat(c.startTime) || 0),
@@ -2045,23 +2261,74 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
         uploadedAt: new Date().toISOString()
       };
 
-      if (!item.subtitles) item.subtitles = [];
-      // Keep original source track as primary, append translated track as secondary track
-      item.subtitles.push(translatedTrack);
-      item.primaryTrackId = sourceTrack.id;
-      item.secondaryTrackId = translatedTrack.id;
-      item.showDualSubtitles = true;
-      saveMediaMeta(list);
+      if (isBookMedia) {
+        try {
+          const books = loadBooksJson();
+          for (const b of books) {
+            let bDirty = false;
+            const updateMediaItem = (m: any) => {
+              if (
+                m.id === rawId ||
+                m.id === cleanId ||
+                m.fileName === rawId ||
+                m.fileName === cleanId ||
+                m.title === rawId ||
+                m.title === cleanId
+              ) {
+                if (!Array.isArray(m.subtitles)) {
+                  m.subtitles = [];
+                }
+                m.subtitles.push(translatedTrack);
+                m.primaryTrackId = sourceTrack?.id || m.primaryTrackId || m.subtitles[0]?.id;
+                m.secondaryTrackId = translatedTrack.id;
+                m.showDualSubtitles = true;
+                bDirty = true;
+              }
+            };
+
+            if (Array.isArray(b.allMedia)) {
+              for (const m of b.allMedia) updateMediaItem(m);
+            }
+            if (Array.isArray(b.pages)) {
+              for (const p of b.pages) {
+                if (Array.isArray(p.media)) {
+                  for (const m of p.media) updateMediaItem(m);
+                }
+              }
+            }
+
+            if (bDirty) {
+              saveBooksJson(books);
+            }
+          }
+        } catch (bErr) {
+          console.error("Error saving translated track to books.json:", bErr);
+        }
+      } else if (item) {
+        if (!item.subtitles) item.subtitles = [];
+        item.subtitles.push(translatedTrack);
+        item.primaryTrackId = sourceTrack?.id || item.primaryTrackId || item.subtitles[0]?.id;
+        item.secondaryTrackId = translatedTrack.id;
+        item.showDualSubtitles = true;
+        saveMediaMeta(list);
+      }
 
       res.json({
         success: true,
-        message: `تمت ترجمة المسار إلى ${targetLangName} بنجاح عبر نموذج ${usedModel}! ⚡`,
+        message: `تمت ترجمة النص إلى ${targetLangName} بنجاح عبر الذكاء الاصطناعي (${usedModel})! 🇸🇦⚡`,
         track: translatedTrack,
-        file: item
+        file: {
+          ...(item || {}),
+          id: rawId,
+          subtitles: [...(item?.subtitles || []), translatedTrack],
+          primaryTrackId: sourceTrack?.id || item?.primaryTrackId,
+          secondaryTrackId: translatedTrack.id,
+          showDualSubtitles: true
+        }
       });
     } catch (e: any) {
       console.error("Translate subtitles error:", e);
-      res.status(500).json({ error: e.message || "حدث خطأ أثناء ترجمة المسار عبر الذكاء الاصطناعي" });
+      res.status(500).json({ error: e.message || "حدث خطأ أثناء ترجمة النص عبر الذكاء الاصطناعي" });
     }
   });
 

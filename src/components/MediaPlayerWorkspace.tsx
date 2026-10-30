@@ -1992,7 +1992,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const activeToken = token || (typeof window !== "undefined" ? localStorage.getItem("app_auth_token") : null);
 
     try {
-      const res = await fetch(`/api/media/${currentFile.id}/translate-subtitles`, {
+      const res = await fetch(`/api/media/${encodeURIComponent(currentFile.id)}/translate-subtitles`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
