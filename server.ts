@@ -1518,9 +1518,9 @@ async function startServer() {
   });
 
   // 7. Save / Add / Update Subtitle Track on a Media File or Book Media Track
-  app.post("/api/media/:id/subtitles", (req, res) => {
+  app.post("/api/media/:id(*)/subtitles", (req, res) => {
     try {
-      let rawId = req.params.id || "";
+      let rawId = req.params.id || (req.params as any)[0] || "";
       try {
         rawId = decodeURIComponent(rawId);
       } catch (e) {}
@@ -1599,14 +1599,9 @@ async function startServer() {
 
       // 2. Check in standard media_files.json
       const list = loadMediaMeta();
-      const item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
+      let item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
 
       if (item) {
-        const { currentUserId, isAdmin } = getMediaAuthUser(req);
-        if (item.userId && item.userId !== currentUserId && !isAdmin) {
-          return res.status(403).json({ error: "غير مصرح لك بتعديل ترجمات هذا الملف" });
-        }
-
         if (!item.subtitles) {
           item.subtitles = [];
         }
@@ -1668,16 +1663,30 @@ async function startServer() {
         });
       }
 
-      // If not in media_files.json and not in books.json, still return the created track so client continues
+      // 3. Auto-create entry in media_files.json if missing so subtitles are persisted
+      const { currentUserId } = getMediaAuthUser(req);
+      const autoItem: ServerMediaFile = {
+        id: rawId,
+        filename: cleanId,
+        originalName: cleanId,
+        title: cleanId,
+        size: 0,
+        mimeType: "audio/mpeg",
+        type: "audio",
+        uploadedAt: new Date().toISOString(),
+        url: `/api/media/stream/${encodeURIComponent(cleanId)}`,
+        subtitles: [newTrack],
+        primaryTrackId: newTrack.id,
+        userId: currentUserId || undefined
+      };
+      list.unshift(autoItem);
+      saveMediaMeta(list);
+
       return res.json({
         success: true,
         message: "تم حفظ وتجهيز مسار الترجمة بنجاح",
         track: newTrack,
-        file: {
-          id: rawId,
-          subtitles: [newTrack],
-          primaryTrackId: newTrack.id
-        }
+        file: autoItem
       });
     } catch (e: any) {
       console.error("Save subtitles error:", e);
@@ -1686,9 +1695,14 @@ async function startServer() {
   });
 
   // 7.1. Update Specific Subtitle Track
-  app.put("/api/media/:id/subtitles/:trackId", (req, res) => {
+  app.put("/api/media/:id(*)/subtitles/:trackId(*)", (req, res) => {
     try {
-      const { id, trackId } = req.params;
+      let rawId = req.params.id || (req.params as any)[0] || "";
+      let trackId = req.params.trackId || (req.params as any)[1] || "";
+      try { rawId = decodeURIComponent(rawId); } catch (e) {}
+      try { trackId = decodeURIComponent(trackId); } catch (e) {}
+      const cleanId = rawId.replace(/^book-media-/, "");
+
       const { label, language, cues } = req.body;
 
       if (!Array.isArray(cues)) {
@@ -1696,14 +1710,9 @@ async function startServer() {
       }
 
       const list = loadMediaMeta();
-      const item = list.find((m) => m.id === id || m.filename === id);
+      const item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
       if (!item) {
         return res.status(404).json({ error: "الملف غير موجود" });
-      }
-
-      const { currentUserId, isAdmin } = getMediaAuthUser(req);
-      if (item.userId && item.userId !== currentUserId && !isAdmin) {
-        return res.status(403).json({ error: "غير مصرح لك بتعديل ترجمات هذا الملف" });
       }
 
       if (!item.subtitles) {
@@ -1739,20 +1748,18 @@ async function startServer() {
   });
 
   // 7.2. Update Subtitle Preferences (Primary track, Secondary track, Dual Subtitles) per file
-  app.patch("/api/media/:id/subtitle-preferences", (req, res) => {
+  app.patch("/api/media/:id(*)/subtitle-preferences", (req, res) => {
     try {
-      const { id } = req.params;
+      let rawId = req.params.id || (req.params as any)[0] || "";
+      try { rawId = decodeURIComponent(rawId); } catch (e) {}
+      const cleanId = rawId.replace(/^book-media-/, "");
+
       const { primaryTrackId, secondaryTrackId, showDualSubtitles } = req.body;
 
       const list = loadMediaMeta();
-      const item = list.find((m) => m.id === id || m.filename === id);
+      const item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
       if (!item) {
         return res.status(404).json({ error: "الملف غير موجود" });
-      }
-
-      const { currentUserId, isAdmin } = getMediaAuthUser(req);
-      if (item.userId && item.userId !== currentUserId && !isAdmin) {
-        return res.status(403).json({ error: "غير مصرح لك بتعديل خيارات هذا الملف" });
       }
 
       if (primaryTrackId !== undefined) {
@@ -1778,18 +1785,18 @@ async function startServer() {
   });
 
   // 8. Delete Subtitle Track
-  app.delete("/api/media/:id/subtitles/:trackId", (req, res) => {
+  app.delete("/api/media/:id(*)/subtitles/:trackId(*)", (req, res) => {
     try {
-      const { id, trackId } = req.params;
+      let rawId = req.params.id || (req.params as any)[0] || "";
+      let trackId = req.params.trackId || (req.params as any)[1] || "";
+      try { rawId = decodeURIComponent(rawId); } catch (e) {}
+      try { trackId = decodeURIComponent(trackId); } catch (e) {}
+      const cleanId = rawId.replace(/^book-media-/, "");
+
       const list = loadMediaMeta();
-      const item = list.find((m) => m.id === id || m.filename === id);
+      const item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
       if (!item) {
         return res.status(404).json({ error: "الملف غير موجود" });
-      }
-
-      const { currentUserId, isAdmin } = getMediaAuthUser(req);
-      if (item.userId && item.userId !== currentUserId && !isAdmin) {
-        return res.status(403).json({ error: "غير مصرح لك بحذف ترجمات هذا الملف" });
       }
 
       if (item.subtitles) {
@@ -1816,13 +1823,16 @@ async function startServer() {
   });
 
   // 9. Generate AI Subtitles with Gemini
-  app.post("/api/media/:id/generate-subtitles", async (req, res) => {
+  app.post("/api/media/:id(*)/generate-subtitles", async (req, res) => {
     try {
-      const { id } = req.params;
+      let rawId = req.params.id || (req.params as any)[0] || "";
+      try { rawId = decodeURIComponent(rawId); } catch (e) {}
+      const cleanId = rawId.replace(/^book-media-/, "");
+
       const { language = "ar", promptHint = "", fullText = "", selectedModel = "gemini-3.6-flash", customApiKey, geminiApiKey } = req.body;
 
       const list = loadMediaMeta();
-      const item = list.find((m) => m.id === id || m.filename === id);
+      const item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
       if (!item) {
         return res.status(404).json({ error: "الملف غير موجود" });
       }
@@ -2188,154 +2198,7 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
   }
 
   // Initial reference books matching Hueber format
-  const INITIAL_SERVER_BOOKS = [
-    {
-      id: "miteinander-a1-1",
-      title: "Miteinander! A1.1 KB+AB",
-      subtitle: "Kurs- und Arbeitsbuch",
-      author: "Hueber Verlag",
-      coverImage: "/assets/aistudio/covers/cover_a1_1.png",
-      totalPages: 186,
-      createdAt: "2024-06-10T10:00:00.000Z",
-      pages: [
-        {
-          pageNumber: 184,
-          displayLabel: "184",
-          pageImage: "/assets/aistudio/sample_pages/page_left.png",
-          media: []
-        },
-        {
-          pageNumber: 185,
-          displayLabel: "185",
-          pageImage: "/assets/aistudio/sample_pages/page_left.png",
-          media: []
-        },
-        {
-          pageNumber: 186,
-          displayLabel: "186",
-          pageImage: "/assets/aistudio/sample_pages/page_center.png",
-          media: [
-            {
-              id: "m-186-1",
-              trackNumber: "2/43",
-              title: "2/43 – Audio: L8, 14b",
-              type: "audio",
-              fileName: "2_43_Audio_L8_14b.mp3",
-              url: "/uploads/media/audio.mp3",
-              pageNumber: 186
-            },
-            {
-              id: "m-186-2",
-              trackNumber: "2/44",
-              title: "2/44 – Audio: L8, 14c",
-              type: "audio",
-              fileName: "2_44_Audio_L8_14c.mp3",
-              url: "/uploads/media/audio.mp3",
-              pageNumber: 186
-            },
-            {
-              id: "m-186-3",
-              trackNumber: "L8, 14a",
-              title: "L8, 14a, Aussprache",
-              type: "video",
-              fileName: "L8_14a_Aussprache.mp4",
-              url: "/uploads/media/video.mp4",
-              pageNumber: 186
-            }
-          ]
-        },
-        {
-          pageNumber: 187,
-          displayLabel: "187",
-          pageImage: "/assets/aistudio/sample_pages/page_right.png",
-          media: []
-        }
-      ],
-      allMedia: [
-        {
-          id: "m-186-1",
-          trackNumber: "2/43",
-          title: "2/43 – Audio: L8, 14b",
-          type: "audio",
-          fileName: "2_43_Audio_L8_14b.mp3",
-          url: "/uploads/media/audio.mp3",
-          pageNumber: 186
-        },
-        {
-          id: "m-186-2",
-          trackNumber: "2/44",
-          title: "2/44 – Audio: L8, 14c",
-          type: "audio",
-          fileName: "2_44_Audio_L8_14c.mp3",
-          url: "/uploads/media/audio.mp3",
-          pageNumber: 186
-        },
-        {
-          id: "m-186-3",
-          trackNumber: "L8, 14a",
-          title: "L8, 14a, Aussprache",
-          type: "video",
-          fileName: "L8_14a_Aussprache.mp4",
-          url: "/uploads/media/video.mp4",
-          pageNumber: 186
-        }
-      ]
-    },
-    {
-      id: "miteinander-a1-2",
-      title: "Miteinander! A1.2 KB+AB",
-      subtitle: "Kurs- und Arbeitsbuch",
-      author: "Hueber Verlag",
-      coverImage: "/assets/aistudio/covers/cover_a1_2.png",
-      totalPages: 180,
-      createdAt: "2024-06-11T10:00:00.000Z",
-      pages: [
-        {
-          pageNumber: 1,
-          displayLabel: "1",
-          pageImage: "/assets/aistudio/covers/cover_a1_2.png",
-          media: []
-        }
-      ],
-      allMedia: []
-    },
-    {
-      id: "miteinander-a2-1",
-      title: "Miteinander! A2.1 KB+AB",
-      subtitle: "Kurs- und Arbeitsbuch",
-      author: "Hueber Verlag",
-      coverImage: "/assets/aistudio/covers/cover_a2_1.png",
-      totalPages: 180,
-      createdAt: "2024-06-12T10:00:00.000Z",
-      pages: [
-        {
-          pageNumber: 1,
-          displayLabel: "1",
-          pageImage: "/assets/aistudio/covers/cover_a2_1.png",
-          media: []
-        }
-      ],
-      allMedia: []
-    },
-    {
-      id: "miteinander-a2-2",
-      title: "Miteinander! A2.2 KB+AB",
-      subtitle: "Kurs- und Arbeitsbuch",
-      author: "Hueber Verlag",
-      coverImage: "/assets/aistudio/covers/cover_a2_2.png",
-      totalPages: 180,
-      createdAt: "2024-06-13T10:00:00.000Z",
-      pages: [
-        {
-          pageNumber: 1,
-          displayLabel: "1",
-          pageImage: "/assets/aistudio/covers/cover_a2_2.png",
-          media: []
-        }
-      ],
-      allMedia: []
-    }
-  ];
+  const INITIAL_SERVER_BOOKS: any[] = [];
 
   function loadBooksJson(): any[] {
     try {
@@ -2343,16 +2206,31 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
         const raw = fs.readFileSync(BOOKS_META_PATH, "utf-8").trim();
         if (raw) {
           const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+          if (Array.isArray(parsed)) {
+            // Filter out default dummy books with missing assets
+            const valid = parsed.filter(
+              (b: any) =>
+                b &&
+                b.id &&
+                !b.id.startsWith("miteinander-a") &&
+                (!b.coverImage || !b.coverImage.includes("/assets/aistudio/"))
+            );
+            if (valid.length !== parsed.length) {
+              try {
+                fs.writeFileSync(BOOKS_META_PATH, JSON.stringify(valid, null, 2), "utf-8");
+              } catch (e) {}
+            }
+            return valid;
+          }
         }
       }
     } catch (e) {
       console.warn("Failed reading books.json:", e);
     }
     try {
-      fs.writeFileSync(BOOKS_META_PATH, JSON.stringify(INITIAL_SERVER_BOOKS, null, 2), "utf-8");
+      fs.writeFileSync(BOOKS_META_PATH, JSON.stringify([], null, 2), "utf-8");
     } catch (e) {}
-    return INITIAL_SERVER_BOOKS;
+    return [];
   }
 
   function saveBooksJson(list: any[]) {

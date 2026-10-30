@@ -878,7 +878,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     showDual?: boolean
   ) => {
     try {
-      await apiFetch(`/api/media/${fileId}/subtitle-preferences`, {
+      await apiFetch(`/api/media/${encodeURIComponent(fileId)}/subtitle-preferences`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2256,7 +2256,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const activeToken = token || (typeof window !== "undefined" ? localStorage.getItem("app_auth_token") : null);
 
     try {
-      const res = await fetch(`/api/media/${currentFile.id}/generate-subtitles`, {
+      const res = await fetch(`/api/media/${encodeURIComponent(currentFile.id)}/generate-subtitles`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2381,7 +2381,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     });
 
     try {
-      const res = await apiFetch(`/api/media/${mediaId}/subtitles`, {
+      const res = await apiFetch(`/api/media/${encodeURIComponent(mediaId)}/subtitles`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2394,7 +2394,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         })
       });
 
-      if (!res.ok) throw new Error("فشل حفظ ملف الترجمة على السيرفر");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        throw new Error(errData?.error || "فشل حفظ ملف الترجمة على السيرفر");
+      }
       const data = await res.json();
 
       setSuccessMsg(`تم حفظ وتحديث الترجمة بنجاح! (${cleanCues.length} مقطع)`);
@@ -2458,10 +2461,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     if (!window.confirm("هل تريد حذف مسار الترجمة هذا نهائياً؟")) return;
 
     try {
-      const res = await apiFetch(`/api/media/${currentFile.id}/subtitles/${trackId}`, {
+      const res = await apiFetch(`/api/media/${encodeURIComponent(currentFile.id)}/subtitles/${encodeURIComponent(trackId)}`, {
         method: "DELETE"
       });
-      if (!res.ok) throw new Error("فشل حذف مسار الترجمة");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        throw new Error(errData?.error || "فشل حذف مسار الترجمة");
+      }
       const data = await res.json();
 
       setSuccessMsg("تم حذف مسار الترجمة بنجاح");

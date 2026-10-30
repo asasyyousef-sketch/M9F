@@ -12,100 +12,7 @@ const STORE_NAME = "books";
 const DB_VERSION = 2;
 
 // Default sample books
-const INITIAL_BOOKS: InteractiveBook[] = [
-  {
-    id: "miteinander-a1-1",
-    title: "Miteinander! A1.1 KB+AB",
-    subtitle: "Kurs- und Arbeitsbuch",
-    author: "Hueber Verlag",
-    coverImage: "/assets/aistudio/covers/cover_a1_1.png",
-    totalPages: 186,
-    createdAt: "2024-06-10T10:00:00.000Z",
-    pages: [
-      {
-        pageNumber: 184,
-        displayLabel: "184",
-        pageImage: "/assets/aistudio/sample_pages/page_left.png",
-        media: []
-      },
-      {
-        pageNumber: 185,
-        displayLabel: "185",
-        pageImage: "/assets/aistudio/sample_pages/page_left.png",
-        media: []
-      },
-      {
-        pageNumber: 186,
-        displayLabel: "186",
-        pageImage: "/assets/aistudio/sample_pages/page_center.png",
-        media: [
-          {
-            id: "m-186-1",
-            trackNumber: "2/43",
-            title: "2/43 – Audio: L8, 14b",
-            type: "audio",
-            fileName: "2_43_Audio_L8_14b.mp3",
-            url: "/uploads/media/audio.mp3",
-            pageNumber: 186
-          },
-          {
-            id: "m-186-2",
-            trackNumber: "2/44",
-            title: "2/44 – Audio: L8, 14c",
-            type: "audio",
-            fileName: "2_44_Audio_L8_14c.mp3",
-            url: "/uploads/media/audio.mp3",
-            pageNumber: 186
-          },
-          {
-            id: "m-186-3",
-            trackNumber: "L8, 14a",
-            title: "L8, 14a, Aussprache",
-            type: "video",
-            fileName: "L8_14a_Aussprache.mp4",
-            url: "/uploads/media/video.mp4",
-            pageNumber: 186
-          }
-        ]
-      },
-      {
-        pageNumber: 187,
-        displayLabel: "187",
-        pageImage: "/assets/aistudio/sample_pages/page_right.png",
-        media: []
-      }
-    ],
-    allMedia: [
-      {
-        id: "m-186-1",
-        trackNumber: "2/43",
-        title: "2/43 – Audio: L8, 14b",
-        type: "audio",
-        fileName: "2_43_Audio_L8_14b.mp3",
-        url: "/uploads/media/audio.mp3",
-        pageNumber: 186
-      },
-      {
-        id: "m-186-2",
-        trackNumber: "2/44",
-        title: "2/44 – Audio: L8, 14c",
-        type: "audio",
-        fileName: "2_44_Audio_L8_14c.mp3",
-        url: "/uploads/media/audio.mp3",
-        pageNumber: 186
-      },
-      {
-        id: "m-186-3",
-        trackNumber: "L8, 14a",
-        title: "L8, 14a, Aussprache",
-        type: "video",
-        fileName: "L8_14a_Aussprache.mp4",
-        url: "/uploads/media/video.mp4",
-        pageNumber: 186
-      }
-    ]
-  }
-];
+const INITIAL_BOOKS: InteractiveBook[] = [];
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -126,7 +33,7 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 // In-memory cache for fast instant rendering
-let memoryBooksCache: InteractiveBook[] = [...INITIAL_BOOKS];
+let memoryBooksCache: InteractiveBook[] = [];
 
 /**
  * Fetch all books from the server disk (books.json).
@@ -138,15 +45,22 @@ export async function fetchBooksFromServer(): Promise<InteractiveBook[]> {
     if (res.ok) {
       const data = await res.json();
       if (data && Array.isArray(data.books)) {
-        memoryBooksCache = data.books;
+        const cleanBooks = data.books.filter(
+          (b: InteractiveBook) =>
+            b &&
+            b.id &&
+            !b.id.startsWith("miteinander-a") &&
+            (!b.coverImage || !b.coverImage.includes("/assets/aistudio/"))
+        );
+        memoryBooksCache = cleanBooks;
         // Cache to IndexedDB for offline resilience
         try {
           const db = await openDB();
           const tx = db.transaction(STORE_NAME, "readwrite");
           const store = tx.objectStore(STORE_NAME);
-          data.books.forEach((b: InteractiveBook) => store.put(b));
+          cleanBooks.forEach((b: InteractiveBook) => store.put(b));
         } catch (e) {}
-        return data.books;
+        return cleanBooks;
       }
     }
   } catch (err) {
@@ -165,8 +79,15 @@ export async function fetchBooksFromServer(): Promise<InteractiveBook[]> {
     });
 
     if (Array.isArray(books) && books.length > 0) {
-      memoryBooksCache = books;
-      return books;
+      const cleanBooks = books.filter(
+        (b: InteractiveBook) =>
+          b &&
+          b.id &&
+          !b.id.startsWith("miteinander-a") &&
+          (!b.coverImage || !b.coverImage.includes("/assets/aistudio/"))
+      );
+      memoryBooksCache = cleanBooks;
+      return cleanBooks;
     }
   } catch (e) {}
 
