@@ -337,33 +337,6 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     }
   };
 
-  // Restore saved page number per book from localStorage
-  useEffect(() => {
-    if (selectedBook) {
-      try {
-        const savedPageStr = localStorage.getItem(`book_last_page_${selectedBook.id}`);
-        if (savedPageStr !== null) {
-          const savedIdx = parseInt(savedPageStr, 10);
-          if (!isNaN(savedIdx) && savedIdx >= 0 && savedIdx < selectedBook.pages.length) {
-            setCurrentPageIndex(savedIdx);
-          }
-        }
-      } catch (e) {}
-    }
-  }, [selectedBook?.id]);
-
-  // Persist current page number per book to localStorage
-  useEffect(() => {
-    if (selectedBook && typeof currentPageIndex === "number") {
-      try {
-        localStorage.setItem(`book_last_page_${selectedBook.id}`, currentPageIndex.toString());
-      } catch (e) {}
-    }
-  }, [selectedBook?.id, currentPageIndex]);
-
-  // Inline Media Player State
-  const [activeInlineMedia, setActiveInlineMedia] = useState<BookPageMedia | null>(null);
-
   // Active page calculation
   const activePage: BookPage | undefined = selectedBook?.pages?.[currentPageIndex];
 
@@ -386,14 +359,8 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     return selectedBook.allMedia || [];
   }, [selectedBook, activePage]);
 
-  // Play track inline right inside the book view
-  const handlePlayInlineTrack = (media: BookPageMedia) => {
-    setActiveInlineMedia(media);
-  };
-
-  // Open track explicitly in full Studio mode (مشغل الوسائط والاستوديو)
-  const handleOpenTrackInStudio = (media: BookPageMedia, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
+  // Play media directly in studio player (مشغل الوسائط)
+  const handlePlayTrack = (media: BookPageMedia) => {
     if (onPlayMediaInStudio && selectedBook) {
       onPlayMediaInStudio({
         id: `book-media-${media.id}`,
@@ -430,26 +397,24 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   };
 
   // =========================================================================
-  // VIEW 2: BOOK READER VIEW
+  // VIEW 2: BOOK READER VIEW (EXACTLY MATCHING image_100aa631.png)
   // =========================================================================
   if (selectedBook) {
     return (
       <div className="w-full h-full bg-white text-slate-900 flex flex-col font-sans select-none overflow-hidden" dir="ltr">
-        {/* Top Pinned Section: Header + Search + Compact 3-Page Carousel + Page Indicator */}
+        {/* Top Pinned Section: Header + Search + 3-Page Carousel + Page Indicator */}
         <div className="shrink-0 bg-white border-b border-slate-200 shadow-2xs z-10 flex flex-col">
           {/* Top Header: Back Arrow + "Book" on left, Search on right */}
-          <div className="h-12 sm:h-14 px-4 flex items-center justify-between shrink-0">
+          <div className="h-14 px-4 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setSelectedBook(null)}
                 className="p-1 text-slate-900 hover:text-slate-600 cursor-pointer transition-colors"
                 title="Back"
               >
-                <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2.2]" />
+                <ArrowLeft className="w-6 h-6 stroke-[2.2]" />
               </button>
-              <span className="text-lg sm:text-xl font-bold tracking-tight text-slate-900 truncate max-w-[200px] sm:max-w-xs">
-                {selectedBook.title}
-              </span>
+              <span className="text-xl font-bold tracking-tight text-slate-900">Book</span>
             </div>
 
             {/* Search Box / Page Jump */}
@@ -498,14 +463,19 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
             </div>
           </div>
 
-          {/* Compact 3-Page Carousel Display (Optimized for maximum audio/video space!) */}
-          <div className="relative w-full flex items-center justify-center overflow-hidden py-1 sm:py-2 px-2 sm:px-6 bg-slate-50/50">
-            <div className="flex items-center justify-center gap-3 sm:gap-6 max-w-2xl w-full">
+          {/* Centered Book Subtitle */}
+          <div className="text-center text-sm font-medium text-slate-900 py-1 px-4 truncate">
+            {selectedBook.title}
+          </div>
+
+          {/* 3-Page Carousel Display */}
+          <div className="relative w-full flex items-center justify-center overflow-hidden py-2 sm:py-3 px-2 sm:px-6">
+            <div className="flex items-center justify-center gap-4 sm:gap-8 max-w-4xl w-full">
               {/* Left Page (Previous) */}
               <div
                 onClick={handlePrevPage}
-                className={`w-1/4 sm:w-1/3 aspect-[3/4] max-h-[85px] sm:max-h-[110px] rounded-sm overflow-hidden shadow-xs border border-slate-200 transition-all cursor-pointer ${
-                  prevPage ? "opacity-80 hover:opacity-100" : "opacity-0 pointer-events-none"
+                className={`w-1/4 sm:w-1/3 aspect-[3/4] max-h-[200px] sm:max-h-[270px] rounded-sm overflow-hidden shadow-md border border-slate-200 transition-all cursor-pointer ${
+                  prevPage ? "opacity-90 hover:opacity-100" : "opacity-0 pointer-events-none"
                 }`}
               >
                 {prevPage?.pageImage ? (
@@ -515,14 +485,12 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
                     className="w-full h-full object-contain bg-white"
                   />
                 ) : (
-                  <div className="w-full h-full bg-white border border-dashed border-slate-300 flex items-center justify-center text-[10px] text-slate-300">
-                    {prevPage?.pageNumber}
-                  </div>
+                  <div className="w-full h-full bg-white border border-dashed border-slate-300" />
                 )}
               </div>
 
               {/* Center Active Page */}
-              <div className="w-1/2 sm:w-2/5 aspect-[3/4] max-h-[115px] sm:max-h-[145px] rounded-sm overflow-hidden shadow-md border-2 border-blue-500 bg-white z-10 transition-transform">
+              <div className="w-1/2 sm:w-2/5 aspect-[3/4] max-h-[240px] sm:max-h-[320px] rounded-sm overflow-hidden shadow-xl border border-slate-200 bg-white z-10 transition-transform">
                 {activePage?.pageImage ? (
                   <img
                     src={activePage.pageImage}
@@ -530,7 +498,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
                     className="w-full h-full object-contain bg-white"
                   />
                 ) : (
-                  <div className="w-full h-full bg-white flex items-center justify-center text-slate-400 text-xs font-bold">
+                  <div className="w-full h-full bg-white flex items-center justify-center text-slate-400 text-xs">
                     Page {activePage?.pageNumber || currentPageIndex + 1}
                   </div>
                 )}
@@ -539,8 +507,8 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
               {/* Right Page (Next) */}
               <div
                 onClick={handleNextPage}
-                className={`w-1/4 sm:w-1/3 aspect-[3/4] max-h-[85px] sm:max-h-[110px] rounded-sm overflow-hidden shadow-xs border border-slate-200 transition-all cursor-pointer ${
-                  nextPage ? "opacity-80 hover:opacity-100" : "opacity-0 pointer-events-none"
+                className={`w-1/4 sm:w-1/3 aspect-[3/4] max-h-[200px] sm:max-h-[270px] rounded-sm overflow-hidden shadow-md border border-slate-200 transition-all cursor-pointer ${
+                  nextPage ? "opacity-90 hover:opacity-100" : "opacity-0 pointer-events-none"
                 }`}
               >
                 {nextPage?.pageImage ? (
@@ -550,150 +518,57 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
                     className="w-full h-full object-contain bg-white"
                   />
                 ) : (
-                  <div className="w-full h-full bg-white border border-dashed border-slate-300 flex items-center justify-center text-[10px] text-slate-300">
-                    {nextPage?.pageNumber}
-                  </div>
+                  <div className="w-full h-full bg-white border border-dashed border-slate-300" />
                 )}
               </div>
             </div>
           </div>
 
           {/* Page Number indicator centered below carousel */}
-          <div className="text-center text-xs font-bold text-slate-600 py-1 bg-slate-50 border-t border-slate-100">
-            صفحة {activePage?.displayLabel || activePage?.pageNumber || currentPageIndex + 1} من {selectedBook.pages.length || selectedBook.totalPages}
+          <div className="text-center text-xs sm:text-sm font-semibold text-slate-500 py-1 pb-2">
+            Page {activePage?.displayLabel || activePage?.pageNumber || currentPageIndex + 1}
           </div>
         </div>
 
-        {/* Tracks List Section (Takes the Majority of Screen Height!) */}
-        <div className="flex-1 w-full overflow-y-auto divide-y divide-slate-100 bg-white min-h-0 pb-28">
-          <div className="px-4 py-2 bg-slate-100/60 border-b border-slate-200/80 flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-600">
-              صوتيات وفيديوهات الصفحة ({pageTracks.length})
-            </span>
-            <span className="text-[11px] text-slate-400">اضغط للتشغيل المباشر</span>
-          </div>
-
+        {/* Tracks List (Only this section scrolls when many audio tracks exist!) */}
+        <div className="flex-1 w-full overflow-y-auto divide-y divide-slate-100 bg-white min-h-0">
           {pageTracks.length === 0 ? (
-            <div className="py-16 text-center text-slate-400 text-sm flex flex-col items-center gap-2">
-              <Clock className="w-8 h-8 text-slate-300 stroke-[1.5]" />
-              <span>لا توجد مقاطع صوتية أو فيديو مسجلة لهذه الصفحة</span>
+            <div className="py-12 text-center text-slate-400 text-sm">
+              No tracks for this page
             </div>
           ) : (
-            pageTracks.map((media) => {
-              const isCurrentInline = activeInlineMedia?.id === media.id;
-              return (
-                <div
-                  key={media.id}
-                  onClick={() => handlePlayInlineTrack(media)}
-                  className={`px-4 py-3 flex items-center justify-between cursor-pointer transition-colors ${
-                    isCurrentInline ? "bg-blue-50/80 border-l-4 border-l-blue-600" : "hover:bg-slate-50"
-                  }`}
-                >
-                  {/* Left Track Info */}
-                  <div className="flex flex-col min-w-0 pr-3 flex-1">
-                    <span className={`text-sm sm:text-base font-bold truncate ${isCurrentInline ? "text-blue-900" : "text-slate-900"}`}>
-                      {media.title}
-                    </span>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs text-slate-400 capitalize">
-                        {media.type === "video" ? "فيديو 📹" : "صوت 🎧"}
-                      </span>
-                      {media.trackNumber && (
-                        <span className="text-[11px] font-mono text-slate-400 bg-slate-100 px-1.5 py-0.2 rounded">
-                          مسار: {media.trackNumber}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Right Actions: Inline Play + Studio Mode Button */}
-                  <div className="shrink-0 flex items-center gap-2 pl-2">
-                    {/* Studio Entry Button */}
-                    <button
-                      type="button"
-                      onClick={(e) => handleOpenTrackInStudio(media, e)}
-                      className="px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50/60 hover:bg-blue-600 hover:text-white text-blue-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs"
-                      title="فتح المقطع في الاستوديو الشامل (تفريغ، ترجمة، وظلال)"
-                    >
-                      <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-400 shrink-0" />
-                      <span>استوديو</span>
-                    </button>
-
-                    {/* Inline Play Icon */}
-                    <div className="p-2 rounded-full bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-2xs">
-                      {media.type === "video" ? (
-                        <svg className="w-4 h-4 fill-white text-white" viewBox="0 0 24 24">
-                          <path d="M4 6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2.5l4 2.5V7l-4 2.5V8a2 2 0 0 0-2-2H4z" />
-                        </svg>
-                      ) : (
-                        <svg className="w-4 h-4 fill-white text-white" viewBox="0 0 24 24">
-                          <polygon points="6 3 20 12 6 21 6 3" />
-                        </svg>
-                      )}
-                    </div>
-                  </div>
+            pageTracks.map((media) => (
+              <div
+                key={media.id}
+                onClick={() => handlePlayTrack(media)}
+                className="px-4 py-3.5 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
+              >
+                {/* Left Track Info */}
+                <div className="flex flex-col min-w-0 pr-4">
+                  <span className="text-base font-semibold text-slate-900 truncate">
+                    {media.title}
+                  </span>
+                  <span className="text-sm text-slate-400 capitalize mt-0.5">
+                    {media.type === "video" ? "Video" : "Audio"}
+                  </span>
                 </div>
-              );
-            })
+
+                {/* Right Action: Solid Blue Play Triangle or Video Icon */}
+                <div className="shrink-0 pl-2">
+                  {media.type === "video" ? (
+                    <svg className="w-6 h-6 fill-[#007aff] text-[#007aff]" viewBox="0 0 24 24">
+                      <path d="M4 6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2.5l4 2.5V7l-4 2.5V8a2 2 0 0 0-2-2H4z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5 fill-[#007aff] text-[#007aff]" viewBox="0 0 24 24">
+                      <polygon points="6 3 20 12 6 21 6 3" />
+                    </svg>
+                  )}
+                </div>
+              </div>
+            ))
           )}
         </div>
-
-        {/* Floating/Pinned Inline Media Player Bar at bottom of Book Workspace */}
-        {activeInlineMedia && (
-          <div className="fixed bottom-3 left-3 right-3 sm:left-6 sm:right-6 z-40 bg-slate-900/95 backdrop-blur-md text-white rounded-2xl p-3 sm:p-4 shadow-2xl border border-slate-700/80 flex flex-col gap-2.5 animate-slideUp">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                <div className="p-2 rounded-xl bg-blue-600 text-white shrink-0">
-                  {activeInlineMedia.type === "video" ? <Film className="w-5 h-5" /> : <Music className="w-5 h-5" />}
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <span className="text-xs font-bold text-blue-300">تشغيل مباشر في الكتاب</span>
-                  <span className="text-sm font-bold text-white truncate">{activeInlineMedia.title}</span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                {/* Button to open in full studio mode */}
-                <button
-                  type="button"
-                  onClick={(e) => handleOpenTrackInStudio(activeInlineMedia, e)}
-                  className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-md transition-all"
-                >
-                  <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
-                  <span>فتح بالاستوديو</span>
-                </button>
-
-                {/* Close Inline Player */}
-                <button
-                  type="button"
-                  onClick={() => setActiveInlineMedia(null)}
-                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Native HTML5 Audio / Video Control */}
-            <div className="w-full">
-              {activeInlineMedia.type === "video" ? (
-                <video
-                  src={activeInlineMedia.url}
-                  controls
-                  autoPlay
-                  className="w-full max-h-56 sm:max-h-72 rounded-xl bg-black border border-slate-800 mt-1"
-                />
-              ) : (
-                <audio
-                  src={activeInlineMedia.url}
-                  controls
-                  autoPlay
-                  className="w-full h-10 accent-blue-500"
-                />
-              )}
-            </div>
-          </div>
-        )}
       </div>
     );
   }

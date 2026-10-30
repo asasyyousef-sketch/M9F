@@ -2198,7 +2198,154 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
   }
 
   // Initial reference books matching Hueber format
-  const INITIAL_SERVER_BOOKS: any[] = [];
+  const INITIAL_SERVER_BOOKS = [
+    {
+      id: "miteinander-a1-1",
+      title: "Miteinander! A1.1 KB+AB",
+      subtitle: "Kurs- und Arbeitsbuch",
+      author: "Hueber Verlag",
+      coverImage: "/assets/aistudio/covers/cover_a1_1.png",
+      totalPages: 186,
+      createdAt: "2024-06-10T10:00:00.000Z",
+      pages: [
+        {
+          pageNumber: 184,
+          displayLabel: "184",
+          pageImage: "/assets/aistudio/sample_pages/page_left.png",
+          media: []
+        },
+        {
+          pageNumber: 185,
+          displayLabel: "185",
+          pageImage: "/assets/aistudio/sample_pages/page_left.png",
+          media: []
+        },
+        {
+          pageNumber: 186,
+          displayLabel: "186",
+          pageImage: "/assets/aistudio/sample_pages/page_center.png",
+          media: [
+            {
+              id: "m-186-1",
+              trackNumber: "2/43",
+              title: "2/43 – Audio: L8, 14b",
+              type: "audio",
+              fileName: "2_43_Audio_L8_14b.mp3",
+              url: "/uploads/media/audio.mp3",
+              pageNumber: 186
+            },
+            {
+              id: "m-186-2",
+              trackNumber: "2/44",
+              title: "2/44 – Audio: L8, 14c",
+              type: "audio",
+              fileName: "2_44_Audio_L8_14c.mp3",
+              url: "/uploads/media/audio.mp3",
+              pageNumber: 186
+            },
+            {
+              id: "m-186-3",
+              trackNumber: "L8, 14a",
+              title: "L8, 14a, Aussprache",
+              type: "video",
+              fileName: "L8_14a_Aussprache.mp4",
+              url: "/uploads/media/video.mp4",
+              pageNumber: 186
+            }
+          ]
+        },
+        {
+          pageNumber: 187,
+          displayLabel: "187",
+          pageImage: "/assets/aistudio/sample_pages/page_right.png",
+          media: []
+        }
+      ],
+      allMedia: [
+        {
+          id: "m-186-1",
+          trackNumber: "2/43",
+          title: "2/43 – Audio: L8, 14b",
+          type: "audio",
+          fileName: "2_43_Audio_L8_14b.mp3",
+          url: "/uploads/media/audio.mp3",
+          pageNumber: 186
+        },
+        {
+          id: "m-186-2",
+          trackNumber: "2/44",
+          title: "2/44 – Audio: L8, 14c",
+          type: "audio",
+          fileName: "2_44_Audio_L8_14c.mp3",
+          url: "/uploads/media/audio.mp3",
+          pageNumber: 186
+        },
+        {
+          id: "m-186-3",
+          trackNumber: "L8, 14a",
+          title: "L8, 14a, Aussprache",
+          type: "video",
+          fileName: "L8_14a_Aussprache.mp4",
+          url: "/uploads/media/video.mp4",
+          pageNumber: 186
+        }
+      ]
+    },
+    {
+      id: "miteinander-a1-2",
+      title: "Miteinander! A1.2 KB+AB",
+      subtitle: "Kurs- und Arbeitsbuch",
+      author: "Hueber Verlag",
+      coverImage: "/assets/aistudio/covers/cover_a1_2.png",
+      totalPages: 180,
+      createdAt: "2024-06-11T10:00:00.000Z",
+      pages: [
+        {
+          pageNumber: 1,
+          displayLabel: "1",
+          pageImage: "/assets/aistudio/covers/cover_a1_2.png",
+          media: []
+        }
+      ],
+      allMedia: []
+    },
+    {
+      id: "miteinander-a2-1",
+      title: "Miteinander! A2.1 KB+AB",
+      subtitle: "Kurs- und Arbeitsbuch",
+      author: "Hueber Verlag",
+      coverImage: "/assets/aistudio/covers/cover_a2_1.png",
+      totalPages: 180,
+      createdAt: "2024-06-12T10:00:00.000Z",
+      pages: [
+        {
+          pageNumber: 1,
+          displayLabel: "1",
+          pageImage: "/assets/aistudio/covers/cover_a2_1.png",
+          media: []
+        }
+      ],
+      allMedia: []
+    },
+    {
+      id: "miteinander-a2-2",
+      title: "Miteinander! A2.2 KB+AB",
+      subtitle: "Kurs- und Arbeitsbuch",
+      author: "Hueber Verlag",
+      coverImage: "/assets/aistudio/covers/cover_a2_2.png",
+      totalPages: 180,
+      createdAt: "2024-06-13T10:00:00.000Z",
+      pages: [
+        {
+          pageNumber: 1,
+          displayLabel: "1",
+          pageImage: "/assets/aistudio/covers/cover_a2_2.png",
+          media: []
+        }
+      ],
+      allMedia: []
+    }
+  ];
 
   function loadBooksJson(): any[] {
     try {
@@ -2206,31 +2353,16 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
         const raw = fs.readFileSync(BOOKS_META_PATH, "utf-8").trim();
         if (raw) {
           const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            // Filter out default dummy books with missing assets
-            const valid = parsed.filter(
-              (b: any) =>
-                b &&
-                b.id &&
-                !b.id.startsWith("miteinander-a") &&
-                (!b.coverImage || !b.coverImage.includes("/assets/aistudio/"))
-            );
-            if (valid.length !== parsed.length) {
-              try {
-                fs.writeFileSync(BOOKS_META_PATH, JSON.stringify(valid, null, 2), "utf-8");
-              } catch (e) {}
-            }
-            return valid;
-          }
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
         }
       }
     } catch (e) {
       console.warn("Failed reading books.json:", e);
     }
     try {
-      fs.writeFileSync(BOOKS_META_PATH, JSON.stringify([], null, 2), "utf-8");
+      fs.writeFileSync(BOOKS_META_PATH, JSON.stringify(INITIAL_SERVER_BOOKS, null, 2), "utf-8");
     } catch (e) {}
-    return [];
+    return INITIAL_SERVER_BOOKS;
   }
 
   function saveBooksJson(list: any[]) {
