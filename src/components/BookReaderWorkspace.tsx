@@ -22,7 +22,13 @@ import {
   ChevronDown,
   ChevronUp,
   RefreshCw,
-  Bug
+  Bug,
+  Play,
+  Pause,
+  ExternalLink,
+  Volume2,
+  VolumeX,
+  Sparkles
 } from "lucide-react";
 import { InteractiveBook, BookPage, BookPageMedia, MediaFile } from "../types";
 import {
@@ -57,6 +63,44 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   const [selectedBook, setSelectedBook] = useState<InteractiveBook | null>(null);
   const [currentPageIndex, setCurrentPageIndex] = useState<number>(0);
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
+
+  // 🎧 Inline Media Player State (Direct In-Line Play without navigating away)
+  const [activeInlineMedia, setActiveInlineMedia] = useState<BookPageMedia | null>(null);
+  const [isPlayingInline, setIsPlayingInline] = useState<boolean>(false);
+  const [inlineCurrentTime, setInlineCurrentTime] = useState<number>(0);
+  const [inlineDuration, setInlineDuration] = useState<number>(0);
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const inlineAudioRef = useRef<HTMLAudioElement | null>(null);
+  const inlineVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Helper: Restore saved last-read page for a book from localStorage
+  const selectBookAndRestorePage = (book: InteractiveBook) => {
+    setSelectedBook(book);
+    setActiveInlineMedia(null);
+    try {
+      const savedPage = localStorage.getItem(`interactive_book_last_page_${book.id}`);
+      if (savedPage !== null) {
+        const parsed = parseInt(savedPage, 10);
+        if (!isNaN(parsed) && parsed >= 0 && parsed < book.pages.length) {
+          setCurrentPageIndex(parsed);
+          return;
+        }
+      }
+    } catch (e) {}
+
+    // Fallback: Default to first page with media if available, or page 0
+    const mediaIdx = book.pages.findIndex((p) => p.media && p.media.length > 0);
+    setCurrentPageIndex(mediaIdx >= 0 ? mediaIdx : 0);
+  };
+
+  // Save current page position to localStorage whenever selectedBook or currentPageIndex changes
+  useEffect(() => {
+    if (selectedBook && typeof currentPageIndex === "number") {
+      try {
+        localStorage.setItem(`interactive_book_last_page_${selectedBook.id}`, currentPageIndex.toString());
+      } catch (e) {}
+    }
+  }, [selectedBook, currentPageIndex]);
 
   // Page Jump & Search state
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
@@ -93,7 +137,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
       if (initialBookId) {
         const found = serverBooks.find((b) => b.id === initialBookId);
         if (found) {
-          setSelectedBook(found);
+          selectBookAndRestorePage(found);
           if (typeof initialPageIndex === "number" && initialPageIndex >= 0 && initialPageIndex < found.pages.length) {
             setCurrentPageIndex(initialPageIndex);
           }
@@ -111,7 +155,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     if (initialBookId && books.length > 0) {
       const found = books.find((b) => b.id === initialBookId);
       if (found) {
-        setSelectedBook(found);
+        selectBookAndRestorePage(found);
         if (typeof initialPageIndex === "number" && initialPageIndex >= 0 && initialPageIndex < found.pages.length) {
           setCurrentPageIndex(initialPageIndex);
         }
@@ -359,8 +403,23 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     return selectedBook.allMedia || [];
   }, [selectedBook, activePage]);
 
-  // Play media directly in studio player (مشغل الوسائط)
-  const handlePlayTrack = (media: BookPageMedia) => {
+  // 1. Play media directly in reader (In-Line quick player)
+  const handleInlinePlayTrack = (media: BookPageMedia, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (activeInlineMedia?.id === media.id) {
+      setIsPlayingInline((prev) => !prev);
+    } else {
+      setActiveInlineMedia(media);
+      setIsPlayingInline(true);
+      setInlineCurrentTime(0);
+    }
+  };
+
+  // 2. Play media explicitly in Studio workspace
+  const handlePlayTrackInStudio = (media: BookPageMedia, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setIsPlayingInline(false);
+    setActiveInlineMedia(null);
     if (onPlayMediaInStudio && selectedBook) {
       onPlayMediaInStudio({
         id: `book-media-${media.id}`,
@@ -384,6 +443,13 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     }
   };
 
+  const formatTime = (secs: number) => {
+    if (isNaN(secs) || secs < 0) return "00:00";
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
+
   const handlePrevPage = () => {
     if (currentPageIndex > 0) {
       setCurrentPageIndex((prev) => prev - 1);
@@ -397,31 +463,35 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   };
 
   // =========================================================================
-  // VIEW 2: BOOK READER VIEW (EXACTLY MATCHING image_100aa631.png)
+  // VIEW 2: BOOK READER VIEW (Optimized Layout: Compact Page Area + Dominant Media List)
   // =========================================================================
   if (selectedBook) {
     return (
       <div className="w-full h-full bg-white text-slate-900 flex flex-col font-sans select-none overflow-hidden" dir="ltr">
-        {/* Top Pinned Section: Header + Search + 3-Page Carousel + Page Indicator */}
+        {/* Top Pinned Compact Section: Header + Search + Compact 3-Page Preview */}
         <div className="shrink-0 bg-white border-b border-slate-200 shadow-2xs z-10 flex flex-col">
           {/* Top Header: Back Arrow + "Book" on left, Search on right */}
-          <div className="h-14 px-4 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
+          <div className="h-11 px-3 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => setSelectedBook(null)}
+                onClick={() => {
+                  setSelectedBook(null);
+                  setActiveInlineMedia(null);
+                  setIsPlayingInline(false);
+                }}
                 className="p-1 text-slate-900 hover:text-slate-600 cursor-pointer transition-colors"
                 title="Back"
               >
-                <ArrowLeft className="w-6 h-6 stroke-[2.2]" />
+                <ArrowLeft className="w-5 h-5 stroke-[2.2]" />
               </button>
-              <span className="text-xl font-bold tracking-tight text-slate-900">Book</span>
+              <span className="text-base font-bold tracking-tight text-slate-900">Book</span>
             </div>
 
             {/* Search Box / Page Jump */}
             <div className="flex items-center gap-2">
               {isSearchOpen ? (
-                <div className="flex items-center gap-1.5 bg-slate-100 border border-slate-300 rounded-xl px-2.5 py-1 animate-scaleUp">
-                  <Search className="w-4 h-4 text-slate-500 shrink-0" />
+                <div className="flex items-center gap-1.5 bg-slate-100 border border-slate-300 rounded-xl px-2.5 py-0.5 animate-scaleUp">
+                  <Search className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                   <input
                     type="text"
                     inputMode="numeric"
@@ -432,12 +502,12 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
                       if (e.key === "Enter") handleJumpToPage(pageSearchInput);
                       if (e.key === "Escape") setIsSearchOpen(false);
                     }}
-                    className="w-24 sm:w-32 bg-transparent text-xs font-bold text-slate-800 placeholder-slate-400 outline-none"
+                    className="w-20 sm:w-28 bg-transparent text-xs font-bold text-slate-800 placeholder-slate-400 outline-none"
                     autoFocus
                   />
                   <button
                     onClick={() => handleJumpToPage(pageSearchInput)}
-                    className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold cursor-pointer transition-colors"
+                    className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-bold cursor-pointer transition-colors"
                   >
                     انتقال
                   </button>
@@ -454,27 +524,27 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
               ) : (
                 <button
                   onClick={() => setIsSearchOpen(true)}
-                  className="p-1.5 text-slate-900 hover:text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors"
+                  className="p-1 text-slate-900 hover:text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors"
                   title="البحث أو الانتقال لرقم صفحة"
                 >
-                  <Search className="w-5 h-5 stroke-[2.2]" />
+                  <Search className="w-4 h-4 stroke-[2.2]" />
                 </button>
               )}
             </div>
           </div>
 
           {/* Centered Book Subtitle */}
-          <div className="text-center text-sm font-medium text-slate-900 py-1 px-4 truncate">
+          <div className="text-center text-xs font-semibold text-slate-800 py-0.5 px-3 truncate">
             {selectedBook.title}
           </div>
 
-          {/* 3-Page Carousel Display */}
-          <div className="relative w-full flex items-center justify-center overflow-hidden py-2 sm:py-3 px-2 sm:px-6">
-            <div className="flex items-center justify-center gap-4 sm:gap-8 max-w-4xl w-full">
+          {/* Compact 3-Page Carousel Display (Optimized for Media Area Dominance) */}
+          <div className="relative w-full flex items-center justify-center overflow-hidden py-1 px-2">
+            <div className="flex items-center justify-center gap-3 sm:gap-6 max-w-2xl w-full">
               {/* Left Page (Previous) */}
               <div
                 onClick={handlePrevPage}
-                className={`w-1/4 sm:w-1/3 aspect-[3/4] max-h-[200px] sm:max-h-[270px] rounded-sm overflow-hidden shadow-md border border-slate-200 transition-all cursor-pointer ${
+                className={`w-20 sm:w-24 aspect-[3/4] max-h-[100px] sm:max-h-[125px] rounded-xs overflow-hidden shadow-xs border border-slate-200 transition-all cursor-pointer ${
                   prevPage ? "opacity-90 hover:opacity-100" : "opacity-0 pointer-events-none"
                 }`}
               >
@@ -490,7 +560,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
               </div>
 
               {/* Center Active Page */}
-              <div className="w-1/2 sm:w-2/5 aspect-[3/4] max-h-[240px] sm:max-h-[320px] rounded-sm overflow-hidden shadow-xl border border-slate-200 bg-white z-10 transition-transform">
+              <div className="w-28 sm:w-36 aspect-[3/4] max-h-[130px] sm:max-h-[160px] rounded-xs overflow-hidden shadow-md border border-slate-300 bg-white z-10 transition-transform">
                 {activePage?.pageImage ? (
                   <img
                     src={activePage.pageImage}
@@ -507,7 +577,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
               {/* Right Page (Next) */}
               <div
                 onClick={handleNextPage}
-                className={`w-1/4 sm:w-1/3 aspect-[3/4] max-h-[200px] sm:max-h-[270px] rounded-sm overflow-hidden shadow-md border border-slate-200 transition-all cursor-pointer ${
+                className={`w-20 sm:w-24 aspect-[3/4] max-h-[100px] sm:max-h-[125px] rounded-xs overflow-hidden shadow-xs border border-slate-200 transition-all cursor-pointer ${
                   nextPage ? "opacity-90 hover:opacity-100" : "opacity-0 pointer-events-none"
                 }`}
               >
@@ -525,50 +595,193 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
           </div>
 
           {/* Page Number indicator centered below carousel */}
-          <div className="text-center text-xs sm:text-sm font-semibold text-slate-500 py-1 pb-2">
+          <div className="text-center text-xs font-semibold text-slate-500 py-0.5 pb-1">
             Page {activePage?.displayLabel || activePage?.pageNumber || currentPageIndex + 1}
           </div>
         </div>
 
-        {/* Tracks List (Only this section scrolls when many audio tracks exist!) */}
+        {/* Tracks List Section (Occupies ~70%+ Viewport Height) */}
         <div className="flex-1 w-full overflow-y-auto divide-y divide-slate-100 bg-white min-h-0">
           {pageTracks.length === 0 ? (
-            <div className="py-12 text-center text-slate-400 text-sm">
-              No tracks for this page
+            <div className="py-12 text-center text-slate-400 text-xs font-medium">
+              لا توجد مقاطع صوتية أو فيديو لهذه الصفحة
             </div>
           ) : (
-            pageTracks.map((media) => (
-              <div
-                key={media.id}
-                onClick={() => handlePlayTrack(media)}
-                className="px-4 py-3.5 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
-              >
-                {/* Left Track Info */}
-                <div className="flex flex-col min-w-0 pr-4">
-                  <span className="text-base font-semibold text-slate-900 truncate">
-                    {media.title}
-                  </span>
-                  <span className="text-sm text-slate-400 capitalize mt-0.5">
-                    {media.type === "video" ? "Video" : "Audio"}
-                  </span>
-                </div>
+            pageTracks.map((media) => {
+              const isActive = activeInlineMedia?.id === media.id;
+              return (
+                <div
+                  key={media.id}
+                  onClick={() => handleInlinePlayTrack(media)}
+                  className={`px-4 py-3 flex items-center justify-between cursor-pointer transition-colors ${
+                    isActive ? "bg-blue-50/80 border-r-4 border-blue-600" : "hover:bg-slate-50"
+                  }`}
+                >
+                  {/* Left Track Info */}
+                  <div className="flex items-center gap-3 min-w-0 pr-2">
+                    {/* Inline Play/Pause Circle Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => handleInlinePlayTrack(media, e)}
+                      className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-transform active:scale-95 cursor-pointer ${
+                        isActive && isPlayingInline
+                          ? "bg-blue-600 text-white shadow-md ring-2 ring-blue-300"
+                          : "bg-blue-100 text-blue-700 hover:bg-blue-600 hover:text-white"
+                      }`}
+                      title={isActive && isPlayingInline ? "إيقاف مؤقت" : "تشغيل مباشر"}
+                    >
+                      {isActive && isPlayingInline ? (
+                        <Pause className="w-4 h-4 fill-current" />
+                      ) : (
+                        <Play className="w-4 h-4 fill-current ml-0.5" />
+                      )}
+                    </button>
 
-                {/* Right Action: Solid Blue Play Triangle or Video Icon */}
-                <div className="shrink-0 pl-2">
-                  {media.type === "video" ? (
-                    <svg className="w-6 h-6 fill-[#007aff] text-[#007aff]" viewBox="0 0 24 24">
-                      <path d="M4 6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2.5l4 2.5V7l-4 2.5V8a2 2 0 0 0-2-2H4z" />
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5 fill-[#007aff] text-[#007aff]" viewBox="0 0 24 24">
-                      <polygon points="6 3 20 12 6 21 6 3" />
-                    </svg>
-                  )}
+                    <div className="flex flex-col min-w-0">
+                      <span className={`text-sm font-bold truncate ${isActive ? "text-blue-900" : "text-slate-900"}`}>
+                        {media.title}
+                      </span>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs text-slate-400 capitalize">
+                          {media.type === "video" ? "فيديو" : "صوتي"}
+                        </span>
+                        {isActive && (
+                          <span className="text-[10px] font-bold text-blue-600 bg-blue-100 px-1.5 py-0.2 rounded-full">
+                            يعمل الآن
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Actions: Studio Entry Button + Indicator */}
+                  <div className="flex items-center gap-2 shrink-0 pl-1">
+                    {/* Subtle Studio Entry Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => handlePlayTrackInStudio(media, e)}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-blue-300 bg-white hover:bg-blue-50 text-slate-600 hover:text-blue-700 text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                      title="فتح المقطع في استوديو تحليل الوسائط"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                      <span className="hidden sm:inline">الاستوديو</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
+
+        {/* 🎵 Floating Bottom Inline Player Bar */}
+        {activeInlineMedia && (
+          <div className="shrink-0 bg-slate-900 text-white p-3 border-t border-slate-800 shadow-2xl flex flex-col gap-2 z-20 animate-in slide-in-from-bottom duration-200">
+            {activeInlineMedia.type === "video" ? (
+              <div className="w-full max-h-48 rounded-lg overflow-hidden bg-black flex justify-center mb-1">
+                <video
+                  ref={inlineVideoRef}
+                  src={activeInlineMedia.url}
+                  controls
+                  autoPlay
+                  className="max-h-48 w-auto object-contain"
+                  onTimeUpdate={(e) => setInlineCurrentTime(e.currentTarget.currentTime)}
+                  onLoadedMetadata={(e) => setInlineDuration(e.currentTarget.duration)}
+                  onEnded={() => setIsPlayingInline(false)}
+                />
+              </div>
+            ) : (
+              <audio
+                ref={inlineAudioRef}
+                src={activeInlineMedia.url}
+                autoPlay={isPlayingInline}
+                muted={isMuted}
+                onTimeUpdate={(e) => setInlineCurrentTime(e.currentTarget.currentTime)}
+                onLoadedMetadata={(e) => setInlineDuration(e.currentTarget.duration)}
+                onEnded={() => setIsPlayingInline(false)}
+              />
+            )}
+
+            {/* Control Bar Row */}
+            <div className="flex items-center justify-between gap-3 px-1">
+              {/* Track Title & Play Toggle */}
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <button
+                  onClick={() => {
+                    if (activeInlineMedia.type === "audio" && inlineAudioRef.current) {
+                      if (isPlayingInline) {
+                        inlineAudioRef.current.pause();
+                      } else {
+                        inlineAudioRef.current.play();
+                      }
+                      setIsPlayingInline(!isPlayingInline);
+                    }
+                  }}
+                  className="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shrink-0 cursor-pointer transition-transform active:scale-95 shadow-md"
+                >
+                  {isPlayingInline ? <Pause className="w-5 h-5 fill-white" /> : <Play className="w-5 h-5 fill-white ml-0.5" />}
+                </button>
+
+                <div className="flex flex-col min-w-0">
+                  <span className="text-sm font-bold text-white truncate">{activeInlineMedia.title}</span>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    {formatTime(inlineCurrentTime)} / {formatTime(inlineDuration)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Progress Slider (Audio) */}
+              {activeInlineMedia.type === "audio" && (
+                <div className="hidden sm:flex items-center gap-2 flex-1 max-w-xs">
+                  <input
+                    type="range"
+                    min={0}
+                    max={inlineDuration || 100}
+                    value={inlineCurrentTime}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      setInlineCurrentTime(val);
+                      if (inlineAudioRef.current) inlineAudioRef.current.currentTime = val;
+                    }}
+                    className="w-full accent-blue-500 h-1.5 bg-slate-700 rounded-lg cursor-pointer"
+                  />
+                </div>
+              )}
+
+              {/* Actions on Right */}
+              <div className="flex items-center gap-2 shrink-0">
+                {/* Mute Button */}
+                <button
+                  onClick={() => setIsMuted(!isMuted)}
+                  className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
+                  title={isMuted ? "Unmute" : "Mute"}
+                >
+                  {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4" />}
+                </button>
+
+                {/* Explicit Open in Studio Button */}
+                <button
+                  onClick={() => handlePlayTrackInStudio(activeInlineMedia)}
+                  className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 rounded-lg text-xs font-bold border border-slate-700 flex items-center gap-1.5 cursor-pointer transition-colors"
+                  title="فتح المقطع في استوديو تحليل الوسائط"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                  <span className="hidden sm:inline">الاستوديو</span>
+                </button>
+
+                {/* Close Player Button */}
+                <button
+                  onClick={() => {
+                    setActiveInlineMedia(null);
+                    setIsPlayingInline(false);
+                  }}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1124,10 +1337,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
             <div
               key={book.id}
               onClick={() => {
-                setSelectedBook(book);
-                // Default to page with media if available, or first page
-                const mediaIdx = book.pages.findIndex((p) => p.media && p.media.length > 0);
-                setCurrentPageIndex(mediaIdx >= 0 ? mediaIdx : 0);
+                selectBookAndRestorePage(book);
               }}
               className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50/70 transition-colors"
             >
