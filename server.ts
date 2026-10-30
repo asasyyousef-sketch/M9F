@@ -1936,86 +1936,23 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
     }
   });
 
-  // 10. Translate Existing Subtitle Track with Gemini (Dual Subtitle Translation, supports regular media & interactive book media)
-  app.post("/api/media/:id(*)/translate-subtitles", async (req, res) => {
+  // 10. Translate Existing Subtitle Track with Gemini (Dual Subtitle Translation)
+  app.post("/api/media/:id/translate-subtitles", async (req, res) => {
     try {
-      let rawId = req.params.id || (req.params as any)[0] || "";
-      try {
-        rawId = decodeURIComponent(rawId);
-      } catch (e) {}
+      const { id } = req.params;
+      const { trackId, targetLanguage = "ar", sourceLanguage = "de", selectedModel = "gemini-3.6-flash", customApiKey, geminiApiKey } = req.body;
 
-      const cleanId = rawId.replace(/^book-media-/, "");
-      const {
-        trackId,
-        cues,
-        targetLanguage = "ar",
-        sourceLanguage = "de",
-        selectedModel = "gemini-3.8-flash",
-        customApiKey,
-        geminiApiKey
-      } = req.body;
-
-      // 1. Locate existing media item or book media item
       const list = loadMediaMeta();
-      let item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
-
-      let sourceTrack: ServerSubtitleTrack | undefined;
-      let matchedBook: any = null;
-      let matchedBookMedia: any = null;
-
-      // Check inside interactive books metadata (books.json)
-      try {
-        const books = loadBooksJson();
-        for (const b of books) {
-          const findMedia = (m: any) =>
-            m.id === rawId ||
-            m.id === cleanId ||
-            `book-media-${m.id}` === rawId ||
-            m.fileName === rawId ||
-            m.fileName === cleanId ||
-            m.title === rawId ||
-            m.title === cleanId;
-
-          const foundInAll = (b.allMedia || []).find(findMedia);
-          const foundInPages = (b.pages || []).flatMap((p: any) => p.media || []).find(findMedia);
-          const found = foundInAll || foundInPages;
-
-          if (found) {
-            matchedBook = b;
-            matchedBookMedia = found;
-            if (Array.isArray(found.subtitles) && found.subtitles.length > 0) {
-              sourceTrack = found.subtitles.find((t: any) => t.id === trackId) || found.subtitles[0];
-            }
-            break;
-          }
-        }
-      } catch (bErr) {
-        console.warn("Could not check books.json for subtitle translation:", bErr);
+      const item = list.find((m) => m.id === id || m.filename === id);
+      if (!item) {
+        return res.status(404).json({ error: "الملف غير موجود" });
       }
 
-      // If not found in book, check in item's subtitles
-      if (!sourceTrack && item && Array.isArray(item.subtitles)) {
-        sourceTrack = item.subtitles.find((t) => t.id === trackId) || item.subtitles[0];
+      const sourceTrack = item.subtitles?.find((t) => t.id === trackId) || item.subtitles?.[0];
+      if (!sourceTrack || !Array.isArray(sourceTrack.cues) || sourceTrack.cues.length === 0) {
+        return res.status(400).json({ error: "لا يوجد مسار ترجمة أصلي لترجمته" });
       }
 
-      // Determine cues to translate: prioritize passed cues (from client state), then sourceTrack cues
-      let cuesToTranslate: ServerSubtitleCue[] = [];
-      if (Array.isArray(cues) && cues.length > 0) {
-        cuesToTranslate = cues.map((c: any, idx: number) => ({
-          id: c.id || `cue-${idx + 1}`,
-          startTime: Math.max(0, parseFloat(c.startTime) || 0),
-          endTime: Math.max(0.1, parseFloat(c.endTime) || 1),
-          text: (c.text || "").trim()
-        })).filter((c) => c.text.length > 0);
-      } else if (sourceTrack && Array.isArray(sourceTrack.cues) && sourceTrack.cues.length > 0) {
-        cuesToTranslate = sourceTrack.cues;
-      }
-
-      if (cuesToTranslate.length === 0) {
-        return res.status(400).json({ error: "لا يوجد مسار تفريغ أو ترجمة أصلية لترجمتها" });
-      }
-
-      // Get API Key
       const headerAuth = req.headers.authorization?.startsWith("Bearer ")
         ? req.headers.authorization.slice(7).trim()
         : "";
@@ -2029,15 +1966,12 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
         headerAuth ||
         process.env.GEMINI_API_KEY ||
         "";
-
       if (!effectiveGeminiKey) {
-        return res.status(500).json({
-          error: "مفتاح GEMINI_API_KEY غير متوفر. يرجى إدخال المفتاح في الإعدادات أو على السيرفر."
-        });
+        return res.status(500).json({ error: "مفتاح GEMINI_API_KEY غير متوفر. يرجى إدخال المفتاح في الإعدادات أو على السيرفر." });
       }
 
       const aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
-
+      
       const langNameMap: Record<string, string> = {
         ar: "العربية",
         en: "الإنجليزية (English)",
@@ -2057,7 +1991,7 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
 حافظ بدقة على نفس أوقات البداية والنهاية (startTime و endTime) ونفس المعرفات (id).
 
 المقاطع الأصلية المطلوب ترجمتها:
-${JSON.stringify(cuesToTranslate.map((c) => ({ id: c.id, startTime: c.startTime, endTime: c.endTime, text: c.text })), null, 2)}
+${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, endTime: c.endTime, text: c.text })), null, 2)}
 
 الشروط:
 1. حافظ على المعنى السياقي السليم والمناسب للترجمة المرئية.
@@ -2071,15 +2005,7 @@ ${JSON.stringify(cuesToTranslate.map((c) => ({ id: c.id, startTime: c.startTime,
   }
 ]`;
 
-      let primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.8-flash";
-      if (
-        primaryModel === "gemini-3.6-flash" ||
-        primaryModel === "gemini-2.5-flash" ||
-        primaryModel === "gemini-1.5-flash" ||
-        primaryModel === "gemini-2.0-flash"
-      ) {
-        primaryModel = "gemini-3.8-flash";
-      }
+      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
       let rawJson = "[]";
       let usedModel = primaryModel;
 
@@ -2090,7 +2016,6 @@ ${JSON.stringify(cuesToTranslate.map((c) => ({ id: c.id, startTime: c.startTime,
           responseMimeType: "application/json"
         }
       });
-
       if (response.text) {
         rawJson = response.text;
       }
@@ -2115,86 +2040,24 @@ ${JSON.stringify(cuesToTranslate.map((c) => ({ id: c.id, startTime: c.startTime,
           startTime: Math.max(0, parseFloat(c.startTime) || 0),
           endTime: Math.max(0.1, parseFloat(c.endTime) || (parseFloat(c.startTime) || 0) + 3),
           text: (c.text || "").trim()
-        })).filter((c) => c.text.length > 0),
+        })).filter(c => c.text.length > 0),
         source: "ai",
         uploadedAt: new Date().toISOString()
       };
 
-      const originalTrackId = sourceTrack?.id || trackId || "sub-primary";
-
-      // 1. Update in books.json if it is a book media item
-      let savedInBook = false;
-      try {
-        const books = loadBooksJson();
-        let bookDirty = false;
-        for (const b of books) {
-          const updateBookTrack = (m: any) => {
-            if (
-              m.id === rawId ||
-              m.id === cleanId ||
-              `book-media-${m.id}` === rawId ||
-              m.fileName === rawId ||
-              m.fileName === cleanId ||
-              m.title === rawId ||
-              m.title === cleanId
-            ) {
-              if (!Array.isArray(m.subtitles)) m.subtitles = [];
-              m.subtitles.push(translatedTrack);
-              m.primaryTrackId = originalTrackId;
-              m.secondaryTrackId = translatedTrack.id;
-              m.showDualSubtitles = true;
-              bookDirty = true;
-              savedInBook = true;
-            }
-          };
-
-          if (Array.isArray(b.allMedia)) b.allMedia.forEach(updateBookTrack);
-          if (Array.isArray(b.pages)) {
-            for (const p of b.pages) {
-              if (Array.isArray(p.media)) p.media.forEach(updateBookTrack);
-            }
-          }
-        }
-        if (bookDirty) {
-          saveBooksJson(books);
-        }
-      } catch (bErr) {
-        console.error("Error saving translated track to books.json:", bErr);
-      }
-
-      // 2. Update in media_files.json if item exists
-      if (item) {
-        if (!item.subtitles) item.subtitles = [];
-        item.subtitles.push(translatedTrack);
-        item.primaryTrackId = originalTrackId;
-        item.secondaryTrackId = translatedTrack.id;
-        item.showDualSubtitles = true;
-        saveMediaMeta(list);
-      }
-
-      // Construct returned file representation
-      const existingSubs = item?.subtitles || (matchedBookMedia?.subtitles ? [...matchedBookMedia.subtitles, translatedTrack] : (sourceTrack ? [sourceTrack, translatedTrack] : [translatedTrack]));
-      const filePayload: Partial<ServerMediaFile> = item || {
-        id: rawId,
-        filename: cleanId,
-        originalName: matchedBookMedia?.title || cleanId,
-        title: matchedBookMedia?.title || cleanId,
-        size: 0,
-        mimeType: "audio/mpeg",
-        type: "audio",
-        uploadedAt: new Date().toISOString(),
-        url: matchedBookMedia?.url || `/api/media/stream/${encodeURIComponent(cleanId)}`,
-        subtitles: existingSubs,
-        primaryTrackId: originalTrackId,
-        secondaryTrackId: translatedTrack.id,
-        showDualSubtitles: true
-      };
+      if (!item.subtitles) item.subtitles = [];
+      // Keep original source track as primary, append translated track as secondary track
+      item.subtitles.push(translatedTrack);
+      item.primaryTrackId = sourceTrack.id;
+      item.secondaryTrackId = translatedTrack.id;
+      item.showDualSubtitles = true;
+      saveMediaMeta(list);
 
       res.json({
         success: true,
         message: `تمت ترجمة المسار إلى ${targetLangName} بنجاح عبر نموذج ${usedModel}! ⚡`,
         track: translatedTrack,
-        file: filePayload
+        file: item
       });
     } catch (e: any) {
       console.error("Translate subtitles error:", e);
