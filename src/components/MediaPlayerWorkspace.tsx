@@ -1992,7 +1992,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const activeToken = token || (typeof window !== "undefined" ? localStorage.getItem("app_auth_token") : null);
 
     try {
-      const res = await fetch(`/api/media/${currentFile.id}/translate-subtitles`, {
+      const fileIdParam = encodeURIComponent(currentFile.id);
+      const res = await fetch(`/api/media/${fileIdParam}/translate-subtitles`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2006,7 +2007,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           selectedModel: selectedAiModel,
           customApiKey: savedKey || undefined,
           geminiApiKey: savedKey || undefined,
-          userApiKey: savedKey || undefined
+          userApiKey: savedKey || undefined,
+          cues: (activeTrack.cues && activeTrack.cues.length > 0) ? activeTrack.cues : undefined
         })
       });
 
@@ -2020,7 +2022,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
       if (data.file) {
         setCurrentFile(data.file);
-        setFiles(prev => prev.map(f => f.id === data.file.id ? data.file : f));
+        setFiles(prev => {
+          const exists = prev.some(f => f.id === data.file.id || f.id === currentFile.id);
+          if (exists) {
+            return prev.map(f => (f.id === data.file.id || f.id === currentFile.id) ? { ...f, ...data.file } : f);
+          }
+          return [data.file, ...prev];
+        });
       }
 
       // Automatically set the new translated track as secondary track for dual subtitles!

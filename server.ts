@@ -1757,9 +1757,22 @@ async function startServer() {
       const { primaryTrackId, secondaryTrackId, showDualSubtitles } = req.body;
 
       const list = loadMediaMeta();
-      const item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
+      let item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
       if (!item) {
-        return res.status(404).json({ error: "الملف غير موجود" });
+        item = {
+          id: rawId,
+          filename: cleanId,
+          originalName: cleanId,
+          title: cleanId,
+          size: 0,
+          mimeType: "audio/mpeg",
+          type: "audio",
+          uploadedAt: new Date().toISOString(),
+          url: `/api/media/stream/${encodeURIComponent(cleanId)}`,
+          subtitles: [],
+          userId: undefined
+        };
+        list.unshift(item);
       }
 
       if (primaryTrackId !== undefined) {
@@ -1937,20 +1950,124 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
   });
 
   // 10. Translate Existing Subtitle Track with Gemini (Dual Subtitle Translation)
-  app.post("/api/media/:id/translate-subtitles", async (req, res) => {
+  app.post("/api/media/:id(*)/translate-subtitles", async (req, res) => {
     try {
-      const { id } = req.params;
-      const { trackId, targetLanguage = "ar", sourceLanguage = "de", selectedModel = "gemini-3.6-flash", customApiKey, geminiApiKey } = req.body;
+      let rawId = req.params.id || (req.params as any)[0] || "";
+      try {
+        rawId = decodeURIComponent(rawId);
+      } catch (e) {}
+
+      const cleanId = rawId.replace(/^book-media-/, "");
+      const { trackId, targetLanguage = "ar", sourceLanguage = "de", selectedModel = "gemini-3.6-flash", customApiKey, geminiApiKey, cues: clientCues } = req.body;
 
       const list = loadMediaMeta();
-      const item = list.find((m) => m.id === id || m.filename === id);
+      let item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
+
+      // Search inside books if not found in media list or missing subtitles
+      let bookMatch: any = null;
+      try {
+        const books = loadBooksJson();
+        for (const b of books) {
+          const matchFn = (m: any) =>
+            m.id === rawId ||
+            m.id === cleanId ||
+            m.fileName === rawId ||
+            m.fileName === cleanId ||
+            m.title === rawId ||
+            m.title === cleanId;
+
+          if (Array.isArray(b.allMedia)) {
+            const found = b.allMedia.find(matchFn);
+            if (found) { bookMatch = found; break; }
+          }
+          if (Array.isArray(b.pages)) {
+            for (const p of b.pages) {
+              if (Array.isArray(p.media)) {
+                const found = p.media.find(matchFn);
+                if (found) { bookMatch = found; break; }
+              }
+            }
+          }
+          if (bookMatch) break;
+        }
+      } catch (bErr) {
+        console.error("Error finding media in books for translation:", bErr);
+      }
+
+      // If item is not in media_files.json but found in books, auto-create it
+      if (!item && bookMatch) {
+        const { currentUserId } = getMediaAuthUser(req);
+        item = {
+          id: rawId,
+          filename: cleanId,
+          originalName: bookMatch.title || bookMatch.fileName || cleanId,
+          title: bookMatch.title || cleanId,
+          size: 0,
+          mimeType: "audio/mpeg",
+          type: "audio",
+          uploadedAt: new Date().toISOString(),
+          url: bookMatch.url || `/api/media/stream/${encodeURIComponent(cleanId)}`,
+          subtitles: Array.isArray(bookMatch.subtitles) ? [...bookMatch.subtitles] : [],
+          primaryTrackId: bookMatch.subtitles?.[0]?.id,
+          userId: currentUserId || undefined
+        };
+        list.unshift(item);
+        saveMediaMeta(list);
+      }
+
+      // If still not in item, but client passed cues, auto-create item with client cues
+      if (!item && Array.isArray(clientCues) && clientCues.length > 0) {
+        const { currentUserId } = getMediaAuthUser(req);
+        item = {
+          id: rawId,
+          filename: cleanId,
+          originalName: cleanId,
+          title: cleanId,
+          size: 0,
+          mimeType: "audio/mpeg",
+          type: "audio",
+          uploadedAt: new Date().toISOString(),
+          url: `/api/media/stream/${encodeURIComponent(cleanId)}`,
+          subtitles: [{
+            id: trackId || "sub-" + Date.now(),
+            label: formatSubtitleTrackProtocol("TRN", sourceLanguage || "de"),
+            language: sourceLanguage || "de",
+            cues: clientCues,
+            source: "transcribe",
+            uploadedAt: new Date().toISOString()
+          }],
+          primaryTrackId: trackId || "sub-" + Date.now(),
+          userId: currentUserId || undefined
+        };
+        list.unshift(item);
+        saveMediaMeta(list);
+      }
+
       if (!item) {
         return res.status(404).json({ error: "الملف غير موجود" });
       }
 
-      const sourceTrack = item.subtitles?.find((t) => t.id === trackId) || item.subtitles?.[0];
+      // Find source track from item, or bookMatch, or clientCues
+      let sourceTrack = item.subtitles?.find((t) => t.id === trackId) || item.subtitles?.[0];
+      if (!sourceTrack && bookMatch && Array.isArray(bookMatch.subtitles)) {
+        sourceTrack = bookMatch.subtitles.find((t: any) => t.id === trackId) || bookMatch.subtitles[0];
+      }
+
+      if ((!sourceTrack || !Array.isArray(sourceTrack.cues) || sourceTrack.cues.length === 0) && Array.isArray(clientCues) && clientCues.length > 0) {
+        sourceTrack = {
+          id: trackId || "sub-" + Date.now(),
+          label: formatSubtitleTrackProtocol("TRN", sourceLanguage || "de"),
+          language: sourceLanguage || "de",
+          cues: clientCues,
+          source: "transcribe",
+          uploadedAt: new Date().toISOString()
+        };
+        if (!item.subtitles) item.subtitles = [];
+        item.subtitles.push(sourceTrack);
+      }
+
       if (!sourceTrack || !Array.isArray(sourceTrack.cues) || sourceTrack.cues.length === 0) {
-        return res.status(400).json({ error: "لا يوجد مسار ترجمة أصلي لترجمته" });
+        return res.status(400).json({ error: "لا يوجد مسار ترجمة أصلي أو مقاطع تفريغ لترجمتها" });
       }
 
       const headerAuth = req.headers.authorization?.startsWith("Bearer ")
@@ -2052,6 +2169,55 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
       item.secondaryTrackId = translatedTrack.id;
       item.showDualSubtitles = true;
       saveMediaMeta(list);
+
+      // Sync both sourceTrack and translatedTrack back into the book if this audio is from a book
+      try {
+        const books = loadBooksJson();
+        let bookChanged = false;
+        const updateMediaSubtitles = (m: any) => {
+          if (
+            m.id === rawId ||
+            m.id === cleanId ||
+            m.fileName === rawId ||
+            m.fileName === cleanId ||
+            m.title === rawId ||
+            m.title === cleanId
+          ) {
+            if (!Array.isArray(m.subtitles)) {
+              m.subtitles = [];
+            }
+            if (sourceTrack) {
+              const srcIdx = m.subtitles.findIndex((t: any) => t.id === sourceTrack.id);
+              if (srcIdx === -1) m.subtitles.push(sourceTrack);
+            }
+            const transIdx = m.subtitles.findIndex((t: any) => t.id === translatedTrack.id);
+            if (transIdx !== -1) {
+              m.subtitles[transIdx] = translatedTrack;
+            } else {
+              m.subtitles.push(translatedTrack);
+            }
+            bookChanged = true;
+          }
+        };
+
+        for (const b of books) {
+          if (Array.isArray(b.allMedia)) {
+            for (const m of b.allMedia) updateMediaSubtitles(m);
+          }
+          if (Array.isArray(b.pages)) {
+            for (const p of b.pages) {
+              if (Array.isArray(p.media)) {
+                for (const m of p.media) updateMediaSubtitles(m);
+              }
+            }
+          }
+        }
+        if (bookChanged) {
+          saveBooksJson(books);
+        }
+      } catch (bErr) {
+        console.error("Error saving translated subtitles to book:", bErr);
+      }
 
       res.json({
         success: true,
