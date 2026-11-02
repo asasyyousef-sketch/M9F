@@ -270,24 +270,29 @@ export function computeSubtitleCSS(
 // ---------------------------------------------------------
 export function resolveMediaStreamUrl(file: MediaFile | null | undefined): string {
   if (!file) return "";
+  const cleanUrl = (file.url || "").trim().replace(/\\/g, "/");
+
   // 1. Direct valid URLs (blob, /uploads/books/..., /uploads/media/..., http, data) take top priority
-  if (file.url && (
-    file.url.startsWith("blob:") ||
-    file.url.startsWith("/uploads/") ||
-    file.url.startsWith("http://") ||
-    file.url.startsWith("https://") ||
-    file.url.startsWith("data:") ||
-    file.url.startsWith("/api/media/stream/")
+  if (cleanUrl && (
+    cleanUrl.startsWith("blob:") ||
+    cleanUrl.startsWith("/uploads/") ||
+    cleanUrl.startsWith("http://") ||
+    cleanUrl.startsWith("https://") ||
+    cleanUrl.startsWith("data:") ||
+    cleanUrl.startsWith("/api/media/stream/")
   )) {
-    return file.url;
+    return cleanUrl;
   }
+
   // 2. If any custom URL is set, use it
-  if (file.url && file.url.trim() !== "") {
-    return file.url;
+  if (cleanUrl) {
+    return cleanUrl;
   }
-  // 3. Fallback to stream route by filename
-  if (file.filename) {
-    return `/api/media/stream/${encodeURIComponent(file.filename)}`;
+
+  // 3. Fallback to stream route by filename, originalName or title
+  const targetName = file.filename || file.originalName || file.title;
+  if (targetName) {
+    return `/api/media/stream/${encodeURIComponent(targetName)}`;
   }
   return "";
 }

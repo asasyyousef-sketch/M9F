@@ -2279,7 +2279,7 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
    - إذا كان حرف الأوملاوت (ä, ö, ü) موجوداً أصلاً في المصدر (مثل: mögen, können, müssen):
      فإن وجود الأوملاوت في صيغ الجمع (wir: mögen, ihr: mögt, sie: mögen أو wir: können, ihr: könnt أو wir: müssen, ihr: müsst) هو تصريف نظامي وطبيعي تماماً 100% ومطابق لأصل المصدر!
      يُمنع منعاً باتاً ومطلقاً وضع وسم <span class="irregular-letter"> على حرف الأوملاوت في هذه الصيغ! يجب أن تبقى نصاً عادياً تماماً بدون أي وسوم.
-   - التغيير الحقيقي في فعل mögen مثلاً يحدث فقط في المفرد حين يتحول ö إلى a وحذف النهاية (ich mag, du magst, er mag)، فهنا فقط نضع الوسم على ما تغير. أما الجمع فمطابق للمصدر ولا يوجد به أي شذوذ.
+   - في أفعال الكيفية (Modalverben) مثل mögen و können: كلمات المفرد تنحرف كلياً في الجذر والنهاية (ich mag, du magst, er mag وكذلك ich kann, du kannst, er kann)، لذلك تكون الكلمات بالكامل حمراء: <span class="irregular-letter">mag</span> و <span class="irregular-letter">magst</span> و <span class="irregular-letter">mag</span>، وكذلك <span class="irregular-letter">kann</span> و <span class="irregular-letter">kannst</span> و <span class="irregular-letter">kann</span>. أما صيغ الجمع فمطابقة للمصدر ولا يوجد بها أي شذوذ.
 2. إذا كان المصدر يحتوي حرفاً عادياً وتحول في التصريف إلى أوملاوت (مثل: fahren -> du fährst, er fährt أو schlafen -> du schläfst):
    هنا فقط نضع الوسم على حرف ä لأنه انحرف وتغير عن حرف a الموجود في المصدر.
 3. مع صيغ الجمع (wir, ihr, sie/Sie):
@@ -2288,7 +2288,7 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
 نماذج وأمثلة نموذجية يجب اتباع نفس أسلوبها بحذافيره:
 1. فعل mögen:
    - ich: "<span class=\\"irregular-letter\\">mag</span>"
-   - du: "<span class=\\"irregular-letter\\">mag</span>st"
+   - du: "<span class=\\"irregular-letter\\">magst</span>"
    - er: "<span class=\\"irregular-letter\\">mag</span>"
    - wir: "mögen"  (نظامي تماماً ومطابق للمصدر - يمنع منعاً باتاً وضع أي وسم على ö)
    - ihr: "mögt"   (نظامي تماماً ومطابق للمصدر - يمنع منعاً باتاً وضع أي وسم على ö)
@@ -2366,7 +2366,15 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
    - ihr: "<span class=\\"irregular-letter\\">seid</span>"
    - sie: "<span class=\\"irregular-letter\\">sind</span>"
 
-11. فعل منتظم مثل lernen:
+11. فعل haben:
+   - ich: "habe"
+   - du: "<span class=\\"irregular-letter\\">hast</span>"
+   - er: "<span class=\\"irregular-letter\\">hat</span>"
+   - wir: "haben"
+   - ihr: "habt"
+   - sie: "haben"
+
+12. فعل منتظم مثل lernen:
    - ich: "lerne"
    - du: "lernst"
    - er: "lernt"
@@ -2494,6 +2502,24 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
         const baseStem = infKey.replace(/en$|n$/, "");
         
         // For verbs other than 'sein' (which is completely irregular/suppletive):
+        // Ensure modal verbs mögen & können have full singular forms in red (mag, magst, mag / kann, kannst, kann)
+        if (infKey === "mögen") {
+          parsedData.forms.ich = "<span class=\"irregular-letter\">mag</span>";
+          parsedData.forms.du = "<span class=\"irregular-letter\">magst</span>";
+          parsedData.forms.er = "<span class=\"irregular-letter\">mag</span>";
+        } else if (infKey === "können") {
+          parsedData.forms.ich = "<span class=\"irregular-letter\">kann</span>";
+          parsedData.forms.du = "<span class=\"irregular-letter\">kannst</span>";
+          parsedData.forms.er = "<span class=\"irregular-letter\">kann</span>";
+        } else if (infKey === "haben") {
+          parsedData.forms.ich = "habe";
+          parsedData.forms.du = "<span class=\"irregular-letter\">hast</span>";
+          parsedData.forms.er = "<span class=\"irregular-letter\">hat</span>";
+          parsedData.forms.wir = "haben";
+          parsedData.forms.ihr = "habt";
+          parsedData.forms.sie = "haben";
+        }
+
         if (infKey !== "sein") {
           const pluralPronouns: Array<"wir" | "ihr" | "sie"> = ["wir", "ihr", "sie"];
           for (const p of pluralPronouns) {
@@ -2542,6 +2568,8 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
       const effectiveGroqKey = (req.body.groqApiKey as string) || (customApiKey && isGroq ? customApiKey : "") || process.env.GROQ_API_KEY || "";
       const effectiveGeminiKey =
         (customApiKey && !isGroq && customApiKey.trim()) ||
+        (req.body.userApiKey && req.body.userApiKey.trim()) ||
+        (req.body.apiKey && req.body.apiKey.trim()) ||
         headerKey.trim() ||
         headerAuth ||
         process.env.GEMINI_API_KEY ||

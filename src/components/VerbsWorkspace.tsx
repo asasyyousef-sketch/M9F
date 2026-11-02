@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Menu, ArrowLeft } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { Menu, ArrowLeft, ChevronLeft, ChevronRight, Search, X, Loader2, Sparkles } from "lucide-react";
 
 interface VerbForms {
   ich: string;
@@ -89,6 +89,27 @@ const initialVerbDataStore: Record<string, VerbItem> = {
       wir: "wir nehmen",
       ihr: "ihr nehmt",
       sie: "sie nehmen"
+    }
+  },
+  "mögen": {
+    title: "mögen",
+    speechBase: "mögen",
+    defaultFolder: "أفعال الكيفية (Modalverben)",
+    forms: {
+      ich: '<span class="irregular-letter">mag</span>',
+      du: '<span class="irregular-letter">magst</span>',
+      er: '<span class="irregular-letter">mag</span>',
+      wir: "mögen",
+      ihr: "mögt",
+      sie: "mögen"
+    },
+    plainForms: {
+      ich: "ich mag",
+      du: "du magst",
+      er: "er es sie mag",
+      wir: "wir mögen",
+      ihr: "ihr mögt",
+      sie: "sie mögen"
     }
   },
   "können": {
@@ -181,8 +202,8 @@ const initialVerbDataStore: Record<string, VerbItem> = {
     defaultFolder: "المفضلة",
     forms: {
       ich: "habe",
-      du: 'ha<span class="irregular-letter">st</span>',
-      er: 'ha<span class="irregular-letter">t</span>',
+      du: '<span class="irregular-letter">hast</span>',
+      er: '<span class="irregular-letter">hat</span>',
       wir: "haben",
       ihr: "habt",
       sie: "haben"
@@ -334,12 +355,64 @@ interface VerbsWorkspaceProps {
   onBackToLibrary?: () => void;
 }
 
+function normalizeModalVerbForms(verbKey: string, forms: VerbForms): VerbForms {
+  const normKey = verbKey.toLowerCase().replace(/[„“"']/g, "").trim();
+  const res = { ...forms };
+  if (normKey === "mögen") {
+    res.ich = '<span class="irregular-letter">mag</span>';
+    res.du = '<span class="irregular-letter">magst</span>';
+    res.er = '<span class="irregular-letter">mag</span>';
+  } else if (normKey === "können") {
+    res.ich = '<span class="irregular-letter">kann</span>';
+    res.du = '<span class="irregular-letter">kannst</span>';
+    res.er = '<span class="irregular-letter">kann</span>';
+  } else if (normKey === "haben") {
+    res.ich = 'habe';
+    res.du = '<span class="irregular-letter">hast</span>';
+    res.er = '<span class="irregular-letter">hat</span>';
+    res.wir = 'haben';
+    res.ihr = 'habt';
+    res.sie = 'haben';
+  }
+  return res;
+}
+
+function getEffectiveGeminiApiKey(): string {
+  if (typeof window === "undefined") return "";
+  return (
+    localStorage.getItem("settings_gemini_api_key") ||
+    localStorage.getItem("gemini_api_key") ||
+    localStorage.getItem("custom_api_key") ||
+    ""
+  );
+}
+
+function getEffectiveGroqApiKey(): string {
+  if (typeof window === "undefined") return "";
+  return (
+    localStorage.getItem("settings_groq_api_key") ||
+    localStorage.getItem("groq_api_key") ||
+    ""
+  );
+}
+
 export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorkspaceProps) {
   const [verbsStore, setVerbsStore] = useState<Record<string, VerbItem>>(() => {
     try {
       const saved = localStorage.getItem("german_verbs_custom_store");
       if (saved) {
-        return { ...initialVerbDataStore, ...JSON.parse(saved) };
+        const parsed = JSON.parse(saved);
+        const merged = { ...initialVerbDataStore, ...parsed };
+        if (merged["mögen"]) {
+          merged["mögen"].forms = normalizeModalVerbForms("mögen", merged["mögen"].forms);
+        }
+        if (merged["können"]) {
+          merged["können"].forms = normalizeModalVerbForms("können", merged["können"].forms);
+        }
+        if (merged["haben"]) {
+          merged["haben"].forms = normalizeModalVerbForms("haben", merged["haben"].forms);
+        }
+        return merged;
       }
     } catch (e) {}
     return initialVerbDataStore;
@@ -348,6 +421,31 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
   const [activeVerbKey, setActiveVerbKey] = useState<string>("möchte");
   const [searchVal, setSearchVal] = useState<string>("");
   const [isSearchingAi, setIsSearchingAi] = useState<boolean>(false);
+
+  const sliderRef = useRef<HTMLElement>(null);
+
+  const scrollSlider = (direction: "left" | "right") => {
+    if (sliderRef.current) {
+      const scrollAmount = direction === "left" ? -180 : 180;
+      sliderRef.current.scrollBy({ left: scrollAmount, behavior: "smooth" });
+    }
+  };
+
+  const quickSliderVerbs = Array.from(
+    new Set([
+      "möchte",
+      "essen",
+      "nehmen",
+      "mögen",
+      "können",
+      "wollen",
+      "haben",
+      "sein",
+      "sprechen",
+      "sehen",
+      ...Object.keys(verbsStore)
+    ])
+  );
 
   // Drawer state
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
@@ -364,7 +462,7 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
     return localStorage.getItem("german_verbs_ai_model") || "gemini-3.6-flash";
   });
   const [customApiKey, setCustomApiKey] = useState<string>(() => {
-    return localStorage.getItem("gemini_api_key") || "";
+    return getEffectiveGeminiApiKey();
   });
   const [isTestingAi, setIsTestingAi] = useState<boolean>(false);
   const [aiTestFeedback, setAiTestFeedback] = useState<{ success: boolean; msg: string } | null>(null);
@@ -494,6 +592,9 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
       return;
     }
 
+    const activeGeminiKey = (customApiKey && customApiKey.trim()) || getEffectiveGeminiApiKey();
+    const activeGroqKey = getEffectiveGroqApiKey();
+
     // Call AI to conjugate verb with exact irregular letter highlights
     setIsSearchingAi(true);
     try {
@@ -501,12 +602,16 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(customApiKey ? { "x-gemini-key": customApiKey } : {})
+          ...(activeGeminiKey ? { "x-gemini-key": activeGeminiKey } : {}),
+          ...(activeGeminiKey ? { "Authorization": `Bearer ${activeGeminiKey}` } : {})
         },
         body: JSON.stringify({
           verb: val,
           selectedModel: selectedAiModel,
-          customApiKey: customApiKey || undefined
+          customApiKey: activeGeminiKey || undefined,
+          userApiKey: activeGeminiKey || undefined,
+          apiKey: activeGeminiKey || undefined,
+          groqApiKey: activeGroqKey || undefined
         })
       });
 
@@ -518,6 +623,9 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
       const data = await res.json();
       const newVerb: VerbItem = data.verbData;
       const key = (data.verbData.key || val).toLowerCase().replace(/[„“"']/g, "").trim();
+      if (newVerb && newVerb.forms) {
+        newVerb.forms = normalizeModalVerbForms(key, newVerb.forms);
+      }
 
       setVerbsStore((prev) => {
         const updated = { ...prev, [key]: newVerb };
@@ -538,15 +646,24 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
 
   // Test AI Connection
   const handleTestAi = async () => {
+    const activeGeminiKey = (customApiKey && customApiKey.trim()) || getEffectiveGeminiApiKey();
+    const activeGroqKey = getEffectiveGroqApiKey();
     setIsTestingAi(true);
     setAiTestFeedback(null);
     try {
       const res = await fetch("/api/verbs/test-ai", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(activeGeminiKey ? { "x-gemini-key": activeGeminiKey } : {}),
+          ...(activeGeminiKey ? { "Authorization": `Bearer ${activeGeminiKey}` } : {})
+        },
         body: JSON.stringify({
           selectedModel: selectedAiModel,
-          customApiKey: customApiKey || undefined
+          customApiKey: activeGeminiKey || undefined,
+          userApiKey: activeGeminiKey || undefined,
+          apiKey: activeGeminiKey || undefined,
+          groqApiKey: activeGroqKey || undefined
         })
       });
       const data = await res.json();
@@ -562,7 +679,10 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
   const handleSaveSettings = () => {
     localStorage.setItem("german_verbs_voice_uri", selectedVoiceUri);
     localStorage.setItem("german_verbs_ai_model", selectedAiModel);
-    localStorage.setItem("gemini_api_key", customApiKey);
+    if (customApiKey && customApiKey.trim()) {
+      localStorage.setItem("gemini_api_key", customApiKey.trim());
+      localStorage.setItem("settings_gemini_api_key", customApiKey.trim());
+    }
     setShowSettingsDialog(false);
   };
 
@@ -753,33 +873,60 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
           <header className="w-full flex flex-col items-center gap-3 text-center">
             <h1 className="text-2xl font-bold tracking-tight text-neutral-900">Deutsche Verben</h1>
             
-            {/* Compact & Elegant Search Bar */}
-            <div className="w-full max-w-xs flex items-center relative mt-0.5">
-              <span className="material-symbols-outlined absolute left-3 text-neutral-400 text-[18px] pointer-events-none">
-                search
-              </span>
-              <input
-                autoComplete="off"
-                className="w-full text-xs rounded-full border border-neutral-300 focus:border-[#FFC700] focus:ring-1 focus:ring-[#FFC700] py-2 pl-9 pr-16 shadow-xs placeholder:text-neutral-400 outline-none"
-                id="verb-search-input"
-                placeholder="ابحث عن فعل..."
-                type="text"
-                value={searchVal}
-                disabled={isSearchingAi}
-                onChange={(e) => setSearchVal(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") executeSearch();
-                }}
-              />
-              <button
-                className="absolute right-1 px-3 py-1 bg-[#FFC700] hover:bg-[#F2BD00] text-black font-semibold text-xs rounded-full transition active:scale-95 shadow-none cursor-pointer disabled:opacity-60"
-                id="btn-search-trigger"
-                type="button"
-                disabled={isSearchingAi}
-                onClick={executeSearch}
-              >
-                {isSearchingAi ? "جاري..." : "بحث"}
-              </button>
+            {/* Harmonized, Readable & Elegant Verb Search Bar */}
+            <div className="w-full max-w-[460px] flex flex-col gap-1.5 mt-1">
+              <div className="relative flex items-center w-full bg-white rounded-2xl border-2 border-amber-300 focus-within:border-[#FFC700] focus-within:ring-4 focus-within:ring-amber-100 shadow-xs hover:shadow-md transition-all duration-200">
+                {/* Search Icon */}
+                <div className="absolute left-3.5 flex items-center pointer-events-none text-amber-500">
+                  <Search className="w-5 h-5 stroke-[2.2]" />
+                </div>
+
+                {/* Input with prominent, clear typography */}
+                <input
+                  id="verb-search-input"
+                  type="text"
+                  autoComplete="off"
+                  dir="auto"
+                  value={searchVal}
+                  disabled={isSearchingAi}
+                  onChange={(e) => setSearchVal(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") executeSearch();
+                  }}
+                  placeholder="ابحث عن فعل (مثل sprechen أو يسافر)..."
+                  className="w-full h-12 pl-11 pr-24 text-[15px] sm:text-base font-semibold text-neutral-900 placeholder:text-neutral-400 placeholder:font-normal bg-transparent rounded-2xl outline-hidden"
+                />
+
+                {/* Clear 'X' button if text exists */}
+                {searchVal && !isSearchingAi && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchVal("")}
+                    className="absolute right-20 p-1 text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 rounded-full transition cursor-pointer"
+                    title="مسح"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+
+                {/* Action Search Button */}
+                <button
+                  id="btn-search-trigger"
+                  type="button"
+                  disabled={isSearchingAi || !searchVal.trim()}
+                  onClick={executeSearch}
+                  className="absolute right-1.5 h-9 px-4 bg-[#FFC700] hover:bg-[#F2BD00] active:scale-95 text-neutral-950 font-bold text-xs sm:text-sm rounded-xl flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSearchingAi ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>جاري...</span>
+                    </>
+                  ) : (
+                    <span>بحث</span>
+                  )}
+                </button>
+              </div>
             </div>
           </header>
 
@@ -898,33 +1045,54 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
           </section>
           {/* END: FlashcardWidget */}
 
-          {/* Quick Verb Selection Buttons (Moved Under the Table) */}
-          <nav aria-label="Schnellauswahl Verben" className="flex justify-center items-center gap-2 max-w-lg pt-1 overflow-x-auto">
-            {["möchte", "essen", "nehmen", "können", "wollen"].map((verb) => {
-              const isActive = activeVerbKey === verb;
-              const data = verbsStore[verb] || initialVerbDataStore[verb];
-              return (
-                <button
-                  key={verb}
-                  className={`verb-btn px-4 py-1.5 rounded-full text-sm font-semibold border cursor-pointer focus:outline-hidden ${
-                    isActive
-                      ? "border-[#FFC700] bg-[#FFC700] text-black shadow-xs"
-                      : "border-amber-300 bg-white text-neutral-800 shadow-xs hover:bg-[#FFE788]"
-                  }`}
-                  onClick={() => setActiveVerbKey(verb)}
-                  type="button"
-                >
-                  {data ? data.title : verb}
-                </button>
-              );
-            })}
-          </nav>
+          {/* Quick Verb Selection Slider (Moved Under the Table) */}
+          <div className="relative w-full max-w-lg mx-auto flex items-center gap-1 pt-2 select-none">
+            <button
+              type="button"
+              onClick={() => scrollSlider("left")}
+              className="p-1.5 text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 rounded-full transition shrink-0 cursor-pointer"
+              title="السابق"
+              aria-label="السابق"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
 
-          {/* Audio Helper Tip */}
-          <footer className="flex items-center justify-center gap-2 text-xs text-neutral-400 pt-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span>
-            <span>ملاحظة: اضغط على أي سطر للاستماع إلى النطق.</span>
-          </footer>
+            <nav
+              ref={sliderRef}
+              aria-label="Schnellauswahl Verben"
+              className="flex items-center gap-2 overflow-x-auto flex-nowrap py-1.5 px-0.5 w-full scroll-smooth"
+              style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+            >
+              {quickSliderVerbs.map((verb) => {
+                const isActive = activeVerbKey === verb;
+                const data = verbsStore[verb] || initialVerbDataStore[verb];
+                return (
+                  <button
+                    key={verb}
+                    className={`verb-btn shrink-0 whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-semibold border cursor-pointer focus:outline-hidden transition-all duration-150 ${
+                      isActive
+                        ? "border-[#FFC700] bg-[#FFC700] text-black shadow-xs scale-105"
+                        : "border-amber-300 bg-white text-neutral-800 shadow-xs hover:bg-[#FFE788]"
+                    }`}
+                    onClick={() => setActiveVerbKey(verb)}
+                    type="button"
+                  >
+                    {data ? data.title : verb}
+                  </button>
+                );
+              })}
+            </nav>
+
+            <button
+              type="button"
+              onClick={() => scrollSlider("right")}
+              className="p-1.5 text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 rounded-full transition shrink-0 cursor-pointer"
+              title="التالي"
+              aria-label="التالي"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
         </main>
       </div>
       {/* END: MainContent */}
