@@ -1,0 +1,877 @@
+<!DOCTYPE html><html dir="ltr" lang="de"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Deutsche Verben Konjugation</title>
+<!-- Google Fonts: Plus Jakarta Sans for German typography & Cairo/Plus Jakarta Sans mix -->
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@500;600;700&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<!-- Material Symbols for crisp modern folder icons -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<!-- Tailwind CSS v3 with Plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Configuration -->
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brandYellow: '#FFC700',
+            pillYellow: '#FFE788',
+            rowDivider: '#FEE48B',
+            highlightRed: '#E84D58',
+            textPrimary: '#1a1a1a',
+            bgPage: '#F8F9FA'
+          },
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', '"Cairo"', 'system-ui', 'sans-serif'],
+            arabic: ['"Cairo"', '"Plus Jakarta Sans"', 'system-ui', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+<!-- Custom Styles: Visual Fidelity & Exact Flashcard Matching -->
+<style data-purpose="table-layout">
+    /* Exact custom borders and line rendering matching physical flashcards */
+    .flashcard-box {
+      border: 3.5px solid #FFC700;
+      background-color: #FFFFFF;
+      box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.08);
+      position: relative;
+    }
+    
+    .vertical-split {
+      border-right: 2.5px solid #FFC700;
+    }
+
+    .horizontal-row-split {
+      border-bottom: 1px solid #FEE48B;
+    }
+
+    .cell-pronoun {
+      width: 44%;
+      padding-left: 1.5rem;
+      padding-right: 0.75rem;
+    }
+
+    .cell-conjugation {
+      width: 56%;
+      padding-left: 1.5rem;
+      padding-right: 1.25rem;
+    }
+
+    .irregular-letter {
+      color: #E84D58;
+      font-weight: 500;
+    }
+  </style>
+<style data-purpose="micro-interactions">
+    .verb-btn {
+      transition: all 0.15s ease-in-out;
+    }
+    
+    .flashcard-row {
+      cursor: pointer;
+      transition: background-color 0.15s ease;
+    }
+
+    .flashcard-row:hover {
+      background-color: #FFFDF0;
+    }
+
+    .flashcard-row:active {
+      transform: scale(0.998);
+    }
+
+    /* Drawer smooth animation classes */
+    .drawer-backdrop {
+      transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .drawer-panel {
+      transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .drawer-view-container {
+      transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+  </style>
+</head>
+<body class="bg-[#F8F9FA] text-[#1a1a1a] min-h-screen flex flex-col justify-start items-center py-6 px-4 font-sans select-none antialiased relative">
+<!-- BEGIN: MainContent -->
+<main class="w-full max-w-xl flex flex-col items-center gap-5" data-purpose="app-container">
+<!-- Top Bar with Saved Folders Capsule Button -->
+<div class="w-full flex justify-end">
+<button class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white border border-amber-300 text-neutral-800 text-xs font-semibold shadow-sm hover:bg-[#FFE788] hover:border-[#FFC700] transition active:scale-95" id="open-saved-btn" title="مجلداتي" type="button">
+<span class="material-symbols-outlined text-[17px] text-amber-500">folder_open</span>
+<span class="font-medium">مجلداتي</span>
+<span class="ml-0.5 px-1.5 py-0.2 bg-[#FFC700] text-black text-[11px] font-bold rounded-full min-w-[18px] text-center" id="saved-counter-badge">4</span>
+</button>
+</div>
+<!-- Minimal Clean Header -->
+<header class="w-full flex flex-col items-center gap-3 text-center">
+<h1 class="text-2xl font-bold tracking-tight text-neutral-900">Deutsche Verben</h1>
+<!-- Compact & Elegant Search Bar -->
+<div class="w-full max-w-xs flex items-center relative mt-0.5">
+<span class="material-symbols-outlined absolute left-3 text-neutral-400 text-[18px] pointer-events-none">search</span>
+<input autocomplete="off" class="w-full text-xs rounded-full border-neutral-300 focus:border-[#FFC700] focus:ring-1 focus:ring-[#FFC700] py-2 pl-9 pr-16 shadow-sm placeholder:text-neutral-400" id="verb-search-input" placeholder="ابحث عن فعل..." type="text">
+<button class="absolute right-1 px-3 py-1 bg-[#FFC700] hover:bg-[#F2BD00] text-black font-semibold text-xs rounded-full transition active:scale-95 shadow-none" id="btn-search-trigger" type="button">
+          بحث
+        </button>
+</div>
+</header>
+<!-- BEGIN: FlashcardWidget -->
+<!-- Authentic 1:1 Physical Textbook Card Replication -->
+<section aria-label="Konjugationskarte" class="w-full flex justify-center py-1">
+<div class="w-full max-w-[460px] flashcard-box flex flex-col" data-purpose="flashcard-container">
+<!-- Header Bar: Solid Yellow Strip -->
+<div aria-hidden="true" class="w-full h-3.5 bg-[#FFC700]"></div>
+<!-- Table Grid Container -->
+<div class="w-full flex flex-col bg-white">
+<!-- Top Row: Blank Left Cell & Rounded Verb Pill with Star Toggle in Right Cell -->
+<div class="flex items-center min-h-[58px] horizontal-row-split">
+<div aria-hidden="true" class="cell-pronoun vertical-split h-full min-h-[58px]"></div>
+<div class="cell-conjugation flex items-center py-2.5 justify-center">
+<!-- Rounded Pill Badge -->
+<span class="inline-flex items-center justify-center px-6 py-1.5 rounded-full bg-[#FFE788] text-[#1a1a1a] text-xl font-medium tracking-tight shadow-none" id="card-verb-title">„möchte“</span>
+<!-- Star Toggle Button -->
+
+</div>
+</div>
+<!-- Conjugation Rows -->
+<!-- Row 1: ich -->
+<div class="flashcard-row flex items-center min-h-[50px] horizontal-row-split" data-pronoun="ich" title="اضغط للاستماع">
+<div class="cell-pronoun vertical-split py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a]">ich</div>
+<div class="cell-conjugation py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a] justify-center" id="row-ich">möchte</div>
+</div>
+<!-- Row 2: du -->
+<div class="flashcard-row flex items-center min-h-[50px] horizontal-row-split" data-pronoun="du" title="اضغط للاستماع">
+<div class="cell-pronoun vertical-split py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a]">du</div>
+<div class="cell-conjugation py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a] justify-center" id="row-du">möcht<span class="irregular-letter">e</span>st</div>
+</div>
+<!-- Row 3: er / es / sie -->
+<div class="flashcard-row flex items-center min-h-[50px] horizontal-row-split" data-pronoun="er, es, sie" title="اضغط للاستماع">
+<div class="cell-pronoun vertical-split py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a]">er / es / sie</div>
+<div class="cell-conjugation py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a] justify-center" id="row-er">möcht<span class="irregular-letter">e</span></div>
+</div>
+<!-- Row 4: wir -->
+<div class="flashcard-row flex items-center min-h-[50px] horizontal-row-split" data-pronoun="wir" title="اضغط للاستماع">
+<div class="cell-pronoun vertical-split py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a]">wir</div>
+<div class="cell-conjugation py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a] justify-center" id="row-wir">möchten</div>
+</div>
+<!-- Row 5: ihr -->
+<div class="flashcard-row flex items-center min-h-[50px] horizontal-row-split" data-pronoun="ihr" title="اضغط للاستماع">
+<div class="cell-pronoun vertical-split py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a]">ihr</div>
+<div class="cell-conjugation py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a] justify-center" id="row-ihr">möcht<span class="irregular-letter">e</span>t</div>
+</div>
+<!-- Row 6: sie / Sie -->
+<div class="flashcard-row flex items-center min-h-[50px]" data-pronoun="sie und Sie" title="اضغط للاستماع">
+<div class="cell-pronoun vertical-split py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a]">sie / Sie</div>
+<div class="cell-conjugation py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a]" id="row-sie">möchten</div>
+</div>
+</div>
+</div>
+</section>
+<!-- END: FlashcardWidget -->
+<!-- Quick Verb Selection Buttons (Moved Under the Table) -->
+<nav aria-label="Schnellauswahl Verben" class="flex justify-center items-center gap-2 max-w-lg pt-1 overflow-x-auto">
+<button class="verb-btn px-4 py-1.5 rounded-full text-sm font-semibold border border-[#FFC700] bg-[#FFC700] text-black shadow-xs hover:bg-[#FFE788] focus:outline-none" data-verb="möchte" type="button">„möchte“</button>
+<button class="verb-btn px-4 py-1.5 rounded-full text-sm font-semibold border border-amber-300 bg-white text-neutral-800 shadow-xs hover:bg-[#FFE788] focus:outline-none" data-verb="essen" type="button">essen</button>
+<button class="verb-btn px-4 py-1.5 rounded-full text-sm font-semibold border border-amber-300 bg-white text-neutral-800 shadow-xs hover:bg-[#FFE788] focus:outline-none" data-verb="nehmen" type="button">nehmen</button>
+<button class="verb-btn px-4 py-1.5 rounded-full text-sm font-semibold border border-amber-300 bg-white text-neutral-800 shadow-xs hover:bg-[#FFE788] focus:outline-none" data-verb="können" type="button">können</button>
+<button class="verb-btn px-4 py-1.5 rounded-full text-sm font-semibold border border-amber-300 bg-white text-neutral-800 shadow-xs hover:bg-[#FFE788] focus:outline-none" data-verb="wollen" type="button">wollen</button>
+</nav>
+<!-- Audio Helper Tip -->
+<footer class="flex items-center justify-center gap-2 text-xs text-neutral-400 pt-1">
+<span class="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span>
+<span class="">ملاحظة: اضغط على أي سطر للاستماع إلى النطق.</span>
+</footer>
+</main>
+<!-- END: MainContent -->
+<!-- BEGIN: Sidebar Folders System (Minimal Two-Level Slide Navigation) -->
+<aside aria-labelledby="drawer-level-title" aria-modal="true" class="fixed inset-0 z-50 pointer-events-none" id="saved-drawer-container" role="dialog">
+<!-- Backdrop -->
+<div class="drawer-backdrop fixed inset-0 bg-neutral-900/30 backdrop-blur-sm opacity-0" id="drawer-backdrop"></div>
+<!-- Slide-in Panel from Right -->
+<div class="fixed inset-y-0 right-0 flex max-w-full pl-6 pointer-events-none">
+<div class="drawer-panel pointer-events-auto w-screen max-w-sm bg-white shadow-2xl flex flex-col transform translate-x-full border-l-2 border-[#FFC700] overflow-hidden" id="drawer-panel">
+<!-- Sliding Container for 2 Views (Level 1: Folders, Level 2: Verbs) -->
+<div class="drawer-view-container flex w-[200%] h-full" id="drawer-slider">
+<!-- LEVEL 1 VIEW: Ordner-Übersicht -->
+<div class="w-1/2 h-full flex flex-col bg-white">
+<!-- Minimal Header -->
+<div class="px-5 py-4 border-b border-neutral-100 flex items-center justify-between">
+<h2 class="text-sm font-bold text-neutral-900 tracking-tight" id="drawer-level-title">المجلدات والأفعال</h2>
+<button aria-label="إغلاق" class="p-1 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition focus:outline-none" id="close-saved-btn" title="إغلاق" type="button">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</button>
+</div>
+<!-- Quick Action: Create New Folder -->
+<div class="px-5 py-3 border-b border-neutral-100/70 bg-neutral-50/50 flex items-center justify-between">
+<span class="text-xs text-neutral-500 font-medium" id="total-folders-count">4 مجلدات</span>
+<button class="inline-flex items-center gap-1 text-xs font-semibold text-neutral-800 hover:text-black px-2.5 py-1 rounded-full bg-amber-100 hover:bg-[#FFE788] transition" id="btn-add-folder" type="button">
+<span class="">+ مجلد جديد</span>
+</button>
+</div>
+<!-- Folders List -->
+<div class="flex-1 overflow-y-auto px-4 py-3 space-y-1.5" id="folders-list-container">
+          <div class="folder-row flex items-center justify-between p-3 rounded-lg hover:bg-neutral-50 border border-neutral-100 hover:border-amber-200 cursor-pointer transition group" data-folder="المفضلة">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <span class="material-symbols-outlined text-[20px] text-amber-500">folder</span>
+              <span class="text-sm font-semibold text-neutral-800 truncate">المفضلة</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-neutral-400 bg-neutral-100 px-2 py-0.5 rounded-full font-medium">1 أفعال</span>
+              <span class="material-symbols-outlined text-neutral-300 group-hover:text-neutral-600 text-lg transition">chevron_right</span>
+            </div>
+          </div>
+        
+          <div class="folder-row flex items-center justify-between p-3 rounded-lg hover:bg-neutral-50 border border-neutral-100 hover:border-amber-200 cursor-pointer transition group" data-folder="أفعال غير منتظمة">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <span class="material-symbols-outlined text-[20px] text-amber-500">folder</span>
+              <span class="text-sm font-semibold text-neutral-800 truncate">أفعال غير منتظمة</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-neutral-400 bg-neutral-100 px-2 py-0.5 rounded-full font-medium">1 أفعال</span>
+              <span class="material-symbols-outlined text-neutral-300 group-hover:text-neutral-600 text-lg transition">chevron_right</span>
+            </div>
+          </div>
+        
+          <div class="folder-row flex items-center justify-between p-3 rounded-lg hover:bg-neutral-50 border border-neutral-100 hover:border-amber-200 cursor-pointer transition group" data-folder="أفعال A1 / A2">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <span class="material-symbols-outlined text-[20px] text-amber-500">folder</span>
+              <span class="text-sm font-semibold text-neutral-800 truncate">أفعال A1 / A2</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-neutral-400 bg-neutral-100 px-2 py-0.5 rounded-full font-medium">0 أفعال</span>
+              <span class="material-symbols-outlined text-neutral-300 group-hover:text-neutral-600 text-lg transition">chevron_right</span>
+            </div>
+          </div>
+        
+          <div class="folder-row flex items-center justify-between p-3 rounded-lg hover:bg-neutral-50 border border-neutral-100 hover:border-amber-200 cursor-pointer transition group" data-folder="أفعال الكيفية (Modalverben)">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <span class="material-symbols-outlined text-[20px] text-amber-500">folder</span>
+              <span class="text-sm font-semibold text-neutral-800 truncate">أفعال الكيفية (Modalverben)</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-neutral-400 bg-neutral-100 px-2 py-0.5 rounded-full font-medium">2 أفعال</span>
+              <span class="material-symbols-outlined text-neutral-300 group-hover:text-neutral-600 text-lg transition">chevron_right</span>
+            </div>
+          </div>
+        </div>
+</div>
+<!-- LEVEL 2 VIEW: Verben im ausgewählten Ordner -->
+<div class="w-1/2 h-full flex flex-col bg-white">
+<!-- Back Header -->
+<div class="px-4 py-3.5 border-b border-neutral-100 flex items-center justify-between bg-neutral-50/70">
+<button class="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 transition focus:outline-none" id="btn-back-to-folders" type="button">
+<span class="material-symbols-outlined text-[18px]">arrow_back</span>
+<span class="">رجوع</span>
+</button>
+<span class="text-xs font-bold text-neutral-900 truncate max-w-[170px]" id="current-folder-heading">اسم المجلد</span>
+<button aria-label="إغلاق" class="p-1 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition focus:outline-none" id="close-saved-btn-sub" title="إغلاق" type="button">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</button>
+</div>
+<!-- Quick Action: Add currently viewed verb to this folder -->
+<div class="px-4 py-2.5 border-b border-neutral-100 bg-amber-50/50 flex items-center justify-between">
+<span class="text-xs text-neutral-500" id="folder-verbs-count">0 أفعال</span>
+<button class="inline-flex items-center gap-1 text-xs font-semibold text-amber-900 hover:text-black px-2 py-0.5 rounded transition" id="btn-add-current-to-active-folder" type="button">
+<span class="text-amber-500 font-bold">+</span>
+<span id="btn-add-current-label" class="">حفظ الفعل الحالي هنا</span>
+</button>
+</div>
+<!-- Folder Verbs List -->
+<div class="flex-1 overflow-y-auto px-4 py-3 space-y-1.5" id="folder-verbs-list">
+<!-- Rendered dynamically -->
+</div>
+</div>
+</div>
+</div>
+</div>
+</aside>
+<!-- END: Sidebar Folders System -->
+<!-- JavaScript: Verbs Database & Interactive Engine -->
+<script data-purpose="conjugation-data-and-engine">
+    const verbDataStore = {
+      "möchte": {
+        title: "„möchte“",
+        speechBase: "möchten",
+        defaultFolder: "أفعال الكيفية (Modalverben)",
+        forms: {
+          ich: "möchte",
+          du: 'möcht<span class="irregular-letter">e</span>st',
+          er: 'möcht<span class="irregular-letter">e</span>',
+          wir: "möchten",
+          ihr: 'möcht<span class="irregular-letter">e</span>t',
+          sie: "möchten"
+        },
+        plainForms: {
+          ich: "ich möchte",
+          du: "du möchtest",
+          er: "er es sie möchte",
+          wir: "wir möchten",
+          ihr: "ihr möchtet",
+          sie: "sie möchten"
+        }
+      },
+      "essen": {
+        title: "essen",
+        speechBase: "essen",
+        defaultFolder: "أفعال غير منتظمة",
+        forms: {
+          ich: "esse",
+          du: '<span class="irregular-letter">i</span>sst',
+          er: '<span class="irregular-letter">i</span>sst',
+          wir: "essen",
+          ihr: "esst",
+          sie: "essen"
+        },
+        plainForms: {
+          ich: "ich esse",
+          du: "du isst",
+          er: "er es sie isst",
+          wir: "wir essen",
+          ihr: "ihr esst",
+          sie: "sie essen"
+        }
+      },
+      "nehmen": {
+        title: "nehmen",
+        speechBase: "nehmen",
+        defaultFolder: "أفعال غير منتظمة",
+        forms: {
+          ich: "nehme",
+          du: 'n<span class="irregular-letter">imm</span>st',
+          er: 'n<span class="irregular-letter">imm</span>t',
+          wir: "nehmen",
+          ihr: "nehmt",
+          sie: "nehmen"
+        },
+        plainForms: {
+          ich: "ich nehme",
+          du: "du nimmst",
+          er: "er es sie nimmt",
+          wir: "wir nehmen",
+          ihr: "ihr nehmt",
+          sie: "sie nehmen"
+        }
+      },
+      "können": {
+        title: "können",
+        speechBase: "können",
+        defaultFolder: "أفعال الكيفية (Modalverben)",
+        forms: {
+          ich: '<span class="irregular-letter">kann</span>',
+          du: '<span class="irregular-letter">kannst</span>',
+          er: '<span class="irregular-letter">kann</span>',
+          wir: "können",
+          ihr: "könnt",
+          sie: "können"
+        },
+        plainForms: {
+          ich: "ich kann",
+          du: "du kannst",
+          er: "er es sie kann",
+          wir: "wir können",
+          ihr: "ihr könnt",
+          sie: "sie können"
+        }
+      },
+      "wollen": {
+        title: "wollen",
+        speechBase: "wollen",
+        defaultFolder: "أفعال الكيفية (Modalverben)",
+        forms: {
+          ich: '<span class="irregular-letter">will</span>',
+          du: '<span class="irregular-letter">willst</span>',
+          er: '<span class="irregular-letter">will</span>',
+          wir: "wollen",
+          ihr: "wollt",
+          sie: "wollen"
+        },
+        plainForms: {
+          ich: "ich will",
+          du: "du willst",
+          er: "er es sie will",
+          wir: "wir wollen",
+          ihr: "ihr wollt",
+          sie: "sie wollen"
+        }
+      },
+      "sprechen": {
+        title: "sprechen",
+        speechBase: "sprechen",
+        defaultFolder: "أفعال غير منتظمة",
+        forms: {
+          ich: "spreche",
+          du: 'spr<span class="irregular-letter">i</span>chst',
+          er: 'spr<span class="irregular-letter">i</span>cht',
+          wir: "sprechen",
+          ihr: "sprecht",
+          sie: "sprechen"
+        },
+        plainForms: {
+          ich: "ich spreche",
+          du: "du sprichst",
+          er: "er es sie spricht",
+          wir: "wir sprechen",
+          ihr: "ihr sprecht",
+          sie: "sie sprechen"
+        }
+      },
+      "sehen": {
+        title: "sehen",
+        speechBase: "sehen",
+        defaultFolder: "أفعال A1 / A2",
+        forms: {
+          ich: "sehe",
+          du: 's<span class="irregular-letter">ie</span>hst',
+          er: 's<span class="irregular-letter">ie</span>ht',
+          wir: "sehen",
+          ihr: "seht",
+          sie: "sehen"
+        },
+        plainForms: {
+          ich: "ich sehe",
+          du: "du siehst",
+          er: "er es sie sieht",
+          wir: "wir sehen",
+          ihr: "ihr seht",
+          sie: "sie sehen"
+        }
+      },
+      "haben": {
+        title: "haben",
+        speechBase: "haben",
+        defaultFolder: "المفضلة",
+        forms: {
+          ich: "habe",
+          du: 'ha<span class="irregular-letter">st</span>',
+          er: 'ha<span class="irregular-letter">t</span>',
+          wir: "haben",
+          ihr: "habt",
+          sie: "haben"
+        },
+        plainForms: {
+          ich: "ich habe",
+          du: "du hast",
+          er: "er es sie hat",
+          wir: "wir haben",
+          ihr: "ihr habt",
+          sie: "sie haben"
+        }
+      },
+      "sein": {
+        title: "sein",
+        speechBase: "sein",
+        defaultFolder: "المفضلة",
+        forms: {
+          ich: '<span class="irregular-letter">bin</span>',
+          du: '<span class="irregular-letter">bist</span>',
+          er: '<span class="irregular-letter">ist</span>',
+          wir: '<span class="irregular-letter">sind</span>',
+          ihr: '<span class="irregular-letter">seid</span>',
+          sie: '<span class="irregular-letter">sind</span>'
+        },
+        plainForms: {
+          ich: "ich bin",
+          du: "du bist",
+          er: "er es sie ist",
+          wir: "wir sind",
+          ihr: "ihr seid",
+          sie: "sie sind"
+        }
+      }
+    };
+
+    let activeVerbKey = "möchte";
+
+    // --- State: Folders & Saved Verbs in Arabic ---
+    let folders = ["المفضلة", "أفعال غير منتظمة", "أفعال A1 / A2", "أفعال الكيفية (Modalverben)"];
+    let currentOpenFolder = null; // null: level 1 (folders), string: level 2 (verbs inside folder)
+    
+    let savedVerbs = [
+      { key: "möchte", folder: "أفعال الكيفية (Modalverben)" },
+      { key: "essen", folder: "أفعال غير منتظمة" },
+      { key: "können", folder: "أفعال الكيفية (Modalverben)" },
+      { key: "haben", folder: "المفضلة" }
+    ];
+
+    function isVerbSaved(verbKey) {
+      return savedVerbs.some(item => item.key === verbKey);
+    }
+
+    function toggleSaveVerb(verbKey) {
+      const idx = savedVerbs.findIndex(item => item.key === verbKey);
+      if (idx > -1) {
+        savedVerbs.splice(idx, 1);
+      } else {
+        const verbData = verbDataStore[verbKey];
+        const targetFolder = currentOpenFolder || (verbData?.defaultFolder || "المفضلة");
+        savedVerbs.push({
+          key: verbKey,
+          folder: targetFolder
+        });
+      }
+      updateUI();
+    }
+
+    function updateStarState() {
+      const isSaved = isVerbSaved(activeVerbKey);
+      const icon = document.getElementById("bookmark-icon");
+      const btn = document.getElementById("toggle-bookmark-btn");
+
+      if (isSaved) {
+        icon.classList.remove("text-neutral-300", "fill-none");
+        icon.classList.add("text-[#FFC700]", "fill-[#FFC700]");
+        btn.setAttribute("aria-label", "إزالة من المجلدات");
+        btn.setAttribute("title", "إزالة من المجلدات");
+      } else {
+        icon.classList.remove("text-[#FFC700]", "fill-[#FFC700]");
+        icon.classList.add("text-neutral-300", "fill-none");
+        btn.setAttribute("aria-label", "إضافة إلى المجلدات");
+        btn.setAttribute("title", "إضافة إلى المجلدات");
+      }
+    }
+
+    function updateBadge() {
+      const badge = document.getElementById("saved-counter-badge");
+      if (badge) badge.textContent = savedVerbs.length;
+    }
+
+    // Slide between Level 1 and Level 2
+    function setDrawerView(level, folderName = null) {
+      const slider = document.getElementById("drawer-slider");
+      if (level === 2 && folderName) {
+        currentOpenFolder = folderName;
+        slider.style.transform = "translateX(-50%)";
+        renderFolderDetail(folderName);
+      } else {
+        currentOpenFolder = null;
+        slider.style.transform = "translateX(0%)";
+        renderFolders();
+      }
+    }
+
+    // LEVEL 1: Render Folder List
+    function renderFolders() {
+      const container = document.getElementById("folders-list-container");
+      const countHeader = document.getElementById("total-folders-count");
+      if (countHeader) countHeader.textContent = `${folders.length} مجلدات`;
+      if (!container) return;
+
+      if (folders.length === 0) {
+        container.innerHTML = `
+          <div class="py-12 text-center text-neutral-400 text-xs">
+            لا توجد مجلدات حالياً.
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = folders.map(f => {
+        const count = savedVerbs.filter(v => v.folder === f).length;
+        return `
+          <div class="folder-row flex items-center justify-between p-3 rounded-lg hover:bg-neutral-50 border border-neutral-100 hover:border-amber-200 cursor-pointer transition group" data-folder="${f}">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <span class="material-symbols-outlined text-[20px] text-amber-500">folder</span>
+              <span class="text-sm font-semibold text-neutral-800 truncate">${f}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-neutral-400 bg-neutral-100 px-2 py-0.5 rounded-full font-medium">${count} أفعال</span>
+              <span class="material-symbols-outlined text-neutral-300 group-hover:text-neutral-600 text-lg transition">chevron_right</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      container.querySelectorAll(".folder-row").forEach(row => {
+        row.addEventListener("click", () => {
+          const folder = row.getAttribute("data-folder");
+          setDrawerView(2, folder);
+        });
+      });
+    }
+
+    // LEVEL 2: Render Verbs Inside Folder
+    function renderFolderDetail(folderName) {
+      const heading = document.getElementById("current-folder-heading");
+      const countEl = document.getElementById("folder-verbs-count");
+      const container = document.getElementById("folder-verbs-list");
+      const addCurrentBtn = document.getElementById("btn-add-current-to-active-folder");
+
+      if (heading) heading.textContent = folderName;
+
+      const verbsInFolder = savedVerbs.filter(v => v.folder === folderName);
+      if (countEl) countEl.textContent = `${verbsInFolder.length} أفعال`;
+
+      // Update button to add/remove active verb in this specific folder
+      const isCurrentInFolder = verbsInFolder.some(v => v.key === activeVerbKey);
+      if (addCurrentBtn) {
+        const activeData = verbDataStore[activeVerbKey];
+        const displayVerb = activeData ? activeData.title : activeVerbKey;
+        if (isCurrentInFolder) {
+          addCurrentBtn.innerHTML = `<span class="text-neutral-400">✓</span> <span>„${displayVerb}“ موجود بالفعل</span>`;
+          addCurrentBtn.classList.remove("text-amber-900");
+          addCurrentBtn.classList.add("text-neutral-500");
+        } else {
+          addCurrentBtn.innerHTML = `<span class="text-amber-600 font-bold">+</span> <span>إضافة „${displayVerb}“</span>`;
+          addCurrentBtn.classList.remove("text-neutral-500");
+          addCurrentBtn.classList.add("text-amber-900");
+        }
+      }
+
+      if (verbsInFolder.length === 0) {
+        container.innerHTML = `
+          <div class="py-14 flex flex-col items-center justify-center text-center text-neutral-400">
+            <span class="material-symbols-outlined text-3xl text-neutral-300 mb-1">folder_open</span>
+            <p class="text-xs text-neutral-500 font-medium">هذا المجلد فارغ حالياً</p>
+            <p class="text-[11px] text-neutral-400 mt-1">اضغط على الزر أعلاه لإضافة الفعل الحالي.</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = verbsInFolder.map(item => {
+        const data = verbDataStore[item.key];
+        const title = data ? data.title : item.key;
+        const isActive = item.key === activeVerbKey;
+
+        return `
+          <div class="flex items-center justify-between p-2.5 rounded-lg border ${isActive ? 'bg-[#FFE788]/20 border-[#FFC700]' : 'bg-white border-neutral-100 hover:border-amber-200'} transition group">
+            <button type="button" class="btn-select-verb flex-1 text-left flex items-center gap-2 min-w-0 focus:outline-none" data-verb="${item.key}">
+              <span class="text-sm font-semibold text-neutral-800 hover:text-amber-700 transition truncate">${title}</span>
+              ${isActive ? '<span class="text-[10px] bg-[#FFE788] px-1.5 py-0.5 rounded font-bold text-neutral-900">نشط</span>' : ''}
+            </button>
+            <button type="button" class="btn-remove-verb p-1 text-neutral-300 hover:text-red-500 rounded transition" data-verb="${item.key}" title="إزالة من المجلد">
+              <span class="material-symbols-outlined text-[17px]">close</span>
+            </button>
+          </div>
+        `;
+      }).join('');
+
+      // Click verb to immediately show in flashcard
+      container.querySelectorAll(".btn-select-verb").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const verb = btn.getAttribute("data-verb");
+          renderVerb(verb);
+          renderFolderDetail(folderName);
+        });
+      });
+
+      // Remove verb from folder
+      container.querySelectorAll(".btn-remove-verb").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const verb = btn.getAttribute("data-verb");
+          const idx = savedVerbs.findIndex(v => v.key === verb && v.folder === folderName);
+          if (idx > -1) {
+            savedVerbs.splice(idx, 1);
+            updateUI();
+            renderFolderDetail(folderName);
+          }
+        });
+      });
+    }
+
+    function updateUI() {
+      updateStarState();
+      updateBadge();
+      if (currentOpenFolder) {
+        renderFolderDetail(currentOpenFolder);
+      } else {
+        renderFolders();
+      }
+    }
+
+    function renderVerb(verbKey) {
+      const normalizedKey = verbKey.toLowerCase().replace(/[„“"']/g, '').trim();
+      const data = verbDataStore[normalizedKey];
+      
+      if (!data) {
+        alert(`لم يتم العثور على الفعل "${verbKey}". الأفعال المتاحة: möchte, essen, nehmen, können, wollen, sprechen, sehen, haben, sein.`);
+        return;
+      }
+
+      activeVerbKey = normalizedKey;
+
+      // Update Header Pill
+      const titleElem = document.getElementById("card-verb-title");
+      titleElem.textContent = data.title;
+
+      // Update rows with highlighted irregular letters
+      document.getElementById("row-ich").innerHTML = data.forms.ich;
+      document.getElementById("row-du").innerHTML = data.forms.du;
+      document.getElementById("row-er").innerHTML = data.forms.er;
+      document.getElementById("row-wir").innerHTML = data.forms.wir;
+      document.getElementById("row-ihr").innerHTML = data.forms.ihr;
+      document.getElementById("row-sie").innerHTML = data.forms.sie;
+
+      // Highlight active button state in the bottom pills
+      document.querySelectorAll(".verb-btn").forEach(btn => {
+        const btnVerb = btn.getAttribute("data-verb");
+        if (btnVerb === normalizedKey) {
+          btn.classList.add("bg-[#FFC700]", "border-[#FFC700]", "text-black");
+          btn.classList.remove("bg-white", "border-amber-300", "text-neutral-800");
+        } else {
+          btn.classList.remove("bg-[#FFC700]", "border-[#FFC700]", "text-black");
+          btn.classList.add("bg-white", "border-amber-300", "text-neutral-800");
+        }
+      });
+
+      updateStarState();
+      if (currentOpenFolder) {
+        renderFolderDetail(currentOpenFolder);
+      }
+    }
+
+    function pronounceText(text) {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'de-DE';
+        utterance.rate = 0.9;
+        window.speechSynthesis.speak(utterance);
+      }
+    }
+
+    // Drawer Slide Handlers
+    function openDrawer() {
+      const container = document.getElementById("saved-drawer-container");
+      const backdrop = document.getElementById("drawer-backdrop");
+      const panel = document.getElementById("drawer-panel");
+
+      container.classList.remove("pointer-events-none");
+      backdrop.classList.remove("opacity-0");
+      backdrop.classList.add("opacity-100");
+      panel.classList.remove("translate-x-full");
+      panel.classList.add("translate-x-0");
+      setDrawerView(1);
+    }
+
+    function closeDrawer() {
+      const container = document.getElementById("saved-drawer-container");
+      const backdrop = document.getElementById("drawer-backdrop");
+      const panel = document.getElementById("drawer-panel");
+
+      backdrop.classList.remove("opacity-100");
+      backdrop.classList.add("opacity-0");
+      panel.classList.remove("translate-x-0");
+      panel.classList.add("translate-x-full");
+
+      setTimeout(() => {
+        container.classList.add("pointer-events-none");
+        setDrawerView(1);
+      }, 350);
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      renderVerb("möchte");
+      updateUI();
+
+      // Bookmark / Star Button Toggle
+      const starBtn = document.getElementById("toggle-bookmark-btn");
+      if (starBtn) {
+        starBtn.addEventListener("click", () => {
+          toggleSaveVerb(activeVerbKey);
+        });
+      }
+
+      // Drawer Open & Close
+      document.getElementById("open-saved-btn")?.addEventListener("click", openDrawer);
+      document.getElementById("close-saved-btn")?.addEventListener("click", closeDrawer);
+      document.getElementById("close-saved-btn-sub")?.addEventListener("click", closeDrawer);
+      document.getElementById("drawer-backdrop")?.addEventListener("click", closeDrawer);
+
+      // Back navigation to Folders level
+      document.getElementById("btn-back-to-folders")?.addEventListener("click", () => {
+        setDrawerView(1);
+      });
+
+      // Add currently loaded verb into current open folder
+      document.getElementById("btn-add-current-to-active-folder")?.addEventListener("click", () => {
+        if (!currentOpenFolder) return;
+        const exists = savedVerbs.some(v => v.key === activeVerbKey && v.folder === currentOpenFolder);
+        if (!exists) {
+          savedVerbs.push({
+            key: activeVerbKey,
+            folder: currentOpenFolder
+          });
+        } else {
+          const idx = savedVerbs.findIndex(v => v.key === activeVerbKey && v.folder === currentOpenFolder);
+          if (idx > -1) savedVerbs.splice(idx, 1);
+        }
+        updateUI();
+      });
+
+      // Add New Folder
+      document.getElementById("btn-add-folder")?.addEventListener("click", () => {
+        const folderName = prompt("اسم المجلد الجديد (مثال: أفعال B1، تصريفات القواعد):");
+        if (folderName && folderName.trim()) {
+          const clean = folderName.trim();
+          if (!folders.includes(clean)) {
+            folders.push(clean);
+            setDrawerView(2, clean);
+          } else {
+            setDrawerView(2, clean);
+          }
+        }
+      });
+
+      // Quick buttons under table click
+      document.querySelectorAll(".verb-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const verb = btn.getAttribute("data-verb");
+          renderVerb(verb);
+        });
+      });
+
+      // Minimal search input
+      const searchInput = document.getElementById("verb-search-input");
+      const searchBtn = document.getElementById("btn-search-trigger");
+
+      const executeSearch = () => {
+        const val = searchInput.value.trim();
+        if (val) {
+          renderVerb(val);
+          searchInput.value = "";
+        }
+      };
+
+      searchBtn?.addEventListener("click", executeSearch);
+      searchInput?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") executeSearch();
+      });
+
+      // Row click sound readout
+      const rowIds = [
+        { selector: '[data-pronoun="ich"]', key: "ich" },
+        { selector: '[data-pronoun="du"]', key: "du" },
+        { selector: '[data-pronoun="er, es, sie"]', key: "er" },
+        { selector: '[data-pronoun="wir"]', key: "wir" },
+        { selector: '[data-pronoun="ihr"]', key: "ihr" },
+        { selector: '[data-pronoun="sie und Sie"]', key: "sie" }
+      ];
+
+      rowIds.forEach(({ selector, key }) => {
+        const rowElem = document.querySelector(selector);
+        if (rowElem) {
+          rowElem.addEventListener("click", () => {
+            const verbData = verbDataStore[activeVerbKey];
+            if (verbData && verbData.plainForms) {
+              pronounceText(verbData.plainForms[key]);
+            }
+          });
+        }
+      });
+    });
+  </script>
+
+
+</body><style class="stylus">.turn-container{
+    direction: rtl;
+}</style></html>

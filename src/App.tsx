@@ -7,6 +7,7 @@ import { RecycleBin } from "./components/RecycleBin";
 import { MediaPlayerWorkspace } from "./components/MediaPlayerWorkspace";
 import { NotesWorkspace } from "./components/NotesWorkspace";
 import { ShadowingWorkspace } from "./components/ShadowingWorkspace";
+import { VerbsWorkspace } from "./components/VerbsWorkspace";
 import {
   CreateFolderModal,
   AddCardModal,
@@ -114,8 +115,8 @@ function MainStudyApp() {
   // Mobile sidebar visibility state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Tab navigation view state: "library" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing"
-  const [viewMode, setViewMode] = useState<"library" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing">("library");
+  // Tab navigation view state: "library" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs"
+  const [viewMode, setViewMode] = useState<"library" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs">("library");
 
   // YouTube transcripts (spT) state
   const [transcripts, setTranscripts] = useState<TranscriptDocument[]>(() => {
@@ -1045,6 +1046,11 @@ function MainStudyApp() {
     setViewMode("shadowing");
   }, []);
 
+  const handleSelectVerbs = useCallback(() => {
+    setActiveReview(null);
+    setViewMode("verbs");
+  }, []);
+
   const handleDataReloaded = useCallback((newFolders: Folder[], newCards: Flashcard[]) => {
     setFolders(newFolders);
     setCards(newCards);
@@ -1236,11 +1242,17 @@ function MainStudyApp() {
           onSelectMedia={handleSelectMedia}
           onSelectNotes={handleSelectNotes}
           onSelectShadowing={handleSelectShadowing}
+          onSelectVerbs={handleSelectVerbs}
           onDataReloaded={handleDataReloaded}
         />
 
         {/* Center Canvas Workspace */}
-        {viewMode === "shadowing" ? (
+        {viewMode === "verbs" ? (
+          <VerbsWorkspace
+            onToggleSidebar={handleToggleSidebar}
+            onBackToLibrary={handleHomeClick}
+          />
+        ) : viewMode === "shadowing" ? (
           <ShadowingWorkspace
             folders={folders}
             cards={cards}

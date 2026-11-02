@@ -14,6 +14,7 @@ import {
   PanelRightOpen,
   BookOpen,
   Headphones,
+  Languages,
   LogOut
 } from "lucide-react";
 import { Folder as FolderType, Flashcard, DbStatus } from "../types";
@@ -29,13 +30,14 @@ interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
   dbStatus?: DbStatus;
-  activeTab?: "library" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing";
+  activeTab?: "library" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs";
   onSelectAI?: () => void;
   onSelectTrash?: () => void;
   onSelectCorrector?: () => void;
   onSelectMedia?: () => void;
   onSelectNotes?: () => void;
   onSelectShadowing?: () => void;
+  onSelectVerbs?: () => void;
   onDataReloaded?: (folders: any[], cards: any[]) => void;
 }
 
@@ -56,6 +58,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   onSelectMedia,
   onSelectNotes,
   onSelectShadowing,
+  onSelectVerbs,
   onDataReloaded
 }) => {
   // Collapsible Mini-Rail state (Slim Icon Bar)
@@ -395,6 +398,34 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
               </div>
               {!isCollapsed && (
                 <span className="truncate">استوديو الشادوينج</span>
+              )}
+            </button>
+
+            {/* Verben Konjugation (تصريف الأفعال) */}
+            <button
+              type="button"
+              onClick={() => {
+                onSelectVerbs?.();
+                onClose?.();
+              }}
+              title="تصريف الأفعال"
+              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
+                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
+              } ${
+                activeTab === "verbs"
+                  ? "bg-amber-50 text-amber-900 font-bold border border-amber-300 shadow-2xs"
+                  : "text-slate-700 hover:bg-slate-100"
+              }`}
+            >
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                activeTab === "verbs" 
+                  ? "bg-[#FFC700] text-black shadow-2xs" 
+                  : "bg-amber-100/70 text-amber-700 group-hover:bg-amber-200 group-hover:text-black"
+              }`}>
+                <Languages className="w-3.5 h-3.5" />
+              </div>
+              {!isCollapsed && (
+                <span className="truncate">تصريف الأفعال</span>
               )}
             </button>
           </div>

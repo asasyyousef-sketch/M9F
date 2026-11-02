@@ -2231,6 +2231,373 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
     }
   });
 
+  // API Route - Conjugate German Verbs using Gemini AI with irregular letters highlight
+  app.post("/api/verbs/conjugate", async (req, res) => {
+    try {
+      const {
+        verb,
+        selectedModel = "gemini-2.5-flash",
+        customApiKey = ""
+      } = req.body;
+
+      if (!verb || typeof verb !== "string" || !verb.trim()) {
+        return res.status(400).json({ error: "يرجى تحديد الفعل المطلوب تصريفه" });
+      }
+
+      const cleanVerb = verb.trim().replace(/[„“"']/g, "");
+
+      const headerAuth = (req.headers.authorization || "").replace("Bearer ", "").trim();
+      const headerKey = (req.headers["x-gemini-key"] as string) || "";
+      const effectiveGeminiKey =
+        (customApiKey && customApiKey.trim()) ||
+        (req.body.userApiKey && req.body.userApiKey.trim()) ||
+        (req.body.apiKey && req.body.apiKey.trim()) ||
+        headerKey.trim() ||
+        headerAuth ||
+        process.env.GEMINI_API_KEY ||
+        "";
+
+      if (!effectiveGeminiKey) {
+        return res.status(500).json({
+          error: "مفتاح GEMINI_API_KEY غير متوفر. يرجى إدخال مفتاح Gemini في الإعدادات أو على السيرفر."
+        });
+      }
+
+      const aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
+
+      const prompt = `أنت خبير لغوي متخصص في تصريف الأفعال في اللغة الألمانية (Deutsche Verben Konjugation) وتدريس القواعد لمتعلمي اللغة الألمانية (DaF).
+المطلوب: قم بتصريف الفعل التالي في زمن الحاضر (Präsens) لجميع الضمائر الشخصية:
+الفعل أو الكلمة المطلوبة: "${cleanVerb}"
+(إذا كانت الكلمة بالعربية مثل "يسافر" أو "يأكل" أو "يذهب" أو "يحب"، حدد الفعل الألماني المقابل أولاً ثم قم بتصريفه).
+
+القاعدة الأساسية الصارمة (تحديد الحروف غير المنتظمة باللون الأحمر):
+يجب تمييز أي حرف يتغير أو ينحرف في جذر الفعل (Vokalwechsel مثل: e -> i, e -> ie, a -> ä, au -> äu أو ö -> a) أو تصريف شاذ (كما في Modalverben أو أفعال الشواذ) بوسم HTML التالي فقط:
+<span class="irregular-letter">الحرف أو الأحرف المتغيرة فقط</span>
+
+قاعدة ذهبية حاسمة وصارمة جداً بخصوص الأوملاوت (Umlaut) والمقارنة بالمصدر الأصلي (Infinitiv):
+1. المعيار الوحيد لوضع وسم <span class="irregular-letter"> هو حدوث *تغيير حقيقي وانحراف* مقارنة بجذر المصدر (Infinitiv):
+   - إذا كان حرف الأوملاوت (ä, ö, ü) موجوداً أصلاً في المصدر (مثل: mögen, können, müssen):
+     فإن وجود الأوملاوت في صيغ الجمع (wir: mögen, ihr: mögt, sie: mögen أو wir: können, ihr: könnt أو wir: müssen, ihr: müsst) هو تصريف نظامي وطبيعي تماماً 100% ومطابق لأصل المصدر!
+     يُمنع منعاً باتاً ومطلقاً وضع وسم <span class="irregular-letter"> على حرف الأوملاوت في هذه الصيغ! يجب أن تبقى نصاً عادياً تماماً بدون أي وسوم.
+   - التغيير الحقيقي في فعل mögen مثلاً يحدث فقط في المفرد حين يتحول ö إلى a وحذف النهاية (ich mag, du magst, er mag)، فهنا فقط نضع الوسم على ما تغير. أما الجمع فمطابق للمصدر ولا يوجد به أي شذوذ.
+2. إذا كان المصدر يحتوي حرفاً عادياً وتحول في التصريف إلى أوملاوت (مثل: fahren -> du fährst, er fährt أو schlafen -> du schläfst):
+   هنا فقط نضع الوسم على حرف ä لأنه انحرف وتغير عن حرف a الموجود في المصدر.
+3. مع صيغ الجمع (wir, ihr, sie/Sie):
+   في الغالبية الساحقة من الأفعال، صيغ الجمع تعود لجذر المصدر وتكون نظامية تماماً، لذلك يُمنع وضع أي تلوين أحمر على صيغ الجمع إذا كانت مطابقة لجذر المصدر.
+
+نماذج وأمثلة نموذجية يجب اتباع نفس أسلوبها بحذافيره:
+1. فعل mögen:
+   - ich: "<span class=\\"irregular-letter\\">mag</span>"
+   - du: "<span class=\\"irregular-letter\\">mag</span>st"
+   - er: "<span class=\\"irregular-letter\\">mag</span>"
+   - wir: "mögen"  (نظامي تماماً ومطابق للمصدر - يمنع منعاً باتاً وضع أي وسم على ö)
+   - ihr: "mögt"   (نظامي تماماً ومطابق للمصدر - يمنع منعاً باتاً وضع أي وسم على ö)
+   - sie: "mögen"  (نظامي تماماً ومطابق للمصدر - يمنع منعاً باتاً وضع أي وسم على ö)
+
+2. فعل können:
+   - ich: "<span class=\\"irregular-letter\\">kann</span>"
+   - du: "<span class=\\"irregular-letter\\">kannst</span>"
+   - er: "<span class=\\"irregular-letter\\">kann</span>"
+   - wir: "können"  (نظامي تماماً - بدون أي وسوم)
+   - ihr: "könnt"   (نظامي تماماً - بدون أي وسوم)
+   - sie: "können"  (نظامي تماماً - بدون أي وسوم)
+
+3. فعل müssen:
+   - ich: "<span class=\\"irregular-letter\\">muss</span>"
+   - du: "<span class=\\"irregular-letter\\">musst</span>"
+   - er: "<span class=\\"irregular-letter\\">muss</span>"
+   - wir: "müssen"  (نظامي تماماً - بدون أي وسوم)
+   - ihr: "müsst"   (نظامي تماماً - بدون أي وسوم)
+   - sie: "müssen"  (نظامي تماماً - بدون أي وسوم)
+
+4. فعل essen:
+   - ich: "esse"
+   - du: "<span class=\\"irregular-letter\\">i</span>sst"
+   - er: "<span class=\\"irregular-letter\\">i</span>sst"
+   - wir: "essen"
+   - ihr: "esst"
+   - sie: "essen"
+
+5. فعل nehmen:
+   - ich: "nehme"
+   - du: "n<span class=\\"irregular-letter\\">imm</span>st"
+   - er: "n<span class=\\"irregular-letter\\">imm</span>t"
+   - wir: "nehmen"
+   - ihr: "nehmt"
+   - sie: "nehmen"
+
+6. فعل sprechen:
+   - ich: "spreche"
+   - du: "spr<span class=\\"irregular-letter\\">i</span>chst"
+   - er: "spr<span class=\\"irregular-letter\\">i</span>cht"
+   - wir: "sprechen"
+   - ihr: "sprecht"
+   - sie: "sprechen"
+
+7. فعل sehen:
+   - ich: "sehe"
+   - du: "s<span class=\\"irregular-letter\\">ie</span>hst"
+   - er: "s<span class=\\"irregular-letter\\">ie</span>ht"
+   - wir: "sehen"
+   - ihr: "seht"
+   - sie: "sehen"
+
+8. فعل fahren:
+   - ich: "fahre"
+   - du: "f<span class=\\"irregular-letter\\">ä</span>hrst"
+   - er: "f<span class=\\"irregular-letter\\">ä</span>hrt"
+   - wir: "fahren"
+   - ihr: "fahrt"
+   - sie: "fahren"
+
+9. فعل möchten:
+   - ich: "möchte"
+   - du: "möcht<span class=\\"irregular-letter\\">e</span>st"
+   - er: "möcht<span class=\\"irregular-letter\\">e</span>"
+   - wir: "möchten"
+   - ihr: "möcht<span class=\\"irregular-letter\\">e</span>t"
+   - sie: "möchten"
+
+10. فعل sein:
+   - ich: "<span class=\\"irregular-letter\\">bin</span>"
+   - du: "<span class=\\"irregular-letter\\">bist</span>"
+   - er: "<span class=\\"irregular-letter\\">ist</span>"
+   - wir: "<span class=\\"irregular-letter\\">sind</span>"
+   - ihr: "<span class=\\"irregular-letter\\">seid</span>"
+   - sie: "<span class=\\"irregular-letter\\">sind</span>"
+
+11. فعل منتظم مثل lernen:
+   - ich: "lerne"
+   - du: "lernst"
+   - er: "lernt"
+   - wir: "lernen"
+   - ihr: "lernt"
+   - sie: "lernen" (لا توجد حروف شاذة أو غير منتظمة)
+
+يجب أن ترجع النتيجة ككائن JSON حصراً بالتنسيق التالي دون أي مقدمات أو علامات إضافية:
+{
+  "key": "اسم الفعل بالألمانية بصيغة المصدر بأحرف صغيرة بدون علامات تنصيص",
+  "title": "اسم الفعل للعرض بالألمانية",
+  "arabicMeaning": "المعنى باللغة العربية بكلمة أو كلمتين واضحتين",
+  "speechBase": "صيغة المصدر الصالحة للنطق الصوتي بالألمانية",
+  "defaultFolder": "المجلد الأنسب: إما 'أفعال غير منتظمة' أو 'أفعال الكيفية (Modalverben)' أو 'أفعال A1 / A2' أو 'أفعال منتظمة'",
+  "forms": {
+    "ich": "التصريف مع تمييز الحروف غير المنتظمة بـ <span class=\\"irregular-letter\\">",
+    "du": "التصريف مع تمييز الحروف غير المنتظمة بـ <span class=\\"irregular-letter\\">",
+    "er": "التصريف مع تمييز الحروف غير المنتظمة بـ <span class=\\"irregular-letter\\">",
+    "wir": "التصريف مع تمييز الحروف غير المنتظمة بـ <span class=\\"irregular-letter\\">",
+    "ihr": "التصريف مع تمييز الحروف غير المنتظمة بـ <span class=\\"irregular-letter\\">",
+    "sie": "التصريف مع تمييز الحروف غير المنتظمة بـ <span class=\\"irregular-letter\\">"
+  },
+  "plainForms": {
+    "ich": "ich + الفعل مجرداً من أي وسوم HTML لنطقه صوتياً",
+    "du": "du + الفعل مجرداً من أي وسوم HTML",
+    "er": "er es sie + الفعل مجرداً من أي وسوم HTML",
+    "wir": "wir + الفعل مجرداً من أي وسوم HTML",
+    "ihr": "ihr + الفعل مجرداً من أي وسوم HTML",
+    "sie": "sie + الفعل مجرداً من أي وسوم HTML"
+  }
+};`;
+
+      const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
+      const isGroq = primaryModel.includes("groq") || primaryModel === "groq-llama-3.3-70b";
+      const effectiveGroqKey = (req.body.groqApiKey as string) || (customApiKey && isGroq ? customApiKey : "") || process.env.GROQ_API_KEY || "";
+
+      let rawJson = "";
+      let modelUsed = primaryModel;
+
+      // 1. Try Groq if selected
+      if (isGroq && effectiveGroqKey) {
+        try {
+          const resGroq = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${effectiveGroqKey}`
+            },
+            body: JSON.stringify({
+              model: "llama-3.3-70b-versatile",
+              response_format: { type: "json_object" },
+              messages: [
+                { role: "system", content: "You are an expert German linguist. Always reply with valid JSON only." },
+                { role: "user", content: prompt }
+              ],
+              temperature: 0.1
+            })
+          });
+          if (resGroq.ok) {
+            const dataGroq = await resGroq.json();
+            rawJson = dataGroq?.choices?.[0]?.message?.content || "";
+            if (rawJson) modelUsed = "groq-llama-3.3-70b";
+          }
+        } catch (groqErr) {
+          console.warn("[Verbs Conjugate] Groq failed, falling back to Gemini:", groqErr);
+        }
+      }
+
+      // 2. Gemini execution with multi-model fallback
+      if (!rawJson && effectiveGeminiKey) {
+        let geminiTargetModel = primaryModel;
+        if (geminiTargetModel.includes("groq") || geminiTargetModel.includes("grok")) {
+          geminiTargetModel = "gemini-3.6-flash";
+        }
+
+        const candidateModels = Array.from(new Set([
+          geminiTargetModel,
+          "gemini-3.6-flash",
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+          "gemini-3.5-flash",
+          "gemini-3.7-flash",
+          "gemini-2.5-flash",
+          "gemini-2.5-pro",
+          "gemini-1.5-pro",
+          "gemini-1.5-flash"
+        ]));
+
+        for (const candidate of candidateModels) {
+          try {
+            const response = await aiClient.models.generateContent({
+              model: candidate,
+              contents: prompt,
+              config: {
+                responseMimeType: "application/json"
+              }
+            });
+            const text = response.text || "";
+            if (text) {
+              rawJson = text;
+              modelUsed = candidate;
+              break;
+            }
+          } catch (gemErr: any) {
+            console.warn(`[Verbs Conjugate] Model '${candidate}' failed (${gemErr?.message}). Trying next...`);
+          }
+        }
+      }
+
+      let parsedData: any = null;
+      try {
+        parsedData = safeExtractAndParseJSON(rawJson, null);
+      } catch (err) {
+        console.error("Failed to parse verb conjugation JSON:", err);
+      }
+
+      if (!parsedData || !parsedData.forms || !parsedData.forms.ich) {
+        return res.status(500).json({ error: "لم يتمكن الذكاء الاصطناعي من تصريف الفعل بالشكل الصحيح" });
+      }
+
+      // Ensure strict adherence: if infinitive already has the vowel (e.g. 'ö' in 'mögen', 'können', 'müssen')
+      // and plural forms (wir, ihr, sie) merely use that original vowel, strip unwanted irregular spans!
+      if (parsedData && parsedData.forms && parsedData.key) {
+        const infKey = (parsedData.key || "").trim().toLowerCase();
+        const baseStem = infKey.replace(/en$|n$/, "");
+        
+        // For verbs other than 'sein' (which is completely irregular/suppletive):
+        if (infKey !== "sein") {
+          const pluralPronouns: Array<"wir" | "ihr" | "sie"> = ["wir", "ihr", "sie"];
+          for (const p of pluralPronouns) {
+            if (typeof parsedData.forms[p] === "string") {
+              const rawVal = parsedData.forms[p];
+              const plainVal = rawVal.replace(/<[^>]+>/g, "").trim();
+              
+              // Standard regular endings:
+              // wir / sie -> stem + "en" or stem + "n"
+              // ihr -> stem + "t" or stem + "et"
+              const expectedWirSie1 = baseStem + "en";
+              const expectedWirSie2 = baseStem + "n";
+              const expectedIhr1 = baseStem + "t";
+              const expectedIhr2 = baseStem + "et";
+              
+              if (
+                ((p === "wir" || p === "sie") && (plainVal === expectedWirSie1 || plainVal === expectedWirSie2)) ||
+                (p === "ihr" && (plainVal === expectedIhr1 || plainVal === expectedIhr2))
+              ) {
+                // It is completely regular relative to the infinitive stem! Keep it pure plain text.
+                parsedData.forms[p] = plainVal;
+              }
+            }
+          }
+        }
+      }
+
+      res.json({
+        success: true,
+        verbData: parsedData,
+        modelUsed: modelUsed
+      });
+    } catch (e: any) {
+      console.error("Verb conjugation error:", e);
+      res.status(500).json({ error: e.message || "حدث خطأ أثناء تصريف الفعل عبر الذكاء الاصطناعي" });
+    }
+  });
+
+  // API Route - Test AI connectivity for Verbs
+  app.post("/api/verbs/test-ai", async (req, res) => {
+    try {
+      const { selectedModel = "gemini-3.6-flash", customApiKey = "" } = req.body;
+      const isGroq = selectedModel.includes("groq") || selectedModel === "groq-llama-3.3-70b";
+      const headerAuth = (req.headers.authorization || "").replace("Bearer ", "").trim();
+      const headerKey = (req.headers["x-gemini-key"] as string) || "";
+      const effectiveGroqKey = (req.body.groqApiKey as string) || (customApiKey && isGroq ? customApiKey : "") || process.env.GROQ_API_KEY || "";
+      const effectiveGeminiKey =
+        (customApiKey && !isGroq && customApiKey.trim()) ||
+        headerKey.trim() ||
+        headerAuth ||
+        process.env.GEMINI_API_KEY ||
+        "";
+
+      if (isGroq) {
+        if (!effectiveGroqKey) {
+          return res.status(400).json({ error: "لا يوجد مفتاح Groq API. يرجى إدخال مفتاح Groq." });
+        }
+        const resGroq = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${effectiveGroqKey}`
+          },
+          body: JSON.stringify({
+            model: "llama-3.3-70b-versatile",
+            messages: [{ role: "user", content: "ping" }],
+            max_tokens: 2
+          })
+        });
+        if (!resGroq.ok) {
+          const errData = await resGroq.json().catch(() => ({}));
+          throw new Error(errData?.error?.message || `Groq status ${resGroq.status}`);
+        }
+        return res.json({
+          success: true,
+          message: `تم الاتصال بنجاح بمحرك Groq Llama 3.3 70B! الذكاء الاصطناعي جاهز للعمل.`,
+          reply: "OK"
+        });
+      }
+
+      if (!effectiveGeminiKey) {
+        return res.status(400).json({ error: "لا يوجد مفتاح Gemini API. يرجى إدخال مفتاح Gemini." });
+      }
+
+      const aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
+      let testModel = selectedModel.trim() || "gemini-3.6-flash";
+      if (testModel.includes("grok")) testModel = "gemini-3.6-flash";
+
+      const result = await aiClient.models.generateContent({
+        model: testModel,
+        contents: "Respond only with: OK"
+      });
+
+      res.json({
+        success: true,
+        message: `تم الاتصال بنجاح بنموذج ${testModel}! الذكاء الاصطناعي جاهز للعمل.`,
+        reply: result.text?.trim() || "OK"
+      });
+    } catch (e: any) {
+      console.error("Test AI error:", e);
+      res.status(500).json({ error: e.message || "فشل الاتصال بالذكاء الاصطناعي. تأكد من صحة المفتاح والنموذج." });
+    }
+  });
+
   // API Route - Translate Shadowing Sentences using Gemini AI
   app.post("/api/shadowing/translate-sentences", async (req, res) => {
     try {
