@@ -287,9 +287,15 @@ export const GradioTranscriberModal: React.FC<GradioTranscriberModalProps> = ({
       setLiveStageLabel("تنزيل الفيديو محلياً...");
       setProgressPercent(95);
 
+      const activeToken = typeof window !== "undefined" ? localStorage.getItem("app_auth_token") : null;
+      const saveHeaders: Record<string, string> = { "Content-Type": "application/json" };
+      if (activeToken) {
+        saveHeaders["Authorization"] = `Bearer ${activeToken}`;
+      }
+
       const saveRes = await fetch("/api/media/from-youtube", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: saveHeaders,
         body: JSON.stringify({
           title: completedJob.title || youtubeInfo?.title || "فيديو يوتيوب مفرغ",
           videoId: completedJob.videoId || youtubeInfo?.videoId,

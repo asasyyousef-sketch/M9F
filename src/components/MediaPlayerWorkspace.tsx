@@ -1127,12 +1127,12 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   // Active screen mode: File Manager (default) vs Active Player
   const [isPlayerOpen, setIsPlayerOpen] = useState<boolean>(false);
 
-  // Folders State (Synchronized with Server and scoped per user)
+  // Folders State (Synchronized with Server - Public for everyone)
   const [folders, setFolders] = useState<MediaFolder[]>(() => {
     try {
-      const uId = currentUser?.id;
-      const key = uId ? `media_player_folders_${uId}` : "media_player_folders";
-      const saved = localStorage.getItem(key);
+      const uId = currentUser?.id || "public";
+      const key = `media_player_folders_${uId}`;
+      const saved = localStorage.getItem(key) || localStorage.getItem("media_player_folders");
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -1141,24 +1141,24 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
 
-  // File to Folder mapping (fileId -> folderId) (Synchronized with Server and scoped per user)
+  // File to Folder mapping (fileId -> folderId) (Synchronized with Server - Public for everyone)
   const [fileFolderMap, setFileFolderMap] = useState<Record<string, string>>(() => {
     try {
-      const uId = currentUser?.id;
-      const key = uId ? `media_file_folder_map_${uId}` : "media_file_folder_map";
-      const saved = localStorage.getItem(key);
+      const uId = currentUser?.id || "public";
+      const key = `media_file_folder_map_${uId}`;
+      const saved = localStorage.getItem(key) || localStorage.getItem("media_file_folder_map");
       return saved ? JSON.parse(saved) : {};
     } catch {
       return {};
     }
   });
 
-  // Save folders & map to localStorage scoped to current user
+  // Save folders & map to localStorage
   useEffect(() => {
     try {
-      if (currentUser?.id) {
-        localStorage.setItem(`media_player_folders_${currentUser.id}`, JSON.stringify(folders));
-      }
+      const uId = currentUser?.id || "public";
+      localStorage.setItem(`media_player_folders_${uId}`, JSON.stringify(folders));
+      localStorage.setItem("media_player_folders", JSON.stringify(folders));
     } catch (e) {
       console.error(e);
     }
@@ -1166,9 +1166,9 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   useEffect(() => {
     try {
-      if (currentUser?.id) {
-        localStorage.setItem(`media_file_folder_map_${currentUser.id}`, JSON.stringify(fileFolderMap));
-      }
+      const uId = currentUser?.id || "public";
+      localStorage.setItem(`media_file_folder_map_${uId}`, JSON.stringify(fileFolderMap));
+      localStorage.setItem("media_file_folder_map", JSON.stringify(fileFolderMap));
     } catch (e) {
       console.error(e);
     }
@@ -1330,25 +1330,15 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   }, [apiFetch]);
 
-  // Sync files and folders when currentUser changes
+  // Sync files and folders (Public for everyone - loads for all users and guests)
   useEffect(() => {
-    if (!currentUser?.id) {
-      setFiles([]);
-      setFolders([]);
-      setFileFolderMap({});
-      setCurrentFile(null);
-      setIsPlaying(false);
-      return;
-    }
-
+    const uId = currentUser?.id || "public";
     try {
-      const savedFolders = localStorage.getItem(`media_player_folders_${currentUser.id}`);
+      const savedFolders = localStorage.getItem(`media_player_folders_${uId}`) || localStorage.getItem("media_player_folders");
       if (savedFolders) setFolders(JSON.parse(savedFolders));
-      else setFolders([]);
 
-      const savedMap = localStorage.getItem(`media_file_folder_map_${currentUser.id}`);
+      const savedMap = localStorage.getItem(`media_file_folder_map_${uId}`) || localStorage.getItem("media_file_folder_map");
       if (savedMap) setFileFolderMap(JSON.parse(savedMap));
-      else setFileFolderMap({});
     } catch (e) {}
 
     fetchMediaFiles();
