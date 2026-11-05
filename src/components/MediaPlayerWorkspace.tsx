@@ -4500,6 +4500,53 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
           {/* Header Actions */}
           <div className="flex items-center gap-2">
+            {/* Subtitle 1 & 2 Display Control Square Buttons (Desktop Header Bar) */}
+            <div className="hidden sm:flex items-center gap-1 bg-slate-100 border border-slate-200/90 rounded-lg p-0.5 shadow-2xs">
+              {/* Subtitle 1 Toggle */}
+              <button
+                type="button"
+                onClick={togglePrimarySubtitle}
+                className={`h-7 w-7 rounded-md flex items-center justify-center transition-all cursor-pointer relative ${
+                  isSub1Active
+                    ? "bg-amber-500 text-slate-950 font-black shadow-xs ring-1 ring-amber-400"
+                    : "text-slate-500 hover:text-slate-800 hover:bg-slate-200/80"
+                }`}
+                title={isSub1Active ? "الترجمة الأولى (مفعّلة 1️⃣) - انقر لإخفاء العرض فقط" : "الترجمة الأولى (معطّلة) - انقر لإظهار العرض"}
+                aria-label="التحكم بعرض الترجمة الأولى"
+              >
+                <div className="relative flex items-center justify-center">
+                  <Subtitles className={`w-3.5 h-3.5 ${isSub1Active ? "text-slate-950" : "text-slate-500"}`} />
+                  <span className={`absolute -bottom-1 -right-1 text-[7.5px] font-mono font-black leading-none px-0.5 rounded ${
+                    isSub1Active ? "bg-slate-950 text-amber-400" : "bg-slate-300 text-slate-600"
+                  }`}>
+                    1
+                  </span>
+                </div>
+              </button>
+
+              {/* Subtitle 2 Toggle */}
+              <button
+                type="button"
+                onClick={toggleSecondarySubtitle}
+                className={`h-7 w-7 rounded-md flex items-center justify-center transition-all cursor-pointer relative ${
+                  isSub2Active
+                    ? "bg-emerald-600 text-white font-black shadow-xs ring-1 ring-emerald-400"
+                    : "text-slate-500 hover:text-slate-800 hover:bg-slate-200/80"
+                }`}
+                title={isSub2Active ? "الترجمة الثانية (مفعّلة 2️⃣) - انقر لإخفاء العرض فقط" : "الترجمة الثانية (معطّلة) - انقر لإظهار العرض"}
+                aria-label="التحكم بعرض الترجمة الثانية"
+              >
+                <div className="relative flex items-center justify-center">
+                  <Subtitles className={`w-3.5 h-3.5 ${isSub2Active ? "text-white" : "text-slate-500"}`} />
+                  <span className={`absolute -bottom-1 -right-1 text-[7.5px] font-mono font-black leading-none px-0.5 rounded ${
+                    isSub2Active ? "bg-black text-emerald-300" : "bg-slate-300 text-slate-600"
+                  }`}>
+                    2
+                  </span>
+                </div>
+              </button>
+            </div>
+
             <button
               onClick={() => {
                 setShowTranscriptPanel(!showTranscriptPanel);
@@ -5703,6 +5750,59 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                       >
                         <Repeat className="w-3.5 h-3.5" />
                       </button>
+
+                      {/* Subtitle 1 & 2 Display Control Square Buttons (Desktop / Computer Toolbar) */}
+                      <div className="flex items-center gap-1 bg-slate-850 bg-slate-800/90 border border-slate-700/60 rounded-lg p-0.5 shadow-xs">
+                        {/* Subtitle 1 (Primary) Display Toggle Button - Square & Symbolic */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            togglePrimarySubtitle();
+                          }}
+                          className={`h-6 w-6 sm:h-7 sm:w-7 rounded-md flex items-center justify-center transition-all cursor-pointer relative ${
+                            isSub1Active
+                              ? "bg-amber-500/25 text-amber-300 ring-1 ring-amber-400/60 shadow-xs"
+                              : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/60"
+                          }`}
+                          title={isSub1Active ? "إخفاء الترجمة الأولى (الأساسية) - تحكم بالعرض فقط" : "إظهار الترجمة الأولى (الأساسية) - تحكم بالعرض فقط"}
+                          aria-label="التحكم بعرض الترجمة الأولى"
+                        >
+                          <div className="relative flex items-center justify-center">
+                            <Subtitles className={`w-3.5 h-3.5 ${isSub1Active ? "text-amber-400" : "text-slate-400"}`} />
+                            <span className={`absolute -bottom-1 -right-1 text-[8px] font-mono font-black px-0.5 leading-none rounded ${
+                              isSub1Active ? "bg-amber-400 text-slate-950 font-bold" : "bg-slate-700 text-slate-300"
+                            }`}>
+                              1
+                            </span>
+                          </div>
+                        </button>
+
+                        {/* Subtitle 2 (Secondary / Dual) Display Toggle Button - Square & Symbolic */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSecondarySubtitle();
+                          }}
+                          className={`h-6 w-6 sm:h-7 sm:w-7 rounded-md flex items-center justify-center transition-all cursor-pointer relative ${
+                            isSub2Active
+                              ? "bg-emerald-500/25 text-emerald-300 ring-1 ring-emerald-400/60 shadow-xs"
+                              : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/60"
+                          }`}
+                          title={isSub2Active ? "إخفاء الترجمة الثانية (المزدوجة) - تحكم بالعرض فقط" : "إظهار الترجمة الثانية (المزدوجة) - تحكم بالعرض فقط"}
+                          aria-label="التحكم بعرض الترجمة الثانية"
+                        >
+                          <div className="relative flex items-center justify-center">
+                            <Subtitles className={`w-3.5 h-3.5 ${isSub2Active ? "text-emerald-400" : "text-slate-400"}`} />
+                            <span className={`absolute -bottom-1 -right-1 text-[8px] font-mono font-black px-0.5 leading-none rounded ${
+                              isSub2Active ? "bg-emerald-400 text-slate-950 font-bold" : "bg-slate-700 text-slate-300"
+                            }`}>
+                              2
+                            </span>
+                          </div>
+                        </button>
+                      </div>
 
                       {/* Volume / Mute Icon Button (No bulky slider track) */}
                       <button
