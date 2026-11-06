@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Menu, ArrowLeft, ChevronLeft, ChevronRight, Search, X, Loader2, Sparkles } from "lucide-react";
 
-interface VerbForms {
+export interface VerbForms {
   ich: string;
   du: string;
   er: string;
@@ -10,7 +10,7 @@ interface VerbForms {
   sie: string;
 }
 
-interface VerbPlainForms {
+export interface VerbPlainForms {
   ich: string;
   du: string;
   er: string;
@@ -19,19 +19,35 @@ interface VerbPlainForms {
   sie: string;
 }
 
-interface VerbItem {
+export interface VerbPastData {
+  auxiliary: "haben" | "sein";
+  partizip2: string;
+  perfektForms: VerbForms;
+  plainPerfektForms: VerbPlainForms;
+  prateritumForms: VerbForms;
+  plainPrateritumForms: VerbPlainForms;
+}
+
+export interface VerbItem {
   title: string;
   speechBase: string;
   defaultFolder: string;
+  auxiliary?: "haben" | "sein";
+  partizip2?: string;
   forms: VerbForms;
   plainForms: VerbPlainForms;
+  past?: VerbPastData;
 }
+
+export type VerbTenseTab = "prasens" | "perfekt";
 
 const initialVerbDataStore: Record<string, VerbItem> = {
   "möchte": {
     title: "„möchte“",
     speechBase: "möchten",
     defaultFolder: "أفعال الكيفية (Modalverben)",
+    auxiliary: "haben",
+    partizip2: "gemocht",
     forms: {
       ich: "möchte",
       du: 'möcht<span class="irregular-letter">e</span>st',
@@ -47,12 +63,50 @@ const initialVerbDataStore: Record<string, VerbItem> = {
       wir: "wir möchten",
       ihr: "ihr möchtet",
       sie: "sie möchten"
+    },
+    past: {
+      auxiliary: "haben",
+      partizip2: "gemocht",
+      perfektForms: {
+        ich: "habe gemocht",
+        du: "hast gemocht",
+        er: "hat gemocht",
+        wir: "haben gemocht",
+        ihr: "habt gemocht",
+        sie: "haben gemocht"
+      },
+      plainPerfektForms: {
+        ich: "ich habe gemocht",
+        du: "du hast gemocht",
+        er: "er hat gemocht",
+        wir: "wir haben gemocht",
+        ihr: "ihr habt gemocht",
+        sie: "sie haben gemocht"
+      },
+      prateritumForms: {
+        ich: "mochte",
+        du: "mochtest",
+        er: "mochte",
+        wir: "mochten",
+        ihr: "mochtet",
+        sie: "mochten"
+      },
+      plainPrateritumForms: {
+        ich: "ich mochte",
+        du: "du mochtest",
+        er: "er mochte",
+        wir: "wir mochten",
+        ihr: "ihr mochtet",
+        sie: "sie mochten"
+      }
     }
   },
   "essen": {
     title: "essen",
     speechBase: "essen",
     defaultFolder: "أفعال غير منتظمة",
+    auxiliary: "haben",
+    partizip2: "gegessen",
     forms: {
       ich: "esse",
       du: '<span class="irregular-letter">i</span>sst',
@@ -68,12 +122,50 @@ const initialVerbDataStore: Record<string, VerbItem> = {
       wir: "wir essen",
       ihr: "ihr esst",
       sie: "sie essen"
+    },
+    past: {
+      auxiliary: "haben",
+      partizip2: "gegessen",
+      perfektForms: {
+        ich: "habe gegessen",
+        du: "hast gegessen",
+        er: "hat gegessen",
+        wir: "haben gegessen",
+        ihr: "habt gegessen",
+        sie: "haben gegessen"
+      },
+      plainPerfektForms: {
+        ich: "ich habe gegessen",
+        du: "du hast gegessen",
+        er: "er hat gegessen",
+        wir: "wir haben gegessen",
+        ihr: "ihr habt gegessen",
+        sie: "sie haben gegessen"
+      },
+      prateritumForms: {
+        ich: "aß",
+        du: "aßest",
+        er: "aß",
+        wir: "aßen",
+        ihr: "aßt",
+        sie: "aßen"
+      },
+      plainPrateritumForms: {
+        ich: "ich aß",
+        du: "du aßest",
+        er: "er aß",
+        wir: "wir aßen",
+        ihr: "ihr aßt",
+        sie: "sie aßen"
+      }
     }
   },
   "nehmen": {
     title: "nehmen",
     speechBase: "nehmen",
     defaultFolder: "أفعال غير منتظمة",
+    auxiliary: "haben",
+    partizip2: "genommen",
     forms: {
       ich: "nehme",
       du: 'n<span class="irregular-letter">imm</span>st',
@@ -89,12 +181,50 @@ const initialVerbDataStore: Record<string, VerbItem> = {
       wir: "wir nehmen",
       ihr: "ihr nehmt",
       sie: "sie nehmen"
+    },
+    past: {
+      auxiliary: "haben",
+      partizip2: "genommen",
+      perfektForms: {
+        ich: "habe genommen",
+        du: "hast genommen",
+        er: "hat genommen",
+        wir: "haben genommen",
+        ihr: "habt genommen",
+        sie: "haben genommen"
+      },
+      plainPerfektForms: {
+        ich: "ich habe genommen",
+        du: "du hast genommen",
+        er: "er hat genommen",
+        wir: "wir haben genommen",
+        ihr: "ihr habt genommen",
+        sie: "sie haben genommen"
+      },
+      prateritumForms: {
+        ich: "nahm",
+        du: "nahmst",
+        er: "nahm",
+        wir: "nahmen",
+        ihr: "nahmt",
+        sie: "nahmen"
+      },
+      plainPrateritumForms: {
+        ich: "ich nahm",
+        du: "du nahmst",
+        er: "er nahm",
+        wir: "wir nahmen",
+        ihr: "ihr nahmt",
+        sie: "sie nahmen"
+      }
     }
   },
   "mögen": {
     title: "mögen",
     speechBase: "mögen",
     defaultFolder: "أفعال الكيفية (Modalverben)",
+    auxiliary: "haben",
+    partizip2: "gemocht",
     forms: {
       ich: '<span class="irregular-letter">mag</span>',
       du: '<span class="irregular-letter">magst</span>',
@@ -110,12 +240,50 @@ const initialVerbDataStore: Record<string, VerbItem> = {
       wir: "wir mögen",
       ihr: "ihr mögt",
       sie: "sie mögen"
+    },
+    past: {
+      auxiliary: "haben",
+      partizip2: "gemocht",
+      perfektForms: {
+        ich: "habe gemocht",
+        du: "hast gemocht",
+        er: "hat gemocht",
+        wir: "haben gemocht",
+        ihr: "habt gemocht",
+        sie: "haben gemocht"
+      },
+      plainPerfektForms: {
+        ich: "ich habe gemocht",
+        du: "du hast gemocht",
+        er: "er hat gemocht",
+        wir: "wir haben gemocht",
+        ihr: "ihr habt gemocht",
+        sie: "sie haben gemocht"
+      },
+      prateritumForms: {
+        ich: "mochte",
+        du: "mochtest",
+        er: "mochte",
+        wir: "mochten",
+        ihr: "mochtet",
+        sie: "mochten"
+      },
+      plainPrateritumForms: {
+        ich: "ich mochte",
+        du: "du mochtest",
+        er: "er mochte",
+        wir: "wir mochten",
+        ihr: "ihr mochtet",
+        sie: "sie mochten"
+      }
     }
   },
   "können": {
     title: "können",
     speechBase: "können",
     defaultFolder: "أفعال الكيفية (Modalverben)",
+    auxiliary: "haben",
+    partizip2: "gekonnt",
     forms: {
       ich: '<span class="irregular-letter">kann</span>',
       du: '<span class="irregular-letter">kannst</span>',
@@ -131,12 +299,50 @@ const initialVerbDataStore: Record<string, VerbItem> = {
       wir: "wir können",
       ihr: "ihr könnt",
       sie: "sie können"
+    },
+    past: {
+      auxiliary: "haben",
+      partizip2: "gekonnt",
+      perfektForms: {
+        ich: "habe gekonnt",
+        du: "hast gekonnt",
+        er: "hat gekonnt",
+        wir: "haben gekonnt",
+        ihr: "habt gekonnt",
+        sie: "haben gekonnt"
+      },
+      plainPerfektForms: {
+        ich: "ich habe gekonnt",
+        du: "du hast gekonnt",
+        er: "er hat gekonnt",
+        wir: "wir haben gekonnt",
+        ihr: "ihr habt gekonnt",
+        sie: "sie haben gekonnt"
+      },
+      prateritumForms: {
+        ich: "konnte",
+        du: "konntest",
+        er: "konnte",
+        wir: "konnten",
+        ihr: "konntet",
+        sie: "konnten"
+      },
+      plainPrateritumForms: {
+        ich: "ich konnte",
+        du: "du konntest",
+        er: "er konnte",
+        wir: "wir konnten",
+        ihr: "ihr konntet",
+        sie: "sie konnten"
+      }
     }
   },
   "wollen": {
     title: "wollen",
     speechBase: "wollen",
     defaultFolder: "أفعال الكيفية (Modalverben)",
+    auxiliary: "haben",
+    partizip2: "gewollt",
     forms: {
       ich: '<span class="irregular-letter">will</span>',
       du: '<span class="irregular-letter">willst</span>',
@@ -152,12 +358,50 @@ const initialVerbDataStore: Record<string, VerbItem> = {
       wir: "wir wollen",
       ihr: "ihr wollt",
       sie: "sie wollen"
+    },
+    past: {
+      auxiliary: "haben",
+      partizip2: "gewollt",
+      perfektForms: {
+        ich: "habe gewollt",
+        du: "hast gewollt",
+        er: "hat gewollt",
+        wir: "haben gewollt",
+        ihr: "habt gewollt",
+        sie: "haben gewollt"
+      },
+      plainPerfektForms: {
+        ich: "ich habe gewollt",
+        du: "du hast gewollt",
+        er: "er hat gewollt",
+        wir: "wir haben gewollt",
+        ihr: "ihr habt gewollt",
+        sie: "sie haben gewollt"
+      },
+      prateritumForms: {
+        ich: "wollte",
+        du: "wolltest",
+        er: "wollte",
+        wir: "wollten",
+        ihr: "wolltet",
+        sie: "wollten"
+      },
+      plainPrateritumForms: {
+        ich: "ich wollte",
+        du: "du wolltest",
+        er: "er wollte",
+        wir: "wir wollten",
+        ihr: "ihr wolltet",
+        sie: "sie wollten"
+      }
     }
   },
   "sprechen": {
     title: "sprechen",
     speechBase: "sprechen",
     defaultFolder: "أفعال غير منتظمة",
+    auxiliary: "haben",
+    partizip2: "gesprochen",
     forms: {
       ich: "spreche",
       du: 'spr<span class="irregular-letter">i</span>chst',
@@ -173,12 +417,50 @@ const initialVerbDataStore: Record<string, VerbItem> = {
       wir: "wir sprechen",
       ihr: "ihr sprecht",
       sie: "sie sprechen"
+    },
+    past: {
+      auxiliary: "haben",
+      partizip2: "gesprochen",
+      perfektForms: {
+        ich: "habe gesprochen",
+        du: "hast gesprochen",
+        er: "hat gesprochen",
+        wir: "haben gesprochen",
+        ihr: "habt gesprochen",
+        sie: "haben gesprochen"
+      },
+      plainPerfektForms: {
+        ich: "ich habe gesprochen",
+        du: "du hast gesprochen",
+        er: "er hat gesprochen",
+        wir: "wir haben gesprochen",
+        ihr: "ihr habt gesprochen",
+        sie: "sie haben gesprochen"
+      },
+      prateritumForms: {
+        ich: "sprach",
+        du: "sprachst",
+        er: "sprach",
+        wir: "sprachen",
+        ihr: "spracht",
+        sie: "sprachen"
+      },
+      plainPrateritumForms: {
+        ich: "ich sprach",
+        du: "du sprachst",
+        er: "er sprach",
+        wir: "wir sprachen",
+        ihr: "ihr spracht",
+        sie: "sie sprachen"
+      }
     }
   },
   "sehen": {
     title: "sehen",
     speechBase: "sehen",
     defaultFolder: "أفعال A1 / A2",
+    auxiliary: "haben",
+    partizip2: "gesehen",
     forms: {
       ich: "sehe",
       du: 's<span class="irregular-letter">ie</span>hst',
@@ -194,12 +476,50 @@ const initialVerbDataStore: Record<string, VerbItem> = {
       wir: "wir sehen",
       ihr: "ihr seht",
       sie: "sie sehen"
+    },
+    past: {
+      auxiliary: "haben",
+      partizip2: "gesehen",
+      perfektForms: {
+        ich: "habe gesehen",
+        du: "hast gesehen",
+        er: "hat gesehen",
+        wir: "haben gesehen",
+        ihr: "habt gesehen",
+        sie: "haben gesehen"
+      },
+      plainPerfektForms: {
+        ich: "ich habe gesehen",
+        du: "du hast gesehen",
+        er: "er hat gesehen",
+        wir: "wir haben gesehen",
+        ihr: "ihr habt gesehen",
+        sie: "sie haben gesehen"
+      },
+      prateritumForms: {
+        ich: "sah",
+        du: "sahst",
+        er: "sah",
+        wir: "sahen",
+        ihr: "saht",
+        sie: "sahen"
+      },
+      plainPrateritumForms: {
+        ich: "ich sah",
+        du: "du sahst",
+        er: "er sah",
+        wir: "wir sahen",
+        ihr: "ihr saht",
+        sie: "sie sahen"
+      }
     }
   },
   "haben": {
     title: "haben",
     speechBase: "haben",
     defaultFolder: "المفضلة",
+    auxiliary: "haben",
+    partizip2: "gehabt",
     forms: {
       ich: "habe",
       du: '<span class="irregular-letter">hast</span>',
@@ -215,12 +535,50 @@ const initialVerbDataStore: Record<string, VerbItem> = {
       wir: "wir haben",
       ihr: "ihr habt",
       sie: "sie haben"
+    },
+    past: {
+      auxiliary: "haben",
+      partizip2: "gehabt",
+      perfektForms: {
+        ich: "habe gehabt",
+        du: "hast gehabt",
+        er: "hat gehabt",
+        wir: "haben gehabt",
+        ihr: "habt gehabt",
+        sie: "haben gehabt"
+      },
+      plainPerfektForms: {
+        ich: "ich habe gehabt",
+        du: "du hast gehabt",
+        er: "er hat gehabt",
+        wir: "wir haben gehabt",
+        ihr: "ihr habt gehabt",
+        sie: "sie haben gehabt"
+      },
+      prateritumForms: {
+        ich: "hatte",
+        du: "hattest",
+        er: "hatte",
+        wir: "hatten",
+        ihr: "hattet",
+        sie: "hatten"
+      },
+      plainPrateritumForms: {
+        ich: "ich hatte",
+        du: "du hattest",
+        er: "er hatte",
+        wir: "wir hatten",
+        ihr: "ihr hattet",
+        sie: "sie hatten"
+      }
     }
   },
   "sein": {
     title: "sein",
     speechBase: "sein",
     defaultFolder: "المفضلة",
+    auxiliary: "sein",
+    partizip2: "gewesen",
     forms: {
       ich: '<span class="irregular-letter">bin</span>',
       du: '<span class="irregular-letter">bist</span>',
@@ -236,9 +594,46 @@ const initialVerbDataStore: Record<string, VerbItem> = {
       wir: "wir sind",
       ihr: "ihr seid",
       sie: "sie sind"
+    },
+    past: {
+      auxiliary: "sein",
+      partizip2: "gewesen",
+      perfektForms: {
+        ich: "bin gewesen",
+        du: "bist gewesen",
+        er: "ist gewesen",
+        wir: "sind gewesen",
+        ihr: "seid gewesen",
+        sie: "sind gewesen"
+      },
+      plainPerfektForms: {
+        ich: "ich bin gewesen",
+        du: "du bist gewesen",
+        er: "er ist gewesen",
+        wir: "wir sind gewesen",
+        ihr: "ihr seid gewesen",
+        sie: "sie sind gewesen"
+      },
+      prateritumForms: {
+        ich: "war",
+        du: "warst",
+        er: "war",
+        wir: "waren",
+        ihr: "wart",
+        sie: "waren"
+      },
+      plainPrateritumForms: {
+        ich: "ich war",
+        du: "du warst",
+        er: "er war",
+        wir: "wir waren",
+        ihr: "ihr wart",
+        sie: "sie waren"
+      }
     }
   }
 };
+
 
 // AI Models exactly matching the Corrector section (AICorrectorWorkspace.tsx)
 export interface AIModelOption {
@@ -377,6 +772,93 @@ function normalizeModalVerbForms(verbKey: string, forms: VerbForms): VerbForms {
   return res;
 }
 
+const SEIN_VERBS_SET = new Set([
+  "sein", "gehen", "kommen", "fahren", "fliegen", "laufen", "bleiben", "werden",
+  "sterben", "wachsen", "reisen", "steigen", "fallen", "rennen", "schwimmen",
+  "ankommen", "aufstehen", "einschlafen", "passieren", "geschehen", "folgen",
+  "begegnen", "gelingen", "misslingen", "verschwinden", "springen", "abfahren"
+]);
+
+export function ensureVerbPastData(key: string, item: VerbItem): VerbItem {
+  if (!item) return item;
+
+  const cleanKey = (key || item.speechBase || item.title || "").toLowerCase().replace(/[„“"']/g, "").trim();
+  const aux: "haben" | "sein" =
+    item.auxiliary === "sein" || (item.past && item.past.auxiliary === "sein") || SEIN_VERBS_SET.has(cleanKey)
+      ? "sein"
+      : "haben";
+
+  const p2 = item.partizip2 || (item.past && item.past.partizip2) || (cleanKey.endsWith("en") ? "ge" + cleanKey.slice(0, -2) + "t" : "ge" + cleanKey + "t");
+
+  if (item.past && item.past.perfektForms && item.past.prateritumForms) {
+    return {
+      ...item,
+      auxiliary: aux,
+      partizip2: p2,
+      past: {
+        ...item.past,
+        auxiliary: aux,
+        partizip2: p2
+      }
+    };
+  }
+
+  const auxForms = aux === "sein"
+    ? { ich: "bin", du: "bist", er: "ist", wir: "sind", ihr: "seid", sie: "sind" }
+    : { ich: "habe", du: "hast", er: "hat", wir: "haben", ihr: "habt", sie: "haben" };
+
+  const perfektForms: VerbForms = {
+    ich: `${auxForms.ich} ${p2}`,
+    du: `${auxForms.du} ${p2}`,
+    er: `${auxForms.er} ${p2}`,
+    wir: `${auxForms.wir} ${p2}`,
+    ihr: `${auxForms.ihr} ${p2}`,
+    sie: `${auxForms.sie} ${p2}`
+  };
+
+  const plainPerfektForms: VerbPlainForms = {
+    ich: `ich ${auxForms.ich} ${p2}`,
+    du: `du ${auxForms.du} ${p2}`,
+    er: `er ${auxForms.er} ${p2}`,
+    wir: `wir ${auxForms.wir} ${p2}`,
+    ihr: `ihr ${auxForms.ihr} ${p2}`,
+    sie: `sie ${auxForms.sie} ${p2}`
+  };
+
+  const stem = cleanKey.replace(/en$|n$/, "");
+  const prateritumForms: VerbForms = {
+    ich: `${stem}te`,
+    du: `${stem}test`,
+    er: `${stem}te`,
+    wir: `${stem}ten`,
+    ihr: `${stem}tet`,
+    sie: `${stem}ten`
+  };
+
+  const plainPrateritumForms: VerbPlainForms = {
+    ich: `ich ${stem}te`,
+    du: `du ${stem}test`,
+    er: `er ${stem}te`,
+    wir: `wir ${stem}ten`,
+    ihr: `ihr ${stem}tet`,
+    sie: `sie ${stem}ten`
+  };
+
+  return {
+    ...item,
+    auxiliary: aux,
+    partizip2: p2,
+    past: {
+      auxiliary: aux,
+      partizip2: p2,
+      perfektForms: item.past?.perfektForms || perfektForms,
+      plainPerfektForms: item.past?.plainPerfektForms || plainPerfektForms,
+      prateritumForms: item.past?.prateritumForms || prateritumForms,
+      plainPrateritumForms: item.past?.plainPrateritumForms || plainPrateritumForms
+    }
+  };
+}
+
 function getEffectiveGeminiApiKey(): string {
   if (typeof window === "undefined") return "";
   return (
@@ -419,6 +901,7 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
   });
 
   const [activeVerbKey, setActiveVerbKey] = useState<string>("möchte");
+  const [activeTense, setActiveTense] = useState<VerbTenseTab>("prasens");
   const [searchVal, setSearchVal] = useState<string>("");
   const [isSearchingAi, setIsSearchingAi] = useState<boolean>(false);
 
@@ -514,7 +997,23 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
     }
   }, []);
 
-  const currentVerbData = verbsStore[activeVerbKey] || verbsStore["möchte"] || initialVerbDataStore["möchte"];
+  const rawCurrentVerbData = verbsStore[activeVerbKey] || verbsStore["möchte"] || initialVerbDataStore["möchte"];
+  const currentVerbData = ensureVerbPastData(activeVerbKey, rawCurrentVerbData);
+
+  const pastData: VerbPastData = currentVerbData.past || {
+    auxiliary: currentVerbData.auxiliary || "haben",
+    partizip2: currentVerbData.partizip2 || "",
+    perfektForms: { ich: "", du: "", er: "", wir: "", ihr: "", sie: "" },
+    plainPerfektForms: { ich: "", du: "", er: "", wir: "", ihr: "", sie: "" },
+    prateritumForms: { ich: "", du: "", er: "", wir: "", ihr: "", sie: "" },
+    plainPrateritumForms: { ich: "", du: "", er: "", wir: "", ihr: "", sie: "" }
+  };
+
+  const displayForms: VerbForms =
+    activeTense === "perfekt" ? pastData.perfektForms : currentVerbData.forms;
+
+  const speechForms: VerbPlainForms =
+    activeTense === "perfekt" ? pastData.plainPerfektForms : currentVerbData.plainForms;
 
   // Voice playback with full support for Google Cloud TTS, Piper Neural Models, and Web Speech API
   const fallbackWebSpeech = (text: string, voiceUri?: string) => {
@@ -621,8 +1120,9 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
       }
 
       const data = await res.json();
-      const newVerb: VerbItem = data.verbData;
-      const key = (data.verbData.key || val).toLowerCase().replace(/[„“"']/g, "").trim();
+      const rawVerb = data.verbData;
+      const key = (rawVerb.key || val).toLowerCase().replace(/[„“"']/g, "").trim();
+      const newVerb: VerbItem = ensureVerbPastData(key, rawVerb);
       if (newVerb && newVerb.forms) {
         newVerb.forms = normalizeModalVerbForms(key, newVerb.forms);
       }
@@ -930,6 +1430,35 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
             </div>
           </header>
 
+          {/* Clean Tense Selector (الحاضر والمضارع / الماضي التام / الماضي البسيط) */}
+          <div className="w-full max-w-[460px] flex items-center justify-center gap-1.5 p-1 bg-neutral-200/60 border border-neutral-300/70 rounded-2xl select-none" dir="rtl">
+            <button
+              type="button"
+              onClick={() => setActiveTense("prasens")}
+              className={`flex-1 py-1.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
+                activeTense === "prasens"
+                  ? "bg-[#FFC700] text-neutral-950 shadow-xs scale-[1.01]"
+                  : "text-neutral-700 hover:text-neutral-950 hover:bg-white/80"
+              }`}
+            >
+              <span>المضارع</span>
+              <span className="text-[10px] sm:text-[11px] font-normal opacity-85" dir="ltr">Präsens</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTense("perfekt")}
+              className={`flex-1 py-1.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
+                activeTense === "perfekt"
+                  ? "bg-[#FFC700] text-neutral-950 shadow-xs scale-[1.01]"
+                  : "text-neutral-700 hover:text-neutral-950 hover:bg-white/80"
+              }`}
+            >
+              <span>الماضي</span>
+              <span className="text-[10px] sm:text-[11px] font-normal opacity-85" dir="ltr">Perfekt</span>
+            </button>
+          </div>
+
           {/* BEGIN: FlashcardWidget */}
           {/* Authentic 1:1 Physical Textbook Card Replication */}
           <section aria-label="Konjugationskarte" className="w-full flex justify-center py-1">
@@ -943,10 +1472,18 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
                 <div className="flex items-center min-h-[58px] horizontal-row-split">
                   <div aria-hidden="true" className="cell-pronoun vertical-split h-full min-h-[58px]"></div>
                   <div className="cell-conjugation flex items-center py-2.5 justify-center">
-                    {/* Rounded Pill Badge */}
-                    <span className="inline-flex items-center justify-center px-6 py-1.5 rounded-full bg-[#FFE788] text-[#1a1a1a] text-xl font-medium tracking-tight shadow-none">
-                      {currentVerbData.title}
-                    </span>
+                    {/* Rounded Pill Badge with Tense Details */}
+                    <div className="flex items-center justify-center gap-2 flex-wrap">
+                      <span className="inline-flex items-center justify-center px-5 py-1 rounded-full bg-[#FFE788] text-[#1a1a1a] text-xl font-medium tracking-tight shadow-none">
+                        {currentVerbData.title}
+                      </span>
+                      {activeTense === "perfekt" && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500 text-white text-xs font-bold tracking-tight shadow-xs" dir="rtl">
+                          <span>المساعد:</span>
+                          <span className="underline decoration-2 font-mono font-bold" dir="ltr">{pastData.auxiliary}</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -954,7 +1491,7 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
                 {/* Row 1: ich */}
                 <div
                   className="flashcard-row flex items-center min-h-[50px] horizontal-row-split"
-                  onClick={() => pronounceText(currentVerbData.plainForms.ich)}
+                  onClick={() => pronounceText(speechForms.ich)}
                   title="اضغط للاستماع"
                 >
                   <div className="cell-pronoun vertical-split py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a]">
@@ -962,14 +1499,14 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
                   </div>
                   <div
                     className="cell-conjugation py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a] justify-center"
-                    dangerouslySetInnerHTML={{ __html: currentVerbData.forms.ich }}
+                    dangerouslySetInnerHTML={{ __html: displayForms.ich }}
                   />
                 </div>
 
                 {/* Row 2: du */}
                 <div
                   className="flashcard-row flex items-center min-h-[50px] horizontal-row-split"
-                  onClick={() => pronounceText(currentVerbData.plainForms.du)}
+                  onClick={() => pronounceText(speechForms.du)}
                   title="اضغط للاستماع"
                 >
                   <div className="cell-pronoun vertical-split py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a]">
@@ -977,14 +1514,14 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
                   </div>
                   <div
                     className="cell-conjugation py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a] justify-center"
-                    dangerouslySetInnerHTML={{ __html: currentVerbData.forms.du }}
+                    dangerouslySetInnerHTML={{ __html: displayForms.du }}
                   />
                 </div>
 
                 {/* Row 3: er / es / sie */}
                 <div
                   className="flashcard-row flex items-center min-h-[50px] horizontal-row-split"
-                  onClick={() => pronounceText(currentVerbData.plainForms.er)}
+                  onClick={() => pronounceText(speechForms.er)}
                   title="اضغط للاستماع"
                 >
                   <div className="cell-pronoun vertical-split py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a]">
@@ -992,14 +1529,14 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
                   </div>
                   <div
                     className="cell-conjugation py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a] justify-center"
-                    dangerouslySetInnerHTML={{ __html: currentVerbData.forms.er }}
+                    dangerouslySetInnerHTML={{ __html: displayForms.er }}
                   />
                 </div>
 
                 {/* Row 4: wir */}
                 <div
                   className="flashcard-row flex items-center min-h-[50px] horizontal-row-split"
-                  onClick={() => pronounceText(currentVerbData.plainForms.wir)}
+                  onClick={() => pronounceText(speechForms.wir)}
                   title="اضغط للاستماع"
                 >
                   <div className="cell-pronoun vertical-split py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a]">
@@ -1007,14 +1544,14 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
                   </div>
                   <div
                     className="cell-conjugation py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a] justify-center"
-                    dangerouslySetInnerHTML={{ __html: currentVerbData.forms.wir }}
+                    dangerouslySetInnerHTML={{ __html: displayForms.wir }}
                   />
                 </div>
 
                 {/* Row 5: ihr */}
                 <div
                   className="flashcard-row flex items-center min-h-[50px] horizontal-row-split"
-                  onClick={() => pronounceText(currentVerbData.plainForms.ihr)}
+                  onClick={() => pronounceText(speechForms.ihr)}
                   title="اضغط للاستماع"
                 >
                   <div className="cell-pronoun vertical-split py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a]">
@@ -1022,14 +1559,14 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
                   </div>
                   <div
                     className="cell-conjugation py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a] justify-center"
-                    dangerouslySetInnerHTML={{ __html: currentVerbData.forms.ihr }}
+                    dangerouslySetInnerHTML={{ __html: displayForms.ihr }}
                   />
                 </div>
 
                 {/* Row 6: sie / Sie */}
                 <div
                   className="flashcard-row flex items-center min-h-[50px]"
-                  onClick={() => pronounceText(currentVerbData.plainForms.sie)}
+                  onClick={() => pronounceText(speechForms.sie)}
                   title="اضغط للاستماع"
                 >
                   <div className="cell-pronoun vertical-split py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a]">
@@ -1037,13 +1574,14 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
                   </div>
                   <div
                     className="cell-conjugation py-2 text-[21px] font-normal tracking-wide text-[#1a1a1a]"
-                    dangerouslySetInnerHTML={{ __html: currentVerbData.forms.sie }}
+                    dangerouslySetInnerHTML={{ __html: displayForms.sie }}
                   />
                 </div>
               </div>
             </div>
           </section>
           {/* END: FlashcardWidget */}
+
 
           {/* Quick Verb Selection Slider (Moved Under the Table) */}
           <div className="relative w-full max-w-lg mx-auto flex items-center gap-1 pt-2 select-none">

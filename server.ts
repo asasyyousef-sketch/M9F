@@ -2158,144 +2158,99 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
       const aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
 
       const prompt = `أنت خبير لغوي متخصص في تصريف الأفعال في اللغة الألمانية (Deutsche Verben Konjugation) وتدريس القواعد لمتعلمي اللغة الألمانية (DaF).
-المطلوب: قم بتصريف الفعل التالي في زمن الحاضر (Präsens) لجميع الضمائر الشخصية:
+المطلوب: قم بتصريف الفعل التالي بدقة في زمن الحاضر (Präsens) وزمن الماضي بنوعيه: الماضي التام (Perfekt) والماضي البسيط (Präteritum) لجميع الضمائر الشخصية:
 الفعل أو الكلمة المطلوبة: "${cleanVerb}"
 (إذا كانت الكلمة بالعربية مثل "يسافر" أو "يأكل" أو "يذهب" أو "يحب"، حدد الفعل الألماني المقابل أولاً ثم قم بتصريفه).
 
-القاعدة الأساسية الصارمة (تحديد الحروف غير المنتظمة باللون الأحمر):
-يجب تمييز أي حرف يتغير أو ينحرف في جذر الفعل (Vokalwechsel مثل: e -> i, e -> ie, a -> ä, au -> äu أو ö -> a) أو تصريف شاذ (كما في Modalverben أو أفعال الشواذ) بوسم HTML التالي فقط:
-<span class="irregular-letter">الحرف أو الأحرف المتغيرة فقط</span>
+1. قاعدة الماضي التام (Perfekt) والفعل المساعد:
+- حدد بدقة الفعل المساعد (Hilfsverb) الذي يصرف معه الفعل في الماضي: إما "haben" أو "sein" (مثال: أفعال الحركة والانتقال وتغير الحالة تأخذ sein مثل gehen, fahren, kommen, bleiben, sein... وباقي الأفعال تأخذ haben مثل essen, lernen, machen, trinken, schlafen, mögen...).
+- حدد اسم المفعول (Partizip II) بدقة، مثل: gegessen, gefahren, gegangen, gemocht, gelernt...
+- قم بتركيب تصريف Perfekt لكل ضمير باستخدام الفعل المساعد المصرف + اسم المفعول:
+  * مع haben: habe gegessen, hast gegessen, hat gegessen, haben gegessen, habt gegessen, haben gegessen
+  * مع sein: bin gefahren, bist gefahren, ist gefahren, sind gefahren, seid gefahren, sind gefahren
 
-قاعدة ذهبية حاسمة وصارمة جداً بخصوص الأوملاوت (Umlaut) والمقارنة بالمصدر الأصلي (Infinitiv):
-1. المعيار الوحيد لوضع وسم <span class="irregular-letter"> هو حدوث *تغيير حقيقي وانحراف* مقارنة بجذر المصدر (Infinitiv):
-   - إذا كان حرف الأوملاوت (ä, ö, ü) موجوداً أصلاً في المصدر (مثل: mögen, können, müssen):
-     فإن وجود الأوملاوت في صيغ الجمع (wir: mögen, ihr: mögt, sie: mögen أو wir: können, ihr: könnt أو wir: müssen, ihr: müsst) هو تصريف نظامي وطبيعي تماماً 100% ومطابق لأصل المصدر!
-     يُمنع منعاً باتاً ومطلقاً وضع وسم <span class="irregular-letter"> على حرف الأوملاوت في هذه الصيغ! يجب أن تبقى نصاً عادياً تماماً بدون أي وسوم.
-   - في أفعال الكيفية (Modalverben) مثل mögen و können: كلمات المفرد تنحرف كلياً في الجذر والنهاية (ich mag, du magst, er mag وكذلك ich kann, du kannst, er kann)، لذلك تكون الكلمات بالكامل حمراء: <span class="irregular-letter">mag</span> و <span class="irregular-letter">magst</span> و <span class="irregular-letter">mag</span>، وكذلك <span class="irregular-letter">kann</span> و <span class="irregular-letter">kannst</span> و <span class="irregular-letter">kann</span>. أما صيغ الجمع فمطابقة للمصدر ولا يوجد بها أي شذوذ.
-2. إذا كان المصدر يحتوي حرفاً عادياً وتحول في التصريف إلى أوملاوت (مثل: fahren -> du fährst, er fährt أو schlafen -> du schläfst):
-   هنا فقط نضع الوسم على حرف ä لأنه انحرف وتغير عن حرف a الموجود في المصدر.
-3. مع صيغ الجمع (wir, ihr, sie/Sie):
-   في الغالبية الساحقة من الأفعال، صيغ الجمع تعود لجذر المصدر وتكون نظامية تماماً، لذلك يُمنع وضع أي تلوين أحمر على صيغ الجمع إذا كانت مطابقة لجذر المصدر.
+2. قاعدة الماضي البسيط (Präteritum):
+- صرّف الفعل في زمن Präteritum لجميع الضمائر الشخصية: ich, du, er (es/sie), wir, ihr, sie (Sie).
+- في الأفعال الشاذة، ميز الحرف أو المقطع الشاذ أو المتغير بوسم <span class="irregular-letter">...</span> (مثل aß, sprach, fuhr, ging, war, hatte, mochte, konnte...).
 
-نماذج وأمثلة نموذجية يجب اتباع نفس أسلوبها بحذافيره:
-1. فعل mögen:
-   - ich: "<span class=\\"irregular-letter\\">mag</span>"
-   - du: "<span class=\\"irregular-letter\\">magst</span>"
-   - er: "<span class=\\"irregular-letter\\">mag</span>"
-   - wir: "mögen"  (نظامي تماماً ومطابق للمصدر - يمنع منعاً باتاً وضع أي وسم على ö)
-   - ihr: "mögt"   (نظامي تماماً ومطابق للمصدر - يمنع منعاً باتاً وضع أي وسم على ö)
-   - sie: "mögen"  (نظامي تماماً ومطابق للمصدر - يمنع منعاً باتاً وضع أي وسم على ö)
+3. قاعدة الحاضر (Präsens) وقاعدة الأوملاوت الصارمة:
+- يجب تمييز أي حرف يتغير أو ينحرف في جذر الفعل (Vokalwechsel) أو تصريف شاذ بوسم <span class="irregular-letter">الحرف أو الأحرف المتغيرة فقط</span>.
+- في أفعال الكيفية (Modalverben) مثل mögen و können: كلمات المفرد تنحرف كلياً في الجذر والنهاية (mag, magst, mag / kann, kannst, kann)، فتكون بالكامل حمراء: <span class="irregular-letter">mag</span> و <span class="irregular-letter">magst</span>... أما صيغ الجمع فمطابقة للمصدر وبدون أي وسوم.
+- إذا كان حرف الأوملاوت موجوداً أصلاً في المصدر (مثل mögen, können, müssen)، فإن بقاءه في صيغ جمع الحاضر (wir mögen, ihr mögt...) هو نظامي ويُمنع منعاً باتاً تلوينه بالأحمر.
 
-2. فعل können:
-   - ich: "<span class=\\"irregular-letter\\">kann</span>"
-   - du: "<span class=\\"irregular-letter\\">kannst</span>"
-   - er: "<span class=\\"irregular-letter\\">kann</span>"
-   - wir: "können"  (نظامي تماماً - بدون أي وسوم)
-   - ihr: "könnt"   (نظامي تماماً - بدون أي وسوم)
-   - sie: "können"  (نظامي تماماً - بدون أي وسوم)
+نماذج إرشادية مختصرة:
+- فعل essen:
+  * Hilfsverb: "haben", Partizip II: "gegessen"
+  * Präsens: ich esse, du <span class="irregular-letter">i</span>sst, er <span class="irregular-letter">i</span>sst, wir essen, ihr esst, sie essen
+  * Perfekt: habe gegessen, hast gegessen, hat gegessen, haben gegessen, habt gegessen, haben gegessen
+  * Präteritum: <span class="irregular-letter">aß</span>, <span class="irregular-letter">aß</span>est, <span class="irregular-letter">aß</span>, <span class="irregular-letter">aß</span>en, <span class="irregular-letter">aß</span>t, <span class="irregular-letter">aß</span>en
 
-3. فعل müssen:
-   - ich: "<span class=\\"irregular-letter\\">muss</span>"
-   - du: "<span class=\\"irregular-letter\\">musst</span>"
-   - er: "<span class=\\"irregular-letter\\">muss</span>"
-   - wir: "müssen"  (نظامي تماماً - بدون أي وسوم)
-   - ihr: "müsst"   (نظامي تماماً - بدون أي وسوم)
-   - sie: "müssen"  (نظامي تماماً - بدون أي وسوم)
+- فعل fahren:
+  * Hilfsverb: "sein", Partizip II: "gefahren"
+  * Präsens: ich fahre, du f<span class="irregular-letter">ä</span>hrst, er f<span class="irregular-letter">ä</span>hrt, wir fahren, ihr fahrt, sie fahren
+  * Perfekt: bin gefahren, bist gefahren, ist gefahren, sind gefahren, seid gefahren, sind gefahren
+  * Präteritum: <span class="irregular-letter">fuhr</span>, <span class="irregular-letter">fuhr</span>st, <span class="irregular-letter">fuhr</span>, <span class="irregular-letter">fuhr</span>en, <span class="irregular-letter">fuhr</span>t, <span class="irregular-letter">fuhr</span>en
 
-4. فعل essen:
-   - ich: "esse"
-   - du: "<span class=\\"irregular-letter\\">i</span>sst"
-   - er: "<span class=\\"irregular-letter\\">i</span>sst"
-   - wir: "essen"
-   - ihr: "esst"
-   - sie: "essen"
-
-5. فعل nehmen:
-   - ich: "nehme"
-   - du: "n<span class=\\"irregular-letter\\">imm</span>st"
-   - er: "n<span class=\\"irregular-letter\\">imm</span>t"
-   - wir: "nehmen"
-   - ihr: "nehmt"
-   - sie: "nehmen"
-
-6. فعل sprechen:
-   - ich: "spreche"
-   - du: "spr<span class=\\"irregular-letter\\">i</span>chst"
-   - er: "spr<span class=\\"irregular-letter\\">i</span>cht"
-   - wir: "sprechen"
-   - ihr: "sprecht"
-   - sie: "sprechen"
-
-7. فعل sehen:
-   - ich: "sehe"
-   - du: "s<span class=\\"irregular-letter\\">ie</span>hst"
-   - er: "s<span class=\\"irregular-letter\\">ie</span>ht"
-   - wir: "sehen"
-   - ihr: "seht"
-   - sie: "sehen"
-
-8. فعل fahren:
-   - ich: "fahre"
-   - du: "f<span class=\\"irregular-letter\\">ä</span>hrst"
-   - er: "f<span class=\\"irregular-letter\\">ä</span>hrt"
-   - wir: "fahren"
-   - ihr: "fahrt"
-   - sie: "fahren"
-
-9. فعل möchten:
-   - ich: "möchte"
-   - du: "möcht<span class=\\"irregular-letter\\">e</span>st"
-   - er: "möcht<span class=\\"irregular-letter\\">e</span>"
-   - wir: "möchten"
-   - ihr: "möcht<span class=\\"irregular-letter\\">e</span>t"
-   - sie: "möchten"
-
-10. فعل sein:
-   - ich: "<span class=\\"irregular-letter\\">bin</span>"
-   - du: "<span class=\\"irregular-letter\\">bist</span>"
-   - er: "<span class=\\"irregular-letter\\">ist</span>"
-   - wir: "<span class=\\"irregular-letter\\">sind</span>"
-   - ihr: "<span class=\\"irregular-letter\\">seid</span>"
-   - sie: "<span class=\\"irregular-letter\\">sind</span>"
-
-11. فعل haben:
-   - ich: "habe"
-   - du: "<span class=\\"irregular-letter\\">hast</span>"
-   - er: "<span class=\\"irregular-letter\\">hat</span>"
-   - wir: "haben"
-   - ihr: "habt"
-   - sie: "haben"
-
-12. فعل منتظم مثل lernen:
-   - ich: "lerne"
-   - du: "lernst"
-   - er: "lernt"
-   - wir: "lernen"
-   - ihr: "lernt"
-   - sie: "lernen" (لا توجد حروف شاذة أو غير منتظمة)
-
-يجب أن ترجع النتيجة ككائن JSON حصراً بالتنسيق التالي دون أي مقدمات أو علامات إضافية:
+يجب أن ترجع النتيجة ككائن JSON حصراً بالتنسيق التالي دون أي مقدمات أو علامات إضافية (بيانات لغوية نقية خالية من أي نصوص حشوية):
 {
   "key": "اسم الفعل بالألمانية بصيغة المصدر بأحرف صغيرة بدون علامات تنصيص",
   "title": "اسم الفعل للعرض بالألمانية",
   "arabicMeaning": "المعنى باللغة العربية بكلمة أو كلمتين واضحتين",
   "speechBase": "صيغة المصدر الصالحة للنطق الصوتي بالألمانية",
   "defaultFolder": "المجلد الأنسب: إما 'أفعال غير منتظمة' أو 'أفعال الكيفية (Modalverben)' أو 'أفعال A1 / A2' أو 'أفعال منتظمة'",
+  "auxiliary": "haben أو sein",
+  "partizip2": "اسم المفعول Partizip II (مثل gegessen أو gefahren)",
   "forms": {
-    "ich": "التصريف مع تمييز الحروف غير المنتظمة بـ <span class=\\"irregular-letter\\">",
-    "du": "التصريف مع تمييز الحروف غير المنتظمة بـ <span class=\\"irregular-letter\\">",
-    "er": "التصريف مع تمييز الحروف غير المنتظمة بـ <span class=\\"irregular-letter\\">",
-    "wir": "التصريف مع تمييز الحروف غير المنتظمة بـ <span class=\\"irregular-letter\\">",
-    "ihr": "التصريف مع تمييز الحروف غير المنتظمة بـ <span class=\\"irregular-letter\\">",
-    "sie": "التصريف مع تمييز الحروف غير المنتظمة بـ <span class=\\"irregular-letter\\">"
+    "ich": "تصريف الحاضر (Präsens) مع تمييز الحروف الشاذة بـ <span class=\\"irregular-letter\\">",
+    "du": "تصريف الحاضر مع تمييز الحروف الشاذة",
+    "er": "تصريف الحاضر مع تمييز الحروف الشاذة",
+    "wir": "تصريف الحاضر",
+    "ihr": "تصريف الحاضر",
+    "sie": "تصريف الحاضر"
   },
   "plainForms": {
-    "ich": "ich + الفعل مجرداً من أي وسوم HTML لنطقه صوتياً",
-    "du": "du + الفعل مجرداً من أي وسوم HTML",
-    "er": "er es sie + الفعل مجرداً من أي وسوم HTML",
-    "wir": "wir + الفعل مجرداً من أي وسوم HTML",
-    "ihr": "ihr + الفعل مجرداً من أي وسوم HTML",
-    "sie": "sie + الفعل مجرداً من أي وسوم HTML"
+    "ich": "ich + تصريف الحاضر مجرداً من أي وسوم HTML للنطق الصوتي",
+    "du": "du + تصريف الحاضر مجرداً",
+    "er": "er es sie + تصريف الحاضر مجرداً",
+    "wir": "wir + تصريف الحاضر مجرداً",
+    "ihr": "ihr + تصريف الحاضر مجرداً",
+    "sie": "sie + تصريف الحاضر مجرداً"
+  },
+  "past": {
+    "auxiliary": "haben أو sein",
+    "partizip2": "اسم المفعول Partizip II",
+    "perfektForms": {
+      "ich": "تصريف الماضي التام مع المساعد (مثل habe gegessen أو bin gefahren)",
+      "du": "تصريف الماضي التام مع المساعد (مثل hast gegessen أو bist gefahren)",
+      "er": "تصريف الماضي التام مع المساعد (مثل hat gegessen أو ist gefahren)",
+      "wir": "تصريف الماضي التام مع المساعد (مثل haben gegessen أو sind gefahren)",
+      "ihr": "تصريف الماضي التام مع المساعد (مثل habt gegessen أو seid gefahren)",
+      "sie": "تصريف الماضي التام مع المساعد (مثل haben gegessen أو sind gefahren)"
+    },
+    "plainPerfektForms": {
+      "ich": "ich + تصريف الماضي التام كاملاً",
+      "du": "du + تصريف الماضي التام كاملاً",
+      "er": "er + تصريف الماضي التام كاملاً",
+      "wir": "wir + تصريف الماضي التام كاملاً",
+      "ihr": "ihr + تصريف الماضي التام كاملاً",
+      "sie": "sie + تصريف الماضي التام كاملاً"
+    },
+    "prateritumForms": {
+      "ich": "تصريف الماضي البسيط Präteritum (مثل aß أو lernte)",
+      "du": "تصريف الماضي البسيط Präteritum (مثل aßest أو lerntest)",
+      "er": "تصريف الماضي البسيط Präteritum (مثل aß أو lernte)",
+      "wir": "تصريف الماضي البسيط Präteritum (مثل aßen أو lernten)",
+      "ihr": "تصريف الماضي البسيط Präteritum (مثل aßt أو lerntet)",
+      "sie": "تصريف الماضي البسيط Präteritum (مثل aßen أو lernten)"
+    },
+    "plainPrateritumForms": {
+      "ich": "ich + تصريف الماضي البسيط",
+      "du": "du + تصريف الماضي البسيط",
+      "er": "er + تصريف الماضي البسيط",
+      "wir": "wir + تصريف الماضي البسيط",
+      "ihr": "ihr + تصريف الماضي البسيط",
+      "sie": "sie + تصريف الماضي البسيط"
+    }
   }
 };`;
 
@@ -2438,6 +2393,17 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
           }
         }
       }
+
+      // Guarantee past structure & auxiliary
+      const aux = (parsedData.auxiliary || (parsedData.past && parsedData.past.auxiliary) || "haben").toLowerCase().includes("sein") ? "sein" : "haben";
+      const p2 = parsedData.partizip2 || (parsedData.past && parsedData.past.partizip2) || "";
+      if (!parsedData.past) {
+        parsedData.past = {};
+      }
+      parsedData.past.auxiliary = aux;
+      parsedData.past.partizip2 = p2;
+      parsedData.auxiliary = aux;
+      parsedData.partizip2 = p2;
 
       res.json({
         success: true,
