@@ -2158,36 +2158,38 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
       const aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
 
       const prompt = `أنت خبير لغوي متخصص في تصريف الأفعال في اللغة الألمانية (Deutsche Verben Konjugation) وتدريس القواعد لمتعلمي اللغة الألمانية (DaF).
-المطلوب: قم بتصريف الفعل التالي بدقة فائقة في زمن المضارع/الحاضر (Präsens) وزمن الماضي (Perfekt) مع الفعل المساعد الدقيق واسم المفعول الصحيح حصراً:
+المطلوب: قم بتصريف الفعل التالي بدقة في زمن الحاضر (Präsens) وزمن الماضي بنوعيه: الماضي التام (Perfekt) والماضي البسيط (Präteritum) لجميع الضمائر الشخصية:
 الفعل أو الكلمة المطلوبة: "${cleanVerb}"
-(إذا كانت الكلمة بالعربية مثل "يسافر" أو "يقود" أو "يأكل" أو "يذهب" أو "يحب"، حدد الفعل الألماني المقابل أولاً ثم قم بتصريفه بدقة).
+(إذا كانت الكلمة بالعربية مثل "يسافر" أو "يأكل" أو "يذهب" أو "يحب"، حدد الفعل الألماني المقابل أولاً ثم قم بتصريفه).
 
-1. قاعدة الماضي (Perfekt) والفعل المساعد واسم المفعول (Partizip II):
-- حدد بدقة الفعل المساعد (Hilfsverb): إما "haben" أو "sein".
-  * أفعال الحركة والانتقال وتغير المكان/الحالة تأخذ sein قطعاً (مثل fahren, gehen, kommen, fliegen, laufen, bleiben, sein...).
-  * باقي الأفعال تأخذ haben (مثل essen, lernen, machen, trinken, schlafen, mögen, nehmen...).
-- اسم المفعول (Partizip II): يجب أن يكون الصيغة اللغوية الصحيحة المعتمدة في قواميس Duden!
-  * الأفعال القوية/الشاذة (Starke Verben) مثل fahren تأخذ Partizip II ينتهي بـ -en حصراً: gefahren (يُمنع منعاً باتاً اختراع gefahrt).
-  * الأفعال الشاذة الأخرى: essen -> gegessen, gehen -> gegangen, kommen -> gekommen, nehmen -> genommen, sprechen -> gesprochen, sehen -> gesehen, trinken -> getrunken.
+1. قاعدة الماضي التام (Perfekt) والفعل المساعد:
+- حدد بدقة الفعل المساعد (Hilfsverb) الذي يصرف معه الفعل في الماضي: إما "haben" أو "sein" (مثال: أفعال الحركة والانتقال وتغير الحالة تأخذ sein مثل gehen, fahren, kommen, bleiben, sein... وباقي الأفعال تأخذ haben مثل essen, lernen, machen, trinken, schlafen, mögen...).
+- حدد اسم المفعول (Partizip II) بدقة، مثل: gegessen, gefahren, gegangen, gemocht, gelernt...
 - قم بتركيب تصريف Perfekt لكل ضمير باستخدام الفعل المساعد المصرف + اسم المفعول:
   * مع haben: habe gegessen, hast gegessen, hat gegessen, haben gegessen, habt gegessen, haben gegessen
   * مع sein: bin gefahren, bist gefahren, ist gefahren, sind gefahren, seid gefahren, sind gefahren
 
-2. قاعدة الحاضر (Präsens) وقاعدة الأوملاوت الصارمة:
-- يجب تمييز أي حرف يتغير أو ينحرف في جذر الفعل (Vokalwechsel) أو تصريف شاذ بوسم <span class="irregular-letter">الحرف أو الأحرف المتغيرة فقط</span> (مثال: du f<span class="irregular-letter">ä</span>hrst, er f<span class="irregular-letter">ä</span>hrt).
+2. قاعدة الماضي البسيط (Präteritum):
+- صرّف الفعل في زمن Präteritum لجميع الضمائر الشخصية: ich, du, er (es/sie), wir, ihr, sie (Sie).
+- في الأفعال الشاذة، ميز الحرف أو المقطع الشاذ أو المتغير بوسم <span class="irregular-letter">...</span> (مثل aß, sprach, fuhr, ging, war, hatte, mochte, konnte...).
+
+3. قاعدة الحاضر (Präsens) وقاعدة الأوملاوت الصارمة:
+- يجب تمييز أي حرف يتغير أو ينحرف في جذر الفعل (Vokalwechsel) أو تصريف شاذ بوسم <span class="irregular-letter">الحرف أو الأحرف المتغيرة فقط</span>.
 - في أفعال الكيفية (Modalverben) مثل mögen و können: كلمات المفرد تنحرف كلياً في الجذر والنهاية (mag, magst, mag / kann, kannst, kann)، فتكون بالكامل حمراء: <span class="irregular-letter">mag</span> و <span class="irregular-letter">magst</span>... أما صيغ الجمع فمطابقة للمصدر وبدون أي وسوم.
 - إذا كان حرف الأوملاوت موجوداً أصلاً في المصدر (مثل mögen, können, müssen)، فإن بقاءه في صيغ جمع الحاضر (wir mögen, ihr mögt...) هو نظامي ويُمنع منعاً باتاً تلوينه بالأحمر.
 
 نماذج إرشادية مختصرة:
-- فعل fahren:
-  * Hilfsverb: "sein", Partizip II: "gefahren"
-  * Präsens: ich fahre, du f<span class="irregular-letter">ä</span>hrst, er f<span class="irregular-letter">ä</span>hrt, wir fahren, ihr fahrt, sie fahren
-  * Perfekt: bin gefahren, bist gefahren, ist gefahren, sind gefahren, seid gefahren, sind gefahren
-
 - فعل essen:
   * Hilfsverb: "haben", Partizip II: "gegessen"
   * Präsens: ich esse, du <span class="irregular-letter">i</span>sst, er <span class="irregular-letter">i</span>sst, wir essen, ihr esst, sie essen
   * Perfekt: habe gegessen, hast gegessen, hat gegessen, haben gegessen, habt gegessen, haben gegessen
+  * Präteritum: <span class="irregular-letter">aß</span>, <span class="irregular-letter">aß</span>est, <span class="irregular-letter">aß</span>, <span class="irregular-letter">aß</span>en, <span class="irregular-letter">aß</span>t, <span class="irregular-letter">aß</span>en
+
+- فعل fahren:
+  * Hilfsverb: "sein", Partizip II: "gefahren"
+  * Präsens: ich fahre, du f<span class="irregular-letter">ä</span>hrst, er f<span class="irregular-letter">ä</span>hrt, wir fahren, ihr fahrt, sie fahren
+  * Perfekt: bin gefahren, bist gefahren, ist gefahren, sind gefahren, seid gefahren, sind gefahren
+  * Präteritum: <span class="irregular-letter">fuhr</span>, <span class="irregular-letter">fuhr</span>st, <span class="irregular-letter">fuhr</span>, <span class="irregular-letter">fuhr</span>en, <span class="irregular-letter">fuhr</span>t, <span class="irregular-letter">fuhr</span>en
 
 يجب أن ترجع النتيجة ككائن JSON حصراً بالتنسيق التالي دون أي مقدمات أو علامات إضافية (بيانات لغوية نقية خالية من أي نصوص حشوية):
 {
@@ -2197,14 +2199,14 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
   "speechBase": "صيغة المصدر الصالحة للنطق الصوتي بالألمانية",
   "defaultFolder": "المجلد الأنسب: إما 'أفعال غير منتظمة' أو 'أفعال الكيفية (Modalverben)' أو 'أفعال A1 / A2' أو 'أفعال منتظمة'",
   "auxiliary": "haben أو sein",
-  "partizip2": "اسم المفعول Partizip II بدقة (مثل gefahren أو gegessen)",
+  "partizip2": "اسم المفعول Partizip II (مثل gegessen أو gefahren)",
   "forms": {
     "ich": "تصريف الحاضر (Präsens) مع تمييز الحروف الشاذة بـ <span class=\\"irregular-letter\\">",
-    "du": "du تصريف الحاضر مع تمييز الحروف الشاذة",
-    "er": "er es sie تصريف الحاضر مع تمييز الحروف الشاذة",
-    "wir": "wir تصريف الحاضر",
-    "ihr": "ihr تصريف الحاضر",
-    "sie": "sie تصريف الحاضر"
+    "du": "تصريف الحاضر مع تمييز الحروف الشاذة",
+    "er": "تصريف الحاضر مع تمييز الحروف الشاذة",
+    "wir": "تصريف الحاضر",
+    "ihr": "تصريف الحاضر",
+    "sie": "تصريف الحاضر"
   },
   "plainForms": {
     "ich": "ich + تصريف الحاضر مجرداً من أي وسوم HTML للنطق الصوتي",
@@ -2216,14 +2218,14 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
   },
   "past": {
     "auxiliary": "haben أو sein",
-    "partizip2": "اسم المفعول Partizip II (مثل gefahren أو gegessen)",
+    "partizip2": "اسم المفعول Partizip II",
     "perfektForms": {
-      "ich": "تصريف الماضي التام مع المساعد (مثل bin gefahren أو habe gegessen)",
-      "du": "تصريف الماضي التام مع المساعد (مثل bist gefahren أو hast gegessen)",
-      "er": "تصريف الماضي التام مع المساعد (مثل ist gefahren أو hat gegessen)",
-      "wir": "تصريف الماضي التام مع المساعد (مثل sind gefahren أو haben gegessen)",
-      "ihr": "تصريف الماضي التام مع المساعد (مثل seid gefahren أو habt gegessen)",
-      "sie": "تصريف الماضي التام مع المساعد (مثل sind gefahren أو haben gegessen)"
+      "ich": "تصريف الماضي التام مع المساعد (مثل habe gegessen أو bin gefahren)",
+      "du": "تصريف الماضي التام مع المساعد (مثل hast gegessen أو bist gefahren)",
+      "er": "تصريف الماضي التام مع المساعد (مثل hat gegessen أو ist gefahren)",
+      "wir": "تصريف الماضي التام مع المساعد (مثل haben gegessen أو sind gefahren)",
+      "ihr": "تصريف الماضي التام مع المساعد (مثل habt gegessen أو seid gefahren)",
+      "sie": "تصريف الماضي التام مع المساعد (مثل haben gegessen أو sind gefahren)"
     },
     "plainPerfektForms": {
       "ich": "ich + تصريف الماضي التام كاملاً",
@@ -2232,9 +2234,25 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
       "wir": "wir + تصريف الماضي التام كاملاً",
       "ihr": "ihr + تصريف الماضي التام كاملاً",
       "sie": "sie + تصريف الماضي التام كاملاً"
+    },
+    "prateritumForms": {
+      "ich": "تصريف الماضي البسيط Präteritum (مثل aß أو lernte)",
+      "du": "تصريف الماضي البسيط Präteritum (مثل aßest أو lerntest)",
+      "er": "تصريف الماضي البسيط Präteritum (مثل aß أو lernte)",
+      "wir": "تصريف الماضي البسيط Präteritum (مثل aßen أو lernten)",
+      "ihr": "تصريف الماضي البسيط Präteritum (مثل aßt أو lerntet)",
+      "sie": "تصريف الماضي البسيط Präteritum (مثل aßen أو lernten)"
+    },
+    "plainPrateritumForms": {
+      "ich": "ich + تصريف الماضي البسيط",
+      "du": "du + تصريف الماضي البسيط",
+      "er": "er + تصريف الماضي البسيط",
+      "wir": "wir + تصريف الماضي البسيط",
+      "ihr": "ihr + تصريف الماضي البسيط",
+      "sie": "sie + تصريف الماضي البسيط"
     }
   }
-};`;;
+};`;
 
       const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
       const isGroq = primaryModel.includes("groq") || primaryModel === "groq-llama-3.3-70b";
@@ -4578,68 +4596,6 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
     }
   }
 
-  function getLocalNetworkIps(): string[] {
-    const interfaces = os.networkInterfaces();
-    const ips: string[] = [];
-    for (const name of Object.keys(interfaces)) {
-      const ifaceList = interfaces[name];
-      if (ifaceList) {
-        for (const iface of ifaceList) {
-          // Strictly accept ONLY valid private LAN addresses (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
-          // Explicitly discard 169.254.x.x (link-local), loopbacks, and container virtual bridges
-          if (
-            iface.family === "IPv4" &&
-            !iface.internal &&
-            !iface.address.startsWith("169.254.") &&
-            !iface.address.startsWith("127.") &&
-            /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(iface.address)
-          ) {
-            ips.push(iface.address);
-          }
-        }
-      }
-    }
-    return ips.sort((a, b) => {
-      // Prioritize 192.168.* as standard home/office Wi-Fi routers
-      const aIs192 = a.startsWith("192.168.");
-      const bIs192 = b.startsWith("192.168.");
-      if (aIs192 && !bIs192) return -1;
-      if (!aIs192 && bIs192) return 1;
-      return 0;
-    });
-  }
-
-  function normalizeMediaUrlToRelative(url?: string): string {
-    if (!url || typeof url !== "string") return "";
-    const clean = url.trim();
-    const fixed = clean.replace(/^\/\/api\/\//, "/api/").replace(/^\/\/uploads\/\//, "/uploads/");
-    return fixed.replace(/^https?:\/\/[^\/]+(\/(?:api|uploads)\/.*)$/i, "$1");
-  }
-
-  // API Route - Get server network host info (for mobile / LAN sharing)
-  app.get("/api/system/network-info", (req, res) => {
-    try {
-      const host = req.get("x-forwarded-host") || req.get("host") || "localhost:3000";
-      const proto = req.get("x-forwarded-proto") || req.protocol || "http";
-      const networkIps = getLocalNetworkIps();
-      const primaryLanIp = networkIps.find(ip => /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip)) || networkIps[0] || "";
-      const portMatch = host.match(/:(\d+)$/);
-      const port = portMatch ? portMatch[1] : "3000";
-      const lanHost = primaryLanIp ? `${primaryLanIp}:${port}` : null;
-
-      return res.json({
-        success: true,
-        currentHost: host,
-        protocol: proto,
-        primaryLanIp,
-        lanHost,
-        networkIps
-      });
-    } catch (e: any) {
-      return res.status(500).json({ success: false, error: e.message });
-    }
-  });
-
   // API Route - Create or update a shared deck link
   app.post("/api/share/folder", express.json({ limit: "50mb" }), async (req, res) => {
     try {
@@ -4659,7 +4615,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
           name: folder.name,
           description: folder.description || "",
           color: folder.color || "#0056f6",
-          coverImage: normalizeMediaUrlToRelative(folder.coverImage || ""),
+          coverImage: folder.coverImage || "",
           coverImagePosition: folder.coverImagePosition || "50% 50%",
           frontLang: folder.frontLang || "de",
           backLang: folder.backLang || "ar",
@@ -4670,14 +4626,14 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
           folderId: c.folderId || folder.id,
           frontText: c.frontText || "",
           frontLang: c.frontLang || folder.frontLang || "de",
-          frontImage: normalizeMediaUrlToRelative(c.frontImage || ""),
+          frontImage: c.frontImage || "",
           frontImagePosition: c.frontImagePosition || "50% 50%",
-          frontAudioUrl: normalizeMediaUrlToRelative(c.frontAudioUrl || ""),
+          frontAudioUrl: c.frontAudioUrl || "",
           backText: c.backText || "",
           backLang: c.backLang || folder.backLang || "ar",
-          backImage: normalizeMediaUrlToRelative(c.backImage || ""),
+          backImage: c.backImage || "",
           backImagePosition: c.backImagePosition || "50% 50%",
-          backAudioUrl: normalizeMediaUrlToRelative(c.backAudioUrl || ""),
+          backAudioUrl: c.backAudioUrl || "",
           isArticleMode: !!c.isArticleMode,
           correctArticle: c.correctArticle || "",
           isPluralMode: !!c.isPluralMode,
@@ -4693,7 +4649,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
           name: sf.name,
           description: sf.description || "",
           color: sf.color || "#0056f6",
-          coverImage: normalizeMediaUrlToRelative(sf.coverImage || ""),
+          coverImage: sf.coverImage || "",
           coverImagePosition: sf.coverImagePosition || "50% 50%",
           frontLang: sf.frontLang || "de",
           backLang: sf.backLang || "ar",
@@ -4710,27 +4666,14 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
 
       const host = req.get("x-forwarded-host") || req.get("host") || "localhost:3000";
       const proto = req.get("x-forwarded-proto") || req.protocol || "http";
-      const publicHost = host.replace(/^ais-dev-/, "ais-pre-");
-      const shareUrl = `${proto}://${publicHost}/?share=${shareId}`;
+      const shareUrl = `${proto}://${host}/?share=${shareId}`;
 
-      const networkIps = getLocalNetworkIps();
-      const primaryLanIp = networkIps.find(ip => /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip)) || networkIps[0] || "";
-      const portMatch = host.match(/:(\d+)$/);
-      const port = portMatch ? portMatch[1] : "3000";
-      const lanHost = primaryLanIp ? `${primaryLanIp}:${port}` : null;
-      const lanShareUrl = lanHost ? `${proto}://${lanHost}/?share=${shareId}` : null;
-
-      console.log(`[Shared Decks] Created share link: ${shareUrl} (LAN: ${lanShareUrl || "N/A"}) for folder "${folder.name}" with ${payload.cardCount} cards`);
+      console.log(`[Shared Decks] Created share link: ${shareUrl} for folder "${folder.name}" with ${payload.cardCount} cards`);
 
       return res.json({
         success: true,
         shareId,
         shareUrl,
-        lanShareUrl,
-        lanHost,
-        primaryLanIp,
-        networkIps,
-        currentHost: host,
         cardCount: payload.cardCount,
         folderName: folder.name
       });
@@ -4739,7 +4682,6 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       return res.status(500).json({ success: false, error: err.message || "حدث خطأ أثناء إنشاء رابط المشاركة" });
     }
   });
-
 
   // API Route - Get shared deck by shareId (public, no authentication required)
   app.get("/api/share/:shareId", (req, res) => {

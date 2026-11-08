@@ -1049,7 +1049,8 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
         if (!queryTerm) continue;
 
         try {
-          const apiBase = "/api/images";
+          const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+          const apiBase = isLocalhost ? "http://localhost:3000/api/images" : "/api/images";
           const res = await fetch(`${apiBase}?q=${encodeURIComponent(queryTerm)}&page=1&provider=duckduckgo`);
           
           if (res.ok) {

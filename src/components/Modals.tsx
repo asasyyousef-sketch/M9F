@@ -132,7 +132,8 @@ export const preloadImage = async (url: string): Promise<string> => {
   } catch (err) {
     // CORS or direct network failure: try fetching via Server Proxy to bypass CORS and store image bytes
     try {
-      const proxyBase = "/api/proxy-image";
+      const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const proxyBase = isLocalhost ? "http://localhost:3000/api/proxy-image" : "/api/proxy-image";
       const proxyUrl = `${proxyBase}?url=${encodeURIComponent(cleanUrl)}`;
 
       const controller = new AbortController();
@@ -3349,7 +3350,8 @@ export const ImagePickerModal: React.FC<ImagePickerModalProps> = ({
   const searchDdg = async (searchTerm: string, pageNum: number, offsetParam?: number | null) => {
     setLoadingDdg(true);
     try {
-      const apiBase = "/api/images";
+      const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const apiBase = isLocalhost ? "http://localhost:3000/api/images" : "/api/images";
       let url = `${apiBase}?q=${encodeURIComponent(searchTerm)}&page=${pageNum}&provider=duckduckgo`;
       
       const currentOffset = offsetParam !== undefined ? offsetParam : nextOffsetDdg;
@@ -3393,7 +3395,8 @@ export const ImagePickerModal: React.FC<ImagePickerModalProps> = ({
   const searchPixabay = async (searchTerm: string, pageNum: number, keyOverride?: string) => {
     setLoadingPixabay(true);
     try {
-      const apiBase = "/api/images";
+      const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const apiBase = isLocalhost ? "http://localhost:3000/api/images" : "/api/images";
       const keyToUse = keyOverride !== undefined ? keyOverride : (pixabayKey || localStorage.getItem("settings_pixabay_key") || "");
       
       let url = `${apiBase}?q=${encodeURIComponent(searchTerm)}&page=${pageNum}&provider=pixabay&customKey=${encodeURIComponent(keyToUse)}`;

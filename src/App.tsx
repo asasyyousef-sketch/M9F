@@ -19,7 +19,7 @@ import {
 } from "./components/Modals";
 import { ShareFolderModal, ImportSharedDeckModal } from "./components/ShareModals";
 import { ReviewSession } from "./components/ReviewSession";
-import { Folder, Flashcard, ReviewMethod, DbStatus, TranscriptDocument, SharedDeckData, normalizeMediaUrl } from "./types";
+import { Folder, Flashcard, ReviewMethod, DbStatus, TranscriptDocument, SharedDeckData } from "./types";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { AuthScreen } from "./components/AuthScreen";
 import { CheckCircle2 } from "lucide-react";
@@ -223,19 +223,11 @@ function MainStudyApp() {
     }
   }, [toastMessage]);
 
-  // Detect shared deck link (?share=...) on initial mount or when currentUser logs in
+  // Detect shared deck link (?share=...) on initial mount
   useEffect(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
-      let shareParam = urlParams.get("share");
-      if (!shareParam) {
-        shareParam = sessionStorage.getItem("pending_share_deck_id");
-      } else {
-        try {
-          sessionStorage.setItem("pending_share_deck_id", shareParam);
-        } catch (e) {}
-      }
-
+      const shareParam = urlParams.get("share");
       if (shareParam) {
         setIsShareLoading(true);
         setIsImportModalOpen(true);
@@ -249,9 +241,6 @@ function MainStudyApp() {
           .then((data) => {
             if (data.success && data.data) {
               setSharedDeckData(data.data);
-              try {
-                sessionStorage.removeItem("pending_share_deck_id");
-              } catch (e) {}
             } else {
               setShareError(data.error || "تعذر العثور على الملف المشارك");
             }
@@ -267,7 +256,7 @@ function MainStudyApp() {
     } catch (e) {
       console.error("[Share] URL parse error:", e);
     }
-  }, [currentUser?.id]);
+  }, []);
 
   // Fetch initial database items from Express Node backend
   useEffect(() => {
@@ -1148,7 +1137,6 @@ function MainStudyApp() {
         ...shared.folder,
         id: newFolderId,
         name: targetFolderName,
-        coverImage: normalizeMediaUrl(shared.folder.coverImage),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -1160,10 +1148,6 @@ function MainStudyApp() {
           ...c,
           id: "c_" + Date.now() + "_" + index + "_" + Math.random().toString(36).substring(2, 7),
           folderId: assignedFolderId,
-          frontImage: normalizeMediaUrl(c.frontImage),
-          frontAudioUrl: normalizeMediaUrl(c.frontAudioUrl),
-          backImage: normalizeMediaUrl(c.backImage),
-          backAudioUrl: normalizeMediaUrl(c.backAudioUrl),
           streak: 0,
           createdAt: new Date(Date.now() + index * 100).toISOString()
         };

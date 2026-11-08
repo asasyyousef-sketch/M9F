@@ -235,19 +235,6 @@ export function cleanImageSearchQuery(query: string, userInstruction?: string): 
   return clean;
 }
 
-/**
- * Normalizes media URLs (images, audio) by converting any hardcoded host/IP
- * (like http://localhost:3000/api/... or http://192.168.0.159:3000/api/...)
- * into domain-independent relative paths (/api/... or /uploads/...).
- * This ensures media files never break when accessing from different devices or IPs.
- */
-export function normalizeMediaUrl(url?: string): string {
-  if (!url || typeof url !== "string") return "";
-  const clean = url.trim();
-  const fixed = clean.replace(/^\/\/api\/\//, "/api/").replace(/^\/\/uploads\/\//, "/uploads/");
-  return fixed.replace(/^https?:\/\/[^\/]+(\/(?:api|uploads)\/.*)$/i, "$1");
-}
-
 export type ReviewMethod = 'challenge' | 'write' | 'listen' | 'article' | 'match' | 'classic' | 'puzzles' | 'repetition' | 'spoken_challenge';
 
 export interface SpeakingChallengeItem {
