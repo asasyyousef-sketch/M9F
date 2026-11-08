@@ -24,8 +24,8 @@ export interface VerbPastData {
   partizip2: string;
   perfektForms: VerbForms;
   plainPerfektForms: VerbPlainForms;
-  prateritumForms: VerbForms;
-  plainPrateritumForms: VerbPlainForms;
+  prateritumForms?: VerbForms;
+  plainPrateritumForms?: VerbPlainForms;
 }
 
 export interface VerbItem {
@@ -39,7 +39,7 @@ export interface VerbItem {
   past?: VerbPastData;
 }
 
-export type VerbTenseTab = "prasens" | "perfekt" | "prateritum";
+export type VerbTenseTab = "prasens" | "perfekt";
 
 const initialVerbDataStore: Record<string, VerbItem> = {
   "möchte": {
@@ -631,6 +631,135 @@ const initialVerbDataStore: Record<string, VerbItem> = {
         sie: "sie waren"
       }
     }
+  },
+  "fahren": {
+    title: "fahren",
+    speechBase: "fahren",
+    defaultFolder: "أفعال غير منتظمة",
+    auxiliary: "sein",
+    partizip2: "gefahren",
+    forms: {
+      ich: "fahre",
+      du: 'f<span class="irregular-letter">ä</span>hrst',
+      er: 'f<span class="irregular-letter">ä</span>hrt',
+      wir: "fahren",
+      ihr: "fahrt",
+      sie: "fahren"
+    },
+    plainForms: {
+      ich: "ich fahre",
+      du: "du fährst",
+      er: "er es sie fährt",
+      wir: "wir fahren",
+      ihr: "ihr fahrt",
+      sie: "sie fahren"
+    },
+    past: {
+      auxiliary: "sein",
+      partizip2: "gefahren",
+      perfektForms: {
+        ich: "bin gefahren",
+        du: "bist gefahren",
+        er: "ist gefahren",
+        wir: "sind gefahren",
+        ihr: "seid gefahren",
+        sie: "sind gefahren"
+      },
+      plainPerfektForms: {
+        ich: "ich bin gefahren",
+        du: "du bist gefahren",
+        er: "er ist gefahren",
+        wir: "wir sind gefahren",
+        ihr: "ihr seid gefahren",
+        sie: "sie sind gefahren"
+      }
+    }
+  },
+  "gehen": {
+    title: "gehen",
+    speechBase: "gehen",
+    defaultFolder: "أفعال غير منتظمة",
+    auxiliary: "sein",
+    partizip2: "gegangen",
+    forms: {
+      ich: "gehe",
+      du: "gehst",
+      er: "geht",
+      wir: "gehen",
+      ihr: "geht",
+      sie: "gehen"
+    },
+    plainForms: {
+      ich: "ich gehe",
+      du: "du gehst",
+      er: "er es sie geht",
+      wir: "wir gehen",
+      ihr: "ihr geht",
+      sie: "sie gehen"
+    },
+    past: {
+      auxiliary: "sein",
+      partizip2: "gegangen",
+      perfektForms: {
+        ich: "bin gegangen",
+        du: "bist gegangen",
+        er: "ist gegangen",
+        wir: "sind gegangen",
+        ihr: "seid gegangen",
+        sie: "sind gegangen"
+      },
+      plainPerfektForms: {
+        ich: "ich bin gegangen",
+        du: "du bist gegangen",
+        er: "er ist gegangen",
+        wir: "wir sind gegangen",
+        ihr: "ihr seid gegangen",
+        sie: "sie sind gegangen"
+      }
+    }
+  },
+  "kommen": {
+    title: "kommen",
+    speechBase: "kommen",
+    defaultFolder: "أفعال غير منتظمة",
+    auxiliary: "sein",
+    partizip2: "gekommen",
+    forms: {
+      ich: "komme",
+      du: "kommst",
+      er: "kommt",
+      wir: "kommen",
+      ihr: "kommt",
+      sie: "kommen"
+    },
+    plainForms: {
+      ich: "ich komme",
+      du: "du kommst",
+      er: "er es sie kommt",
+      wir: "wir kommen",
+      ihr: "ihr kommt",
+      sie: "sie kommen"
+    },
+    past: {
+      auxiliary: "sein",
+      partizip2: "gekommen",
+      perfektForms: {
+        ich: "bin gekommen",
+        du: "bist gekommen",
+        er: "ist gekommen",
+        wir: "sind gekommen",
+        ihr: "seid gekommen",
+        sie: "sind gekommen"
+      },
+      plainPerfektForms: {
+        ich: "ich bin gekommen",
+        du: "du bist gekommen",
+        er: "er ist gekommen",
+        wir: "wir sind gekommen",
+        ihr: "ihr seid gekommen",
+        sie: "sie sind gekommen"
+      }
+    }
   }
 };
 
@@ -783,24 +912,52 @@ export function ensureVerbPastData(key: string, item: VerbItem): VerbItem {
   if (!item) return item;
 
   const cleanKey = (key || item.speechBase || item.title || "").toLowerCase().replace(/[„“"']/g, "").trim();
+
+  // If the verb is 'fahren', ensure partizip2 is never corrupted as 'gefahrt'
+  let p2 = (item.partizip2 || item.past?.partizip2 || "").trim();
+  if (cleanKey === "fahren" && (p2 === "gefahrt" || !p2)) {
+    p2 = "gefahren";
+  }
+
   const aux: "haben" | "sein" =
-    item.auxiliary === "sein" || (item.past && item.past.auxiliary === "sein") || SEIN_VERBS_SET.has(cleanKey)
+    item.auxiliary === "sein" || item.past?.auxiliary === "sein" || SEIN_VERBS_SET.has(cleanKey)
       ? "sein"
       : "haben";
 
-  const p2 = item.partizip2 || (item.past && item.past.partizip2) || (cleanKey.endsWith("en") ? "ge" + cleanKey.slice(0, -2) + "t" : "ge" + cleanKey + "t");
+  // If already has verified perfektForms from AI or verified initial store
+  if (item.past && item.past.perfektForms && item.past.perfektForms.ich) {
+    const cleanedPerfektForms: VerbForms = { ...item.past.perfektForms };
+    (Object.keys(cleanedPerfektForms) as Array<keyof VerbForms>).forEach((k) => {
+      if (cleanKey === "fahren") {
+        cleanedPerfektForms[k] = cleanedPerfektForms[k].replace(/\bgefahrt\b/g, "gefahren");
+      }
+    });
+    const cleanedPlainPerfektForms: VerbPlainForms = { ...(item.past.plainPerfektForms || cleanedPerfektForms) };
+    (Object.keys(cleanedPlainPerfektForms) as Array<keyof VerbPlainForms>).forEach((k) => {
+      if (cleanKey === "fahren") {
+        cleanedPlainPerfektForms[k] = cleanedPlainPerfektForms[k].replace(/\bgefahrt\b/g, "gefahren");
+      }
+    });
 
-  if (item.past && item.past.perfektForms && item.past.prateritumForms) {
+    const finalP2 = p2 || item.past.partizip2 || (cleanKey === "fahren" ? "gefahren" : "");
+
     return {
       ...item,
       auxiliary: aux,
-      partizip2: p2,
+      partizip2: finalP2,
       past: {
-        ...item.past,
         auxiliary: aux,
-        partizip2: p2
+        partizip2: finalP2,
+        perfektForms: cleanedPerfektForms,
+        plainPerfektForms: cleanedPlainPerfektForms
       }
     };
+  }
+
+  // If no verified partizip2 exists yet (e.g. still awaiting AI response),
+  // NEVER fabricate fake words like 'gefahrt' or guess rules.
+  if (!p2) {
+    return item;
   }
 
   const auxForms = aux === "sein"
@@ -825,25 +982,6 @@ export function ensureVerbPastData(key: string, item: VerbItem): VerbItem {
     sie: `sie ${auxForms.sie} ${p2}`
   };
 
-  const stem = cleanKey.replace(/en$|n$/, "");
-  const prateritumForms: VerbForms = {
-    ich: `${stem}te`,
-    du: `${stem}test`,
-    er: `${stem}te`,
-    wir: `${stem}ten`,
-    ihr: `${stem}tet`,
-    sie: `${stem}ten`
-  };
-
-  const plainPrateritumForms: VerbPlainForms = {
-    ich: `ich ${stem}te`,
-    du: `du ${stem}test`,
-    er: `er ${stem}te`,
-    wir: `wir ${stem}ten`,
-    ihr: `ihr ${stem}tet`,
-    sie: `sie ${stem}ten`
-  };
-
   return {
     ...item,
     auxiliary: aux,
@@ -851,10 +989,8 @@ export function ensureVerbPastData(key: string, item: VerbItem): VerbItem {
     past: {
       auxiliary: aux,
       partizip2: p2,
-      perfektForms: item.past?.perfektForms || perfektForms,
-      plainPerfektForms: item.past?.plainPerfektForms || plainPerfektForms,
-      prateritumForms: item.past?.prateritumForms || prateritumForms,
-      plainPrateritumForms: item.past?.plainPrateritumForms || plainPrateritumForms
+      perfektForms,
+      plainPerfektForms
     }
   };
 }
@@ -894,6 +1030,18 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
         if (merged["haben"]) {
           merged["haben"].forms = normalizeModalVerbForms("haben", merged["haben"].forms);
         }
+        // Strict linguistic guard: ensure 'fahren' is never corrupted as 'gefahrt'
+        if (merged["fahren"]) {
+          merged["fahren"].partizip2 = "gefahren";
+          if (merged["fahren"].past) {
+            merged["fahren"].past.partizip2 = "gefahren";
+            if (merged["fahren"].past.perfektForms) {
+              (Object.keys(merged["fahren"].past.perfektForms) as Array<keyof VerbForms>).forEach((k) => {
+                merged["fahren"].past!.perfektForms[k] = merged["fahren"].past!.perfektForms[k].replace(/\bgefahrt\b/g, "gefahren");
+              });
+            }
+          }
+        }
         return merged;
       }
     } catch (e) {}
@@ -917,6 +1065,9 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
   const quickSliderVerbs = Array.from(
     new Set([
       "möchte",
+      "fahren",
+      "gehen",
+      "kommen",
       "essen",
       "nehmen",
       "mögen",
@@ -1004,23 +1155,17 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
     auxiliary: currentVerbData.auxiliary || "haben",
     partizip2: currentVerbData.partizip2 || "",
     perfektForms: { ich: "", du: "", er: "", wir: "", ihr: "", sie: "" },
-    plainPerfektForms: { ich: "", du: "", er: "", wir: "", ihr: "", sie: "" },
-    prateritumForms: { ich: "", du: "", er: "", wir: "", ihr: "", sie: "" },
-    plainPrateritumForms: { ich: "", du: "", er: "", wir: "", ihr: "", sie: "" }
+    plainPerfektForms: { ich: "", du: "", er: "", wir: "", ihr: "", sie: "" }
   };
 
   const displayForms: VerbForms =
     activeTense === "perfekt"
       ? pastData.perfektForms
-      : activeTense === "prateritum"
-      ? pastData.prateritumForms
       : currentVerbData.forms;
 
   const speechForms: VerbPlainForms =
     activeTense === "perfekt"
       ? pastData.plainPerfektForms
-      : activeTense === "prateritum"
-      ? pastData.plainPrateritumForms
       : currentVerbData.plainForms;
 
   // Voice playback with full support for Google Cloud TTS, Piper Neural Models, and Web Speech API
@@ -1438,12 +1583,12 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
             </div>
           </header>
 
-          {/* Clean Tense Selector (الحاضر والمضارع / الماضي التام / الماضي البسيط) */}
-          <div className="w-full max-w-[460px] flex items-center justify-center gap-1.5 p-1 bg-neutral-200/60 border border-neutral-300/70 rounded-2xl select-none" dir="rtl">
+          {/* Clean Tense Selector (المضارع / الماضي) */}
+          <div className="w-full max-w-[460px] flex items-center justify-center gap-2 p-1.5 bg-neutral-200/60 border border-neutral-300/70 rounded-2xl select-none" dir="rtl">
             <button
               type="button"
               onClick={() => setActiveTense("prasens")}
-              className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`flex-1 py-2 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeTense === "prasens"
                   ? "bg-[#FFC700] text-neutral-950 shadow-xs scale-[1.01]"
                   : "text-neutral-700 hover:text-neutral-950 hover:bg-white/80"
@@ -1456,7 +1601,7 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
             <button
               type="button"
               onClick={() => setActiveTense("perfekt")}
-              className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`flex-1 py-2 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeTense === "perfekt"
                   ? "bg-[#FFC700] text-neutral-950 shadow-xs scale-[1.01]"
                   : "text-neutral-700 hover:text-neutral-950 hover:bg-white/80"
@@ -1464,19 +1609,6 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
             >
               <span>الماضي التام</span>
               <span className="text-[10px] sm:text-[11px] font-normal opacity-85" dir="ltr">Perfekt</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTense("prateritum")}
-              className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
-                activeTense === "prateritum"
-                  ? "bg-[#FFC700] text-neutral-950 shadow-xs scale-[1.01]"
-                  : "text-neutral-700 hover:text-neutral-950 hover:bg-white/80"
-              }`}
-            >
-              <span>الماضي البسيط</span>
-              <span className="text-[10px] sm:text-[11px] font-normal opacity-85" dir="ltr">Präteritum</span>
             </button>
           </div>
 
@@ -1502,11 +1634,6 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500 text-white text-xs font-bold tracking-tight shadow-xs" dir="rtl">
                           <span>المساعد:</span>
                           <span className="underline decoration-2 font-mono font-bold" dir="ltr">{pastData.auxiliary}</span>
-                        </span>
-                      )}
-                      {activeTense === "prateritum" && (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-neutral-800 text-white text-xs font-bold tracking-tight shadow-xs">
-                          Präteritum
                         </span>
                       )}
                     </div>

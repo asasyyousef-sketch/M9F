@@ -2158,38 +2158,36 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
       const aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
 
       const prompt = `أنت خبير لغوي متخصص في تصريف الأفعال في اللغة الألمانية (Deutsche Verben Konjugation) وتدريس القواعد لمتعلمي اللغة الألمانية (DaF).
-المطلوب: قم بتصريف الفعل التالي بدقة في زمن الحاضر (Präsens) وزمن الماضي بنوعيه: الماضي التام (Perfekt) والماضي البسيط (Präteritum) لجميع الضمائر الشخصية:
+المطلوب: قم بتصريف الفعل التالي بدقة فائقة في زمن المضارع/الحاضر (Präsens) وزمن الماضي (Perfekt) مع الفعل المساعد الدقيق واسم المفعول الصحيح حصراً:
 الفعل أو الكلمة المطلوبة: "${cleanVerb}"
-(إذا كانت الكلمة بالعربية مثل "يسافر" أو "يأكل" أو "يذهب" أو "يحب"، حدد الفعل الألماني المقابل أولاً ثم قم بتصريفه).
+(إذا كانت الكلمة بالعربية مثل "يسافر" أو "يقود" أو "يأكل" أو "يذهب" أو "يحب"، حدد الفعل الألماني المقابل أولاً ثم قم بتصريفه بدقة).
 
-1. قاعدة الماضي التام (Perfekt) والفعل المساعد:
-- حدد بدقة الفعل المساعد (Hilfsverb) الذي يصرف معه الفعل في الماضي: إما "haben" أو "sein" (مثال: أفعال الحركة والانتقال وتغير الحالة تأخذ sein مثل gehen, fahren, kommen, bleiben, sein... وباقي الأفعال تأخذ haben مثل essen, lernen, machen, trinken, schlafen, mögen...).
-- حدد اسم المفعول (Partizip II) بدقة، مثل: gegessen, gefahren, gegangen, gemocht, gelernt...
+1. قاعدة الماضي (Perfekt) والفعل المساعد واسم المفعول (Partizip II):
+- حدد بدقة الفعل المساعد (Hilfsverb): إما "haben" أو "sein".
+  * أفعال الحركة والانتقال وتغير المكان/الحالة تأخذ sein قطعاً (مثل fahren, gehen, kommen, fliegen, laufen, bleiben, sein...).
+  * باقي الأفعال تأخذ haben (مثل essen, lernen, machen, trinken, schlafen, mögen, nehmen...).
+- اسم المفعول (Partizip II): يجب أن يكون الصيغة اللغوية الصحيحة المعتمدة في قواميس Duden!
+  * الأفعال القوية/الشاذة (Starke Verben) مثل fahren تأخذ Partizip II ينتهي بـ -en حصراً: gefahren (يُمنع منعاً باتاً اختراع gefahrt).
+  * الأفعال الشاذة الأخرى: essen -> gegessen, gehen -> gegangen, kommen -> gekommen, nehmen -> genommen, sprechen -> gesprochen, sehen -> gesehen, trinken -> getrunken.
 - قم بتركيب تصريف Perfekt لكل ضمير باستخدام الفعل المساعد المصرف + اسم المفعول:
   * مع haben: habe gegessen, hast gegessen, hat gegessen, haben gegessen, habt gegessen, haben gegessen
   * مع sein: bin gefahren, bist gefahren, ist gefahren, sind gefahren, seid gefahren, sind gefahren
 
-2. قاعدة الماضي البسيط (Präteritum):
-- صرّف الفعل في زمن Präteritum لجميع الضمائر الشخصية: ich, du, er (es/sie), wir, ihr, sie (Sie).
-- في الأفعال الشاذة، ميز الحرف أو المقطع الشاذ أو المتغير بوسم <span class="irregular-letter">...</span> (مثل aß, sprach, fuhr, ging, war, hatte, mochte, konnte...).
-
-3. قاعدة الحاضر (Präsens) وقاعدة الأوملاوت الصارمة:
-- يجب تمييز أي حرف يتغير أو ينحرف في جذر الفعل (Vokalwechsel) أو تصريف شاذ بوسم <span class="irregular-letter">الحرف أو الأحرف المتغيرة فقط</span>.
+2. قاعدة الحاضر (Präsens) وقاعدة الأوملاوت الصارمة:
+- يجب تمييز أي حرف يتغير أو ينحرف في جذر الفعل (Vokalwechsel) أو تصريف شاذ بوسم <span class="irregular-letter">الحرف أو الأحرف المتغيرة فقط</span> (مثال: du f<span class="irregular-letter">ä</span>hrst, er f<span class="irregular-letter">ä</span>hrt).
 - في أفعال الكيفية (Modalverben) مثل mögen و können: كلمات المفرد تنحرف كلياً في الجذر والنهاية (mag, magst, mag / kann, kannst, kann)، فتكون بالكامل حمراء: <span class="irregular-letter">mag</span> و <span class="irregular-letter">magst</span>... أما صيغ الجمع فمطابقة للمصدر وبدون أي وسوم.
 - إذا كان حرف الأوملاوت موجوداً أصلاً في المصدر (مثل mögen, können, müssen)، فإن بقاءه في صيغ جمع الحاضر (wir mögen, ihr mögt...) هو نظامي ويُمنع منعاً باتاً تلوينه بالأحمر.
 
 نماذج إرشادية مختصرة:
-- فعل essen:
-  * Hilfsverb: "haben", Partizip II: "gegessen"
-  * Präsens: ich esse, du <span class="irregular-letter">i</span>sst, er <span class="irregular-letter">i</span>sst, wir essen, ihr esst, sie essen
-  * Perfekt: habe gegessen, hast gegessen, hat gegessen, haben gegessen, habt gegessen, haben gegessen
-  * Präteritum: <span class="irregular-letter">aß</span>, <span class="irregular-letter">aß</span>est, <span class="irregular-letter">aß</span>, <span class="irregular-letter">aß</span>en, <span class="irregular-letter">aß</span>t, <span class="irregular-letter">aß</span>en
-
 - فعل fahren:
   * Hilfsverb: "sein", Partizip II: "gefahren"
   * Präsens: ich fahre, du f<span class="irregular-letter">ä</span>hrst, er f<span class="irregular-letter">ä</span>hrt, wir fahren, ihr fahrt, sie fahren
   * Perfekt: bin gefahren, bist gefahren, ist gefahren, sind gefahren, seid gefahren, sind gefahren
-  * Präteritum: <span class="irregular-letter">fuhr</span>, <span class="irregular-letter">fuhr</span>st, <span class="irregular-letter">fuhr</span>, <span class="irregular-letter">fuhr</span>en, <span class="irregular-letter">fuhr</span>t, <span class="irregular-letter">fuhr</span>en
+
+- فعل essen:
+  * Hilfsverb: "haben", Partizip II: "gegessen"
+  * Präsens: ich esse, du <span class="irregular-letter">i</span>sst, er <span class="irregular-letter">i</span>sst, wir essen, ihr esst, sie essen
+  * Perfekt: habe gegessen, hast gegessen, hat gegessen, haben gegessen, habt gegessen, haben gegessen
 
 يجب أن ترجع النتيجة ككائن JSON حصراً بالتنسيق التالي دون أي مقدمات أو علامات إضافية (بيانات لغوية نقية خالية من أي نصوص حشوية):
 {
@@ -2199,14 +2197,14 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
   "speechBase": "صيغة المصدر الصالحة للنطق الصوتي بالألمانية",
   "defaultFolder": "المجلد الأنسب: إما 'أفعال غير منتظمة' أو 'أفعال الكيفية (Modalverben)' أو 'أفعال A1 / A2' أو 'أفعال منتظمة'",
   "auxiliary": "haben أو sein",
-  "partizip2": "اسم المفعول Partizip II (مثل gegessen أو gefahren)",
+  "partizip2": "اسم المفعول Partizip II بدقة (مثل gefahren أو gegessen)",
   "forms": {
     "ich": "تصريف الحاضر (Präsens) مع تمييز الحروف الشاذة بـ <span class=\\"irregular-letter\\">",
-    "du": "تصريف الحاضر مع تمييز الحروف الشاذة",
-    "er": "تصريف الحاضر مع تمييز الحروف الشاذة",
-    "wir": "تصريف الحاضر",
-    "ihr": "تصريف الحاضر",
-    "sie": "تصريف الحاضر"
+    "du": "du تصريف الحاضر مع تمييز الحروف الشاذة",
+    "er": "er es sie تصريف الحاضر مع تمييز الحروف الشاذة",
+    "wir": "wir تصريف الحاضر",
+    "ihr": "ihr تصريف الحاضر",
+    "sie": "sie تصريف الحاضر"
   },
   "plainForms": {
     "ich": "ich + تصريف الحاضر مجرداً من أي وسوم HTML للنطق الصوتي",
@@ -2218,14 +2216,14 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
   },
   "past": {
     "auxiliary": "haben أو sein",
-    "partizip2": "اسم المفعول Partizip II",
+    "partizip2": "اسم المفعول Partizip II (مثل gefahren أو gegessen)",
     "perfektForms": {
-      "ich": "تصريف الماضي التام مع المساعد (مثل habe gegessen أو bin gefahren)",
-      "du": "تصريف الماضي التام مع المساعد (مثل hast gegessen أو bist gefahren)",
-      "er": "تصريف الماضي التام مع المساعد (مثل hat gegessen أو ist gefahren)",
-      "wir": "تصريف الماضي التام مع المساعد (مثل haben gegessen أو sind gefahren)",
-      "ihr": "تصريف الماضي التام مع المساعد (مثل habt gegessen أو seid gefahren)",
-      "sie": "تصريف الماضي التام مع المساعد (مثل haben gegessen أو sind gefahren)"
+      "ich": "تصريف الماضي التام مع المساعد (مثل bin gefahren أو habe gegessen)",
+      "du": "تصريف الماضي التام مع المساعد (مثل bist gefahren أو hast gegessen)",
+      "er": "تصريف الماضي التام مع المساعد (مثل ist gefahren أو hat gegessen)",
+      "wir": "تصريف الماضي التام مع المساعد (مثل sind gefahren أو haben gegessen)",
+      "ihr": "تصريف الماضي التام مع المساعد (مثل seid gefahren أو habt gegessen)",
+      "sie": "تصريف الماضي التام مع المساعد (مثل sind gefahren أو haben gegessen)"
     },
     "plainPerfektForms": {
       "ich": "ich + تصريف الماضي التام كاملاً",
@@ -2234,25 +2232,9 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
       "wir": "wir + تصريف الماضي التام كاملاً",
       "ihr": "ihr + تصريف الماضي التام كاملاً",
       "sie": "sie + تصريف الماضي التام كاملاً"
-    },
-    "prateritumForms": {
-      "ich": "تصريف الماضي البسيط Präteritum (مثل aß أو lernte)",
-      "du": "تصريف الماضي البسيط Präteritum (مثل aßest أو lerntest)",
-      "er": "تصريف الماضي البسيط Präteritum (مثل aß أو lernte)",
-      "wir": "تصريف الماضي البسيط Präteritum (مثل aßen أو lernten)",
-      "ihr": "تصريف الماضي البسيط Präteritum (مثل aßt أو lerntet)",
-      "sie": "تصريف الماضي البسيط Präteritum (مثل aßen أو lernten)"
-    },
-    "plainPrateritumForms": {
-      "ich": "ich + تصريف الماضي البسيط",
-      "du": "du + تصريف الماضي البسيط",
-      "er": "er + تصريف الماضي البسيط",
-      "wir": "wir + تصريف الماضي البسيط",
-      "ihr": "ihr + تصريف الماضي البسيط",
-      "sie": "sie + تصريف الماضي البسيط"
     }
   }
-};`;
+};`;;
 
       const primaryModel = (selectedModel && selectedModel.trim()) || "gemini-3.6-flash";
       const isGroq = primaryModel.includes("groq") || primaryModel === "groq-llama-3.3-70b";
