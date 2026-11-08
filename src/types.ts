@@ -244,10 +244,8 @@ export function cleanImageSearchQuery(query: string, userInstruction?: string): 
 export function normalizeMediaUrl(url?: string): string {
   if (!url || typeof url !== "string") return "";
   const clean = url.trim();
-  if (/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?(\/(api|uploads)\/.*)$/i.test(clean)) {
-    return clean.replace(/^https?:\/\/[^\/]+(\/(api|uploads)\/)/i, "/$2/");
-  }
-  return clean;
+  const fixed = clean.replace(/^\/\/api\/\//, "/api/").replace(/^\/\/uploads\/\//, "/uploads/");
+  return fixed.replace(/^https?:\/\/[^\/]+(\/(?:api|uploads)\/.*)$/i, "$1");
 }
 
 export type ReviewMethod = 'challenge' | 'write' | 'listen' | 'article' | 'match' | 'classic' | 'puzzles' | 'repetition' | 'spoken_challenge';

@@ -223,11 +223,19 @@ function MainStudyApp() {
     }
   }, [toastMessage]);
 
-  // Detect shared deck link (?share=...) on initial mount
+  // Detect shared deck link (?share=...) on initial mount or when currentUser logs in
   useEffect(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
-      const shareParam = urlParams.get("share");
+      let shareParam = urlParams.get("share");
+      if (!shareParam) {
+        shareParam = sessionStorage.getItem("pending_share_deck_id");
+      } else {
+        try {
+          sessionStorage.setItem("pending_share_deck_id", shareParam);
+        } catch (e) {}
+      }
+
       if (shareParam) {
         setIsShareLoading(true);
         setIsImportModalOpen(true);
@@ -241,6 +249,9 @@ function MainStudyApp() {
           .then((data) => {
             if (data.success && data.data) {
               setSharedDeckData(data.data);
+              try {
+                sessionStorage.removeItem("pending_share_deck_id");
+              } catch (e) {}
             } else {
               setShareError(data.error || "تعذر العثور على الملف المشارك");
             }
@@ -256,7 +267,7 @@ function MainStudyApp() {
     } catch (e) {
       console.error("[Share] URL parse error:", e);
     }
-  }, []);
+  }, [currentUser?.id]);
 
   // Fetch initial database items from Express Node backend
   useEffect(() => {

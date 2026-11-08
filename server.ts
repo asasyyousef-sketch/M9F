@@ -4585,17 +4585,26 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       const ifaceList = interfaces[name];
       if (ifaceList) {
         for (const iface of ifaceList) {
-          if (iface.family === "IPv4" && !iface.internal) {
+          // Strictly accept ONLY valid private LAN addresses (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+          // Explicitly discard 169.254.x.x (link-local), loopbacks, and container virtual bridges
+          if (
+            iface.family === "IPv4" &&
+            !iface.internal &&
+            !iface.address.startsWith("169.254.") &&
+            !iface.address.startsWith("127.") &&
+            /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(iface.address)
+          ) {
             ips.push(iface.address);
           }
         }
       }
     }
     return ips.sort((a, b) => {
-      const aIsPrivate = /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a);
-      const bIsPrivate = /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(b);
-      if (aIsPrivate && !bIsPrivate) return -1;
-      if (!aIsPrivate && bIsPrivate) return 1;
+      // Prioritize 192.168.* as standard home/office Wi-Fi routers
+      const aIs192 = a.startsWith("192.168.");
+      const bIs192 = b.startsWith("192.168.");
+      if (aIs192 && !bIs192) return -1;
+      if (!aIs192 && bIs192) return 1;
       return 0;
     });
   }
@@ -4603,7 +4612,8 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
   function normalizeMediaUrlToRelative(url?: string): string {
     if (!url || typeof url !== "string") return "";
     const clean = url.trim();
-    return clean.replace(/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?(\/(api|uploads)\/)/i, "/$4/");
+    const fixed = clean.replace(/^\/\/api\/\//, "/api/").replace(/^\/\/uploads\/\//, "/uploads/");
+    return fixed.replace(/^https?:\/\/[^\/]+(\/(?:api|uploads)\/.*)$/i, "$1");
   }
 
   // API Route - Get server network host info (for mobile / LAN sharing)

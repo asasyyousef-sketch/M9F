@@ -49,8 +49,12 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
   const [lanHost, setLanHost] = useState<string>("");
   const [serverHost, setServerHost] = useState<string>("");
   const [availableIps, setAvailableIps] = useState<string[]>([]);
-  const [selectedHostMode, setSelectedHostMode] = useState<"lan" | "localhost" | "current" | "custom">(() => {
-    return (localStorage.getItem("preferred_share_host_mode") as any) || "lan";
+  const [selectedHostMode, setSelectedHostMode] = useState<"current" | "lan" | "localhost" | "custom">(() => {
+    const saved = localStorage.getItem("preferred_share_host_mode");
+    if (saved === "current" || saved === "lan" || saved === "localhost" || saved === "custom") {
+      return saved as any;
+    }
+    return "current";
   });
   const [customHostInput, setCustomHostInput] = useState<string>(() => {
     return localStorage.getItem("preferred_share_custom_host") || "";
@@ -113,10 +117,19 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
         if (!isMounted) return;
         if (data.success && data.shareId) {
           setShareId(data.shareId);
-          if (data.lanHost) setLanHost(data.lanHost);
+          const rawLan = data.lanHost || "";
+          const isValidLan = rawLan && !rawLan.startsWith("169.254.") && !rawLan.startsWith("127.");
+          if (isValidLan) {
+            setLanHost(rawLan);
+          } else {
+            setLanHost("");
+          }
           if (data.currentHost) setServerHost(data.currentHost);
-          if (data.networkIps) setAvailableIps(data.networkIps);
-          if (data.primaryLanIp && !localStorage.getItem("preferred_share_custom_host")) {
+          if (data.networkIps) {
+            const filteredIps = (data.networkIps as string[]).filter(ip => !ip.startsWith("169.254.") && !ip.startsWith("127."));
+            setAvailableIps(filteredIps);
+          }
+          if (isValidLan && data.primaryLanIp && !localStorage.getItem("preferred_share_custom_host")) {
             const portMatch = (data.currentHost || "").match(/:(\d+)$/);
             const port = portMatch ? portMatch[1] : "3000";
             setCustomHostInput(`${data.primaryLanIp}:${port}`);
@@ -151,16 +164,11 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
       const port = browserHost.split(":")[1] || "3000";
       return `localhost:${port}`;
     }
-    if (selectedHostMode === "lan" && lanHost) {
+    const isValidLan = lanHost && !lanHost.startsWith("169.254.") && !lanHost.startsWith("127.");
+    if (selectedHostMode === "lan" && isValidLan) {
       return lanHost;
     }
-    if (selectedHostMode === "current") {
-      return browserHost;
-    }
-    // Auto-fallback: if currently accessing via localhost and lanHost is known, default to LAN for phones
-    if (browserHost.includes("localhost") && lanHost) {
-      return lanHost;
-    }
+    // Safe standard: The actual current domain or IP the user is browsing on right now
     return browserHost;
   }, [selectedHostMode, customHostInput, lanHost, browserHost]);
 
