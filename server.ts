@@ -4710,7 +4710,8 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
 
       const host = req.get("x-forwarded-host") || req.get("host") || "localhost:3000";
       const proto = req.get("x-forwarded-proto") || req.protocol || "http";
-      const shareUrl = `${proto}://${host}/?share=${shareId}`;
+      const publicHost = host.replace(/^ais-dev-/, "ais-pre-");
+      const shareUrl = `${proto}://${publicHost}/?share=${shareId}`;
 
       const networkIps = getLocalNetworkIps();
       const primaryLanIp = networkIps.find(ip => /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip)) || networkIps[0] || "";

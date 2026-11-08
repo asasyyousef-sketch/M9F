@@ -155,6 +155,7 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
   // Determine effective host dynamically
   const browserHost = typeof window !== "undefined" ? window.location.host : "localhost:3000";
   const protocol = typeof window !== "undefined" ? window.location.protocol : "http:";
+  const publicBrowserHost = browserHost.replace(/^ais-dev-/, "ais-pre-");
 
   const effectiveHost = React.useMemo(() => {
     if (selectedHostMode === "custom" && customHostInput.trim()) {
@@ -168,9 +169,9 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
     if (selectedHostMode === "lan" && isValidLan) {
       return lanHost;
     }
-    // Safe standard: The actual current domain or IP the user is browsing on right now
-    return browserHost;
-  }, [selectedHostMode, customHostInput, lanHost, browserHost]);
+    // Safe standard: The public accessible domain or IP
+    return publicBrowserHost;
+  }, [selectedHostMode, customHostInput, lanHost, browserHost, publicBrowserHost]);
 
   const activeShareUrl = React.useMemo(() => {
     if (!shareId) return "";
