@@ -4596,6 +4596,58 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
     }
   }
 
+  function getLocalNetworkIps(): string[] {
+    const interfaces = os.networkInterfaces();
+    const ips: string[] = [];
+    for (const name of Object.keys(interfaces)) {
+      const ifaceList = interfaces[name];
+      if (ifaceList) {
+        for (const iface of ifaceList) {
+          if (iface.family === "IPv4" && !iface.internal) {
+            ips.push(iface.address);
+          }
+        }
+      }
+    }
+    return ips.sort((a, b) => {
+      const aIsPrivate = /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a);
+      const bIsPrivate = /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(b);
+      if (aIsPrivate && !bIsPrivate) return -1;
+      if (!aIsPrivate && bIsPrivate) return 1;
+      return 0;
+    });
+  }
+
+  function normalizeMediaUrlToRelative(url?: string): string {
+    if (!url || typeof url !== "string") return "";
+    const clean = url.trim();
+    return clean.replace(/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?(\/(api|uploads)\/)/i, "/$4/");
+  }
+
+  // API Route - Get server network host info (for mobile / LAN sharing)
+  app.get("/api/system/network-info", (req, res) => {
+    try {
+      const host = req.get("x-forwarded-host") || req.get("host") || "localhost:3000";
+      const proto = req.get("x-forwarded-proto") || req.protocol || "http";
+      const networkIps = getLocalNetworkIps();
+      const primaryLanIp = networkIps.find(ip => /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip)) || networkIps[0] || "";
+      const portMatch = host.match(/:(\d+)$/);
+      const port = portMatch ? portMatch[1] : "3000";
+      const lanHost = primaryLanIp ? `${primaryLanIp}:${port}` : null;
+
+      return res.json({
+        success: true,
+        currentHost: host,
+        protocol: proto,
+        primaryLanIp,
+        lanHost,
+        networkIps
+      });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
   // API Route - Create or update a shared deck link
   app.post("/api/share/folder", express.json({ limit: "50mb" }), async (req, res) => {
     try {
@@ -4615,7 +4667,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
           name: folder.name,
           description: folder.description || "",
           color: folder.color || "#0056f6",
-          coverImage: folder.coverImage || "",
+          coverImage: normalizeMediaUrlToRelative(folder.coverImage || ""),
           coverImagePosition: folder.coverImagePosition || "50% 50%",
           frontLang: folder.frontLang || "de",
           backLang: folder.backLang || "ar",
@@ -4626,14 +4678,14 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
           folderId: c.folderId || folder.id,
           frontText: c.frontText || "",
           frontLang: c.frontLang || folder.frontLang || "de",
-          frontImage: c.frontImage || "",
+          frontImage: normalizeMediaUrlToRelative(c.frontImage || ""),
           frontImagePosition: c.frontImagePosition || "50% 50%",
-          frontAudioUrl: c.frontAudioUrl || "",
+          frontAudioUrl: normalizeMediaUrlToRelative(c.frontAudioUrl || ""),
           backText: c.backText || "",
           backLang: c.backLang || folder.backLang || "ar",
-          backImage: c.backImage || "",
+          backImage: normalizeMediaUrlToRelative(c.backImage || ""),
           backImagePosition: c.backImagePosition || "50% 50%",
-          backAudioUrl: c.backAudioUrl || "",
+          backAudioUrl: normalizeMediaUrlToRelative(c.backAudioUrl || ""),
           isArticleMode: !!c.isArticleMode,
           correctArticle: c.correctArticle || "",
           isPluralMode: !!c.isPluralMode,
@@ -4649,7 +4701,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
           name: sf.name,
           description: sf.description || "",
           color: sf.color || "#0056f6",
-          coverImage: sf.coverImage || "",
+          coverImage: normalizeMediaUrlToRelative(sf.coverImage || ""),
           coverImagePosition: sf.coverImagePosition || "50% 50%",
           frontLang: sf.frontLang || "de",
           backLang: sf.backLang || "ar",
@@ -4668,12 +4720,24 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       const proto = req.get("x-forwarded-proto") || req.protocol || "http";
       const shareUrl = `${proto}://${host}/?share=${shareId}`;
 
-      console.log(`[Shared Decks] Created share link: ${shareUrl} for folder "${folder.name}" with ${payload.cardCount} cards`);
+      const networkIps = getLocalNetworkIps();
+      const primaryLanIp = networkIps.find(ip => /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip)) || networkIps[0] || "";
+      const portMatch = host.match(/:(\d+)$/);
+      const port = portMatch ? portMatch[1] : "3000";
+      const lanHost = primaryLanIp ? `${primaryLanIp}:${port}` : null;
+      const lanShareUrl = lanHost ? `${proto}://${lanHost}/?share=${shareId}` : null;
+
+      console.log(`[Shared Decks] Created share link: ${shareUrl} (LAN: ${lanShareUrl || "N/A"}) for folder "${folder.name}" with ${payload.cardCount} cards`);
 
       return res.json({
         success: true,
         shareId,
         shareUrl,
+        lanShareUrl,
+        lanHost,
+        primaryLanIp,
+        networkIps,
+        currentHost: host,
         cardCount: payload.cardCount,
         folderName: folder.name
       });
@@ -4682,6 +4746,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       return res.status(500).json({ success: false, error: err.message || "حدث خطأ أثناء إنشاء رابط المشاركة" });
     }
   });
+
 
   // API Route - Get shared deck by shareId (public, no authentication required)
   app.get("/api/share/:shareId", (req, res) => {

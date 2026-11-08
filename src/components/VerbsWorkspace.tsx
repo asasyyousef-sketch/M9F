@@ -39,7 +39,7 @@ export interface VerbItem {
   past?: VerbPastData;
 }
 
-export type VerbTenseTab = "prasens" | "perfekt";
+export type VerbTenseTab = "prasens" | "perfekt" | "prateritum";
 
 const initialVerbDataStore: Record<string, VerbItem> = {
   "möchte": {
@@ -1010,10 +1010,18 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
   };
 
   const displayForms: VerbForms =
-    activeTense === "perfekt" ? pastData.perfektForms : currentVerbData.forms;
+    activeTense === "perfekt"
+      ? pastData.perfektForms
+      : activeTense === "prateritum"
+      ? pastData.prateritumForms
+      : currentVerbData.forms;
 
   const speechForms: VerbPlainForms =
-    activeTense === "perfekt" ? pastData.plainPerfektForms : currentVerbData.plainForms;
+    activeTense === "perfekt"
+      ? pastData.plainPerfektForms
+      : activeTense === "prateritum"
+      ? pastData.plainPrateritumForms
+      : currentVerbData.plainForms;
 
   // Voice playback with full support for Google Cloud TTS, Piper Neural Models, and Web Speech API
   const fallbackWebSpeech = (text: string, voiceUri?: string) => {
@@ -1435,7 +1443,7 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
             <button
               type="button"
               onClick={() => setActiveTense("prasens")}
-              className={`flex-1 py-1.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeTense === "prasens"
                   ? "bg-[#FFC700] text-neutral-950 shadow-xs scale-[1.01]"
                   : "text-neutral-700 hover:text-neutral-950 hover:bg-white/80"
@@ -1448,14 +1456,27 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
             <button
               type="button"
               onClick={() => setActiveTense("perfekt")}
-              className={`flex-1 py-1.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeTense === "perfekt"
                   ? "bg-[#FFC700] text-neutral-950 shadow-xs scale-[1.01]"
                   : "text-neutral-700 hover:text-neutral-950 hover:bg-white/80"
               }`}
             >
-              <span>الماضي</span>
+              <span>الماضي التام</span>
               <span className="text-[10px] sm:text-[11px] font-normal opacity-85" dir="ltr">Perfekt</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTense("prateritum")}
+              className={`flex-1 py-1.5 px-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
+                activeTense === "prateritum"
+                  ? "bg-[#FFC700] text-neutral-950 shadow-xs scale-[1.01]"
+                  : "text-neutral-700 hover:text-neutral-950 hover:bg-white/80"
+              }`}
+            >
+              <span>الماضي البسيط</span>
+              <span className="text-[10px] sm:text-[11px] font-normal opacity-85" dir="ltr">Präteritum</span>
             </button>
           </div>
 
@@ -1481,6 +1502,11 @@ export function VerbsWorkspace({ onToggleSidebar, onBackToLibrary }: VerbsWorksp
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500 text-white text-xs font-bold tracking-tight shadow-xs" dir="rtl">
                           <span>المساعد:</span>
                           <span className="underline decoration-2 font-mono font-bold" dir="ltr">{pastData.auxiliary}</span>
+                        </span>
+                      )}
+                      {activeTense === "prateritum" && (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-neutral-800 text-white text-xs font-bold tracking-tight shadow-xs">
+                          Präteritum
                         </span>
                       )}
                     </div>

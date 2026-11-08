@@ -19,7 +19,7 @@ import {
 } from "./components/Modals";
 import { ShareFolderModal, ImportSharedDeckModal } from "./components/ShareModals";
 import { ReviewSession } from "./components/ReviewSession";
-import { Folder, Flashcard, ReviewMethod, DbStatus, TranscriptDocument, SharedDeckData } from "./types";
+import { Folder, Flashcard, ReviewMethod, DbStatus, TranscriptDocument, SharedDeckData, normalizeMediaUrl } from "./types";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { AuthScreen } from "./components/AuthScreen";
 import { CheckCircle2 } from "lucide-react";
@@ -1137,6 +1137,7 @@ function MainStudyApp() {
         ...shared.folder,
         id: newFolderId,
         name: targetFolderName,
+        coverImage: normalizeMediaUrl(shared.folder.coverImage),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -1148,6 +1149,10 @@ function MainStudyApp() {
           ...c,
           id: "c_" + Date.now() + "_" + index + "_" + Math.random().toString(36).substring(2, 7),
           folderId: assignedFolderId,
+          frontImage: normalizeMediaUrl(c.frontImage),
+          frontAudioUrl: normalizeMediaUrl(c.frontAudioUrl),
+          backImage: normalizeMediaUrl(c.backImage),
+          backAudioUrl: normalizeMediaUrl(c.backAudioUrl),
           streak: 0,
           createdAt: new Date(Date.now() + index * 100).toISOString()
         };

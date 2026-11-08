@@ -20,9 +20,12 @@ import {
   Play, 
   Smartphone,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Wifi,
+  Laptop,
+  Edit2
 } from "lucide-react";
-import { Folder as FolderType, Flashcard, SharedDeckData, getSafeImageStyle } from "../types";
+import { Folder as FolderType, Flashcard, SharedDeckData, getSafeImageStyle, normalizeMediaUrl } from "../types";
 
 // ─── ShareFolderModal ──────────────────────────────────────────────────────────
 interface ShareFolderModalProps {
@@ -42,8 +45,17 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
   allCards,
   currentUserName
 }) => {
-  const [shareUrl, setShareUrl] = useState<string>("");
   const [shareId, setShareId] = useState<string>("");
+  const [lanHost, setLanHost] = useState<string>("");
+  const [serverHost, setServerHost] = useState<string>("");
+  const [availableIps, setAvailableIps] = useState<string[]>([]);
+  const [selectedHostMode, setSelectedHostMode] = useState<"lan" | "localhost" | "current" | "custom">(() => {
+    return (localStorage.getItem("preferred_share_host_mode") as any) || "lan";
+  });
+  const [customHostInput, setCustomHostInput] = useState<string>(() => {
+    return localStorage.getItem("preferred_share_custom_host") || "";
+  });
+  const [isEditingCustomHost, setIsEditingCustomHost] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
@@ -75,7 +87,6 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
   // Request share link generation when modal opens
   useEffect(() => {
     if (!isOpen || !folder) {
-      setShareUrl("");
       setShareId("");
       setQrCodeDataUrl("");
       setError(null);
@@ -100,12 +111,16 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
       .then(res => res.json())
       .then(data => {
         if (!isMounted) return;
-        if (data.success && data.shareUrl) {
-          setShareUrl(data.shareUrl);
+        if (data.success && data.shareId) {
           setShareId(data.shareId);
-          // Generate QR code for mobile scanning (zero external dependencies)
-          const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=10&data=${encodeURIComponent(data.shareUrl)}`;
-          setQrCodeDataUrl(qrUrl);
+          if (data.lanHost) setLanHost(data.lanHost);
+          if (data.currentHost) setServerHost(data.currentHost);
+          if (data.networkIps) setAvailableIps(data.networkIps);
+          if (data.primaryLanIp && !localStorage.getItem("preferred_share_custom_host")) {
+            const portMatch = (data.currentHost || "").match(/:(\d+)$/);
+            const port = portMatch ? portMatch[1] : "3000";
+            setCustomHostInput(`${data.primaryLanIp}:${port}`);
+          }
         } else {
           setError(data.error || "تعذر إنشاء رابط المشاركة");
         }
@@ -124,39 +139,91 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
     };
   }, [isOpen, folder, folderCards, subfolders, currentUserName]);
 
+  // Determine effective host dynamically
+  const browserHost = typeof window !== "undefined" ? window.location.host : "localhost:3000";
+  const protocol = typeof window !== "undefined" ? window.location.protocol : "http:";
+
+  const effectiveHost = React.useMemo(() => {
+    if (selectedHostMode === "custom" && customHostInput.trim()) {
+      return customHostInput.trim();
+    }
+    if (selectedHostMode === "localhost") {
+      const port = browserHost.split(":")[1] || "3000";
+      return `localhost:${port}`;
+    }
+    if (selectedHostMode === "lan" && lanHost) {
+      return lanHost;
+    }
+    if (selectedHostMode === "current") {
+      return browserHost;
+    }
+    // Auto-fallback: if currently accessing via localhost and lanHost is known, default to LAN for phones
+    if (browserHost.includes("localhost") && lanHost) {
+      return lanHost;
+    }
+    return browserHost;
+  }, [selectedHostMode, customHostInput, lanHost, browserHost]);
+
+  const activeShareUrl = React.useMemo(() => {
+    if (!shareId) return "";
+    return `${protocol}//${effectiveHost}/?share=${shareId}`;
+  }, [protocol, effectiveHost, shareId]);
+
+  // Update QR code whenever activeShareUrl changes
+  useEffect(() => {
+    if (activeShareUrl) {
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=10&data=${encodeURIComponent(activeShareUrl)}`;
+      setQrCodeDataUrl(qrUrl);
+    } else {
+      setQrCodeDataUrl("");
+    }
+  }, [activeShareUrl]);
+
   if (!isOpen || !folder) return null;
 
   const handleCopyLink = () => {
-    if (!shareUrl) return;
-    navigator.clipboard.writeText(shareUrl).then(() => {
+    if (!activeShareUrl) return;
+    navigator.clipboard.writeText(activeShareUrl).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     });
   };
 
   const handleNativeShare = () => {
-    if (navigator.share && shareUrl) {
+    if (navigator.share && activeShareUrl) {
       navigator.share({
         title: `ملف بطاقات: ${folder.name}`,
         text: `📚 شاركت معك ملف البطاقات التعليمية "${folder.name}" (${folderCards.length} بطاقة). اضغط الرابط لإضافته فوراً لمكتبتك!`,
-        url: shareUrl
+        url: activeShareUrl
       }).catch(() => {});
     }
   };
 
   const shareText = encodeURIComponent(
-    `📚 شاركت معك ملف البطاقات التعليمية "${folder.name}" (${folderCards.length} بطاقة).\nاضغط على الرابط لإضافته فوراً إلى مكتبتك بكل صوره وكلماته وترتيبه:\n${shareUrl}`
+    `📚 شاركت معك ملف البطاقات التعليمية "${folder.name}" (${folderCards.length} بطاقة).\nاضغط على الرابط لإضافته فوراً إلى مكتبتك بكل صوره وكلماته وترتيبه:\n${activeShareUrl}`
   );
   const whatsappUrl = `https://api.whatsapp.com/send?text=${shareText}`;
-  const telegramUrl = `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(`📚 ملف بطاقات: ${folder.name} (${folderCards.length} بطاقة)`)}`;
+  const telegramUrl = `https://t.me/share/url?url=${encodeURIComponent(activeShareUrl)}&text=${encodeURIComponent(`📚 ملف بطاقات: ${folder.name} (${folderCards.length} بطاقة)`)}`;
 
   const handleDownloadDeckBackup = () => {
     const backupData = {
       version: 1,
       exportedAt: new Date().toISOString(),
-      folder,
-      subfolders,
-      cards: folderCards
+      folder: {
+        ...folder,
+        coverImage: normalizeMediaUrl(folder.coverImage)
+      },
+      subfolders: subfolders.map(sf => ({
+        ...sf,
+        coverImage: normalizeMediaUrl(sf.coverImage)
+      })),
+      cards: folderCards.map(c => ({
+        ...c,
+        frontImage: normalizeMediaUrl(c.frontImage),
+        frontAudioUrl: normalizeMediaUrl(c.frontAudioUrl),
+        backImage: normalizeMediaUrl(c.backImage),
+        backAudioUrl: normalizeMediaUrl(c.backAudioUrl)
+      }))
     };
     const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -209,7 +276,7 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
             >
               {folder.coverImage ? (
                 <img
-                  src={folder.coverImage}
+                  src={normalizeMediaUrl(folder.coverImage)}
                   alt=""
                   className="w-full h-full object-cover"
                   style={getSafeImageStyle(folder.coverImagePosition)}
@@ -247,6 +314,123 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
             </div>
           </div>
 
+          {/* Domain & Host Selection Control */}
+          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5" dir="rtl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                <Globe className="w-4 h-4 text-[#0056f6]" />
+                <span>نطاق الرابط (الدومين / IP):</span>
+              </div>
+              <span className="text-[11px] font-mono text-slate-600 bg-white px-2 py-0.5 rounded-md border border-slate-200">
+                {effectiveHost}
+              </span>
+            </div>
+
+            {/* Quick Host Switcher Tabs */}
+            <div className="flex items-center gap-1.5 bg-slate-200/70 p-1 rounded-xl">
+              {lanHost && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedHostMode("lan");
+                    localStorage.setItem("preferred_share_host_mode", "lan");
+                  }}
+                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                    selectedHostMode === "lan"
+                      ? "bg-white text-[#0056f6] shadow-xs"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                  title={`مشاركة عبر شبكة Wi-Fi: ${lanHost}`}
+                >
+                  <Wifi className="w-3.5 h-3.5" />
+                  <span>شبكة Wi-Fi ({lanHost.split(":")[0]})</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedHostMode("localhost");
+                  localStorage.setItem("preferred_share_host_mode", "localhost");
+                }}
+                className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                  selectedHostMode === "localhost"
+                    ? "bg-white text-slate-900 shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+                title="للفتح على نفس الكمبيوتر فقط"
+              >
+                <Laptop className="w-3.5 h-3.5" />
+                <span>Localhost</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedHostMode("custom");
+                  localStorage.setItem("preferred_share_host_mode", "custom");
+                  setIsEditingCustomHost(true);
+                }}
+                className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                  selectedHostMode === "custom"
+                    ? "bg-white text-slate-900 shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+                title="تحديد IP أو دومين مخصص يدوياً"
+              >
+                <Edit2 className="w-3 h-3" />
+                <span>تخصيص IP</span>
+              </button>
+            </div>
+
+            {/* Inline Custom Host Edit Input */}
+            {(selectedHostMode === "custom" || isEditingCustomHost) && (
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="text"
+                  value={customHostInput}
+                  onChange={(e) => {
+                    setCustomHostInput(e.target.value);
+                    localStorage.setItem("preferred_share_custom_host", e.target.value.trim());
+                  }}
+                  placeholder="مثال: 192.168.0.159:3000 أو mydomain.com"
+                  className="flex-1 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0056f6]"
+                  dir="ltr"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (customHostInput.trim()) {
+                      localStorage.setItem("preferred_share_custom_host", customHostInput.trim());
+                      setSelectedHostMode("custom");
+                      setIsEditingCustomHost(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-[#0056f6] hover:bg-[#0047cc] text-white rounded-lg text-xs font-bold transition cursor-pointer"
+                >
+                  حفظ
+                </button>
+              </div>
+            )}
+
+            {/* Contextual Guidance Note */}
+            {effectiveHost.includes("localhost") ? (
+              <p className="text-[11px] text-amber-800 bg-amber-50/90 border border-amber-200/80 rounded-xl p-2.5 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <span>
+                  <strong>تنبيه:</strong> رابط localhost يعمل فقط على هذا الجهاز نفسه. لمشاركة الرابط مع هاتفك أو جهاز آخر عبر نفس شبكة Wi-Fi، اضغط على <strong>شبكة Wi-Fi</strong> أعلاه ليتمكن الهاتف من فتحه ومسح رمز الـ QR.
+                </span>
+              </p>
+            ) : (
+              <p className="text-[11px] text-emerald-800 bg-emerald-50/90 border border-emerald-200/80 rounded-xl p-2 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>
+                  الرابط متوافق مع الهواتف والأجهزة المتصلة بنفس شبكة Wi-Fi ({effectiveHost}).
+                </span>
+              </p>
+            )}
+          </div>
+
           {/* Share Link Section */}
           {isLoading ? (
             <div className="p-8 rounded-2xl bg-slate-50 flex flex-col items-center justify-center gap-2 text-center">
@@ -265,7 +449,7 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
                 <input
                   type="text"
                   readOnly
-                  value={shareUrl}
+                  value={activeShareUrl}
                   onClick={(e) => (e.target as HTMLInputElement).select()}
                   className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#0056f6] cursor-text"
                   dir="ltr"
@@ -328,8 +512,10 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
               {/* QR Code view */}
               {showQrCode && qrCodeDataUrl && (
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex flex-col items-center justify-center gap-2">
-                  <img src={qrCodeDataUrl} alt="QR Code" className="w-36 h-36 rounded-lg bg-white p-2 shadow-2xs" />
-                  <p className="text-[11px] text-slate-500">امسح الرمز بكاميرا الهاتف لفتح الملف</p>
+                  <img src={qrCodeDataUrl} alt="QR Code" className="w-40 h-40 rounded-lg bg-white p-2 shadow-2xs" />
+                  <p className="text-[11px] text-slate-500 font-medium text-center">
+                    امسح الرمز بكاميرا الهاتف للفتح مباشرة عبر ({effectiveHost})
+                  </p>
                 </div>
               )}
 
@@ -389,6 +575,7 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
     </div>
   );
 };
+
 
 
 // ─── ImportSharedDeckModal ─────────────────────────────────────────────────────
@@ -478,7 +665,7 @@ export const ImportSharedDeckModal: React.FC<ImportSharedDeckModalProps> = ({
                 >
                   {folder.coverImage ? (
                     <img
-                      src={folder.coverImage}
+                      src={normalizeMediaUrl(folder.coverImage)}
                       alt=""
                       className="w-full h-full object-cover"
                       style={getSafeImageStyle(folder.coverImagePosition)}
