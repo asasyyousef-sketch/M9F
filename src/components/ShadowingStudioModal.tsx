@@ -11,7 +11,6 @@ import {
   X,
   CheckCircle2,
   AlertCircle,
-  Clock,
   Headphones,
   Award,
   Waves,
@@ -20,7 +19,6 @@ import {
   Sliders
 } from "lucide-react";
 import { SubtitleCue } from "../types";
-import { formatSecondsToClock } from "../utils/subtitleParser";
 import { fetchGradioAudioBlob, speakClient } from "./Modals";
 import {
   ShadowingVoiceSettingsModal,
@@ -827,11 +825,11 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[100] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fadeIn"
+      className="fixed inset-0 z-[100] bg-black/85 backdrop-blur-md flex items-start sm:items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fadeIn"
       onClick={onClose}
     >
       <div
-        className="bg-slate-900 border border-slate-700/90 rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl text-slate-100 flex flex-col justify-between gap-3 sm:gap-4 sm:h-[640px] min-h-[580px] max-h-[92vh] overflow-y-auto animate-scaleUp text-right"
+        className="my-auto bg-slate-900 border border-slate-700/90 rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl text-slate-100 flex flex-col justify-between gap-3 sm:gap-4 animate-scaleUp text-right"
         onClick={(e) => e.stopPropagation()}
         dir="rtl"
       >
@@ -906,82 +904,67 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
           </div>
         </div>
 
-        {/* Target Sentence Card - Fixed consistent height so navigating between cues never alters modal size */}
-        <div className="h-32 sm:h-36 shrink-0 p-3.5 sm:p-4 rounded-2xl bg-slate-950/40 border border-slate-800/80 relative flex flex-col justify-between overflow-hidden">
-          {/* Timestamp and Duration Tag */}
-          <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono select-none shrink-0 pb-1 border-b border-slate-800/40">
-            <div className="flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-sky-400" />
-              <span>
-                {formatSecondsToClock(cue.startTime)} ➔ {formatSecondsToClock(cue.endTime)}
-              </span>
-              <span className="text-slate-400">
-                ({(cue.endTime - cue.startTime).toFixed(1)}ث)
-              </span>
-            </div>
-          </div>
-
-          {/* Primary Sentence Text & Subtitle in scrollable area with fixed container */}
-          <div className="flex-1 overflow-y-auto pr-1 my-1 space-y-1.5 flex flex-col justify-center">
-            <div
-              className="text-base sm:text-lg font-medium text-slate-100 leading-relaxed select-text"
-              dir={detectDirection(cue.text)}
-            >
-              <p className="flex flex-wrap gap-x-2 gap-y-1 items-baseline">
-                {targetWords.map((word, idx) => {
-                  const status = getWordMatchStatus(word);
-                  if (status === "correct") {
-                    return (
-                      <span
-                        key={idx}
-                        className="text-emerald-400 font-bold underline decoration-emerald-400/50 underline-offset-4"
-                      >
-                        {word}
-                      </span>
-                    );
-                  }
-                  if (status === "close") {
-                    return (
-                      <span
-                        key={idx}
-                        className="text-amber-300 font-semibold underline decoration-amber-400/50 underline-offset-4"
-                      >
-                        {word}
-                      </span>
-                    );
-                  }
-                  if (status === "missing") {
-                    return (
-                      <span
-                        key={idx}
-                        className="text-rose-400/90 line-through decoration-rose-400/50"
-                      >
-                        {word}
-                      </span>
-                    );
-                  }
+        {/* Target Sentence Card - Expands naturally with no scrollbar and no timestamp header */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/40 border border-slate-800/80 flex flex-col justify-center gap-2.5">
+          {/* Primary Sentence Text */}
+          <div
+            className="text-base sm:text-lg font-medium text-slate-100 leading-relaxed select-text"
+            dir={detectDirection(cue.text)}
+          >
+            <p className="flex flex-wrap gap-x-2 gap-y-1 items-baseline">
+              {targetWords.map((word, idx) => {
+                const status = getWordMatchStatus(word);
+                if (status === "correct") {
                   return (
                     <span
                       key={idx}
-                      className="text-slate-100 hover:text-sky-300 transition-colors"
+                      className="text-emerald-400 font-bold underline decoration-emerald-400/50 underline-offset-4"
                     >
                       {word}
                     </span>
                   );
-                })}
-              </p>
-            </div>
-
-            {/* Secondary Translation Subtitle */}
-            {cue.secondaryText && (
-              <p
-                className="text-xs sm:text-sm text-slate-400 font-normal leading-relaxed pt-1.5 border-t border-slate-800/60"
-                dir={detectDirection(cue.secondaryText)}
-              >
-                {cue.secondaryText}
-              </p>
-            )}
+                }
+                if (status === "close") {
+                  return (
+                    <span
+                      key={idx}
+                      className="text-amber-300 font-semibold underline decoration-amber-400/50 underline-offset-4"
+                    >
+                      {word}
+                    </span>
+                  );
+                }
+                if (status === "missing") {
+                  return (
+                    <span
+                      key={idx}
+                      className="text-rose-400/90 line-through decoration-rose-400/50"
+                    >
+                      {word}
+                    </span>
+                  );
+                }
+                return (
+                  <span
+                    key={idx}
+                    className="text-slate-100 hover:text-sky-300 transition-colors"
+                  >
+                    {word}
+                  </span>
+                );
+              })}
+            </p>
           </div>
+
+          {/* Secondary Translation Subtitle */}
+          {cue.secondaryText && (
+            <p
+              className="text-sm sm:text-base text-purple-200/90 font-normal leading-relaxed pt-2 border-t border-slate-800/70 select-text"
+              dir={detectDirection(cue.secondaryText)}
+            >
+              {cue.secondaryText}
+            </p>
+          )}
         </div>
 
         {/* Full-width Audio Sections (Repetition Mode Style) */}

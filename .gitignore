@@ -7,3 +7,4 @@ piper_bin
 piper_models
 active_sessions.json
 shared_decks.json
+direct_shares.json
