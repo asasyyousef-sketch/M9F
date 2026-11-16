@@ -1,9 +1,11 @@
 import React from "react";
-import { ChevronLeft, Folder, Volume2, Trash2, FolderPlus, Bell, User, Play, Plus, Search, Pencil, Menu, Home, Layers, BookOpen, RectangleVertical, CheckSquare, Scissors, Copy, X, Check, Clipboard, ListChecks, Sparkles, History, Headphones, DownloadCloud, Download, CheckCircle2, Loader2, VolumeX, FileAudio, Image as ImageIcon, FileImage, Minimize2, Maximize2, Share2, MoreVertical, ChevronDown, Info, Calendar } from "lucide-react";
-import { Folder as FolderType, Flashcard, getSafeImageStyle, getCardSearchQuery, isGermanSentence } from "../types";
+import { ChevronLeft, Folder, Volume2, Trash2, FolderPlus, Bell, User, Play, Plus, Search, Pencil, Menu, Home, Layers, BookOpen, RectangleVertical, CheckSquare, Scissors, Copy, X, Check, Clipboard, ListChecks, Sparkles, History, Headphones, DownloadCloud, Download, CheckCircle2, Loader2, VolumeX, FileAudio, Image as ImageIcon, FileImage, Minimize2, Maximize2, Share2, MoreVertical, ChevronDown, Info, Calendar, Send, Inbox } from "lucide-react";
+import { Folder as FolderType, Flashcard, DirectShareItem, getSafeImageStyle, getCardSearchQuery, isGermanSentence } from "../types";
 import { FolderThumbnail, CardThumbnail } from "./ThumbnailStyles";
 import { speakClient, preloadTTS, preloadImage, fetchGradioAudioBlob, fetchAudioBlob } from "./Modals";
 import { ImageWithSkeleton } from "./ReviewSession";
+import { SharedFolderPreview } from "./SharedFolderPreview";
+import { useAuth } from "../context/AuthContext";
 import { motion } from "motion/react";
 import JSZip from "jszip";
 
@@ -82,7 +84,7 @@ interface ExplorerProps {
   onCreateFolderClick: () => void;
   onEditFolder: (folder: FolderType) => void;
   onEditCard: (card: Flashcard) => void;
-  onShareFolder?: (folder: FolderType) => void;
+  onShareFolder?: (folder: FolderType, initialMode?: "link" | "send") => void;
   onToggleSidebar?: () => void;
   onBulkDelete?: (folderIds: string[], cardIds: string[]) => void;
   onBulkMove?: (folderIds: string[], cardIds: string[], targetFolderId: string) => void;
@@ -90,6 +92,14 @@ interface ExplorerProps {
   onRefineFolderWithAI?: (folderId: string) => void;
   onReorderFolders?: (newFolders: FolderType[]) => void;
   onReorderCards?: (newCards: Flashcard[]) => void;
+  inboxItems?: DirectShareItem[];
+  unreadInboxCount?: number;
+  previewDirectShare?: DirectShareItem | null;
+  onOpenDirectSharePreview?: (item: DirectShareItem) => void;
+  onCloseDirectSharePreview?: () => void;
+  onInsertDirectShare?: (item: DirectShareItem) => void;
+  onDeleteDirectShare?: (id: string) => void;
+  onTryReviewDirectShare?: (cards: Flashcard[], folder: FolderType, folders: FolderType[]) => void;
 }
 
 export const Explorer: React.FC<ExplorerProps> = React.memo(({
@@ -113,8 +123,17 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
   onBulkCopy,
   onRefineFolderWithAI,
   onReorderFolders,
-  onReorderCards
+  onReorderCards,
+  inboxItems = [],
+  unreadInboxCount = 0,
+  previewDirectShare = null,
+  onOpenDirectSharePreview,
+  onCloseDirectSharePreview,
+  onInsertDirectShare,
+  onDeleteDirectShare,
+  onTryReviewDirectShare
 }) => {
+  const { currentUser } = useAuth();
   const activeFolder = folders.find((f) => f.id === activeFolderId);
   const folderColor = activeFolder?.color || "#0056f6";
   const [confirmDelete, setConfirmDelete] = React.useState<{
@@ -234,10 +253,15 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
     } catch (e) {}
   }, []);
 
+  const [isBellOpen, setIsBellOpen] = React.useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = React.useState(false);
+
   const moreMenuRef = React.useRef<HTMLDivElement>(null);
   const addMenuRef = React.useRef<HTMLDivElement>(null);
   const folderMenuRef = React.useRef<HTMLDivElement>(null);
   const cardMenuRef = React.useRef<HTMLDivElement>(null);
+  const bellMenuRef = React.useRef<HTMLDivElement>(null);
+  const userMenuRef = React.useRef<HTMLDivElement>(null);
 
   // Close menus when clicking outside
   React.useEffect(() => {
@@ -253,6 +277,12 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
       }
       if (cardMenuRef.current && !cardMenuRef.current.contains(e.target as Node)) {
         setOpenCardMenuId(null);
+      }
+      if (bellMenuRef.current && !bellMenuRef.current.contains(e.target as Node)) {
+        setIsBellOpen(false);
+      }
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setIsUserMenuOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -1357,18 +1387,207 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
           </div>
         </div>
 
-        {/* User profile */}
-        <div className="flex items-center gap-1">
-          <button className="text-outline hover:text-on-surface transition-colors p-2 rounded-full hover:bg-slate-100 cursor-pointer">
-            <Bell className="w-5 h-5 text-[#5f6368]" />
-          </button>
-          <div className="w-8 h-8 rounded-full bg-[#f1f3f4] border border-outline-variant/20 flex items-center justify-center font-bold text-xs text-[#5f6368] cursor-pointer hover:bg-slate-200">
-            <User className="w-4 h-4 text-[#5f6368]" />
+        {/* User profile & Notifications Bell */}
+        <div className="flex items-center gap-1.5 relative">
+          {/* Bell Notification Button */}
+          <div className="relative" ref={bellMenuRef}>
+            <button
+              type="button"
+              onClick={() => {
+                setIsBellOpen((prev) => !prev);
+                setIsUserMenuOpen(false);
+              }}
+              className={`relative text-outline hover:text-on-surface transition-colors p-2 rounded-full cursor-pointer ${
+                isBellOpen ? "bg-blue-50 text-[#0056f6]" : "hover:bg-slate-100"
+              }`}
+              title="المجلدات المرسلة إليك"
+              aria-label="المجلدات المرسلة إليك"
+            >
+              <Bell className={`w-5 h-5 ${unreadInboxCount > 0 ? "text-[#0056f6]" : "text-[#5f6368]"}`} />
+              {unreadInboxCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center justify-center shadow-xs ring-2 ring-white">
+                  {unreadInboxCount > 99 ? "99+" : unreadInboxCount}
+                </span>
+              )}
+            </button>
+
+            {/* Bell Notifications Dropdown */}
+            {isBellOpen && (
+              <div
+                className="fixed sm:absolute left-3 right-3 sm:right-auto sm:left-0 top-16 sm:top-full sm:mt-2 sm:w-96 bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 overflow-hidden text-right animate-in fade-in zoom-in-95 duration-100"
+                dir="rtl"
+              >
+                <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Inbox className="w-4 h-4 text-[#0056f6]" />
+                    <span className="text-xs font-extrabold text-slate-800">المجلدات المرسلة إليك</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {unreadInboxCount > 0 && (
+                      <span className="text-[10px] font-bold bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full">
+                        {unreadInboxCount} جديد
+                      </span>
+                    )}
+                    <span className="text-[10px] font-bold text-slate-400">
+                      ({inboxItems.length})
+                    </span>
+                  </div>
+                </div>
+
+                <div className="max-h-96 overflow-y-auto divide-y divide-slate-100">
+                  {inboxItems.length === 0 ? (
+                    <div className="p-8 text-center space-y-2">
+                      <Bell className="w-8 h-8 text-slate-300 mx-auto" />
+                      <p className="text-xs font-bold text-slate-600">لا توجد مجلدات مرسلة إليك حالياً</p>
+                      <p className="text-[11px] text-slate-400">
+                        عندما يرسل لك مستخدم آخر مجلداً، سيظهر هنا للمعاينة والإدراج في مكتبتك.
+                      </p>
+                    </div>
+                  ) : (
+                    inboxItems.map((item) => {
+                      const isActivePreview = previewDirectShare?.id === item.id;
+                      return (
+                        <div
+                          key={item.id}
+                          onClick={() => {
+                            setIsBellOpen(false);
+                            onOpenDirectSharePreview?.(item);
+                          }}
+                          className={`p-3.5 hover:bg-blue-50/40 transition-colors cursor-pointer flex items-start gap-3 ${
+                            !item.isRead ? "bg-blue-50/30" : ""
+                          } ${isActivePreview ? "ring-1 ring-inset ring-[#0056f6]/30 bg-blue-50/50" : ""}`}
+                        >
+                          {/* Folder Cover/Color Icon */}
+                          <div
+                            className="w-11 h-12 rounded-xl overflow-hidden shrink-0 border border-slate-200/80 shadow-2xs flex items-center justify-center text-white"
+                            style={{ backgroundColor: item.folder.color || "#0056f6" }}
+                          >
+                            {item.folder.coverImage ? (
+                              <img
+                                src={item.folder.coverImage}
+                                alt=""
+                                className="w-full h-full object-cover"
+                                style={getSafeImageStyle(item.folder.coverImagePosition)}
+                              />
+                            ) : (
+                              <Folder className="w-5 h-5 fill-white/25" />
+                            )}
+                          </div>
+
+                          {/* Details */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <h4 className="text-xs font-extrabold text-slate-800 truncate">
+                                {item.folder.name}
+                              </h4>
+                              {!item.isRead && (
+                                <span className="w-2 h-2 rounded-full bg-[#0056f6] shrink-0" title="جديد" />
+                              )}
+                            </div>
+
+                            <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+                              مرسل من: <span className="font-bold text-slate-700">{item.senderName}</span>
+                              <span className="font-mono text-slate-400 mr-1" dir="ltr">@{item.senderUsername}</span>
+                            </p>
+
+                            {item.message && (
+                              <p className="text-[11px] text-slate-600 bg-slate-100/80 rounded-lg px-2 py-0.5 mt-1 line-clamp-1">
+                                "{item.message}"
+                              </p>
+                            )}
+
+                            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                              <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                                {item.cardCount} بطاقة
+                              </span>
+                              {item.subfolders && item.subfolders.length > 0 && (
+                                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                                  {item.subfolders.length} مجلد فرعي
+                                </span>
+                              )}
+                              {item.isImported ? (
+                                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                                  <CheckCircle2 className="w-2.5 h-2.5" />
+                                  تم الإدراج
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-bold text-[#0056f6] bg-blue-50 px-2 py-0.5 rounded-full">
+                                  اضغط للمعاينة
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Delete Notification Button */}
+                          {onDeleteDirectShare && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteDirectShare(item.id);
+                              }}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer shrink-0"
+                              title="حذف الإشعار"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Current User Profile Button */}
+          <div className="relative" ref={userMenuRef}>
+            <button
+              type="button"
+              onClick={() => {
+                setIsUserMenuOpen((prev) => !prev);
+                setIsBellOpen(false);
+              }}
+              className="w-8 h-8 rounded-full bg-[#f1f3f4] border border-outline-variant/20 flex items-center justify-center font-bold text-xs text-[#5f6368] cursor-pointer hover:bg-slate-200 transition-colors"
+              title={currentUser ? `${currentUser.name || currentUser.username} (@${currentUser.username})` : "الحساب"}
+            >
+              <User className="w-4 h-4 text-[#5f6368]" />
+            </button>
+
+            {isUserMenuOpen && currentUser && (
+              <div
+                className="absolute left-0 top-full mt-2 w-52 bg-white border border-slate-200 rounded-2xl shadow-xl p-3 z-50 text-right animate-in fade-in zoom-in-95 duration-100"
+                dir="rtl"
+              >
+                <p className="text-xs font-extrabold text-slate-800 truncate">{currentUser.name || currentUser.username}</p>
+                <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5" dir="ltr">@{currentUser.username}</p>
+                <span
+                  className={`inline-block mt-2 text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    currentUser.role === "admin"
+                      ? "bg-purple-100 text-purple-700"
+                      : "bg-blue-100 text-blue-700"
+                  }`}
+                >
+                  {currentUser.role === "admin" ? "مشرف النظام" : "مستخدم"}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
       </div>
 
+      {previewDirectShare ? (
+        <SharedFolderPreview
+          directShare={previewDirectShare}
+          searchQuery={searchQuery}
+          onInsertFolder={(item) => onInsertDirectShare?.(item)}
+          onClosePreview={() => onCloseDirectSharePreview?.()}
+          onTryReview={onTryReviewDirectShare}
+        />
+      ) : (
+        <>
       {/* 2. Separated Elegant Folder Path (مسار المجلد بشكل مستقل وجميل) */}
       <div 
         className="flex items-center justify-start w-full mb-1.5 md:mb-2 max-w-full overflow-hidden relative" 
@@ -1918,18 +2137,30 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                     </button>
                   )}
 
-                  {/* Share Folder */}
+                  {/* Share Folder & Send to User */}
                   {activeFolder && onShareFolder && (
-                    <button
-                      onClick={() => {
-                        setIsMoreMenuOpen(false);
-                        onShareFolder(activeFolder);
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:text-[#0056f6] hover:bg-blue-50/70 transition-colors cursor-pointer"
-                    >
-                      <Share2 className="w-4 h-4 text-[#0056f6]" />
-                      <span>مشاركة</span>
-                    </button>
+                    <>
+                      <button
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          onShareFolder(activeFolder, "link");
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:text-[#0056f6] hover:bg-blue-50/70 transition-colors cursor-pointer"
+                      >
+                        <Share2 className="w-4 h-4 text-[#0056f6]" />
+                        <span>مشاركة برابط</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          onShareFolder(activeFolder, "send");
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:text-[#0056f6] hover:bg-blue-50/70 transition-colors cursor-pointer"
+                      >
+                        <Send className="w-4 h-4 text-[#0056f6]" />
+                        <span>إرسال لمستخدم</span>
+                      </button>
+                    </>
                   )}
 
                   {/* Edit Current Folder */}
@@ -2295,7 +2526,7 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                       {/* Dropdown Options Menu */}
                       {openFolderMenuId === f.id && (
                         <div 
-                          className="absolute left-0 top-full mt-1.5 w-36 bg-white border border-slate-200 rounded-xl shadow-2xl p-1.5 z-50 text-right animate-in fade-in zoom-in-95 duration-100"
+                          className="absolute left-0 top-full mt-1.5 w-44 bg-white border border-slate-200 rounded-xl shadow-2xl p-1.5 z-50 text-right animate-in fade-in zoom-in-95 duration-100"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <button
@@ -2303,22 +2534,34 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                               setOpenFolderMenuId(null);
                               setFolderDetailsTarget(f);
                             }}
-                            className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-[#0056f6] transition-colors"
+                            className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-[#0056f6] transition-colors cursor-pointer"
                           >
                             <span>التفاصيل</span>
                             <Info className="w-3.5 h-3.5 text-slate-400" />
                           </button>
                           {onShareFolder && (
-                            <button
-                              onClick={() => {
-                                setOpenFolderMenuId(null);
-                                onShareFolder(f);
-                              }}
-                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-[#0056f6] transition-colors"
-                            >
-                              <span>مشاركة</span>
-                              <Share2 className="w-3.5 h-3.5 text-slate-400" />
-                            </button>
+                            <>
+                              <button
+                                onClick={() => {
+                                  setOpenFolderMenuId(null);
+                                  onShareFolder(f, "link");
+                                }}
+                                className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-[#0056f6] transition-colors cursor-pointer"
+                              >
+                                <span>مشاركة برابط</span>
+                                <Share2 className="w-3.5 h-3.5 text-slate-400" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setOpenFolderMenuId(null);
+                                  onShareFolder(f, "send");
+                                }}
+                                className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-[#0056f6] transition-colors cursor-pointer"
+                              >
+                                <span>إرسال لمستخدم</span>
+                                <Send className="w-3.5 h-3.5 text-slate-400" />
+                              </button>
+                            </>
                           )}
                           <button
                             onClick={() => {
@@ -3679,6 +3922,8 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
         );
       })()}
 
+        </>
+      )}
 
     </div>
   );

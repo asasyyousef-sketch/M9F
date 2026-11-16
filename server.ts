@@ -4708,6 +4708,281 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
     res.redirect(`/?share=${req.params.shareId}`);
   });
 
+  // ─── Direct User-to-User Folder Sending & Bell Inbox System ──────────────────────
+  const DIRECT_SHARES_PATH = path.join(process.cwd(), "direct_shares.json");
+
+  function loadDirectShares(): any[] {
+    try {
+      if (fs.existsSync(DIRECT_SHARES_PATH)) {
+        const raw = fs.readFileSync(DIRECT_SHARES_PATH, "utf-8").trim();
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed : [];
+        }
+      }
+    } catch (e) {
+      console.error("[Direct Shares] Error reading direct_shares.json:", e);
+    }
+    return [];
+  }
+
+  function saveDirectShares(items: any[]) {
+    try {
+      fs.writeFileSync(DIRECT_SHARES_PATH, JSON.stringify(items, null, 2), "utf-8");
+    } catch (e) {
+      console.error("[Direct Shares] Error writing direct_shares.json:", e);
+    }
+  }
+
+  // List available recipient users in the system (excluding the current user)
+  app.get("/api/users/recipients", async (req: any, res: any) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ success: false, error: "يجب تسجيل الدخول أولاً" });
+      }
+      let users = loadUsers(DB_PATH);
+      try {
+        if (getSupabase()) {
+          users = await syncUsersWithSupabase(DB_PATH);
+        }
+      } catch (e) {}
+
+      const currentUserId = req.user.userId || req.user.id;
+      const recipients = users
+        .filter((u) => u.id !== currentUserId)
+        .map((u) => ({
+          id: u.id,
+          username: u.username,
+          name: u.name || u.username,
+          role: u.role,
+        }));
+
+      return res.json({ success: true, users: recipients });
+    } catch (err: any) {
+      console.error("[Direct Shares] Failed to load recipients:", err);
+      return res.status(500).json({ success: false, error: "تعذر جلب قائمة المستخدمين" });
+    }
+  });
+
+  // Send a folder directly to one or more users in the system
+  app.post("/api/direct-shares/send", express.json({ limit: "50mb" }), async (req: any, res: any) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ success: false, error: "يجب تسجيل الدخول لإرسال المجلدات" });
+      }
+
+      const { recipientIds, recipientId, folder, cards, subfolders, message } = req.body || {};
+      const senderId = req.user.userId || req.user.id;
+
+      const rawIds: string[] = Array.isArray(recipientIds)
+        ? recipientIds
+        : recipientId
+        ? [recipientId]
+        : [];
+      const targetIds = Array.from(new Set(rawIds.map((id) => String(id).trim()).filter((id) => id && id !== senderId)));
+
+      if (!folder || !folder.name) {
+        return res.status(400).json({ success: false, error: "بيانات المجلد غير صالحة" });
+      }
+      if (targetIds.length === 0) {
+        return res.status(400).json({ success: false, error: "يرجى اختيار مستخدم واحد على الأقل لإرسال المجلد إليه" });
+      }
+
+      let users = loadUsers(DB_PATH);
+      if (users.length === 0 && getSupabase()) {
+        try {
+          users = await syncUsersWithSupabase(DB_PATH);
+        } catch (e) {}
+      }
+
+      const targetUsers = targetIds
+        .map((id) => users.find((u) => u.id === id))
+        .filter((u): u is NonNullable<typeof u> => Boolean(u));
+
+      if (targetUsers.length === 0) {
+        return res.status(404).json({ success: false, error: "لم يتم العثور على المستخدم المستهدف في النظام" });
+      }
+
+      const sanitizedFolder = {
+        id: folder.id,
+        name: folder.name,
+        description: folder.description || "",
+        color: folder.color || "#0056f6",
+        coverImage: folder.coverImage || "",
+        coverImagePosition: folder.coverImagePosition || "50% 50%",
+        frontLang: folder.frontLang || "de",
+        backLang: folder.backLang || "ar",
+        createdAt: folder.createdAt || new Date().toISOString(),
+        updatedAt: folder.updatedAt || new Date().toISOString()
+      };
+
+      const sanitizedSubfolders = Array.isArray(subfolders)
+        ? subfolders.map((sf: any) => ({
+            id: sf.id,
+            name: sf.name,
+            description: sf.description || "",
+            color: sf.color || "#0056f6",
+            coverImage: sf.coverImage || "",
+            coverImagePosition: sf.coverImagePosition || "50% 50%",
+            frontLang: sf.frontLang || "de",
+            backLang: sf.backLang || "ar",
+            parentId: sf.parentId || folder.id,
+            createdAt: sf.createdAt || new Date().toISOString(),
+            updatedAt: sf.updatedAt || new Date().toISOString()
+          }))
+        : [];
+
+      const sanitizedCards = Array.isArray(cards)
+        ? cards.map((c: any, index: number) => ({
+            id: c.id,
+            folderId: c.folderId || folder.id,
+            frontText: c.frontText || "",
+            frontLang: c.frontLang || folder.frontLang || "de",
+            frontImage: c.frontImage || "",
+            frontImagePosition: c.frontImagePosition || "50% 50%",
+            frontAudioUrl: c.frontAudioUrl || "",
+            backText: c.backText || "",
+            backLang: c.backLang || folder.backLang || "ar",
+            backImage: c.backImage || "",
+            backImagePosition: c.backImagePosition || "50% 50%",
+            backAudioUrl: c.backAudioUrl || "",
+            isArticleMode: !!c.isArticleMode,
+            correctArticle: c.correctArticle || "",
+            isPluralMode: !!c.isPluralMode,
+            pluralText: c.pluralText || "",
+            pluralLang: c.pluralLang || "de",
+            translationHint: c.translationHint || "",
+            streak: 0,
+            difficulty: c.difficulty || "medium",
+            createdAt: c.createdAt || new Date().toISOString(),
+            orderIndex: index
+          }))
+        : [];
+
+      const allShares = loadDirectShares();
+      const nowIso = new Date().toISOString();
+      const cleanMessage = typeof message === "string" ? message.trim().slice(0, 300) : "";
+
+      const createdItems = targetUsers.map((recipient) => ({
+        id: "ds_" + Date.now() + "_" + crypto.randomBytes(3).toString("hex"),
+        senderId,
+        senderUsername: req.user.username,
+        senderName: req.user.name || req.user.username,
+        recipientId: recipient.id,
+        recipientUsername: recipient.username,
+        recipientName: recipient.name || recipient.username,
+        folder: sanitizedFolder,
+        subfolders: sanitizedSubfolders,
+        cards: sanitizedCards,
+        cardCount: sanitizedCards.length,
+        message: cleanMessage || undefined,
+        createdAt: nowIso,
+        isRead: false,
+        isImported: false
+      }));
+
+      saveDirectShares([...createdItems, ...allShares]);
+
+      console.log(
+        `[Direct Shares] User "${req.user.username}" sent folder "${folder.name}" (${sanitizedCards.length} cards) to: ${targetUsers
+          .map((u) => u.username)
+          .join(", ")}`
+      );
+
+      return res.json({
+        success: true,
+        sentCount: createdItems.length,
+        recipients: targetUsers.map((u) => ({ id: u.id, username: u.username, name: u.name || u.username }))
+      });
+    } catch (err: any) {
+      console.error("[Direct Shares] Error sending folder:", err);
+      return res.status(500).json({ success: false, error: err.message || "حدث خطأ أثناء إرسال المجلد" });
+    }
+  });
+
+  // Get incoming sent folders (Bell notifications) for the current logged-in user
+  app.get("/api/direct-shares/inbox", (req: any, res: any) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ success: false, error: "غير مصرح" });
+      }
+      const userId = req.user.userId || req.user.id;
+      const items = loadDirectShares()
+        .filter((item) => item.recipientId === userId)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      const unreadCount = items.filter((item) => !item.isRead).length;
+      return res.json({ success: true, items, unreadCount });
+    } catch (err: any) {
+      console.error("[Direct Shares] Error fetching inbox:", err);
+      return res.status(500).json({ success: false, error: "تعذر جلب الإشعارات" });
+    }
+  });
+
+  // Mark an incoming shared folder notification as read
+  app.patch("/api/direct-shares/:id/read", (req: any, res: any) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ success: false, error: "غير مصرح" });
+      }
+      const userId = req.user.userId || req.user.id;
+      const { id } = req.params;
+      const allShares = loadDirectShares();
+      const idx = allShares.findIndex((item) => item.id === id && item.recipientId === userId);
+      if (idx === -1) {
+        return res.status(404).json({ success: false, error: "الإشعار غير موجود" });
+      }
+      allShares[idx].isRead = true;
+      saveDirectShares(allShares);
+      return res.json({ success: true, item: allShares[idx] });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: "تعذر تحديث حالة الإشعار" });
+    }
+  });
+
+  // Mark an incoming shared folder as imported into the recipient's library
+  app.patch("/api/direct-shares/:id/imported", (req: any, res: any) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ success: false, error: "غير مصرح" });
+      }
+      const userId = req.user.userId || req.user.id;
+      const { id } = req.params;
+      const allShares = loadDirectShares();
+      const idx = allShares.findIndex((item) => item.id === id && item.recipientId === userId);
+      if (idx === -1) {
+        return res.status(404).json({ success: false, error: "الإشعار غير موجود" });
+      }
+      allShares[idx].isRead = true;
+      allShares[idx].isImported = true;
+      allShares[idx].importedAt = new Date().toISOString();
+      saveDirectShares(allShares);
+      return res.json({ success: true, item: allShares[idx] });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: "تعذر تحديث حالة الإدراج" });
+    }
+  });
+
+  // Delete an incoming shared folder notification from inbox
+  app.delete("/api/direct-shares/:id", (req: any, res: any) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ success: false, error: "غير مصرح" });
+      }
+      const userId = req.user.userId || req.user.id;
+      const { id } = req.params;
+      const allShares = loadDirectShares();
+      const filtered = allShares.filter((item) => !(item.id === id && item.recipientId === userId));
+      if (filtered.length === allShares.length) {
+        return res.status(404).json({ success: false, error: "الإشعار غير موجود" });
+      }
+      saveDirectShares(filtered);
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: "تعذر حذف الإشعار" });
+    }
+  });
+
 
   // API Route - Force Push Local data to Supabase Cloud
   app.post("/api/sync/push", async (req, res) => {
@@ -10723,6 +10998,7 @@ ${structureDirective}
             '**/active_sessions.json',
             '**/db.json',
             '**/shared_decks.json',
+            '**/direct_shares.json',
             '**/token_usage_log.json',
             '**/users.json',
             '**/voice_profiles.json',

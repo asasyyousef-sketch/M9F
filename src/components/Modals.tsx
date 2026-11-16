@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { X, Search, Image as ImageIcon, Volume2, Link as LinkIcon, Plus, Check, ChevronLeft, ChevronRight, ChevronDown, FolderOpen, HelpCircle, Trash2, Settings, AlertCircle, Play, Folder as LucideFolder, FileText, Eye, Pencil, Headphones, BookOpen, Layers, Copy, Shuffle, Move, Key, Timer, History, Download, RefreshCw, DownloadCloud, HardDrive, Sparkles, Cpu, Star, Square, VolumeX, Radio, Activity, Laptop, Server, Zap, CheckCircle2, Minimize2, Maximize2, Loader2, ExternalLink, Link2, Users, Share2 } from "lucide-react";
+import { X, Search, Image as ImageIcon, Volume2, Link as LinkIcon, Plus, Check, ChevronLeft, ChevronRight, ChevronDown, FolderOpen, HelpCircle, Trash2, Settings, AlertCircle, Play, Folder as LucideFolder, FileText, Eye, Pencil, Headphones, BookOpen, Layers, Copy, Shuffle, Move, Key, Timer, History, Download, RefreshCw, DownloadCloud, HardDrive, Sparkles, Cpu, Star, Square, VolumeX, Radio, Activity, Laptop, Server, Zap, CheckCircle2, Minimize2, Maximize2, Loader2, ExternalLink, Link2, Users, Share2, Send } from "lucide-react";
 import { Folder, Flashcard, ReviewMethod, getSafeImageStyle, DEFAULT_GRADIO_VOICES, GRADIO_LANGUAGES, GradioVoice, sanitizeCardArticleAndSentence } from "../types";
 import { LivePiperSandboxModal } from "./LivePiperSandboxModal";
 import { AccountsSettingsTab } from "./AccountsSettingsTab";
@@ -1790,7 +1790,7 @@ interface EditFolderModalProps {
   folder: Folder;
   onSave: (id: string, folder: Omit<Folder, "id" | "createdAt" | "updatedAt">) => void;
   onOpenImageSearch: (onSelect: (url: string) => void, initialQuery?: string) => void;
-  onShare?: (folder: Folder) => void;
+  onShare?: (folder: Folder, initialMode?: "link" | "send") => void;
 }
 
 export const EditFolderModal: React.FC<EditFolderModalProps> = ({
@@ -2009,20 +2009,34 @@ export const EditFolderModal: React.FC<EditFolderModalProps> = ({
 
 
           {/* Footer Actions */}
-          <div className="pt-4 border-t border-outline-variant flex items-center justify-between gap-3">
+          <div className="pt-4 border-t border-outline-variant flex items-center justify-between gap-2 flex-wrap">
             {onShare && (
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onShare(folder);
-                }}
-                className="px-4 py-2 rounded-full text-xs font-bold text-[#0056f6] bg-blue-50 hover:bg-blue-100 transition-all flex items-center gap-1.5 cursor-pointer border border-blue-100"
-                title="مشاركة هذا الملف برابط"
-              >
-                <Share2 className="w-3.5 h-3.5" />
-                مشاركة برابط 🔗
-              </button>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onShare(folder, "link");
+                  }}
+                  className="px-3.5 py-2 rounded-full text-xs font-bold text-[#0056f6] bg-blue-50 hover:bg-blue-100 transition-all flex items-center gap-1.5 cursor-pointer border border-blue-100"
+                  title="مشاركة هذا الملف برابط"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  مشاركة برابط 🔗
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onShare(folder, "send");
+                  }}
+                  className="px-3.5 py-2 rounded-full text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-all flex items-center gap-1.5 cursor-pointer border border-indigo-100"
+                  title="إرسال هذا المجلد لمستخدم آخر في النظام"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  إرسال لمستخدم
+                </button>
+              </div>
             )}
             <div className="flex items-center gap-2 mr-auto">
               <button

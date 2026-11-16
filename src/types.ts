@@ -53,6 +53,32 @@ export interface SharedDeckData {
   views?: number;
 }
 
+export interface DirectShareUser {
+  id: string;
+  username: string;
+  name: string;
+  role: UserRole;
+}
+
+export interface DirectShareItem {
+  id: string;
+  senderId: string;
+  senderUsername: string;
+  senderName: string;
+  recipientId: string;
+  recipientUsername?: string;
+  recipientName?: string;
+  folder: Folder;
+  cards: Flashcard[];
+  subfolders: Folder[];
+  cardCount: number;
+  message?: string;
+  createdAt: string;
+  isRead: boolean;
+  isImported: boolean;
+  importedAt?: string;
+}
+
 
 export function getCardSearchQuery(
   card: { frontText?: string; backText?: string; imageSearchQuery?: string }

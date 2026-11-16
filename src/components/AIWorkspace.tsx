@@ -433,8 +433,7 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
     if (url.startsWith("data:")) return url;
 
     try {
-      const isLocalhost = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-      const proxyBase = isLocalhost ? "http://localhost:3000/api/proxy-image" : "/api/proxy-image";
+      const proxyBase = "/api/proxy-image";
       const proxyUrl = `${proxyBase}?url=${encodeURIComponent(url)}`;
 
       const controller = new AbortController();
@@ -1982,8 +1981,7 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
           setLoadingStatus(`مرحلة 1/2 (جلب القوائم): جلب الـ 10 صور للبطاقة (${idx + 1}/${totalCards}): "${card.frontText || queryTerm}"...`);
 
           try {
-            const isLocalhost = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-            const apiBase = isLocalhost ? "http://localhost:3000/api/images" : "/api/images";
+            const apiBase = "/api/images";
             const res = await fetch(`${apiBase}?q=${encodeURIComponent(queryTerm)}&page=1&provider=duckduckgo`);
 
             if (res.ok) {

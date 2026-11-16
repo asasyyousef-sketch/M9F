@@ -1,28 +1,26 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Share2, 
   Copy, 
   Check, 
-  ExternalLink, 
   QrCode, 
-  Folder, 
-  Layers, 
   Download, 
   Sparkles, 
   X, 
-  CheckCircle2, 
   AlertCircle, 
-  ArrowRight, 
-  Globe, 
-  Image as ImageIcon, 
-  Volume2, 
   BookOpen, 
   Play, 
-  Smartphone,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Send,
+  Users,
+  Search,
+  CheckCircle2,
+  ShieldCheck,
+  User as UserIcon
 } from "lucide-react";
-import { Folder as FolderType, Flashcard, SharedDeckData, getSafeImageStyle } from "../types";
+import { Folder as FolderType, Flashcard, SharedDeckData, DirectShareUser, getSafeImageStyle } from "../types";
+import { useAuth } from "../context/AuthContext";
 
 // ─── ShareFolderModal ──────────────────────────────────────────────────────────
 interface ShareFolderModalProps {
@@ -32,6 +30,8 @@ interface ShareFolderModalProps {
   allFolders: FolderType[];
   allCards: Flashcard[];
   currentUserName?: string;
+  initialMode?: "link" | "send";
+  onSentSuccess?: (msg: string) => void;
 }
 
 export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
@@ -40,8 +40,14 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
   folder,
   allFolders,
   allCards,
-  currentUserName
+  currentUserName,
+  initialMode = "link",
+  onSentSuccess
 }) => {
+  const { authFetch } = useAuth();
+  const [activeMode, setActiveMode] = useState<"link" | "send">(initialMode);
+
+  // Link share states
   const [shareUrl, setShareUrl] = useState<string>("");
   const [shareId, setShareId] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -51,28 +57,52 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
   const [showQrCode, setShowQrCode] = useState<boolean>(false);
   const [showCardsPreview, setShowCardsPreview] = useState<boolean>(false);
 
-  // Cards belonging to this folder (and subfolders)
-  const folderCards = React.useMemo(() => {
-    if (!folder) return [];
-    // Collect child folder IDs
+  // Direct send-to-user states
+  const [recipients, setRecipients] = useState<DirectShareUser[]>([]);
+  const [isLoadingRecipients, setIsLoadingRecipients] = useState<boolean>(false);
+  const [recipientsError, setRecipientsError] = useState<string | null>(null);
+  const [selectedRecipientIds, setSelectedRecipientIds] = useState<string[]>([]);
+  const [recipientSearch, setRecipientSearch] = useState<string>("");
+  const [sendMessage, setSendMessage] = useState<string>("");
+  const [isSending, setIsSending] = useState<boolean>(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [sentSuccessText, setSentSuccessText] = useState<string | null>(null);
+
+  // Sync mode when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setActiveMode(initialMode);
+      setSelectedRecipientIds([]);
+      setRecipientSearch("");
+      setSendMessage("");
+      setSendError(null);
+      setSentSuccessText(null);
+    }
+  }, [isOpen, initialMode, folder?.id]);
+
+  // Cards & ALL recursive subfolders belonging to this folder
+  const { folderCards, subfolders } = React.useMemo(() => {
+    if (!folder) return { folderCards: [], subfolders: [] };
     const childFolderIds = new Set<string>([folder.id]);
+    const collectedSubfolders: FolderType[] = [];
     const collectChildren = (parentId: string) => {
       allFolders.filter(f => f.parentId === parentId).forEach(child => {
-        childFolderIds.add(child.id);
-        collectChildren(child.id);
+        if (!childFolderIds.has(child.id)) {
+          childFolderIds.add(child.id);
+          collectedSubfolders.push(child);
+          collectChildren(child.id);
+        }
       });
     };
     collectChildren(folder.id);
 
-    return allCards.filter(c => childFolderIds.has(c.folderId));
+    return {
+      subfolders: collectedSubfolders,
+      folderCards: allCards.filter(c => childFolderIds.has(c.folderId))
+    };
   }, [folder, allFolders, allCards]);
 
-  const subfolders = React.useMemo(() => {
-    if (!folder) return [];
-    return allFolders.filter(f => f.parentId === folder.id);
-  }, [folder, allFolders]);
-
-  // Request share link generation when modal opens
+  // Request share link generation when link mode is active
   useEffect(() => {
     if (!isOpen || !folder) {
       setShareUrl("");
@@ -82,6 +112,9 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
       setCopied(false);
       return;
     }
+
+    if (activeMode !== "link") return;
+    if (shareUrl) return;
 
     let isMounted = true;
     setIsLoading(true);
@@ -103,7 +136,6 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
         if (data.success && data.shareUrl) {
           setShareUrl(data.shareUrl);
           setShareId(data.shareId);
-          // Generate QR code for mobile scanning (zero external dependencies)
           const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=10&data=${encodeURIComponent(data.shareUrl)}`;
           setQrCodeDataUrl(qrUrl);
         } else {
@@ -122,9 +154,100 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [isOpen, folder, folderCards, subfolders, currentUserName]);
+  }, [isOpen, folder, activeMode, shareUrl, folderCards, subfolders, currentUserName]);
+
+  // Fetch system users when send mode is active
+  useEffect(() => {
+    if (!isOpen || activeMode !== "send") return;
+    let isMounted = true;
+    setIsLoadingRecipients(true);
+    setRecipientsError(null);
+
+    authFetch("/api/users/recipients")
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "تعذر جلب قائمة المستخدمين");
+        }
+        return data;
+      })
+      .then(data => {
+        if (!isMounted) return;
+        setRecipients(Array.isArray(data.users) ? data.users : []);
+      })
+      .catch(err => {
+        if (!isMounted) return;
+        setRecipientsError(err.message || "تعذر تحميل قائمة المستخدمين");
+      })
+      .finally(() => {
+        if (isMounted) setIsLoadingRecipients(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, activeMode, authFetch]);
 
   if (!isOpen || !folder) return null;
+
+  const filteredRecipients = recipients.filter((u) => {
+    const q = recipientSearch.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      u.name.toLowerCase().includes(q) ||
+      u.username.toLowerCase().includes(q)
+    );
+  });
+
+  const toggleRecipient = (id: string) => {
+    setSentSuccessText(null);
+    setSendError(null);
+    setSelectedRecipientIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleDirectSend = async () => {
+    if (selectedRecipientIds.length === 0) {
+      setSendError("يرجى اختيار مستخدم واحد على الأقل لإرسال المجلد إليه.");
+      return;
+    }
+
+    setIsSending(true);
+    setSendError(null);
+    setSentSuccessText(null);
+
+    try {
+      const res = await authFetch("/api/direct-shares/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipientIds: selectedRecipientIds,
+          folder,
+          cards: folderCards,
+          subfolders,
+          message: sendMessage
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "فشل إرسال المجلد");
+      }
+
+      const names = (data.recipients || []).map((r: any) => r.name || r.username).join("، ");
+      const msg = `تم إرسال "${folder.name}" بنجاح إلى: ${names}`;
+      setSentSuccessText(msg);
+      setSelectedRecipientIds([]);
+      setSendMessage("");
+      if (onSentSuccess) {
+        onSentSuccess(`📨 ${msg}`);
+      }
+    } catch (err: any) {
+      setSendError(err.message || "حدث خطأ أثناء إرسال المجلد");
+    } finally {
+      setIsSending(false);
+    }
+  };
 
   const handleCopyLink = () => {
     if (!shareUrl) return;
@@ -132,16 +255,6 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     });
-  };
-
-  const handleNativeShare = () => {
-    if (navigator.share && shareUrl) {
-      navigator.share({
-        title: `ملف بطاقات: ${folder.name}`,
-        text: `📚 شاركت معك ملف البطاقات التعليمية "${folder.name}" (${folderCards.length} بطاقة). اضغط الرابط لإضافته فوراً لمكتبتك!`,
-        url: shareUrl
-      }).catch(() => {});
-    }
   };
 
   const shareText = encodeURIComponent(
@@ -182,12 +295,16 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
               className="w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-xs"
               style={{ backgroundColor: folder.color || "#0056f6" }}
             >
-              <Share2 className="w-5 h-5" />
+              {activeMode === "send" ? <Send className="w-5 h-5" /> : <Share2 className="w-5 h-5" />}
             </div>
             <div>
-              <h3 className="font-bold text-slate-800 text-base">مشاركة الملف برابط</h3>
+              <h3 className="font-bold text-slate-800 text-base">
+                {activeMode === "send" ? "إرسال المجلد لمستخدم" : "مشاركة الملف برابط"}
+              </h3>
               <p className="text-xs text-slate-400">
-                أي شخص لديه الرابط يمكنه إضافة الملف لمكتبته
+                {activeMode === "send"
+                  ? "أرسل المجلد مباشرة لحساب مستخدم آخر ليظهر في زر الجرس لديه"
+                  : "أي شخص لديه الرابط يمكنه إضافة الملف لمكتبته"}
               </p>
             </div>
           </div>
@@ -199,11 +316,40 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
           </button>
         </div>
 
+        {/* Parallel Mode Switcher: Link Share vs Direct Send */}
+        <div className="px-6 pt-4">
+          <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-2xl border border-slate-200/70">
+            <button
+              type="button"
+              onClick={() => setActiveMode("link")}
+              className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                activeMode === "link"
+                  ? "bg-white text-[#0056f6] shadow-xs"
+                  : "text-slate-600 hover:text-slate-800"
+              }`}
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span>مشاركة برابط</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveMode("send")}
+              className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                activeMode === "send"
+                  ? "bg-white text-[#0056f6] shadow-xs"
+                  : "text-slate-600 hover:text-slate-800"
+              }`}
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>إرسال لمستخدم</span>
+            </button>
+          </div>
+        </div>
+
         {/* Body content */}
-        <div className="p-6 overflow-y-auto space-y-4 flex-1">
-          {/* Deck Card Overview (Simplified & Clean) */}
+        <div className="p-6 pt-4 overflow-y-auto space-y-4 flex-1">
+          {/* Deck Card Overview */}
           <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 flex items-center gap-3.5">
-            {/* Visual Cover Thumbnail */}
             <div 
               className="relative w-14 h-18 rounded-xl overflow-hidden shrink-0 shadow-xs border border-slate-200/80 bg-white"
             >
@@ -224,10 +370,9 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
               )}
             </div>
 
-            {/* Folder Info */}
             <div className="flex-1 min-w-0">
               <h4 className="font-bold text-slate-800 text-sm truncate">{folder.name}</h4>
-              <div className="flex items-center gap-2 mt-1">
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
                 <span className="text-xs text-slate-500 font-medium">
                   {folderCards.length} بطاقة
                 </span>
@@ -247,8 +392,167 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
             </div>
           </div>
 
-          {/* Share Link Section */}
-          {isLoading ? (
+          {activeMode === "send" ? (
+            <div className="space-y-3.5">
+              {/* Search Users */}
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={recipientSearch}
+                  onChange={(e) => setRecipientSearch(e.target.value)}
+                  placeholder="ابحث عن اسم المستخدم أو الاسم..."
+                  className="w-full pr-9 pl-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#0056f6]/20 focus:border-[#0056f6]"
+                />
+              </div>
+
+              {/* Users List */}
+              {isLoadingRecipients ? (
+                <div className="p-6 rounded-2xl bg-slate-50 flex flex-col items-center justify-center gap-2 text-center">
+                  <div className="w-5 h-5 border-2 border-[#0056f6] border-t-transparent rounded-full animate-spin" />
+                  <p className="text-xs text-slate-500">جاري تحميل المستخدمين المسجلين...</p>
+                </div>
+              ) : recipientsError ? (
+                <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 flex items-center gap-2 text-xs">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{recipientsError}</span>
+                </div>
+              ) : recipients.length === 0 ? (
+                <div className="p-6 rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-center space-y-1.5">
+                  <Users className="w-7 h-7 text-slate-300 mx-auto" />
+                  <p className="text-xs font-bold text-slate-700">لا يوجد مستخدمون آخرون في النظام حالياً</p>
+                  <p className="text-[11px] text-slate-500">
+                    قم بإنشاء حساب مستخدم آخر في النظام حتى تتمكن من إرسال المجلدات إليه مباشرة.
+                  </p>
+                </div>
+              ) : filteredRecipients.length === 0 ? (
+                <div className="p-5 rounded-2xl bg-slate-50 text-center text-xs text-slate-500">
+                  لا توجد نتائج مطابقة للبحث "{recipientSearch}"
+                </div>
+              ) : (
+                <div className="max-h-52 overflow-y-auto space-y-1.5 pr-0.5">
+                  {filteredRecipients.map((user) => {
+                    const isSelected = selectedRecipientIds.includes(user.id);
+                    return (
+                      <button
+                        key={user.id}
+                        type="button"
+                        onClick={() => toggleRecipient(user.id)}
+                        className={`w-full p-2.5 rounded-xl border flex items-center justify-between gap-3 transition-all cursor-pointer text-right ${
+                          isSelected
+                            ? "bg-blue-50/70 border-[#0056f6] shadow-2xs"
+                            : "bg-white border-slate-200/80 hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div
+                            className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-extrabold ${
+                              isSelected
+                                ? "bg-[#0056f6] text-white"
+                                : "bg-slate-100 text-slate-600"
+                            }`}
+                          >
+                            {user.role === "admin" ? (
+                              <ShieldCheck className="w-4 h-4" />
+                            ) : (
+                              <UserIcon className="w-4 h-4" />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-bold text-slate-800 truncate">{user.name}</span>
+                              <span
+                                className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                                  user.role === "admin"
+                                    ? "bg-purple-100 text-purple-700"
+                                    : "bg-slate-100 text-slate-600"
+                                }`}
+                              >
+                                {user.role === "admin" ? "مشرف" : "مستخدم"}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 font-mono truncate" dir="ltr">
+                              @{user.username}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div
+                          className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-all ${
+                            isSelected
+                              ? "bg-[#0056f6] border-[#0056f6] text-white"
+                              : "border-slate-300 bg-white"
+                          }`}
+                        >
+                          {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Optional message */}
+              {recipients.length > 0 && (
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                    رسالة مرفقة (اختياري)
+                  </label>
+                  <input
+                    type="text"
+                    value={sendMessage}
+                    onChange={(e) => setSendMessage(e.target.value)}
+                    placeholder="مثلاً: أرسلت لك هذا المجلد للمراجعة..."
+                    maxLength={250}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#0056f6]/20 focus:border-[#0056f6]"
+                  />
+                </div>
+              )}
+
+              {sendError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 flex items-center gap-2 text-xs font-semibold">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{sendError}</span>
+                </div>
+              )}
+
+              {sentSuccessText && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-2 text-xs font-bold">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{sentSuccessText}</span>
+                </div>
+              )}
+
+              {recipients.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleDirectSend}
+                  disabled={isSending || selectedRecipientIds.length === 0}
+                  className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    isSending || selectedRecipientIds.length === 0
+                      ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                      : "bg-[#0056f6] hover:bg-[#0047cc] text-white shadow-sm active:scale-98"
+                  }`}
+                >
+                  {isSending ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>جاري الإرسال...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      <span>
+                        {selectedRecipientIds.length > 0
+                          ? `إرسال المجلد (${selectedRecipientIds.length} مستخدم)`
+                          : "اختر مستخدماً للإرسال"}
+                      </span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          ) : isLoading ? (
             <div className="p-8 rounded-2xl bg-slate-50 flex flex-col items-center justify-center gap-2 text-center">
               <div className="w-6 h-6 border-2 border-[#0056f6] border-t-transparent rounded-full animate-spin" />
               <p className="text-xs text-slate-500">جاري إنشاء الرابط...</p>
@@ -259,6 +563,7 @@ export const ShareFolderModal: React.FC<ShareFolderModalProps> = ({
               <span>{error}</span>
             </div>
           ) : (
+
             <div className="space-y-3">
               {/* Main Copy Action */}
               <div className="flex items-center gap-2">

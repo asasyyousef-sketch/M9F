@@ -19,7 +19,7 @@ import {
 } from "./components/Modals";
 import { ShareFolderModal, ImportSharedDeckModal } from "./components/ShareModals";
 import { ReviewSession } from "./components/ReviewSession";
-import { Folder, Flashcard, ReviewMethod, DbStatus, TranscriptDocument, SharedDeckData } from "./types";
+import { Folder, Flashcard, ReviewMethod, DbStatus, TranscriptDocument, SharedDeckData, DirectShareItem } from "./types";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { AuthScreen } from "./components/AuthScreen";
 import { CheckCircle2 } from "lucide-react";
@@ -92,12 +92,18 @@ function MainStudyApp() {
 
   // Shared Decks state
   const [sharingFolder, setSharingFolder] = useState<Folder | null>(null);
+  const [shareModalInitialMode, setShareModalInitialMode] = useState<"link" | "send">("link");
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [sharedDeckData, setSharedDeckData] = useState<SharedDeckData | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isShareLoading, setIsShareLoading] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Direct User-to-User Inbox & Preview state
+  const [inboxItems, setInboxItems] = useState<DirectShareItem[]>([]);
+  const [unreadInboxCount, setUnreadInboxCount] = useState<number>(0);
+  const [previewDirectShare, setPreviewDirectShare] = useState<DirectShareItem | null>(null);
   
   // Image picker callback channel
   const [isImagePickerOpen, setIsImagePickerOpen] = useState(false);
@@ -257,6 +263,44 @@ function MainStudyApp() {
       console.error("[Share] URL parse error:", e);
     }
   }, []);
+
+  // Fetch & poll direct-share Bell inbox notifications for currentUser
+  const fetchDirectInbox = useCallback(async () => {
+    if (!currentUser) {
+      setInboxItems([]);
+      setUnreadInboxCount(0);
+      return;
+    }
+    try {
+      const res = await authFetch("/api/direct-shares/inbox");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.items)) {
+          setInboxItems(data.items);
+          setUnreadInboxCount(typeof data.unreadCount === "number" ? data.unreadCount : data.items.filter((i: DirectShareItem) => !i.isRead).length);
+        }
+      }
+    } catch (e) {
+      console.warn("[Direct Shares] Failed to fetch inbox:", e);
+    }
+  }, [currentUser, authFetch]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setInboxItems([]);
+      setUnreadInboxCount(0);
+      setPreviewDirectShare(null);
+      return;
+    }
+    fetchDirectInbox();
+    const interval = setInterval(fetchDirectInbox, 15000);
+    const handleFocus = () => fetchDirectInbox();
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [currentUser, fetchDirectInbox]);
 
   // Fetch initial database items from Express Node backend
   useEffect(() => {
@@ -1000,11 +1044,13 @@ function MainStudyApp() {
   };
 
   const handleSelectFolder = useCallback((id: string) => {
+    setPreviewDirectShare(null);
     setActiveFolderId(id);
     setViewMode("library");
   }, []);
 
   const handleHomeClick = useCallback(() => {
+    setPreviewDirectShare(null);
     setActiveFolderId("");
     setViewMode("library");
   }, []);
@@ -1103,28 +1149,71 @@ function MainStudyApp() {
     setEditingCard(card);
   }, []);
 
-  const handleOpenShareFolder = useCallback((folder: Folder) => {
+  const handleOpenShareFolder = useCallback((folder: Folder, initialMode: "link" | "send" = "link") => {
     setSharingFolder(folder);
+    setShareModalInitialMode(initialMode);
     setIsShareModalOpen(true);
+  }, []);
+
+  const handleOpenDirectSharePreview = useCallback(async (item: DirectShareItem) => {
+    setPreviewDirectShare({ ...item, isRead: true });
+    setViewMode("library");
+    if (!item.isRead) {
+      setInboxItems((prev) => prev.map((it) => (it.id === item.id ? { ...it, isRead: true } : it)));
+      setUnreadInboxCount((prev) => Math.max(0, prev - 1));
+      try {
+        await authFetch(`/api/direct-shares/${encodeURIComponent(item.id)}/read`, { method: "PATCH" });
+      } catch (e) {}
+    }
+  }, [authFetch]);
+
+  const handleCloseDirectSharePreview = useCallback(() => {
+    setPreviewDirectShare(null);
+  }, []);
+
+  const handleDeleteDirectShare = useCallback(async (id: string) => {
+    setInboxItems((prev) => {
+      const target = prev.find((i) => i.id === id);
+      if (target && !target.isRead) {
+        setUnreadInboxCount((c) => Math.max(0, c - 1));
+      }
+      return prev.filter((i) => i.id !== id);
+    });
+    if (previewDirectShare?.id === id) {
+      setPreviewDirectShare(null);
+    }
+    try {
+      await authFetch(`/api/direct-shares/${encodeURIComponent(id)}`, { method: "DELETE" });
+    } catch (e) {}
+  }, [authFetch, previewDirectShare?.id]);
+
+  const handleTryReviewDirectShare = useCallback((reviewCards: Flashcard[]) => {
+    if (!reviewCards || reviewCards.length === 0) return;
+    setActiveReview({
+      method: "classic",
+      cards: reviewCards
+    });
   }, []);
 
   const handleImportSharedDeck = useCallback((shared: SharedDeckData, openImmediately: boolean = true) => {
     try {
-      const newFolderId = "f_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7);
+      const baseTs = Date.now();
+      const newFolderId = "f_" + baseTs + "_" + Math.random().toString(36).substring(2, 7);
       const idMap: Record<string, string> = { [shared.folder.id]: newFolderId };
 
-      // Map subfolders if any
-      const newSubfolders: Folder[] = (shared.subfolders || []).map((sf, idx) => {
-        const subId = "f_" + Date.now() + "_sub_" + idx + "_" + Math.random().toString(36).substring(2, 6);
-        idMap[sf.id] = subId;
-        return {
-          ...sf,
-          id: subId,
-          parentId: sf.parentId ? (idMap[sf.parentId] || newFolderId) : newFolderId,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
+      // Pre-generate mapped IDs for all subfolders so multi-level nesting resolves accurately
+      (shared.subfolders || []).forEach((sf, idx) => {
+        idMap[sf.id] = "f_" + baseTs + "_sub_" + idx + "_" + Math.random().toString(36).substring(2, 6);
       });
+
+      const newSubfolders: Folder[] = (shared.subfolders || []).map((sf) => ({
+        ...sf,
+        id: idMap[sf.id],
+        userId: currentUser?.id,
+        parentId: sf.parentId ? (idMap[sf.parentId] || newFolderId) : newFolderId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }));
 
       // Name conflict checking
       let targetFolderName = shared.folder.name;
@@ -1136,6 +1225,8 @@ function MainStudyApp() {
       const newFolder: Folder = {
         ...shared.folder,
         id: newFolderId,
+        userId: currentUser?.id,
+        parentId: undefined,
         name: targetFolderName,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -1146,10 +1237,11 @@ function MainStudyApp() {
         const assignedFolderId = idMap[c.folderId] || newFolderId;
         return {
           ...c,
-          id: "c_" + Date.now() + "_" + index + "_" + Math.random().toString(36).substring(2, 7),
+          id: "c_" + baseTs + "_" + index + "_" + Math.random().toString(36).substring(2, 7),
+          userId: currentUser?.id,
           folderId: assignedFolderId,
           streak: 0,
-          createdAt: new Date(Date.now() + index * 100).toISOString()
+          createdAt: new Date(baseTs + index * 100).toISOString()
         };
       });
 
@@ -1177,7 +1269,80 @@ function MainStudyApp() {
       console.error("[Share] Failed to import shared deck:", err);
       alert("حدث خطأ أثناء حفظ الملف المشارك في مكتبتك.");
     }
-  }, [folders, cards, persistDB]);
+  }, [folders, cards, persistDB, currentUser?.id]);
+
+  const handleInsertDirectShare = useCallback(async (item: DirectShareItem) => {
+    try {
+      const baseTs = Date.now();
+      const newFolderId = "f_" + baseTs + "_" + Math.random().toString(36).substring(2, 7);
+      const idMap: Record<string, string> = { [item.folder.id]: newFolderId };
+
+      (item.subfolders || []).forEach((sf, idx) => {
+        idMap[sf.id] = "f_" + baseTs + "_sub_" + idx + "_" + Math.random().toString(36).substring(2, 6);
+      });
+
+      const newSubfolders: Folder[] = (item.subfolders || []).map((sf) => ({
+        ...sf,
+        id: idMap[sf.id],
+        userId: currentUser?.id,
+        parentId: sf.parentId ? (idMap[sf.parentId] || newFolderId) : newFolderId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }));
+
+      let targetFolderName = item.folder.name;
+      const isDuplicate = folders.some((f) => f.name.trim().toLowerCase() === targetFolderName.trim().toLowerCase());
+      if (isDuplicate) {
+        targetFolderName = `${item.folder.name} (مشارك)`;
+      }
+
+      const newFolder: Folder = {
+        ...item.folder,
+        id: newFolderId,
+        userId: currentUser?.id,
+        parentId: undefined,
+        name: targetFolderName,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      const newCards: Flashcard[] = (item.cards || []).map((c, index) => ({
+        ...c,
+        id: "c_" + baseTs + "_" + index + "_" + Math.random().toString(36).substring(2, 7),
+        userId: currentUser?.id,
+        folderId: idMap[c.folderId] || newFolderId,
+        streak: 0,
+        createdAt: new Date(baseTs + index * 100).toISOString()
+      }));
+
+      const updatedFolders = [...folders, newFolder, ...newSubfolders];
+      const updatedCards = [...cards, ...newCards];
+
+      setFolders(updatedFolders);
+      setCards(updatedCards);
+      persistDB(updatedFolders, updatedCards);
+
+      // Update inbox item status
+      setInboxItems((prev) =>
+        prev.map((it) => (it.id === item.id ? { ...it, isRead: true, isImported: true, importedAt: new Date().toISOString() } : it))
+      );
+      if (!item.isRead) {
+        setUnreadInboxCount((c) => Math.max(0, c - 1));
+      }
+
+      try {
+        await authFetch(`/api/direct-shares/${encodeURIComponent(item.id)}/imported`, { method: "PATCH" });
+      } catch (e) {}
+
+      setPreviewDirectShare(null);
+      setActiveFolderId(newFolderId);
+      setViewMode("library");
+      setToastMessage(`🎉 تم إدراج المجلد المشارك "${newFolder.name}" (${newCards.length} بطاقة) في مكتبتك!`);
+    } catch (err) {
+      console.error("[Direct Share] Failed to insert shared folder:", err);
+      alert("حدث خطأ أثناء إدراج المجلد المشارك في مكتبتك.");
+    }
+  }, [folders, cards, persistDB, currentUser?.id, authFetch]);
 
   const handleRefineFolderWithAI = useCallback((folderId: string) => {
     setAiRefineFolderId(folderId);
@@ -1338,6 +1503,14 @@ function MainStudyApp() {
             onOpenReviewSetup={handleOpenReviewSetup}
             onReorderFolders={handleReorderFolders}
             onReorderCards={handleReorderCards}
+            inboxItems={inboxItems}
+            unreadInboxCount={unreadInboxCount}
+            previewDirectShare={previewDirectShare}
+            onOpenDirectSharePreview={handleOpenDirectSharePreview}
+            onCloseDirectSharePreview={handleCloseDirectSharePreview}
+            onInsertDirectShare={handleInsertDirectShare}
+            onDeleteDirectShare={handleDeleteDirectShare}
+            onTryReviewDirectShare={handleTryReviewDirectShare}
           />
         )}
       </div>
@@ -1448,6 +1621,8 @@ function MainStudyApp() {
           allFolders={folders}
           allCards={cards}
           currentUserName={currentUser?.name || currentUser?.username}
+          initialMode={shareModalInitialMode}
+          onSentSuccess={(msg) => setToastMessage(msg)}
         />
       )}
 
