@@ -69,24 +69,31 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   const inlineAudioRef = useRef<HTMLAudioElement | null>(null);
   const touchStartXRef = useRef<number | null>(null);
 
+  // Helper: Filter book pages to show only pages with audio/video (unless no page has mapped media)
+  const getVisibleBookPages = (book: InteractiveBook): BookPage[] => {
+    const pagesWithMedia = (book.pages || []).filter(
+      (p) => Array.isArray(p.media) && p.media.length > 0
+    );
+    return pagesWithMedia.length > 0 ? pagesWithMedia : (book.pages || []);
+  };
+
   // Helper: Restore saved last-read page for a book from localStorage
   const selectBookAndRestorePage = (book: InteractiveBook) => {
     setSelectedBook(book);
     setActiveInlineMedia(null);
+    const visible = getVisibleBookPages(book);
     try {
       const savedPage = localStorage.getItem(`interactive_book_last_page_${book.id}`);
       if (savedPage !== null) {
         const parsed = parseInt(savedPage, 10);
-        if (!isNaN(parsed) && parsed >= 0 && parsed < book.pages.length) {
+        if (!isNaN(parsed) && parsed >= 0 && parsed < visible.length) {
           setCurrentPageIndex(parsed);
           return;
         }
       }
     } catch (e) {}
 
-    // Fallback: Default to first page with media if available, or page 0
-    const mediaIdx = book.pages.findIndex((p) => p.media && p.media.length > 0);
-    setCurrentPageIndex(mediaIdx >= 0 ? mediaIdx : 0);
+    setCurrentPageIndex(0);
   };
 
   // Save current page position to localStorage whenever selectedBook or currentPageIndex changes
@@ -134,7 +141,8 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
         const found = serverBooks.find((b) => b.id === initialBookId);
         if (found) {
           selectBookAndRestorePage(found);
-          if (typeof initialPageIndex === "number" && initialPageIndex >= 0 && initialPageIndex < found.pages.length) {
+          const visible = getVisibleBookPages(found);
+          if (typeof initialPageIndex === "number" && initialPageIndex >= 0 && initialPageIndex < visible.length) {
             setCurrentPageIndex(initialPageIndex);
           }
         }
@@ -152,7 +160,8 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
       const found = books.find((b) => b.id === initialBookId);
       if (found) {
         selectBookAndRestorePage(found);
-        if (typeof initialPageIndex === "number" && initialPageIndex >= 0 && initialPageIndex < found.pages.length) {
+        const visible = getVisibleBookPages(found);
+        if (typeof initialPageIndex === "number" && initialPageIndex >= 0 && initialPageIndex < visible.length) {
           setCurrentPageIndex(initialPageIndex);
         }
       }
@@ -162,21 +171,15 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   // Jump to specific page by number or label
   const handleJumpToPage = (query: string) => {
     if (!selectedBook || !query.trim()) return;
+    const visible = getVisibleBookPages(selectedBook);
     const clean = query.trim().toLowerCase();
     const num = parseInt(clean, 10);
 
     // 1. Try finding by pageNumber
     if (!isNaN(num)) {
-      const idxByNum = selectedBook.pages.findIndex((p) => p.pageNumber === num);
+      const idxByNum = visible.findIndex((p) => p.pageNumber === num);
       if (idxByNum !== -1) {
         setCurrentPageIndex(idxByNum);
-        setIsSearchOpen(false);
-        setPageSearchInput("");
-        return;
-      }
-      // Or 1-based index
-      if (num >= 1 && num <= selectedBook.pages.length) {
-        setCurrentPageIndex(num - 1);
         setIsSearchOpen(false);
         setPageSearchInput("");
         return;
@@ -184,7 +187,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     }
 
     // 2. Try finding by displayLabel
-    const idxByLabel = selectedBook.pages.findIndex(
+    const idxByLabel = visible.findIndex(
       (p) => p.displayLabel && p.displayLabel.toLowerCase() === clean
     );
     if (idxByLabel !== -1) {
@@ -195,11 +198,19 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     }
 
     // 3. Try partial match on label
-    const idxByPartial = selectedBook.pages.findIndex(
+    const idxByPartial = visible.findIndex(
       (p) => p.displayLabel && p.displayLabel.toLowerCase().includes(clean)
     );
     if (idxByPartial !== -1) {
       setCurrentPageIndex(idxByPartial);
+      setIsSearchOpen(false);
+      setPageSearchInput("");
+      return;
+    }
+
+    // 4. Fallback: 1-based visible index
+    if (!isNaN(num) && num >= 1 && num <= visible.length) {
+      setCurrentPageIndex(num - 1);
       setIsSearchOpen(false);
       setPageSearchInput("");
     }
@@ -306,8 +317,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
       setTimeout(() => {
         setUploading(false);
         setSelectedBook(newBook);
-        const mediaIdx = newBook.pages.findIndex((p) => p.media && p.media.length > 0);
-        setCurrentPageIndex(mediaIdx >= 0 ? mediaIdx : 0);
+        setCurrentPageIndex(0);
       }, 500);
     } catch (err: any) {
       console.error("[Book Upload Error Caught]:", err);
@@ -351,8 +361,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
       setTimeout(() => {
         setUploading(false);
         setSelectedBook(newBook);
-        const mediaIdx = newBook.pages.findIndex((p) => p.media && p.media.length > 0);
-        setCurrentPageIndex(mediaIdx >= 0 ? mediaIdx : 0);
+        setCurrentPageIndex(0);
       }, 500);
     } catch (err: any) {
       setUploadError(err?.message || "حدث خطأ أثناء قراءة مجلد الكتاب");
@@ -377,26 +386,38 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     }
   };
 
+  // Visible pages: only pages that contain audio/video (unless the book has no page-mapped media at all)
+  const visiblePages: BookPage[] = useMemo(() => {
+    if (!selectedBook) return [];
+    return getVisibleBookPages(selectedBook);
+  }, [selectedBook]);
+
+  const safePageIndex =
+    visiblePages.length > 0 ? Math.min(Math.max(0, currentPageIndex), visiblePages.length - 1) : 0;
+
   // Active page calculation
-  const activePage: BookPage | undefined = selectedBook?.pages?.[currentPageIndex];
+  const activePage: BookPage | undefined = visiblePages[safePageIndex];
 
   // Previous and next pages for 3-page carousel
   const prevPage: BookPage | undefined =
-    selectedBook && currentPageIndex > 0 ? selectedBook.pages[currentPageIndex - 1] : undefined;
+    safePageIndex > 0 ? visiblePages[safePageIndex - 1] : undefined;
 
   const nextPage: BookPage | undefined =
-    selectedBook && currentPageIndex < selectedBook.pages.length - 1
-      ? selectedBook.pages[currentPageIndex + 1]
-      : undefined;
+    safePageIndex < visiblePages.length - 1 ? visiblePages[safePageIndex + 1] : undefined;
 
   // Media tracks for current page
   const pageTracks: BookPageMedia[] = useMemo(() => {
-    if (!selectedBook) return [];
-    if (activePage && activePage.media && activePage.media.length > 0) {
+    if (!selectedBook || !activePage) return [];
+    if (Array.isArray(activePage.media) && activePage.media.length > 0) {
       return activePage.media;
     }
-    // Fallback: If no page-specific media, return book's allMedia
-    return selectedBook.allMedia || [];
+    const hasAnyPageMappedMedia = (selectedBook.pages || []).some(
+      (p) => Array.isArray(p.media) && p.media.length > 0
+    );
+    if (!hasAnyPageMappedMedia) {
+      return selectedBook.allMedia || [];
+    }
+    return [];
   }, [selectedBook, activePage]);
 
   // Sync audio playback state & speed reliably with the <audio> element
@@ -465,8 +486,8 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
         bookContext: {
           bookId: selectedBook.id,
           bookTitle: selectedBook.title,
-          pageIndex: currentPageIndex,
-          pageNumber: activePage?.pageNumber || currentPageIndex + 1,
+          pageIndex: safePageIndex,
+          pageNumber: activePage?.pageNumber || safePageIndex + 1,
           displayLabel: activePage?.displayLabel
         }
       });
@@ -481,14 +502,14 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   };
 
   const handlePrevPage = () => {
-    if (currentPageIndex > 0) {
-      setCurrentPageIndex((prev) => prev - 1);
+    if (safePageIndex > 0) {
+      setCurrentPageIndex(safePageIndex - 1);
     }
   };
 
   const handleNextPage = () => {
-    if (selectedBook && currentPageIndex < selectedBook.pages.length - 1) {
-      setCurrentPageIndex((prev) => prev + 1);
+    if (safePageIndex < visiblePages.length - 1) {
+      setCurrentPageIndex(safePageIndex + 1);
     }
   };
 
@@ -646,7 +667,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
               />
             ) : (
               <div className="w-full h-full bg-white flex items-center justify-center text-gray-400 text-sm tabular-nums">
-                {activePage?.displayLabel || activePage?.pageNumber || currentPageIndex + 1}
+                {activePage?.displayLabel || activePage?.pageNumber || safePageIndex + 1}
               </div>
             )}
           </div>
@@ -677,7 +698,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
 
         {/* Centered Page Number & Hairline Bottom Divider */}
         <div className="shrink-0 text-center text-[15px] font-normal text-[#8E8E93] pt-2 pb-2.5 border-b border-[#D1D5DB] tabular-nums bg-white">
-          {activePage?.displayLabel || activePage?.pageNumber || currentPageIndex + 1}
+          {activePage?.displayLabel || activePage?.pageNumber || safePageIndex + 1}
         </div>
 
         {/* Clean White Media Tracks List */}
