@@ -23,11 +23,6 @@ import {
   ChevronUp,
   RefreshCw,
   Bug,
-  Play,
-  Pause,
-  ExternalLink,
-  Volume2,
-  VolumeX,
   Sparkles
 } from "lucide-react";
 import { InteractiveBook, BookPage, BookPageMedia, MediaFile } from "../types";
@@ -64,14 +59,15 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   const [currentPageIndex, setCurrentPageIndex] = useState<number>(0);
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
 
-  // 🎧 Inline Media Player State (Direct In-Line Play without navigating away)
+  // Inline Audio Player State
   const [activeInlineMedia, setActiveInlineMedia] = useState<BookPageMedia | null>(null);
   const [isPlayingInline, setIsPlayingInline] = useState<boolean>(false);
   const [inlineCurrentTime, setInlineCurrentTime] = useState<number>(0);
   const [inlineDuration, setInlineDuration] = useState<number>(0);
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [inlinePlaybackRate, setInlinePlaybackRate] = useState<number>(1.0);
+  const [activeVideoFallback, setActiveVideoFallback] = useState<BookPageMedia | null>(null);
   const inlineAudioRef = useRef<HTMLAudioElement | null>(null);
-  const inlineVideoRef = useRef<HTMLVideoElement | null>(null);
+  const touchStartXRef = useRef<number | null>(null);
 
   // Helper: Restore saved last-read page for a book from localStorage
   const selectBookAndRestorePage = (book: InteractiveBook) => {
@@ -403,15 +399,49 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     return selectedBook.allMedia || [];
   }, [selectedBook, activePage]);
 
-  // 1. Play media directly in reader (In-Line quick player)
+  // Sync audio playback state & speed reliably with the <audio> element
+  useEffect(() => {
+    const audio = inlineAudioRef.current;
+    if (!audio || !activeInlineMedia || activeInlineMedia.type !== "audio") return;
+    audio.playbackRate = inlinePlaybackRate;
+    if (isPlayingInline) {
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  }, [activeInlineMedia, isPlayingInline, inlinePlaybackRate]);
+
+  // 1. Play / toggle audio inline or open video
   const handleInlinePlayTrack = (media: BookPageMedia, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    if (media.type === "video") {
+      if (onPlayMediaInStudio && selectedBook) {
+        handlePlayTrackInStudio(media, e);
+      } else {
+        setIsPlayingInline(false);
+        setActiveVideoFallback(media);
+      }
+      return;
+    }
+
     if (activeInlineMedia?.id === media.id) {
       setIsPlayingInline((prev) => !prev);
     } else {
       setActiveInlineMedia(media);
       setIsPlayingInline(true);
       setInlineCurrentTime(0);
+      setInlineDuration(0);
+    }
+  };
+
+  // Cycle playback speed: 1.0x -> 1.2x -> 1.5x -> 0.8x -> 1.0x
+  const handleCyclePlaybackRate = () => {
+    const rates = [1.0, 1.2, 1.5, 0.8];
+    const currentIdx = rates.findIndex((r) => Math.abs(r - inlinePlaybackRate) < 0.05);
+    const nextRate = rates[(currentIdx + 1) % rates.length];
+    setInlinePlaybackRate(nextRate);
+    if (inlineAudioRef.current) {
+      inlineAudioRef.current.playbackRate = nextRate;
     }
   };
 
@@ -463,322 +493,349 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   };
 
   // =========================================================================
-  // VIEW 2: BOOK READER VIEW (Optimized Layout: Compact Page Area + Dominant Media List)
+  // VIEW 2: BOOK READER VIEW (Exact Match to Reference Screenshot)
   // =========================================================================
   if (selectedBook) {
-    return (
-      <div className="w-full h-full bg-white text-slate-900 flex flex-col font-sans select-none overflow-hidden" dir="ltr">
-        {/* Top Pinned Compact Section: Header + Search + Compact 3-Page Preview */}
-        <div className="shrink-0 bg-white border-b border-slate-200 shadow-2xs z-10 flex flex-col">
-          {/* Top Header: Back Arrow + "Book" on left, Search on right */}
-          <div className="h-11 px-3 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  setSelectedBook(null);
-                  setActiveInlineMedia(null);
-                  setIsPlayingInline(false);
-                }}
-                className="p-1 text-slate-900 hover:text-slate-600 cursor-pointer transition-colors"
-                title="Back"
-              >
-                <ArrowLeft className="w-5 h-5 stroke-[2.2]" />
-              </button>
-              <span className="text-base font-bold tracking-tight text-slate-900">Book</span>
-            </div>
+    const sliderProgressPct =
+      inlineDuration > 0 ? Math.min(100, Math.max(0, (inlineCurrentTime / inlineDuration) * 100)) : 0;
 
-            {/* Search Box / Page Jump */}
-            <div className="flex items-center gap-2">
-              {isSearchOpen ? (
-                <div className="flex items-center gap-1.5 bg-slate-100 border border-slate-300 rounded-xl px-2.5 py-0.5 animate-scaleUp">
-                  <Search className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="رقم الصفحة..."
-                    value={pageSearchInput}
-                    onChange={(e) => setPageSearchInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleJumpToPage(pageSearchInput);
-                      if (e.key === "Escape") setIsSearchOpen(false);
-                    }}
-                    className="w-20 sm:w-28 bg-transparent text-xs font-bold text-slate-800 placeholder-slate-400 outline-none"
-                    autoFocus
-                  />
-                  <button
-                    onClick={() => handleJumpToPage(pageSearchInput)}
-                    className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-bold cursor-pointer transition-colors"
-                  >
-                    انتقال
-                  </button>
-                  <button
-                    onClick={() => {
+    return (
+      <div
+        className="w-full flex-1 bg-white text-[#111827] flex flex-col font-sans select-none overflow-hidden"
+        dir="ltr"
+      >
+        {/* Hidden audio element for inline playback */}
+        {activeInlineMedia && activeInlineMedia.type === "audio" && (
+          <audio
+            ref={inlineAudioRef}
+            src={activeInlineMedia.url}
+            preload="metadata"
+            onCanPlay={(e) => {
+              e.currentTarget.playbackRate = inlinePlaybackRate;
+              if (isPlayingInline && e.currentTarget.paused) {
+                e.currentTarget.play().catch(() => {});
+              }
+            }}
+            onTimeUpdate={(e) => setInlineCurrentTime(e.currentTarget.currentTime)}
+            onLoadedMetadata={(e) => {
+              setInlineDuration(e.currentTarget.duration || 0);
+              e.currentTarget.playbackRate = inlinePlaybackRate;
+            }}
+            onEnded={() => setIsPlayingInline(false)}
+          />
+        )}
+
+        {/* Top Header: Back Arrow + "Book" on left, Search on right */}
+        <div className="h-14 px-4 sm:px-5 flex items-center justify-between shrink-0 bg-white">
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedBook(null);
+                setActiveInlineMedia(null);
+                setIsPlayingInline(false);
+                setIsSearchOpen(false);
+                setPageSearchInput("");
+              }}
+              className="p-1 -ml-1 text-[#111827] hover:text-gray-600 cursor-pointer transition-colors"
+              aria-label="Back"
+            >
+              <ArrowLeft className="w-5 h-5 stroke-[2]" />
+            </button>
+            <span className="text-[20px] font-bold tracking-tight text-[#111827]">Book</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {isSearchOpen ? (
+              <div className="flex items-center gap-1.5 border border-gray-300 rounded-lg px-2.5 py-1 bg-white">
+                <Search className="w-4 h-4 text-gray-500 shrink-0" />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="Page..."
+                  value={pageSearchInput}
+                  onChange={(e) => setPageSearchInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleJumpToPage(pageSearchInput);
+                    if (e.key === "Escape") {
                       setIsSearchOpen(false);
                       setPageSearchInput("");
-                    }}
-                    className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setIsSearchOpen(true)}
-                  className="p-1 text-slate-900 hover:text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors"
-                  title="البحث أو الانتقال لرقم صفحة"
-                >
-                  <Search className="w-4 h-4 stroke-[2.2]" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Centered Book Subtitle */}
-          <div className="text-center text-xs font-semibold text-slate-800 py-0.5 px-3 truncate">
-            {selectedBook.title}
-          </div>
-
-          {/* Compact 3-Page Carousel Display (Optimized for Media Area Dominance) */}
-          <div className="relative w-full flex items-center justify-center overflow-hidden py-1 px-2">
-            <div className="flex items-center justify-center gap-3 sm:gap-6 max-w-2xl w-full">
-              {/* Left Page (Previous) */}
-              <div
-                onClick={handlePrevPage}
-                className={`w-20 sm:w-24 aspect-[3/4] max-h-[100px] sm:max-h-[125px] rounded-xs overflow-hidden shadow-xs border border-slate-200 transition-all cursor-pointer ${
-                  prevPage ? "opacity-90 hover:opacity-100" : "opacity-0 pointer-events-none"
-                }`}
-              >
-                {prevPage?.pageImage ? (
-                  <img
-                    src={prevPage.pageImage}
-                    alt={`Page ${prevPage.pageNumber}`}
-                    className="w-full h-full object-contain bg-white"
-                  />
-                ) : (
-                  <div className="w-full h-full bg-white border border-dashed border-slate-300" />
-                )}
-              </div>
-
-              {/* Center Active Page */}
-              <div className="w-28 sm:w-36 aspect-[3/4] max-h-[130px] sm:max-h-[160px] rounded-xs overflow-hidden shadow-md border border-slate-300 bg-white z-10 transition-transform">
-                {activePage?.pageImage ? (
-                  <img
-                    src={activePage.pageImage}
-                    alt={`Page ${activePage.pageNumber}`}
-                    className="w-full h-full object-contain bg-white"
-                  />
-                ) : (
-                  <div className="w-full h-full bg-white flex items-center justify-center text-slate-400 text-xs">
-                    Page {activePage?.pageNumber || currentPageIndex + 1}
-                  </div>
-                )}
-              </div>
-
-              {/* Right Page (Next) */}
-              <div
-                onClick={handleNextPage}
-                className={`w-20 sm:w-24 aspect-[3/4] max-h-[100px] sm:max-h-[125px] rounded-xs overflow-hidden shadow-xs border border-slate-200 transition-all cursor-pointer ${
-                  nextPage ? "opacity-90 hover:opacity-100" : "opacity-0 pointer-events-none"
-                }`}
-              >
-                {nextPage?.pageImage ? (
-                  <img
-                    src={nextPage.pageImage}
-                    alt={`Page ${nextPage.pageNumber}`}
-                    className="w-full h-full object-contain bg-white"
-                  />
-                ) : (
-                  <div className="w-full h-full bg-white border border-dashed border-slate-300" />
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Page Number indicator centered below carousel */}
-          <div className="text-center text-xs font-semibold text-slate-500 py-0.5 pb-1">
-            Page {activePage?.displayLabel || activePage?.pageNumber || currentPageIndex + 1}
-          </div>
-        </div>
-
-        {/* Tracks List Section (Occupies ~70%+ Viewport Height) */}
-        <div className="flex-1 w-full overflow-y-auto divide-y divide-slate-100 bg-white min-h-0">
-          {pageTracks.length === 0 ? (
-            <div className="py-12 text-center text-slate-400 text-xs font-medium">
-              لا توجد مقاطع صوتية أو فيديو لهذه الصفحة
-            </div>
-          ) : (
-            pageTracks.map((media) => {
-              const isActive = activeInlineMedia?.id === media.id;
-              return (
-                <div
-                  key={media.id}
-                  onClick={() => handleInlinePlayTrack(media)}
-                  className={`px-4 py-3 flex items-center justify-between cursor-pointer transition-colors ${
-                    isActive ? "bg-blue-50/80 border-r-4 border-blue-600" : "hover:bg-slate-50"
-                  }`}
-                >
-                  {/* Left Track Info */}
-                  <div className="flex items-center gap-3 min-w-0 pr-2">
-                    {/* Inline Play/Pause Circle Button */}
-                    <button
-                      type="button"
-                      onClick={(e) => handleInlinePlayTrack(media, e)}
-                      className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-transform active:scale-95 cursor-pointer ${
-                        isActive && isPlayingInline
-                          ? "bg-blue-600 text-white shadow-md ring-2 ring-blue-300"
-                          : "bg-blue-100 text-blue-700 hover:bg-blue-600 hover:text-white"
-                      }`}
-                      title={isActive && isPlayingInline ? "إيقاف مؤقت" : "تشغيل مباشر"}
-                    >
-                      {isActive && isPlayingInline ? (
-                        <Pause className="w-4 h-4 fill-current" />
-                      ) : (
-                        <Play className="w-4 h-4 fill-current ml-0.5" />
-                      )}
-                    </button>
-
-                    <div className="flex flex-col min-w-0">
-                      <span className={`text-sm font-bold truncate ${isActive ? "text-blue-900" : "text-slate-900"}`}>
-                        {media.title}
-                      </span>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-xs text-slate-400 capitalize">
-                          {media.type === "video" ? "فيديو" : "صوتي"}
-                        </span>
-                        {isActive && (
-                          <span className="text-[10px] font-bold text-blue-600 bg-blue-100 px-1.5 py-0.2 rounded-full">
-                            يعمل الآن
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right Actions: Studio Entry Button + Indicator */}
-                  <div className="flex items-center gap-2 shrink-0 pl-1">
-                    {/* Subtle Studio Entry Button */}
-                    <button
-                      type="button"
-                      onClick={(e) => handlePlayTrackInStudio(media, e)}
-                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-blue-300 bg-white hover:bg-blue-50 text-slate-600 hover:text-blue-700 text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                      title="فتح المقطع في استوديو تحليل الوسائط"
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                      <span className="hidden sm:inline">الاستوديو</span>
-                    </button>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        {/* 🎵 Floating Bottom Inline Player Bar */}
-        {activeInlineMedia && (
-          <div className="shrink-0 bg-slate-900 text-white p-3 border-t border-slate-800 shadow-2xl flex flex-col gap-2 z-20 animate-in slide-in-from-bottom duration-200">
-            {activeInlineMedia.type === "video" ? (
-              <div className="w-full max-h-48 rounded-lg overflow-hidden bg-black flex justify-center mb-1">
-                <video
-                  ref={inlineVideoRef}
-                  src={activeInlineMedia.url}
-                  controls
-                  autoPlay
-                  className="max-h-48 w-auto object-contain"
-                  onTimeUpdate={(e) => setInlineCurrentTime(e.currentTarget.currentTime)}
-                  onLoadedMetadata={(e) => setInlineDuration(e.currentTarget.duration)}
-                  onEnded={() => setIsPlayingInline(false)}
-                />
-              </div>
-            ) : (
-              <audio
-                ref={inlineAudioRef}
-                src={activeInlineMedia.url}
-                autoPlay={isPlayingInline}
-                muted={isMuted}
-                onTimeUpdate={(e) => setInlineCurrentTime(e.currentTarget.currentTime)}
-                onLoadedMetadata={(e) => setInlineDuration(e.currentTarget.duration)}
-                onEnded={() => setIsPlayingInline(false)}
-              />
-            )}
-
-            {/* Control Bar Row */}
-            <div className="flex items-center justify-between gap-3 px-1">
-              {/* Track Title & Play Toggle */}
-              <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                <button
-                  onClick={() => {
-                    if (activeInlineMedia.type === "audio" && inlineAudioRef.current) {
-                      if (isPlayingInline) {
-                        inlineAudioRef.current.pause();
-                      } else {
-                        inlineAudioRef.current.play();
-                      }
-                      setIsPlayingInline(!isPlayingInline);
                     }
                   }}
-                  className="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shrink-0 cursor-pointer transition-transform active:scale-95 shadow-md"
-                >
-                  {isPlayingInline ? <Pause className="w-5 h-5 fill-white" /> : <Play className="w-5 h-5 fill-white ml-0.5" />}
-                </button>
-
-                <div className="flex flex-col min-w-0">
-                  <span className="text-sm font-bold text-white truncate">{activeInlineMedia.title}</span>
-                  <span className="text-[11px] text-slate-400 font-mono">
-                    {formatTime(inlineCurrentTime)} / {formatTime(inlineDuration)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Progress Slider (Audio) */}
-              {activeInlineMedia.type === "audio" && (
-                <div className="hidden sm:flex items-center gap-2 flex-1 max-w-xs">
-                  <input
-                    type="range"
-                    min={0}
-                    max={inlineDuration || 100}
-                    value={inlineCurrentTime}
-                    onChange={(e) => {
-                      const val = parseFloat(e.target.value);
-                      setInlineCurrentTime(val);
-                      if (inlineAudioRef.current) inlineAudioRef.current.currentTime = val;
-                    }}
-                    className="w-full accent-blue-500 h-1.5 bg-slate-700 rounded-lg cursor-pointer"
-                  />
-                </div>
-              )}
-
-              {/* Actions on Right */}
-              <div className="flex items-center gap-2 shrink-0">
-                {/* Mute Button */}
+                  className="w-20 sm:w-28 bg-transparent text-sm text-[#111827] placeholder-gray-400 outline-none"
+                  autoFocus
+                />
                 <button
-                  onClick={() => setIsMuted(!isMuted)}
-                  className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
-                  title={isMuted ? "Unmute" : "Mute"}
-                >
-                  {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4" />}
-                </button>
-
-                {/* Explicit Open in Studio Button */}
-                <button
-                  onClick={() => handlePlayTrackInStudio(activeInlineMedia)}
-                  className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 rounded-lg text-xs font-bold border border-slate-700 flex items-center gap-1.5 cursor-pointer transition-colors"
-                  title="فتح المقطع في استوديو تحليل الوسائط"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-                  <span className="hidden sm:inline">الاستوديو</span>
-                </button>
-
-                {/* Close Player Button */}
-                <button
+                  type="button"
                   onClick={() => {
-                    setActiveInlineMedia(null);
-                    setIsPlayingInline(false);
+                    setIsSearchOpen(false);
+                    setPageSearchInput("");
                   }}
-                  className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
+                  className="p-0.5 text-gray-400 hover:text-gray-700 cursor-pointer"
+                  aria-label="Close search"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsSearchOpen(true)}
+                className="p-1 text-[#111827] hover:text-gray-600 cursor-pointer transition-colors"
+                aria-label="Search page"
+              >
+                <Search className="w-5 h-5 stroke-[2]" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Centered Book Title */}
+        <div className="text-center text-[15px] sm:text-[16px] font-normal text-[#1F2937] pt-1 pb-3 px-4 truncate shrink-0">
+          {selectedBook.title}
+        </div>
+
+        {/* 3-Page Carousel Stage (Compact height, side pages cropped at viewport edges) */}
+        <div
+          className="relative w-full flex items-center justify-center overflow-hidden py-1 shrink-0 min-h-[155px] sm:min-h-[185px] md:min-h-[205px]"
+          onTouchStart={(e) => {
+            touchStartXRef.current = e.touches[0]?.clientX ?? null;
+          }}
+          onTouchEnd={(e) => {
+            if (touchStartXRef.current === null) return;
+            const endX = e.changedTouches[0]?.clientX ?? touchStartXRef.current;
+            const diff = touchStartXRef.current - endX;
+            touchStartXRef.current = null;
+            if (Math.abs(diff) > 40) {
+              if (diff > 0) handleNextPage();
+              else handlePrevPage();
+            }
+          }}
+        >
+          {/* Left Page (Previous - bleeding off left edge) */}
+          {prevPage && (
+            <button
+              type="button"
+              onClick={handlePrevPage}
+              aria-label={`Previous page ${prevPage.displayLabel || prevPage.pageNumber}`}
+              className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[45%] w-[100px] sm:w-[120px] md:w-[134px] aspect-[210/297] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.16)] border border-black/5 overflow-hidden cursor-pointer focus:outline-none"
+            >
+              {prevPage.pageImage ? (
+                <img
+                  src={prevPage.pageImage}
+                  alt={`Page ${prevPage.pageNumber}`}
+                  className="w-full h-full object-contain bg-white"
+                  draggable={false}
+                />
+              ) : (
+                <div className="w-full h-full bg-white flex items-center justify-center text-gray-400 text-xs">
+                  {prevPage.displayLabel || prevPage.pageNumber}
+                </div>
+              )}
+            </button>
+          )}
+
+          {/* Center Active Page */}
+          <div className="relative z-10 w-[104px] sm:w-[126px] md:w-[140px] aspect-[210/297] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.18)] border border-black/5 overflow-hidden">
+            {activePage?.pageImage ? (
+              <img
+                src={activePage.pageImage}
+                alt={`Page ${activePage.pageNumber}`}
+                className="w-full h-full object-contain bg-white"
+                draggable={false}
+              />
+            ) : (
+              <div className="w-full h-full bg-white flex items-center justify-center text-gray-400 text-sm tabular-nums">
+                {activePage?.displayLabel || activePage?.pageNumber || currentPageIndex + 1}
+              </div>
+            )}
+          </div>
+
+          {/* Right Page (Next - bleeding off right edge) */}
+          {nextPage && (
+            <button
+              type="button"
+              onClick={handleNextPage}
+              aria-label={`Next page ${nextPage.displayLabel || nextPage.pageNumber}`}
+              className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[45%] w-[100px] sm:w-[120px] md:w-[134px] aspect-[210/297] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.16)] border border-black/5 overflow-hidden cursor-pointer focus:outline-none"
+            >
+              {nextPage.pageImage ? (
+                <img
+                  src={nextPage.pageImage}
+                  alt={`Page ${nextPage.pageNumber}`}
+                  className="w-full h-full object-contain bg-white"
+                  draggable={false}
+                />
+              ) : (
+                <div className="w-full h-full bg-white flex items-center justify-center text-gray-400 text-xs">
+                  {nextPage.displayLabel || nextPage.pageNumber}
+                </div>
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* Centered Page Number & Hairline Bottom Divider */}
+        <div className="shrink-0 text-center text-[15px] font-normal text-[#8E8E93] pt-2 pb-2.5 border-b border-[#D1D5DB] tabular-nums bg-white">
+          {activePage?.displayLabel || activePage?.pageNumber || currentPageIndex + 1}
+        </div>
+
+        {/* Clean White Media Tracks List */}
+        <div className="flex-1 w-full overflow-y-auto bg-white min-h-0">
+          {pageTracks.length === 0 ? (
+            <div className="py-12 text-center text-[#8E8E93] text-sm">
+              No media tracks for this page
+            </div>
+          ) : (
+            <div className="divide-y divide-[#D1D5DB] border-b border-[#D1D5DB]">
+              {pageTracks.map((media) => {
+                const isActiveAudio = media.type === "audio" && activeInlineMedia?.id === media.id;
+
+                return (
+                  <div
+                    key={media.id}
+                    onClick={() => handleInlinePlayTrack(media)}
+                    className="px-4 sm:px-5 py-3.5 flex items-center justify-between gap-4 bg-white hover:bg-gray-50/70 transition-colors cursor-pointer"
+                  >
+                    {/* Left Track Title & Type */}
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[15px] sm:text-[16px] font-normal text-[#111827] leading-snug truncate">
+                        {media.title}
+                      </span>
+                      <span className="text-[14px] font-normal text-[#8E8E93] leading-snug mt-0.5">
+                        {media.type === "video" ? "Video" : "Audio"}
+                      </span>
+                    </div>
+
+                    {/* Right Action Icons: Simple Studio Icon + Play/Pause/Video Icon (Uniform size) */}
+                    <div className="flex items-center gap-3 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => handlePlayTrackInStudio(media, e)}
+                        className="p-1 text-[#8E8E93] hover:text-[#007AFF] transition-colors cursor-pointer"
+                        title="فتح في الاستوديو"
+                        aria-label={`Open ${media.title} in studio`}
+                      >
+                        <Sparkles className="w-4 h-4" />
+                      </button>
+
+                      {media.type === "video" ? (
+                        <button
+                          type="button"
+                          onClick={(e) => handleInlinePlayTrack(media, e)}
+                          className="p-1 text-[#007AFF] hover:opacity-80 transition-opacity cursor-pointer"
+                          aria-label={`Play video ${media.title}`}
+                        >
+                          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M16 10.2V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h11c.55 0 1-.45 1-1v-3.2l5 3.7V6.5l-5 3.7z" />
+                          </svg>
+                        </button>
+                      ) : isActiveAudio ? (
+                        <button
+                          type="button"
+                          onClick={(e) => handleInlinePlayTrack(media, e)}
+                          className="p-1 text-[#007AFF] hover:opacity-80 transition-opacity cursor-pointer"
+                          aria-label={isPlayingInline ? "Pause" : "Play"}
+                        >
+                          {isPlayingInline ? (
+                            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                              <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                            </svg>
+                          ) : (
+                            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                              <path d="M8 5v14l11-7z" />
+                            </svg>
+                          )}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={(e) => handleInlinePlayTrack(media, e)}
+                          className="p-1 text-[#007AFF] hover:opacity-80 transition-opacity cursor-pointer"
+                          aria-label={`Play audio ${media.title}`}
+                        >
+                          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M8 5v14l11-7z" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Bottom Fixed Audio Scrubber Bar (Exact Match to Screenshot) */}
+        {activeInlineMedia && activeInlineMedia.type === "audio" && (
+          <div className="shrink-0 bg-white px-4 py-2.5 flex items-center gap-3">
+            <span className="text-[13px] sm:text-[14px] font-normal text-[#111827] tabular-nums shrink-0">
+              {formatTime(inlineCurrentTime)}
+            </span>
+
+            <input
+              type="range"
+              min={0}
+              max={inlineDuration || 100}
+              step={0.1}
+              value={inlineCurrentTime}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                setInlineCurrentTime(val);
+                if (inlineAudioRef.current) {
+                  inlineAudioRef.current.currentTime = val;
+                }
+              }}
+              aria-label="Audio progress"
+              className="flex-1 h-[3px] appearance-none rounded-full cursor-pointer outline-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#007AFF] [&::-webkit-slider-thumb]:cursor-pointer [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-[#007AFF] [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer"
+              style={{
+                background: `linear-gradient(to right, #007AFF 0%, #007AFF ${sliderProgressPct}%, #D1D5DB ${sliderProgressPct}%, #D1D5DB 100%)`
+              }}
+            />
+
+            <span className="text-[13px] sm:text-[14px] font-normal text-[#111827] tabular-nums shrink-0">
+              {formatTime(inlineDuration)}
+            </span>
+
+            <button
+              type="button"
+              onClick={handleCyclePlaybackRate}
+              className="bg-[#007AFF] hover:bg-[#0066D6] text-white text-[13px] font-medium px-2.5 py-2 rounded-[4px] tabular-nums leading-none shrink-0 cursor-pointer transition-colors"
+              aria-label="Playback speed"
+            >
+              {inlinePlaybackRate.toFixed(1)}x
+            </button>
+          </div>
+        )}
+
+        {/* Fallback Inline Video Modal (only if Studio callback is not provided) */}
+        {activeVideoFallback && (
+          <div
+            className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+            onClick={() => setActiveVideoFallback(null)}
+          >
+            <div
+              className="w-full max-w-3xl bg-black rounded-xl overflow-hidden shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900 text-white">
+                <span className="text-sm font-medium truncate">{activeVideoFallback.title}</span>
+                <button
+                  type="button"
+                  onClick={() => setActiveVideoFallback(null)}
+                  className="p-1 text-zinc-400 hover:text-white cursor-pointer"
+                  aria-label="Close video"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <video
+                src={activeVideoFallback.url}
+                controls
+                autoPlay
+                className="w-full max-h-[75vh] bg-black"
+              />
             </div>
           </div>
         )}
