@@ -2824,6 +2824,12 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   // Media Player element getter & control handlers
   const getMediaElement = () => (currentFile?.type === "video" ? videoRef.current : audioRef.current);
+  const currentFileTypeRef = useRef<string | undefined>(currentFile?.type);
+  currentFileTypeRef.current = currentFile?.type;
+  const getShadowingCurrentTime = useCallback(() => {
+    const el = currentFileTypeRef.current === "video" ? videoRef.current : audioRef.current;
+    return el?.currentTime ?? 0;
+  }, []);
 
   // ---------------------------------------------------------
   // High-Fidelity Studio Audio Engine & Playback Controls
@@ -3667,16 +3673,24 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       ...targetCue,
       secondaryText: matchingSec?.text,
     });
+    handleSeek(targetCue.startTime);
     setIsShadowingStudioOpen(true);
-  }, [secondaryCueMap, smoothPause]);
+  }, [secondaryCueMap, smoothPause, handleSeek]);
 
   const handlePlayShadowingSegment = useCallback((startTime: number, endTime: number, speed: number = 1.0) => {
     singleSentencePlaybackEndRef.current = endTime;
     const el = getMediaElement();
     if (el) {
       el.playbackRate = speed;
+      // Avoid redundant seek flush on mobile if already positioned at segment start
+      if (Math.abs((el.currentTime || 0) - startTime) > 0.04) {
+        handleSeek(startTime);
+      } else {
+        setCurrentTime(startTime);
+      }
+    } else {
+      handleSeek(startTime);
     }
-    handleSeek(startTime);
     smoothPlay();
   }, [getMediaElement, handleSeek, smoothPlay]);
 
@@ -7210,7 +7224,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           onStopOriginalSegment={handleStopShadowingSegment}
           isPlayingOriginal={isPlaying}
           currentTime={currentTime}
-          getCurrentTime={() => getMediaElement()?.currentTime ?? 0}
+          getCurrentTime={getShadowingCurrentTime}
           mediaUrl={currentFile?.url}
         />
       )}

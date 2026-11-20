@@ -55,6 +55,10 @@ import {
   isHttpInsecureOrigin,
   getHttpsSwitchUrl
 } from "../utils/audioRecording";
+import {
+  SmoothWaveformTrack,
+  SmoothWaveformTrackHandle
+} from "./SmoothWaveformTrack";
 
 export type ShadowingProvider = ShadowingVoiceProvider;
 
@@ -295,9 +299,7 @@ export function ShadowingWorkspace({
 
   // Model audio & progress states
   const [isPlayingModel, setIsPlayingModel] = useState<boolean>(false);
-  const [modelAudioProgress, setModelAudioProgress] = useState<number>(0);
   const [modelAudioDuration, setModelAudioDuration] = useState<number>(0);
-  const [modelAudioCurrentTime, setModelAudioCurrentTime] = useState<number>(0);
   const [isGeneratingModelAudio, setIsGeneratingModelAudio] = useState<boolean>(false);
   const [originalWaveform, setOriginalWaveform] = useState<number[]>([]);
 
@@ -305,11 +307,8 @@ export function ShadowingWorkspace({
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
   const [isPlayingUserAudio, setIsPlayingUserAudio] = useState<boolean>(false);
-  const [userAudioProgress, setUserAudioProgress] = useState<number>(0);
   const [userAudioDuration, setUserAudioDuration] = useState<number>(0);
-  const [userAudioCurrentTime, setUserAudioCurrentTime] = useState<number>(0);
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
-  const [micVolume, setMicVolume] = useState<number>(0);
   const [userWaveform, setUserWaveform] = useState<number[]>([]);
 
   // Speech Recognition & Scoring States
@@ -347,9 +346,13 @@ export function ShadowingWorkspace({
   const lastSampleTimeRef = useRef<number>(0);
   const audioCacheRef = useRef<Map<string, { url: string; blob?: Blob }>>(new Map());
 
-  // Animation frames for smooth playhead tracks
+  // Animation frames & GPU track handles for zero-rerender 60/120fps playheads
   const modelAnimRef = useRef<number | null>(null);
   const userAnimRef = useRef<number | null>(null);
+  const modelTrackRef = useRef<SmoothWaveformTrackHandle | null>(null);
+  const userTrackRef = useRef<SmoothWaveformTrackHandle | null>(null);
+  const modelHeaderTimeRef = useRef<HTMLSpanElement | null>(null);
+  const modelTrackTimeRef = useRef<HTMLSpanElement | null>(null);
 
   // AI Translation State (Exclusive to Shadowing / Text Studio)
   const [isTranslatingWithAi, setIsTranslatingWithAi] = useState<boolean>(false);
@@ -483,32 +486,50 @@ export function ShadowingWorkspace({
       setUserWaveform([]);
     }
 
-    setModelAudioProgress(0);
-    setModelAudioCurrentTime(0);
-    setUserAudioProgress(0);
-    setUserAudioCurrentTime(0);
+    modelTrackRef.current?.setProgress(0);
+    userTrackRef.current?.setProgress(0);
+    if (modelHeaderTimeRef.current) modelHeaderTimeRef.current.textContent = "0.0s";
+    if (modelTrackTimeRef.current) modelTrackTimeRef.current.textContent = "0.0s";
     setIsLoopingModel(false);
     setSpeechError(null);
   }, [currentSentence?.id]);
 
-  // Smooth 60fps tracking for Model Audio
+  // Smooth 60/120fps GPU-composited tracking for Model Audio (zero React re-renders)
   useEffect(() => {
     if (!isPlayingModel) {
       if (modelAnimRef.current) cancelAnimationFrame(modelAnimRef.current);
       return;
     }
 
-    const updateSmoothModel = () => {
+    let lastMediaTime = modelAudioRef.current?.currentTime ?? 0;
+    let lastPerfMs = performance.now();
+    let hasStartedAdvancing = false;
+    let lastTextUpdateMs = 0;
+
+    const updateSmoothModel = (now: number) => {
       const audio = modelAudioRef.current;
       if (audio && audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
-        const frac = Math.max(0, Math.min(1, audio.currentTime / audio.duration));
-        setModelAudioProgress(frac * 100);
-        setModelAudioCurrentTime(audio.currentTime);
-        setModelAudioDuration(audio.duration);
+        const rawCur = audio.currentTime;
+        if (Math.abs(rawCur - lastMediaTime) > 0.002) {
+          lastMediaTime = rawCur;
+          lastPerfMs = now;
+          hasStartedAdvancing = true;
+        }
+        const effectiveCur =
+          hasStartedAdvancing && !audio.paused && !audio.ended
+            ? Math.min(lastMediaTime + 0.14, lastMediaTime + ((now - lastPerfMs) / 1000) * (audio.playbackRate || 1))
+            : rawCur;
+        const frac = Math.max(0, Math.min(1, effectiveCur / audio.duration));
+        modelTrackRef.current?.setProgress(frac);
+
+        if (now - lastTextUpdateMs >= 80) {
+          lastTextUpdateMs = now;
+          const formatted = formatTimeSeconds(effectiveCur);
+          if (modelHeaderTimeRef.current) modelHeaderTimeRef.current.textContent = formatted;
+          if (modelTrackTimeRef.current) modelTrackTimeRef.current.textContent = formatted;
+        }
       }
-      if (isPlayingModel) {
-        modelAnimRef.current = requestAnimationFrame(updateSmoothModel);
-      }
+      modelAnimRef.current = requestAnimationFrame(updateSmoothModel);
     };
 
     modelAnimRef.current = requestAnimationFrame(updateSmoothModel);
@@ -518,24 +539,34 @@ export function ShadowingWorkspace({
     };
   }, [isPlayingModel]);
 
-  // Smooth 60fps tracking for User Audio
+  // Smooth 60/120fps GPU-composited tracking for User Audio (zero React re-renders)
   useEffect(() => {
     if (!isPlayingUserAudio) {
       if (userAnimRef.current) cancelAnimationFrame(userAnimRef.current);
       return;
     }
 
-    const updateSmoothUser = () => {
+    let lastMediaTime = userAudioRef.current?.currentTime ?? 0;
+    let lastPerfMs = performance.now();
+    let hasStartedAdvancing = false;
+
+    const updateSmoothUser = (now: number) => {
       const audio = userAudioRef.current;
       if (audio && audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
-        const frac = Math.max(0, Math.min(1, audio.currentTime / audio.duration));
-        setUserAudioProgress(frac * 100);
-        setUserAudioCurrentTime(audio.currentTime);
-        setUserAudioDuration(audio.duration);
+        const rawCur = audio.currentTime;
+        if (Math.abs(rawCur - lastMediaTime) > 0.002) {
+          lastMediaTime = rawCur;
+          lastPerfMs = now;
+          hasStartedAdvancing = true;
+        }
+        const effectiveCur =
+          hasStartedAdvancing && !audio.paused && !audio.ended
+            ? Math.min(lastMediaTime + 0.14, lastMediaTime + ((now - lastPerfMs) / 1000) * (audio.playbackRate || 1))
+            : rawCur;
+        const frac = Math.max(0, Math.min(1, effectiveCur / audio.duration));
+        userTrackRef.current?.setProgress(frac);
       }
-      if (isPlayingUserAudio) {
-        userAnimRef.current = requestAnimationFrame(updateSmoothUser);
-      }
+      userAnimRef.current = requestAnimationFrame(updateSmoothUser);
     };
 
     userAnimRef.current = requestAnimationFrame(updateSmoothUser);
@@ -952,7 +983,7 @@ export function ShadowingWorkspace({
           utterance.onstart = () => setIsPlayingModel(true);
           utterance.onend = () => {
             setIsPlayingModel(false);
-            setModelAudioProgress(100);
+            modelTrackRef.current?.setProgress(1);
             if (isLoopingModel) {
               loopTimerRef.current = window.setTimeout(() => handlePlayModel(), 750);
             } else if (autoAdvance && currentSentenceIndex < sentences.length - 1) {
@@ -986,7 +1017,7 @@ export function ShadowingWorkspace({
           utterance.onstart = () => setIsPlayingModel(true);
           utterance.onend = () => {
             setIsPlayingModel(false);
-            setModelAudioProgress(100);
+            modelTrackRef.current?.setProgress(1);
             if (isLoopingModel) {
               loopTimerRef.current = window.setTimeout(() => handlePlayModel(), 750);
             } else if (autoAdvance && currentSentenceIndex < sentences.length - 1) {
@@ -1030,7 +1061,7 @@ export function ShadowingWorkspace({
 
       audio.onended = () => {
         setIsPlayingModel(false);
-        setModelAudioProgress(100);
+        modelTrackRef.current?.setProgress(1);
         if (isLoopingModel) {
           loopTimerRef.current = window.setTimeout(() => {
             if (modelAudioRef.current) {
@@ -1072,17 +1103,20 @@ export function ShadowingWorkspace({
     ]
   );
 
-  // Original Waveform Click-to-Seek
-  const handleOriginalWaveformSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    if (modelAudioRef.current && modelAudioRef.current.duration) {
-      modelAudioRef.current.currentTime = frac * modelAudioRef.current.duration;
-      setModelAudioProgress(frac * 100);
-      if (!isPlayingModel) {
-        modelAudioRef.current.play().then(() => setIsPlayingModel(true)).catch(() => {});
+  // Original Waveform Touch/Mouse Scrub-to-Seek
+  const seekModelByFraction = (frac: number, autoPlay: boolean) => {
+    const audio = modelAudioRef.current;
+    if (audio && audio.duration && !isNaN(audio.duration)) {
+      const targetTime = frac * audio.duration;
+      audio.currentTime = targetTime;
+      modelTrackRef.current?.setProgress(frac);
+      const formatted = formatTimeSeconds(targetTime);
+      if (modelHeaderTimeRef.current) modelHeaderTimeRef.current.textContent = formatted;
+      if (modelTrackTimeRef.current) modelTrackTimeRef.current.textContent = formatted;
+      if (autoPlay && !isPlayingModel) {
+        audio.play().then(() => setIsPlayingModel(true)).catch(() => {});
       }
-    } else {
+    } else if (autoPlay) {
       handlePlayModel(frac);
     }
   };
@@ -1099,11 +1133,10 @@ export function ShadowingWorkspace({
     let audio = userAudioRef.current;
     if (!audio) {
       audio = new Audio(recordedAudioUrl);
+      audio.preload = "auto";
       userAudioRef.current = audio;
-    } else {
-      if (audio.src !== recordedAudioUrl) {
-        audio.src = recordedAudioUrl;
-      }
+    } else if (audio.src !== recordedAudioUrl) {
+      audio.src = recordedAudioUrl;
     }
 
     audio.playbackRate = playbackSpeed;
@@ -1114,7 +1147,7 @@ export function ShadowingWorkspace({
 
     audio.onended = () => {
       setIsPlayingUserAudio(false);
-      setUserAudioProgress(0);
+      userTrackRef.current?.setProgress(0);
     };
 
     audio.onerror = () => {
@@ -1126,15 +1159,14 @@ export function ShadowingWorkspace({
     }).catch(console.error);
   };
 
-  // User Waveform Click-to-Seek
-  const handleUserWaveformSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!userAudioRef.current || !recordedAudioUrl || isRecording) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    if (userAudioRef.current.duration) {
-      userAudioRef.current.currentTime = frac * userAudioRef.current.duration;
-      setUserAudioProgress(frac * 100);
-      if (!isPlayingUserAudio) {
+  // User Waveform Touch/Mouse Scrub-to-Seek
+  const seekUserByFraction = (frac: number, autoPlay: boolean) => {
+    const audio = userAudioRef.current;
+    if (!audio || !recordedAudioUrl || isRecording) return;
+    if (audio.duration && !isNaN(audio.duration)) {
+      audio.currentTime = frac * audio.duration;
+      userTrackRef.current?.setProgress(frac);
+      if (autoPlay && !isPlayingUserAudio) {
         handlePlayUserAudio();
       }
     }
@@ -1178,7 +1210,7 @@ export function ShadowingWorkspace({
     return Math.min(100, Math.max(10, calculated));
   }, []);
 
-  // Start Mic Recording & Web Speech Recognition (Mobile-Safe)
+  // Start Mic Recording & Web Speech Recognition (Mobile-Safe, Zero 60fps React Re-renders)
   const startRecording = async () => {
     setSpeechError(null);
     setRecognizedText("");
@@ -1186,13 +1218,14 @@ export function ShadowingWorkspace({
     stopAllAudio();
     userWaveformSamplesRef.current = [];
     setUserWaveform([]);
-    lastSampleTimeRef.current = Date.now();
+    userTrackRef.current?.resetLiveBars();
+    lastSampleTimeRef.current = performance.now();
 
     try {
       const stream = await requestMobileSafeMicrophoneStream();
       micStreamRef.current = stream;
 
-      // Audio Analyzer for live visualizer
+      // Audio Analyzer for silky 60fps direct-DOM visualizer (zero React setState in rAF!)
       try {
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioContextClass) {
@@ -1201,44 +1234,45 @@ export function ShadowingWorkspace({
           audioContextRef.current = ctx;
           const source = ctx.createMediaStreamSource(stream);
           const analyser = ctx.createAnalyser();
-          analyser.fftSize = 64;
+          analyser.fftSize = 256;
+          analyser.smoothingTimeConstant = 0.55;
           source.connect(analyser);
           analyserRef.current = analyser;
 
-          const dataArray = new Uint8Array(analyser.frequencyBinCount);
-          const updateMicVisual = () => {
-            if (analyserRef.current) {
-              analyserRef.current.getByteFrequencyData(dataArray);
-              let sum = 0;
-              for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-              const avg = sum / dataArray.length;
-              const vol = Math.min(100, Math.round((avg / 128) * 100));
-              setMicVolume(vol);
+          const timeData = new Uint8Array(analyser.fftSize);
+          const liveDisplayBars = Array.from({ length: 80 }, () => 0.14);
+          let smoothedLevel = 0.14;
 
-              // Sample waveform peaks (80 bars)
-              const now = Date.now();
-              if (now - lastSampleTimeRef.current >= 50) {
-                lastSampleTimeRef.current = now;
-                const norm = Math.max(0.12, Math.min(0.95, avg / 80));
-                if (userWaveformSamplesRef.current.length < 80) {
-                  userWaveformSamplesRef.current.push(parseFloat(norm.toFixed(2)));
-                  setUserWaveform([...userWaveformSamplesRef.current]);
-                } else {
-                  userWaveformSamplesRef.current.push(parseFloat(norm.toFixed(2)));
-                  const step = userWaveformSamplesRef.current.length / 80;
-                  const resampled: number[] = [];
-                  for (let b = 0; b < 80; b++) {
-                    const idx = Math.floor(b * step);
-                    resampled.push(userWaveformSamplesRef.current[idx] || 0.12);
-                  }
-                  setUserWaveform(resampled);
-                }
-              }
-
-              animationFrameRef.current = requestAnimationFrame(updateMicVisual);
+          const updateMicVisual = (now: number) => {
+            if (!analyserRef.current) return;
+            analyserRef.current.getByteTimeDomainData(timeData);
+            let sumSq = 0;
+            for (let i = 0; i < timeData.length; i++) {
+              const centered = (timeData[i] - 128) / 128;
+              sumSq += centered * centered;
             }
+            const rms = Math.sqrt(sumSq / timeData.length);
+            const instant = Math.max(0.14, Math.min(1.0, 0.14 + Math.pow(rms * 3.4, 0.85) * 0.86));
+            smoothedLevel = smoothedLevel * 0.5 + instant * 0.5;
+
+            if (now - lastSampleTimeRef.current >= 36) {
+              lastSampleTimeRef.current = now;
+              const sampleVal = parseFloat(smoothedLevel.toFixed(2));
+              userWaveformSamplesRef.current.push(sampleVal);
+
+              if (userWaveformSamplesRef.current.length <= 80) {
+                const idx = userWaveformSamplesRef.current.length - 1;
+                liveDisplayBars[idx] = sampleVal;
+              } else {
+                liveDisplayBars.shift();
+                liveDisplayBars.push(sampleVal);
+              }
+              userTrackRef.current?.setLiveBars(liveDisplayBars);
+            }
+
+            animationFrameRef.current = requestAnimationFrame(updateMicVisual);
           };
-          updateMicVisual();
+          animationFrameRef.current = requestAnimationFrame(updateMicVisual);
         }
       } catch (e) {
         console.warn("AudioContext visualizer error:", e);
@@ -1369,7 +1403,6 @@ export function ShadowingWorkspace({
     }
 
     setIsRecording(false);
-    setMicVolume(0);
 
     if (recognizedText && currentSentence) {
       const finalScore = evaluatePronunciation(recognizedText, currentSentence.text);
@@ -1742,7 +1775,7 @@ export function ShadowingWorkspace({
                   <div className="flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5 text-sky-400" />
                     <span>
-                      {formatTimeSeconds(modelAudioCurrentTime)} ➔ {formatTimeSeconds(modelAudioDuration || 2.5)}
+                      <span ref={modelHeaderTimeRef}>0.0s</span> ➔ {formatTimeSeconds(modelAudioDuration || 2.5)}
                     </span>
                     <span className="text-slate-400">
                       ({(modelAudioDuration || 2.5).toFixed(1)}ث)
@@ -1905,60 +1938,26 @@ export function ShadowingWorkspace({
 
                     {/* Time Readout */}
                     <div className="flex items-center gap-1.5 text-xs font-mono text-slate-400">
-                      <span className="text-sky-400 font-bold">
-                        {formatTimeSeconds(modelAudioCurrentTime)}
+                      <span ref={modelTrackTimeRef} className="text-sky-400 font-bold">
+                        0.0s
                       </span>
                       <span>/</span>
                       <span>{formatTimeSeconds(modelAudioDuration || 2.5)}</span>
                     </div>
                   </div>
 
-                  {/* Full-width Waveform Track */}
-                  <div
-                    dir="ltr"
-                    onClick={handleOriginalWaveformSeek}
-                    className="relative w-full h-16 sm:h-20 bg-slate-950/60 border border-slate-800 hover:border-slate-700/80 rounded-xl flex flex-row items-center justify-between px-2 gap-[2px] overflow-hidden group select-none cursor-pointer"
-                    title="انقر لتحديد موضع التشغيل"
-                  >
-                    {/* Background Progress Fill */}
-                    <div
-                      className="absolute top-0 bottom-0 left-0 bg-sky-500/10 pointer-events-none"
-                      style={{
-                        width: `${modelAudioProgress}%`,
-                        willChange: "width"
-                      }}
-                    />
-
-                    {/* Smooth 60fps Laser Playhead Cursor */}
-                    <div
-                      className="absolute top-0 bottom-0 w-[2px] bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.8)] pointer-events-none z-20"
-                      style={{
-                        left: `${modelAudioProgress}%`,
-                        transform: "translateX(-50%)",
-                        willChange: "left"
-                      }}
-                    />
-
-                    {/* Waveform Bars (80 bars) */}
-                    {originalWaveform.map((peak, idx) => {
-                      const barFrac = ((idx + 0.5) / (originalWaveform.length || 80)) * 100;
-                      const isPassed = isPlayingModel && barFrac <= modelAudioProgress;
-                      return (
-                        <div key={idx} className="flex-1 h-full flex items-center justify-center pointer-events-none">
-                          <div
-                            className={`w-full min-w-[2px] rounded-full transition-colors duration-75 ${
-                              isPassed
-                                ? "bg-sky-400 shadow-[0_0_4px_rgba(56,189,248,0.4)]"
-                                : "bg-slate-700/60 group-hover:bg-slate-600/70"
-                            }`}
-                            style={{
-                              height: `${Math.max(10, peak * 85)}%`
-                            }}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
+                  {/* Full-width GPU-Composited Waveform Track */}
+                  <SmoothWaveformTrack
+                    ref={modelTrackRef}
+                    peaks={originalWaveform}
+                    accent="sky"
+                    isPlaying={isPlayingModel}
+                    interactive={true}
+                    title="اسحب أو انقر لتحديد موضع التشغيل"
+                    onSeekStart={(frac) => seekModelByFraction(frac, false)}
+                    onSeekMove={(frac) => seekModelByFraction(frac, false)}
+                    onSeekEnd={(frac) => seekModelByFraction(frac, true)}
+                  />
                 </div>
 
                 {/* SECTION 2: USER VOICE TRACK */}
@@ -2047,66 +2046,19 @@ export function ShadowingWorkspace({
                     )}
                   </div>
 
-                  {/* Full-width Waveform Track */}
-                  <div
-                    dir="ltr"
-                    onClick={handleUserWaveformSeek}
-                    className={`relative w-full h-16 sm:h-20 rounded-xl flex flex-row items-center justify-between px-2 gap-[2px] overflow-hidden select-none border transition-colors ${
-                      isRecording
-                        ? "bg-slate-950/80 border-rose-500/40 cursor-default"
-                        : recordedAudioUrl
-                        ? "bg-slate-950/60 border-slate-800 hover:border-slate-700/80 cursor-pointer"
-                        : "bg-slate-950/40 border-slate-800/40 cursor-default"
-                    }`}
-                    title={recordedAudioUrl ? "انقر لتحديد موضع التشغيل" : ""}
-                  >
-                    {/* Background Progress Fill */}
-                    {isPlayingUserAudio && (
-                      <div
-                        className="absolute top-0 bottom-0 left-0 bg-emerald-500/10 pointer-events-none"
-                        style={{
-                          width: `${userAudioProgress}%`,
-                          willChange: "width"
-                        }}
-                      />
-                    )}
-
-                    {/* Smooth 60fps Laser Playhead Cursor */}
-                    {isPlayingUserAudio && (
-                      <div
-                        className="absolute top-0 bottom-0 w-[2px] bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] pointer-events-none z-20"
-                        style={{
-                          left: `${userAudioProgress}%`,
-                          transform: "translateX(-50%)",
-                          willChange: "left"
-                        }}
-                      />
-                    )}
-
-                    {/* Waveform Bars (80 bars) */}
-                    {displayUserWaveform.map((peak, idx) => {
-                      const barFrac = ((idx + 0.5) / displayUserWaveform.length) * 100;
-                      const isPassed = isPlayingUserAudio && barFrac <= userAudioProgress;
-                      return (
-                        <div key={idx} className="flex-1 h-full flex items-center justify-center pointer-events-none">
-                          <div
-                            className={`w-full min-w-[2px] rounded-full transition-colors duration-75 ${
-                              isRecording
-                                ? "bg-rose-400/90"
-                                : isPassed
-                                ? "bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.4)]"
-                                : recordedAudioUrl
-                                ? "bg-slate-700/60"
-                                : "bg-slate-800/40"
-                            }`}
-                            style={{
-                              height: `${Math.max(10, peak * 85)}%`
-                            }}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
+                  {/* Full-width GPU-Composited User Waveform Track */}
+                  <SmoothWaveformTrack
+                    ref={userTrackRef}
+                    peaks={displayUserWaveform}
+                    accent="emerald"
+                    isPlaying={isPlayingUserAudio}
+                    isRecording={isRecording}
+                    interactive={Boolean(recordedAudioUrl)}
+                    title={recordedAudioUrl ? "اسحب أو انقر لتحديد موضع التشغيل" : ""}
+                    onSeekStart={(frac) => seekUserByFraction(frac, false)}
+                    onSeekMove={(frac) => seekUserByFraction(frac, false)}
+                    onSeekEnd={(frac) => seekUserByFraction(frac, true)}
+                  />
                 </div>
               </div>
 
