@@ -32,6 +32,7 @@ import {
 import { InteractiveBook, BookPage, BookPageMedia, MediaFile } from "../types";
 import {
   fetchBooksFromServer,
+  getCachedBooks,
   uploadBookToServer,
   uploadBookFolderToServer,
   deleteBookFromServer,
@@ -60,11 +61,42 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   initialBookId,
   initialPageIndex
 }) => {
+  // Helper: Filter book pages to show only pages with audio/video (unless no page has mapped media)
+  const getVisibleBookPages = (book: InteractiveBook): BookPage[] => {
+    const pagesWithMedia = (book.pages || []).filter(
+      (p) => Array.isArray(p.media) && p.media.length > 0
+    );
+    return pagesWithMedia.length > 0 ? pagesWithMedia : (book.pages || []);
+  };
+
+  // Synchronous initial snapshot from memory cache for instant return from Studio
+  const initialCachedBooks = getCachedBooks();
+  const initialMatchedBook = initialBookId
+    ? initialCachedBooks.find((b) => b.id === initialBookId) || null
+    : null;
+
   // Books list loaded from server / local storage
-  const [books, setBooks] = useState<InteractiveBook[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [selectedBook, setSelectedBook] = useState<InteractiveBook | null>(null);
-  const [currentPageIndex, setCurrentPageIndex] = useState<number>(0);
+  const [books, setBooks] = useState<InteractiveBook[]>(initialCachedBooks);
+  const [loading, setLoading] = useState<boolean>(initialCachedBooks.length === 0);
+  const [selectedBook, setSelectedBook] = useState<InteractiveBook | null>(initialMatchedBook);
+  const [currentPageIndex, setCurrentPageIndex] = useState<number>(() => {
+    if (!initialMatchedBook) return 0;
+    const visible = getVisibleBookPages(initialMatchedBook);
+    if (typeof initialPageIndex === "number" && initialPageIndex >= 0 && initialPageIndex < visible.length) {
+      return initialPageIndex;
+    }
+    try {
+      const savedPage = localStorage.getItem(`interactive_book_last_page_${initialMatchedBook.id}`);
+      if (savedPage !== null) {
+        const parsed = parseInt(savedPage, 10);
+        if (!isNaN(parsed) && parsed >= 0 && parsed < visible.length) return parsed;
+      }
+    } catch {}
+    return 0;
+  });
+  const appliedInitialContextRef = useRef<string | null>(
+    initialMatchedBook ? `${initialMatchedBook.id}:${initialPageIndex ?? ""}` : null
+  );
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
 
   // Inline Audio Player State
@@ -76,14 +108,6 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   const [activeVideoFallback, setActiveVideoFallback] = useState<BookPageMedia | null>(null);
   const inlineAudioRef = useRef<HTMLAudioElement | null>(null);
   const touchStartXRef = useRef<number | null>(null);
-
-  // Helper: Filter book pages to show only pages with audio/video (unless no page has mapped media)
-  const getVisibleBookPages = (book: InteractiveBook): BookPage[] => {
-    const pagesWithMedia = (book.pages || []).filter(
-      (p) => Array.isArray(p.media) && p.media.length > 0
-    );
-    return pagesWithMedia.length > 0 ? pagesWithMedia : (book.pages || []);
-  };
 
   // Helper: Restore saved last-read page for a book from localStorage
   const selectBookAndRestorePage = (book: InteractiveBook) => {
@@ -152,17 +176,26 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   }, []);
 
   const loadBooks = async () => {
-    setLoading(true);
+    if (books.length === 0) {
+      setLoading(true);
+    }
     try {
       const serverBooks = await fetchBooksFromServer();
       setBooks(serverBooks);
       if (initialBookId) {
+        const ctxKey = `${initialBookId}:${initialPageIndex ?? ""}`;
         const found = serverBooks.find((b) => b.id === initialBookId);
         if (found) {
-          selectBookAndRestorePage(found);
-          const visible = getVisibleBookPages(found);
-          if (typeof initialPageIndex === "number" && initialPageIndex >= 0 && initialPageIndex < visible.length) {
-            setCurrentPageIndex(initialPageIndex);
+          if (appliedInitialContextRef.current !== ctxKey) {
+            appliedInitialContextRef.current = ctxKey;
+            selectBookAndRestorePage(found);
+            const visible = getVisibleBookPages(found);
+            if (typeof initialPageIndex === "number" && initialPageIndex >= 0 && initialPageIndex < visible.length) {
+              setCurrentPageIndex(initialPageIndex);
+            }
+          } else {
+            // Update selected book reference cleanly without resetting user's active page
+            setSelectedBook((prev) => (prev?.id === found.id ? found : prev));
           }
         }
       }
@@ -175,14 +208,16 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
 
   // Sync when initialBookId or initialPageIndex change from props
   useEffect(() => {
-    if (initialBookId && books.length > 0) {
-      const found = books.find((b) => b.id === initialBookId);
-      if (found) {
-        selectBookAndRestorePage(found);
-        const visible = getVisibleBookPages(found);
-        if (typeof initialPageIndex === "number" && initialPageIndex >= 0 && initialPageIndex < visible.length) {
-          setCurrentPageIndex(initialPageIndex);
-        }
+    if (!initialBookId || books.length === 0) return;
+    const ctxKey = `${initialBookId}:${initialPageIndex ?? ""}`;
+    if (appliedInitialContextRef.current === ctxKey) return;
+    const found = books.find((b) => b.id === initialBookId);
+    if (found) {
+      appliedInitialContextRef.current = ctxKey;
+      selectBookAndRestorePage(found);
+      const visible = getVisibleBookPages(found);
+      if (typeof initialPageIndex === "number" && initialPageIndex >= 0 && initialPageIndex < visible.length) {
+        setCurrentPageIndex(initialPageIndex);
       }
     }
   }, [initialBookId, initialPageIndex, books]);

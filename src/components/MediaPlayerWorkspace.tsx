@@ -480,8 +480,29 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     [authFetch, token]
   );
 
-  const [files, setFiles] = useState<MediaFile[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const buildBookMediaFile = (mediaInfo: Partial<MediaFile>): MediaFile => ({
+    id: mediaInfo.id || `book-media-${Date.now()}`,
+    filename: mediaInfo.filename || mediaInfo.originalName || "audio.mp3",
+    originalName: mediaInfo.originalName || mediaInfo.filename || "audio.mp3",
+    title: mediaInfo.title || "مقطع كتاب رقمي",
+    size: mediaInfo.size || 1024 * 1024,
+    mimeType: mediaInfo.type === "video" ? "video/mp4" : "audio/mpeg",
+    type: mediaInfo.type || "audio",
+    url: mediaInfo.url || "",
+    uploadedAt: mediaInfo.uploadedAt || new Date().toISOString(),
+    subtitles: mediaInfo.subtitles || [],
+    bookContext: mediaInfo.bookContext
+  });
+
+  const initialPendingBookFileRef = useRef<MediaFile | null>(
+    pendingBookMedia ? buildBookMediaFile(pendingBookMedia) : null
+  );
+  const initialPendingBookSourceRef = useRef<Partial<MediaFile> | null>(pendingBookMedia || null);
+
+  const [files, setFiles] = useState<MediaFile[]>(() =>
+    initialPendingBookFileRef.current ? [initialPendingBookFileRef.current] : []
+  );
+  const [loading, setLoading] = useState<boolean>(!initialPendingBookFileRef.current);
   const [uploading, setUploading] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [uploadingFolderName, setUploadingFolderName] = useState<string | null>(null);
@@ -490,8 +511,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Active playing media
-  const [currentFile, setCurrentFile] = useState<MediaFile | null>(null);
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [currentFile, setCurrentFile] = useState<MediaFile | null>(() => initialPendingBookFileRef.current);
+  const [isPlaying, setIsPlaying] = useState<boolean>(() => Boolean(initialPendingBookFileRef.current));
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
   const [playbackRate, setPlaybackRate] = useState<number>(1);
@@ -523,7 +544,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   // Workspace Tab: Media Files vs Interactive Books
   const [mediaWorkspaceTab, setMediaWorkspaceTab] = useState<"media" | "books">("media");
-  const [activeBookContext, setActiveBookContext] = useState<MediaBookContext | null>(null);
+  const [activeBookContext, setActiveBookContext] = useState<MediaBookContext | null>(
+    () => pendingBookMedia?.bookContext || null
+  );
+  const [isReturningToBooks, setIsReturningToBooks] = useState<boolean>(false);
 
   // Subtitle States
   const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
@@ -749,7 +773,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     isFullscreen && isPortraitViewport && forceLandscapeInPortrait && landscapeRotationAngle !== 0;
 
   // Immersive Theater Mode (Video huge, minimal bottom controls, side drawer for scrolling cues with toggle)
-  const [isImmersiveMode, setIsImmersiveMode] = useState<boolean>(false);
+  const [isImmersiveMode, setIsImmersiveMode] = useState<boolean>(() => Boolean(initialPendingBookFileRef.current));
   const [showImmersiveSideDrawer, setShowImmersiveSideDrawer] = useState<boolean>(true);
 
   // Gemini Subtitle Translation state
@@ -1131,7 +1155,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   }, []);
 
   // Active screen mode: File Manager (default) vs Active Player
-  const [isPlayerOpen, setIsPlayerOpen] = useState<boolean>(false);
+  const [isPlayerOpen, setIsPlayerOpen] = useState<boolean>(() => Boolean(initialPendingBookFileRef.current));
 
   // Folders State (Synchronized with Server - Public for everyone)
   const [folders, setFolders] = useState<MediaFolder[]>(() => {
@@ -1316,17 +1340,37 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           loadedFiles.push(f);
         }
       }
-      setFiles(loadedFiles);
+      // Preserve active synthetic book media item if it isn't stored in /api/media/files
+      const activeCur = currentFileRef.current;
+      const isBookTrack = Boolean(activeCur && (activeCur.bookContext || activeCur.id.startsWith("book-media-")));
 
-      // Keep currentFile synchronized if already playing
-      if (currentFileRef.current) {
-        const updatedCurrent = loadedFiles.find((f) => f.id === currentFileRef.current?.id);
+      if (activeCur) {
+        const updatedCurrent = loadedFiles.find(
+          (f) =>
+            f.id === activeCur.id ||
+            (activeCur.url && f.url === activeCur.url) ||
+            (activeCur.originalName && f.originalName === activeCur.originalName)
+        );
         if (updatedCurrent) {
-          setCurrentFile(updatedCurrent);
+          const mergedCurrent: MediaFile = {
+            ...updatedCurrent,
+            bookContext: activeCur.bookContext || updatedCurrent.bookContext,
+            subtitles:
+              updatedCurrent.subtitles && updatedCurrent.subtitles.length > 0
+                ? updatedCurrent.subtitles
+                : activeCur.subtitles
+          };
+          setFiles(loadedFiles);
+          setCurrentFile(mergedCurrent);
+        } else if (isBookTrack) {
+          setFiles([activeCur, ...loadedFiles.filter((f) => f.id !== activeCur.id)]);
         } else {
+          setFiles(loadedFiles);
           setCurrentFile(null);
           setIsPlaying(false);
         }
+      } else {
+        setFiles(loadedFiles);
       }
     } catch (err: any) {
       console.error(err);
@@ -1391,6 +1435,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   // Close player and return to file manager or book reader (Strictly wipe transient sentence chat memory)
   const handleBackToFileManager = () => {
     smoothPause();
+    if (typeof document !== "undefined" && document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+    setIsFullscreen(false);
     setSentenceChatHistories({});
     setIsSentenceChatOpen(false);
     setChatTargetCue(null);
@@ -1402,19 +1450,34 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         }
       }
     } catch (e) {}
+
+    const bookCtx =
+      activeBookContext ||
+      currentFileRef.current?.bookContext ||
+      currentFile?.bookContext ||
+      pendingBookMedia?.bookContext ||
+      null;
+
+    if (bookCtx) {
+      if (onBackToBooksSection) {
+        // Exit immediately to standalone Books section without rendering MediaExplorerView
+        setIsReturningToBooks(true);
+        onBackToBooksSection(bookCtx);
+        return;
+      }
+      setMediaWorkspaceTab("books");
+      setIsPlayerOpen(false);
+      setIsImmersiveMode(false);
+      return;
+    }
+
     setIsPlayerOpen(false);
     setIsImmersiveMode(false);
-    if (activeBookContext) {
-      if (onBackToBooksSection) {
-        onBackToBooksSection(activeBookContext);
-      } else {
-        setMediaWorkspaceTab("books");
-      }
-    }
   };
 
   // Play media track from Interactive Digital Books inside Studio Player
   const handlePlayBookMediaInStudio = (mediaInfo: Partial<MediaFile>) => {
+    setIsReturningToBooks(false);
     if (mediaInfo.bookContext) {
       setActiveBookContext(mediaInfo.bookContext);
     }
@@ -1437,31 +1500,24 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       };
       handleSelectFile(merged, true);
     } else {
-      const syntheticFile: MediaFile = {
-        id: mediaInfo.id || `book-media-${Date.now()}`,
-        filename: mediaInfo.filename || mediaInfo.originalName || "audio.mp3",
-        originalName: mediaInfo.originalName || mediaInfo.filename || "audio.mp3",
-        title: mediaInfo.title || "مقطع كتاب رقمي",
-        size: mediaInfo.size || 1024 * 1024,
-        mimeType: mediaInfo.type === "video" ? "video/mp4" : "audio/mpeg",
-        type: mediaInfo.type || "audio",
-        url: mediaInfo.url || "",
-        uploadedAt: new Date().toISOString(),
-        subtitles: mediaInfo.subtitles || [],
-        bookContext: mediaInfo.bookContext
-      };
-      setFiles((prev) => [syntheticFile, ...prev]);
+      const syntheticFile = buildBookMediaFile(mediaInfo);
+      setFiles((prev) => [syntheticFile, ...prev.filter((f) => f.id !== syntheticFile.id)]);
       handleSelectFile(syntheticFile, true);
     }
   };
 
   // Auto-open book media when launched from standalone Books section in Sidebar
   useEffect(() => {
-    if (pendingBookMedia && !loading) {
-      handlePlayBookMediaInStudio(pendingBookMedia);
+    if (!pendingBookMedia) return;
+    if (initialPendingBookSourceRef.current === pendingBookMedia) {
+      // Already initialized synchronously on mount for zero-flash entry
+      initialPendingBookSourceRef.current = null;
       onClearPendingBookMedia?.();
+      return;
     }
-  }, [pendingBookMedia, loading]);
+    handlePlayBookMediaInStudio(pendingBookMedia);
+    onClearPendingBookMedia?.();
+  }, [pendingBookMedia]);
 
   // Folder management functions
   const getFolderPathName = (folder: MediaFolder): string => {
@@ -4436,6 +4492,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       transition: "bottom 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s ease"
     };
   }, [isFullscreen, showFullscreenControls, controlsBarHeight]);
+
+  if (isReturningToBooks) {
+    return null;
+  }
 
   return (
     <div

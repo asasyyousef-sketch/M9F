@@ -35,6 +35,10 @@ function openDB(): Promise<IDBDatabase> {
 // In-memory cache for fast instant rendering
 let memoryBooksCache: InteractiveBook[] = [...INITIAL_BOOKS];
 
+export function getCachedBooks(): InteractiveBook[] {
+  return memoryBooksCache;
+}
+
 /**
  * Fetch all books from the server disk (books.json).
  * Server is the primary authority so refresh always shows permanent disk files.
