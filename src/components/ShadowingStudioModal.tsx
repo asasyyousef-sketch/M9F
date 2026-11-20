@@ -466,16 +466,35 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     return () => window.removeEventListener("keydown", handleKeyNav);
   }, [isOpen, currentCueIndex, allCues, onSelectCue]);
 
+  const isDraggingOriginalRef = useRef<boolean>(false);
+
+  const readOriginalSnapshot = useCallback((): MediaPlaybackSnapshot => {
+    if (getPlaybackSnapshotRef.current) {
+      return getPlaybackSnapshotRef.current();
+    }
+    const cur = getCurrentTimeRef.current ? getCurrentTimeRef.current() : currentTimeRef.current;
+    return {
+      currentTime: cur,
+      paused: true,
+      seeking: false,
+      readyState: 4,
+      playbackRate: playbackSpeedRef.current
+    };
+  }, []);
+
   // Handle loop mode playback logic
   useEffect(() => {
     if (!isLoopingSegment) {
       if (loopTimerRef.current) window.clearTimeout(loopTimerRef.current);
       return;
     }
-    // If not currently playing, trigger play with 800ms pause between repeats
+    // If not currently playing, trigger play with 750ms pause between repeats
     if (!isPlayingOriginal && isLoopingSegment) {
       loopTimerRef.current = window.setTimeout(() => {
         if (isLoopingSegment) {
+          const pre = readOriginalSnapshot().currentTime;
+          beginPlaybackSeekHold(originalClockRef.current, cue.startTime, performance.now(), pre);
+          originalTrackRef.current?.setProgress(0);
           onPlayOriginalSegment(cue.startTime, cue.endTime, playbackSpeed);
         }
       }, 750);
@@ -483,7 +502,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     return () => {
       if (loopTimerRef.current) window.clearTimeout(loopTimerRef.current);
     };
-  }, [isLoopingSegment, isPlayingOriginal, cue.startTime, cue.endTime, playbackSpeed]);
+  }, [isLoopingSegment, isPlayingOriginal, cue.startTime, cue.endTime, playbackSpeed, readOriginalSnapshot]);
 
   // Audio Playback progress calculation for Original Segment
   const segmentDuration = Math.max(0.2, cue.endTime - cue.startTime);
@@ -492,20 +511,6 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   const originalAnimRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const readOriginalSnapshot = (): MediaPlaybackSnapshot => {
-      if (getPlaybackSnapshotRef.current) {
-        return getPlaybackSnapshotRef.current();
-      }
-      const cur = getCurrentTimeRef.current ? getCurrentTimeRef.current() : currentTimeRef.current;
-      return {
-        currentTime: cur,
-        paused: !isPlayingOriginal,
-        seeking: false,
-        readyState: 4,
-        playbackRate: playbackSpeedRef.current
-      };
-    };
-
     if (!isPlayingOriginal) {
       if (originalAnimRef.current) cancelAnimationFrame(originalAnimRef.current);
       const snap = readOriginalSnapshot();
@@ -516,7 +521,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
       const clampedOffset = Math.max(0, Math.min(segmentDuration, targetTime - cue.startTime));
       const frac = Math.max(0, Math.min(1, clampedOffset / segmentDuration));
       originalTrackRef.current?.setProgress(frac);
-      if (originalTimeTextRef.current) {
+      if (originalTimeTextRef.current && !isDraggingOriginalRef.current) {
         originalTimeTextRef.current.textContent = formatTimeSeconds(clampedOffset);
       }
       return;
@@ -539,7 +544,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
       const frac = Math.max(0, Math.min(1, clampedOffset / segmentDuration));
       originalTrackRef.current?.setProgress(frac);
 
-      if (originalTimeTextRef.current && now - lastTextUpdateMs >= 80) {
+      if (originalTimeTextRef.current && !isDraggingOriginalRef.current && now - lastTextUpdateMs >= 80) {
         lastTextUpdateMs = now;
         originalTimeTextRef.current.textContent = formatTimeSeconds(clampedOffset);
       }
@@ -552,7 +557,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     return () => {
       if (originalAnimRef.current) cancelAnimationFrame(originalAnimRef.current);
     };
-  }, [isPlayingOriginal, cue.startTime, segmentDuration]);
+  }, [isPlayingOriginal, cue.startTime, segmentDuration, readOriginalSnapshot]);
 
   // Smooth 60/120fps monotonic PLL playhead for user audio (zero React re-renders)
   const userAnimRef = useRef<number | null>(null);
@@ -601,12 +606,16 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
       onStopOriginalSegment();
       setIsLoopingSegment(false);
     } else {
+      const pre = readOriginalSnapshot().currentTime;
+      beginPlaybackSeekHold(originalClockRef.current, cue.startTime, performance.now(), pre);
+      originalTrackRef.current?.setProgress(0);
       onPlayOriginalSegment(cue.startTime, cue.endTime, playbackSpeed);
     }
   };
 
   // Preview time text during touch/mouse drag without spamming hardware media decoder seeks
   const previewOriginalSeek = (frac: number) => {
+    isDraggingOriginalRef.current = true;
     const clampedOffset = frac * segmentDuration;
     if (originalTimeTextRef.current) {
       originalTimeTextRef.current.textContent = formatTimeSeconds(clampedOffset);
@@ -615,12 +624,14 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
 
   // Commit clean seek once pointer lifts (or tap ends) with seek-hold to prevent bounce-back
   const commitOriginalSeek = (frac: number) => {
+    isDraggingOriginalRef.current = false;
     const clampedOffset = frac * segmentDuration;
     const seekTarget = cue.startTime + clampedOffset;
     if (originalTimeTextRef.current) {
       originalTimeTextRef.current.textContent = formatTimeSeconds(clampedOffset);
     }
-    beginPlaybackSeekHold(originalClockRef.current, seekTarget, performance.now());
+    const pre = readOriginalSnapshot().currentTime;
+    beginPlaybackSeekHold(originalClockRef.current, seekTarget, performance.now(), pre);
     originalTrackRef.current?.setProgress(frac);
     onPlayOriginalSegment(seekTarget, cue.endTime, playbackSpeed);
   };
@@ -631,7 +642,8 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     if (!audio || !recordedAudioUrl || isRecording) return;
     if (audio.duration && !isNaN(audio.duration)) {
       const targetTime = frac * audio.duration;
-      beginPlaybackSeekHold(userClockRef.current, targetTime, performance.now());
+      const pre = audio.currentTime;
+      beginPlaybackSeekHold(userClockRef.current, targetTime, performance.now(), pre);
       audio.currentTime = targetTime;
       userTrackRef.current?.setProgress(frac);
       if (autoPlayIfPaused && !isPlayingUserAudio) {
@@ -1173,7 +1185,8 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    beginPlaybackSeekHold(originalClockRef.current, cue.startTime, performance.now());
+                    const pre = readOriginalSnapshot().currentTime;
+                    beginPlaybackSeekHold(originalClockRef.current, cue.startTime, performance.now(), pre);
                     originalTrackRef.current?.setProgress(0);
                     onPlayOriginalSegment(cue.startTime, cue.endTime, playbackSpeed);
                   }}

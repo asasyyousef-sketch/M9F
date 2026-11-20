@@ -1067,7 +1067,7 @@ export function ShadowingWorkspace({
           setModelAudioDuration(audio.duration);
           if (seekRatio !== undefined) {
             const targetTime = seekRatio * audio.duration;
-            beginPlaybackSeekHold(modelClockRef.current, targetTime, performance.now());
+            beginPlaybackSeekHold(modelClockRef.current, targetTime, performance.now(), audio.currentTime);
             audio.currentTime = targetTime;
           }
         }
@@ -1079,7 +1079,7 @@ export function ShadowingWorkspace({
         if (isLoopingModel) {
           loopTimerRef.current = window.setTimeout(() => {
             if (modelAudioRef.current) {
-              beginPlaybackSeekHold(modelClockRef.current, 0, performance.now());
+              beginPlaybackSeekHold(modelClockRef.current, 0, performance.now(), modelAudioRef.current.currentTime);
               modelAudioRef.current.currentTime = 0;
               modelAudioRef.current.play().then(() => setIsPlayingModel(true)).catch(() => {});
             }
@@ -1095,7 +1095,7 @@ export function ShadowingWorkspace({
 
       if (seekRatio !== undefined && audio.duration) {
         const targetTime = seekRatio * audio.duration;
-        beginPlaybackSeekHold(modelClockRef.current, targetTime, performance.now());
+        beginPlaybackSeekHold(modelClockRef.current, targetTime, performance.now(), audio.currentTime);
         audio.currentTime = targetTime;
       }
 
@@ -1136,7 +1136,7 @@ export function ShadowingWorkspace({
     const audio = modelAudioRef.current;
     if (audio && audio.duration && !isNaN(audio.duration)) {
       const targetTime = frac * audio.duration;
-      beginPlaybackSeekHold(modelClockRef.current, targetTime, performance.now());
+      beginPlaybackSeekHold(modelClockRef.current, targetTime, performance.now(), audio.currentTime);
       audio.currentTime = targetTime;
       modelTrackRef.current?.setProgress(frac);
       const formatted = formatTimeSeconds(targetTime);
@@ -1194,7 +1194,7 @@ export function ShadowingWorkspace({
     if (!audio || !recordedAudioUrl || isRecording) return;
     if (audio.duration && !isNaN(audio.duration)) {
       const targetTime = frac * audio.duration;
-      beginPlaybackSeekHold(userClockRef.current, targetTime, performance.now());
+      beginPlaybackSeekHold(userClockRef.current, targetTime, performance.now(), audio.currentTime);
       audio.currentTime = targetTime;
       userTrackRef.current?.setProgress(frac);
       if (autoPlay && !isPlayingUserAudio) {

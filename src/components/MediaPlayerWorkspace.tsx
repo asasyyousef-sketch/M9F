@@ -3834,7 +3834,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
     const onTimeUpdate = () => {
-      if (isScrubbingRef.current) return;
+      if (isScrubbingRef.current || el.seeking) return;
       const cur = el.currentTime;
       // Avoid 4Hz full-workspace React re-renders on low-end mobile while Shadowing modal is open
       if (!isShadowingStudioOpenRef.current) {

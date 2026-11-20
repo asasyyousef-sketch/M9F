@@ -130,10 +130,10 @@ export interface MediaPlaybackSnapshot {
 export interface PlaybackClockState {
   visualTime: number;
   lastMediaTime: number;
-  lastAdvanceMs: number;
+  lastTickMs: number;
   lastFrameMs: number;
-  hasObservedPlayback: boolean;
   pendingSeekTarget: number | null;
+  pendingSeekPreTime: number | null;
   pendingSeekUntilMs: number;
 }
 
@@ -142,27 +142,34 @@ export function createPlaybackClockState(initialTime: number): PlaybackClockStat
   return {
     visualTime: initialTime,
     lastMediaTime: initialTime,
-    lastAdvanceMs: now,
+    lastTickMs: now,
     lastFrameMs: now,
-    hasObservedPlayback: false,
     pendingSeekTarget: null,
+    pendingSeekPreTime: null,
     pendingSeekUntilMs: 0
   };
 }
 
-export function beginPlaybackSeekHold(state: PlaybackClockState, targetTime: number, nowMs: number): void {
+export function beginPlaybackSeekHold(
+  state: PlaybackClockState,
+  targetTime: number,
+  nowMs: number,
+  preSeekTime?: number
+): void {
+  state.pendingSeekPreTime =
+    preSeekTime !== undefined && Number.isFinite(preSeekTime) ? preSeekTime : state.lastMediaTime;
   state.pendingSeekTarget = targetTime;
-  state.pendingSeekUntilMs = nowMs + 1200;
+  state.pendingSeekUntilMs = nowMs + 650;
   state.visualTime = targetTime;
   state.lastFrameMs = nowMs;
-  state.lastAdvanceMs = nowMs;
-  state.hasObservedPlayback = false;
+  state.lastTickMs = nowMs;
 }
 
 /**
  * Strictly monotonic phase-locked loop (PLL) for mobile HTMLMediaElement playback.
- * Never vibrates backward/forward between coarse hardware currentTime ticks,
- * never freezes mid-playback, and holds user seek targets until hardware seek settles.
+ * Advances smoothly from frame 1 (no startup freeze), converges phase error to 0ms
+ * between coarse mobile currentTime updates without backward jitter, and prevents
+ * post-seek snap-back using pre-seek baseline checks.
  */
 export function stepMonotonicPlaybackClock(
   state: PlaybackClockState,
@@ -173,69 +180,70 @@ export function stepMonotonicPlaybackClock(
   state.lastFrameMs = nowMs;
 
   const rawCur = Number.isFinite(snapshot.currentTime) ? snapshot.currentTime : state.visualTime;
+  const rate = snapshot.playbackRate > 0 ? snapshot.playbackRate : 1;
 
-  // 1. Hold user's scrubbed/clicked position until hardware decoder completes seek
+  // 1. Hold user's scrubbed/clicked position until hardware decoder finishes seeking
   if (state.pendingSeekTarget !== null) {
-    const settled = !snapshot.seeking && Math.abs(rawCur - state.pendingSeekTarget) <= 0.35;
+    const target = state.pendingSeekTarget;
+    const preTime = state.pendingSeekPreTime ?? target;
+    const nearTargetExact = Math.abs(rawCur - target) <= 0.08;
+    const movedFromPreToTarget =
+      Math.abs(rawCur - preTime) > 0.03 && Math.abs(rawCur - target) <= 0.35;
+    const tinyDeltaSeek = Math.abs(target - preTime) <= 0.06;
+    const settled = !snapshot.seeking && (nearTargetExact || movedFromPreToTarget || tinyDeltaSeek);
     const timedOut = nowMs >= state.pendingSeekUntilMs;
+
     if (settled || timedOut) {
       state.pendingSeekTarget = null;
-      state.visualTime = rawCur;
+      state.pendingSeekPreTime = null;
+      const resolved = !snapshot.seeking ? rawCur : target;
+      state.visualTime = resolved;
       state.lastMediaTime = rawCur;
-      state.lastAdvanceMs = nowMs;
-      state.hasObservedPlayback = !snapshot.paused && snapshot.readyState >= 2;
+      state.lastTickMs = nowMs;
     } else {
       state.lastMediaTime = rawCur;
-      return state.pendingSeekTarget;
+      state.lastTickMs = nowMs;
+      return target;
     }
   }
 
-  // 2. If paused, actively seeking, or decoder has no frame/audio yet, do not extrapolate
+  // 2. If paused, actively seeking, or decoder has no playable frame yet, pause extrapolation
   if (snapshot.paused || snapshot.seeking || snapshot.readyState < 2) {
     if (!snapshot.seeking && snapshot.paused && Math.abs(rawCur - state.visualTime) > 0.05) {
       state.visualTime = rawCur;
     }
     state.lastMediaTime = rawCur;
-    state.hasObservedPlayback = false;
+    state.lastTickMs = nowMs;
     return state.visualTime;
   }
 
-  // 3. Hardware clock update observed
+  // 3. Observe any hardware clock update from the media element
   if (Math.abs(rawCur - state.lastMediaTime) > 0.001) {
-    const prevMedia = state.lastMediaTime;
     state.lastMediaTime = rawCur;
-    state.lastAdvanceMs = nowMs;
-
-    if (rawCur > prevMedia || !state.hasObservedPlayback) {
-      state.hasObservedPlayback = true;
-      const err = rawCur - state.visualTime;
-      if (Math.abs(err) > 0.45) {
-        // External jump / wrap / loop
-        state.visualTime = rawCur;
-      } else if (err > 0) {
-        // Hardware is ahead: smoothly pull forward without snapping
-        state.visualTime += Math.min(err, err * 0.4 + 0.006);
-      }
-      // If err <= 0 (visualTime was slightly ahead of this tick), NEVER snap backward!
-      // Just wait gently below while hardware catches up.
-      return state.visualTime;
-    }
+    state.lastTickMs = nowMs;
   }
 
-  // 4. Between coarse mobile hardware ticks: advance monotonically only if recently confirmed playing
-  if (state.hasObservedPlayback) {
-    const lead = state.visualTime - state.lastMediaTime;
-    const sinceTickMs = nowMs - state.lastAdvanceMs;
-    if (lead < 0.28 && sinceTickMs < 380) {
-      const rate = snapshot.playbackRate > 0 ? snapshot.playbackRate : 1;
-      // Gently taper pace if already slightly ahead of last reported hardware tick
-      const taper = lead > 0.04 ? Math.max(0.45, 1 - lead * 2) : 1;
-      state.visualTime += dt * rate * taper;
-    }
+  // 4. Continuous PLL tracking anchored to latest hardware tick + elapsed frame time
+  const elapsedSinceTick = Math.max(0, Math.min(0.9, (nowMs - state.lastTickMs) / 1000));
+  const estimatedAudioTime = state.lastMediaTime + elapsedSinceTick * rate;
+  const error = estimatedAudioTime - state.visualTime;
+
+  if (Math.abs(error) > 0.45) {
+    // External jump / loop restart
+    state.visualTime = estimatedAudioTime;
+  } else if (error > 0.002) {
+    // Visual is behind estimated hardware time: smoothly catch up to zero phase error
+    const catchUp = Math.min(error, error * 0.28 + dt * 0.6);
+    state.visualTime += dt * rate + catchUp;
+  } else if (error < -0.002) {
+    // Visual crept slightly ahead of hardware clock: gently slow pace without backward vibration
+    const paceScale = Math.max(0.2, 1 + error * 4.0);
+    state.visualTime += dt * rate * paceScale;
   } else {
-    state.visualTime = rawCur;
+    state.visualTime += dt * rate;
   }
 
   return state.visualTime;
 }
+
 
