@@ -368,6 +368,9 @@ export function ShadowingWorkspace({
   const [aiTargetLanguage, setAiTargetLanguage] = useState<string>(() => {
     return localStorage.getItem("shadowing_ai_target_lang") || "ar";
   });
+  const [aiCustomPrompt, setAiCustomPrompt] = useState<string>(() => {
+    return localStorage.getItem("shadowing_ai_custom_prompt") || "";
+  });
   const [editingTranslationSentenceId, setEditingTranslationSentenceId] = useState<string | null>(null);
   const [editingTranslationText, setEditingTranslationText] = useState<string>("");
 
@@ -702,6 +705,7 @@ export function ShadowingWorkspace({
             sourceLanguage: language,
             targetLanguage: aiTargetLanguage,
             selectedModel: aiTranslationModel,
+            customPrompt: aiCustomPrompt.trim() || undefined,
             customApiKey: savedGeminiKey,
             userApiKey: savedGeminiKey,
             geminiApiKey: savedGeminiKey,
@@ -742,7 +746,7 @@ export function ShadowingWorkspace({
         setIsTranslatingWithAi(false);
       }
     },
-    [sentences, rawText, language, aiTargetLanguage, aiTranslationModel, showToast]
+    [sentences, rawText, language, aiTargetLanguage, aiTranslationModel, aiCustomPrompt, showToast]
   );
 
   const handleTranslateSingleSentence = useCallback(
@@ -768,6 +772,7 @@ export function ShadowingWorkspace({
             sourceLanguage: language,
             targetLanguage: aiTargetLanguage,
             selectedModel: aiTranslationModel,
+            customPrompt: aiCustomPrompt.trim() || undefined,
             customApiKey: savedGeminiKey,
             userApiKey: savedGeminiKey,
             geminiApiKey: savedGeminiKey,
@@ -804,7 +809,7 @@ export function ShadowingWorkspace({
         setIsTranslatingWithAi(false);
       }
     },
-    [sentences, language, aiTargetLanguage, aiTranslationModel, showToast]
+    [sentences, language, aiTargetLanguage, aiTranslationModel, aiCustomPrompt, showToast]
   );
 
   const handleSaveSentenceTranslation = useCallback(
@@ -2452,6 +2457,7 @@ export function ShadowingWorkspace({
           currentSentenceText={currentSentence?.text || ""}
           aiTranslationModel={aiTranslationModel}
           aiTargetLanguage={aiTargetLanguage}
+          aiCustomPrompt={aiCustomPrompt}
           onSaveSettings={(newSettings) => {
             setProvider(newSettings.provider);
             setSelectedVoiceId(newSettings.selectedVoiceId);
@@ -2460,6 +2466,7 @@ export function ShadowingWorkspace({
             setGradioUrl(newSettings.gradioUrl);
             setAiTranslationModel(newSettings.aiTranslationModel);
             setAiTargetLanguage(newSettings.aiTargetLanguage);
+            setAiCustomPrompt(newSettings.aiCustomPrompt);
 
             // Persist preferences
             localStorage.setItem("shadowing_voice_provider", newSettings.provider);
@@ -2470,6 +2477,11 @@ export function ShadowingWorkspace({
             localStorage.setItem("gradio_api_url", newSettings.gradioUrl);
             localStorage.setItem("shadowing_ai_translation_model", newSettings.aiTranslationModel);
             localStorage.setItem("shadowing_ai_target_lang", newSettings.aiTargetLanguage);
+            if (newSettings.aiCustomPrompt) {
+              localStorage.setItem("shadowing_ai_custom_prompt", newSettings.aiCustomPrompt);
+            } else {
+              localStorage.removeItem("shadowing_ai_custom_prompt");
+            }
 
             // Invalidate audio cache
             audioCacheRef.current.clear();

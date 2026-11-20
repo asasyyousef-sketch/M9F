@@ -2200,7 +2200,8 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
       } catch (e) {}
 
       const cleanId = rawId.replace(/^book-media-/, "");
-      const { trackId, targetLanguage = "ar", sourceLanguage = "de", selectedModel = "gemini-3.6-flash", customApiKey, geminiApiKey, cues: clientCues } = req.body;
+      const { trackId, targetLanguage = "ar", sourceLanguage = "de", selectedModel = "gemini-3.6-flash", customPrompt = "", extraPrompt = "", customApiKey, geminiApiKey, cues: clientCues } = req.body;
+      const resolvedCustomPrompt = (typeof customPrompt === "string" ? customPrompt : typeof extraPrompt === "string" ? extraPrompt : "").trim().slice(0, 1500);
 
       const list = loadMediaMeta();
       let item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
@@ -2348,12 +2349,15 @@ ${fullText ? `- النص الكامل أو التفريغ المتاح: ${fullTe
 المهمة:
 قم بترجمة مقاطع الترجمة التالية بدقة من ${sourceLangName} إلى ${targetLangName}.
 حافظ بدقة على نفس أوقات البداية والنهاية (startTime و endTime) ونفس المعرفات (id).
-
+${resolvedCustomPrompt ? `
+تعليمات وأسلوب إضافي مطلوب من المستخدم (التزم به في الصياغة والأسلوب دون تغيير بنية JSON أو المعرفات أو التوقيت):
+${resolvedCustomPrompt}
+` : ""}
 المقاطع الأصلية المطلوب ترجمتها:
 ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, endTime: c.endTime, text: c.text })), null, 2)}
 
 الشروط:
-1. حافظ على المعنى السياقي السليم والمناسب للترجمة المرئية.
+1. حافظ على المعنى السياقي السليم والمناسب للترجمة المرئية${resolvedCustomPrompt ? " مع تطبيق تعليمات المستخدم الإضافية أعلاه" : ""}.
 2. أرجع النتيجة حصراً كمصفوفة JSON بالتنسيق التالي:
 [
   {
@@ -2843,8 +2847,11 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
         sourceLanguage = "de",
         targetLanguage = "ar",
         selectedModel = "gemini-3.8-flash",
+        customPrompt = "",
+        extraPrompt = "",
         customApiKey = ""
       } = req.body;
+      const resolvedCustomPrompt = (typeof customPrompt === "string" ? customPrompt : typeof extraPrompt === "string" ? extraPrompt : "").trim().slice(0, 1500);
 
       if (!Array.isArray(sentences) || sentences.length === 0) {
         return res.status(400).json({ error: "قائمة الجمل فارغة أو غير صحيحة" });
@@ -2890,12 +2897,15 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
 المهمة:
 قم بترجمة الجمل والعبارات التالية بدقة وسلاسة وسياق طبيعي من ${sourceLangName} إلى ${targetLangName}.
 حافظ بدقة على المعرف (id) لكل جملة لربط الترجمة بالجملة الأصلية.
-
+${resolvedCustomPrompt ? `
+تعليمات وأسلوب إضافي مطلوب من المستخدم (التزم به في الصياغة والأسلوب دون تغيير بنية JSON أو المعرفات):
+${resolvedCustomPrompt}
+` : ""}
 قائمة الجمل الأصلية:
 ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${idx + 1}`, text: s.text || "" })), null, 2)}
 
 الشروط:
-1. حافظ على المعنى السياقي السليم، والصياغة الطبيعية والمفهومة.
+1. حافظ على المعنى السياقي السليم، والصياغة الطبيعية والمفهومة${resolvedCustomPrompt ? " مع تطبيق تعليمات المستخدم الإضافية أعلاه" : ""}.
 2. أرجع النتيجة حصراً كمصفوفة JSON بالتنسيق التالي بدون أي نصوص إضافية:
 [
   {

@@ -307,6 +307,7 @@ export interface ShadowingVoiceSettingsModalProps {
   gradioUrl: string;
   aiTranslationModel?: string;
   aiTargetLanguage?: string;
+  aiCustomPrompt?: string;
   onSaveSettings: (settings: {
     provider: ShadowingVoiceProvider;
     selectedVoiceId: string;
@@ -315,6 +316,7 @@ export interface ShadowingVoiceSettingsModalProps {
     gradioUrl: string;
     aiTranslationModel: string;
     aiTargetLanguage: string;
+    aiCustomPrompt: string;
   }) => void;
   currentSentenceText?: string;
 }
@@ -329,6 +331,7 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
   gradioUrl: initialGradioUrl,
   aiTranslationModel: initialAiModel,
   aiTargetLanguage: initialAiTargetLang,
+  aiCustomPrompt: initialAiCustomPrompt,
   onSaveSettings,
   currentSentenceText = "",
 }) => {
@@ -358,6 +361,13 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
       initialAiTargetLang ||
       localStorage.getItem("shadowing_ai_target_lang") ||
       "ar"
+    );
+  });
+  const [aiCustomPrompt, setAiCustomPrompt] = useState<string>(() => {
+    return (
+      initialAiCustomPrompt ??
+      localStorage.getItem("shadowing_ai_custom_prompt") ??
+      ""
     );
   });
 
@@ -451,6 +461,11 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
         initialAiTargetLang ||
         localStorage.getItem("shadowing_ai_target_lang") ||
         "ar"
+      );
+      setAiCustomPrompt(
+        initialAiCustomPrompt ??
+        localStorage.getItem("shadowing_ai_custom_prompt") ??
+        ""
       );
       setTestError(null);
       setGradioConnResult(null);
@@ -759,6 +774,11 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
     localStorage.setItem("gradio_api_url", resolvedGradioUrl);
     localStorage.setItem("shadowing_ai_translation_model", aiTranslationModel);
     localStorage.setItem("shadowing_ai_target_lang", aiTargetLanguage);
+    if (aiCustomPrompt.trim()) {
+      localStorage.setItem("shadowing_ai_custom_prompt", aiCustomPrompt.trim());
+    } else {
+      localStorage.removeItem("shadowing_ai_custom_prompt");
+    }
 
     onSaveSettings({
       provider,
@@ -768,6 +788,7 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
       gradioUrl: resolvedGradioUrl,
       aiTranslationModel,
       aiTargetLanguage,
+      aiCustomPrompt: aiCustomPrompt.trim(),
     });
 
     onClose();
@@ -1505,6 +1526,32 @@ export const ShadowingVoiceSettingsModal: React.FC<ShadowingVoiceSettingsModalPr
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Optional Custom Translation Prompt */}
+            <div className="pt-2 border-t border-slate-800 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-300">
+                  برومبت / تعليمات إضافية للترجمة (اختياري):
+                </label>
+                {aiCustomPrompt.trim().length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setAiCustomPrompt("")}
+                    className="text-[11px] font-bold text-slate-400 hover:text-rose-300 transition-colors cursor-pointer"
+                  >
+                    مسح
+                  </button>
+                )}
+              </div>
+              <textarea
+                rows={2}
+                maxLength={1500}
+                value={aiCustomPrompt}
+                onChange={(e) => setAiCustomPrompt(e.target.value)}
+                placeholder="مثال: ترجم بأسلوب مبسط مع شرح الكلمات الصعبة أو بلهجة محددة..."
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-purple-500 resize-y leading-relaxed"
+              />
             </div>
           </div>
 

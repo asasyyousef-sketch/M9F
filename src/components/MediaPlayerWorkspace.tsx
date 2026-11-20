@@ -787,6 +787,12 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   const [isTranslatingTrack, setIsTranslatingTrack] = useState<boolean>(false);
   const [showTranslateModal, setShowTranslateModal] = useState<boolean>(false);
   const [translateTargetLang, setTranslateTargetLang] = useState<string>("ar");
+  const [translateCustomPrompt, setTranslateCustomPrompt] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("media_translate_custom_prompt") || "";
+    }
+    return "";
+  });
 
   // Subtitle Modals
   const [showSubtitleUploadModal, setShowSubtitleUploadModal] = useState<boolean>(false);
@@ -2081,6 +2087,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           targetLanguage: targetLang,
           sourceLanguage: activeTrack.language || "de",
           selectedModel: selectedAiModel,
+          customPrompt: translateCustomPrompt.trim() || undefined,
           customApiKey: savedKey || undefined,
           geminiApiKey: savedKey || undefined,
           userApiKey: savedKey || undefined,
@@ -7250,7 +7257,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       {/* ======================================================== */}
       {showTranslateModal && activeTrack && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl text-white animate-scaleUp">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl text-white animate-scaleUp">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-xl bg-linear-to-tr from-emerald-600 to-teal-600 flex items-center justify-center text-white shadow-md">
@@ -7327,6 +7334,46 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   <option value="es">🇪🇸 الإسبانية (Spanish)</option>
                   <option value="tr">🇹🇷 التركية (Turkish)</option>
                 </select>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-slate-300">
+                    برومبت / تعليمات إضافية للترجمة (اختياري):
+                  </label>
+                  {translateCustomPrompt.trim().length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTranslateCustomPrompt("");
+                        if (typeof window !== "undefined") {
+                          localStorage.removeItem("media_translate_custom_prompt");
+                        }
+                      }}
+                      className="text-[11px] font-bold text-slate-400 hover:text-rose-300 transition-colors cursor-pointer"
+                    >
+                      مسح
+                    </button>
+                  )}
+                </div>
+                <textarea
+                  rows={3}
+                  maxLength={1500}
+                  value={translateCustomPrompt}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setTranslateCustomPrompt(val);
+                    if (typeof window !== "undefined") {
+                      if (val.trim()) localStorage.setItem("media_translate_custom_prompt", val);
+                      else localStorage.removeItem("media_translate_custom_prompt");
+                    }
+                  }}
+                  placeholder="مثال: ترجم بأسلوب مبسط ومناسب للمبتدئين، أو باللهجة العراقية، أو أضف شرحاً مختصراً للمصطلحات الصعبة..."
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-emerald-500 resize-y leading-relaxed"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  اتركه فارغاً للترجمة القياسية التلقائية، أو اكتب توجيهاً إضافياً يتحكم بأسلوب الترجمة دون التأثير على التوقيت.
+                </p>
               </div>
 
               <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-2xl p-3.5 text-xs text-emerald-200 space-y-1">
