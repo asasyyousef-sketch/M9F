@@ -95,6 +95,7 @@ import { ReviewChatModal, ReviewChatMessage } from "./ReviewChatModal";
 import { ShadowingStudioModal } from "./ShadowingStudioModal";
 import { speakClient } from "./Modals";
 import { useAuth } from "../context/AuthContext";
+import { syncBookMediaSubtitlesInCache } from "../utils/bookStorage";
 
 export interface SubtitleTrackStyleConfig {
   fontSize: number; // in px
@@ -654,6 +655,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   // Shadowing Studio Modal State & Standard Practice Workflow
   const [isShadowingStudioOpen, setIsShadowingStudioOpen] = useState<boolean>(false);
   const [shadowingTargetCue, setShadowingTargetCue] = useState<(SubtitleCue & { secondaryText?: string }) | null>(null);
+  const [trackToDelete, setTrackToDelete] = useState<MediaSubtitleTrack | null>(null);
 
   // Top Video/Media Header Options Menu State
   const [showTopOptionsMenu, setShowTopOptionsMenu] = useState<boolean>(false);
@@ -2484,16 +2486,48 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       if (data.file) {
         setCurrentFile((prev) => {
           if (!prev || prev.id !== data.file.id) return prev;
-          return {
-            ...data.file,
-            primaryTrackId: shouldBePrimary ? (actualTrackId || data.file.primaryTrackId) : (prev.primaryTrackId || data.file.primaryTrackId),
-            secondaryTrackId: shouldBePrimary && prev.primaryTrackId && prev.primaryTrackId !== actualTrackId
+          const mergedSubtitles = Array.isArray(data.file.subtitles) ? data.file.subtitles : prev.subtitles;
+          const nextPrimary = shouldBePrimary
+            ? actualTrackId || data.file.primaryTrackId
+            : prev.primaryTrackId || data.file.primaryTrackId;
+          const nextSecondary =
+            shouldBePrimary && prev.primaryTrackId && prev.primaryTrackId !== actualTrackId
               ? prev.primaryTrackId
-              : (prev.secondaryTrackId || data.file.secondaryTrackId),
-            showDualSubtitles: data.file.showDualSubtitles !== undefined ? data.file.showDualSubtitles : prev.showDualSubtitles
+              : prev.secondaryTrackId || data.file.secondaryTrackId;
+          const nextDual =
+            data.file.showDualSubtitles !== undefined ? data.file.showDualSubtitles : prev.showDualSubtitles;
+          if (prev.bookContext || prev.id.startsWith("book-media-")) {
+            syncBookMediaSubtitlesInCache(prev.id, mergedSubtitles || [], {
+              primaryTrackId: nextPrimary,
+              secondaryTrackId: nextSecondary,
+              showDualSubtitles: nextDual
+            });
+          }
+          return {
+            ...prev,
+            ...data.file,
+            url: data.file.url || prev.url,
+            type: data.file.type || prev.type,
+            title: data.file.title || prev.title,
+            bookContext: prev.bookContext,
+            subtitles: mergedSubtitles,
+            primaryTrackId: nextPrimary,
+            secondaryTrackId: nextSecondary,
+            showDualSubtitles: nextDual
           };
         });
-        setFiles((prev) => prev.map((f) => (f.id === data.file.id ? { ...f, subtitles: data.file.subtitles, primaryTrackId: data.file.primaryTrackId, secondaryTrackId: data.file.secondaryTrackId } : f)));
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === data.file.id
+              ? {
+                  ...f,
+                  subtitles: data.file.subtitles || f.subtitles,
+                  primaryTrackId: data.file.primaryTrackId,
+                  secondaryTrackId: data.file.secondaryTrackId
+                }
+              : f
+          )
+        );
       }
 
       if (actualTrackId && !trackId) {
@@ -2531,14 +2565,13 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   };
 
-  // Delete Subtitle Track
-  const handleDeleteSubtitleTrack = async (trackId: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (!currentFile) return;
-    if (!window.confirm("هل تريد حذف مسار الترجمة هذا نهائياً؟")) return;
+  // Confirm & Execute Subtitle Track Deletion
+  const executeDeleteSubtitleTrack = async (trackId: string) => {
+    const targetFile = currentFileRef.current || currentFile;
+    if (!targetFile) return;
 
     try {
-      const res = await apiFetch(`/api/media/${encodeURIComponent(currentFile.id)}/subtitles/${encodeURIComponent(trackId)}`, {
+      const res = await apiFetch(`/api/media/${encodeURIComponent(targetFile.id)}/subtitles/${encodeURIComponent(trackId)}`, {
         method: "DELETE"
       });
       if (!res.ok) {
@@ -2548,16 +2581,85 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       const data = await res.json();
 
       setSuccessMsg("تم حذف مسار الترجمة بنجاح");
-      if (data.file) {
-        setCurrentFile(data.file);
-        setFiles(prev => prev.map(f => f.id === data.file.id ? data.file : f));
-        if (activeTrackId === trackId) {
-          const remaining = data.file.subtitles || [];
-          setActiveTrackId(remaining.length > 0 ? remaining[0].id : null);
-        }
+      const remaining: MediaSubtitleTrack[] = Array.isArray(data.file?.subtitles)
+        ? data.file.subtitles
+        : (targetFile.subtitles || []).filter((t) => t.id !== trackId);
+
+      const nextPrimary =
+        data.file?.primaryTrackId !== undefined
+          ? data.file.primaryTrackId
+          : activeTrackIdRef.current === trackId
+          ? remaining[0]?.id
+          : activeTrackIdRef.current || undefined;
+
+      const nextSecondary =
+        data.file?.secondaryTrackId !== undefined
+          ? data.file.secondaryTrackId
+          : secondaryTrackIdRef.current === trackId
+          ? remaining.find((t) => t.id !== nextPrimary)?.id
+          : secondaryTrackIdRef.current || undefined;
+
+      const nextDual = Boolean(nextSecondary && remaining.length >= 2 && (data.file?.showDualSubtitles ?? showDualSubtitles));
+
+      setCurrentFile((prev) =>
+        prev
+          ? {
+              ...prev,
+              ...(data.file || {}),
+              url: data.file?.url || prev.url,
+              type: data.file?.type || prev.type,
+              title: data.file?.title || prev.title,
+              bookContext: prev.bookContext,
+              subtitles: remaining,
+              primaryTrackId: nextPrimary,
+              secondaryTrackId: nextSecondary,
+              showDualSubtitles: nextDual
+            }
+          : prev
+      );
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.id === targetFile.id
+            ? {
+                ...f,
+                subtitles: remaining,
+                primaryTrackId: nextPrimary,
+                secondaryTrackId: nextSecondary,
+                showDualSubtitles: nextDual
+              }
+            : f
+        )
+      );
+
+      activeTrackIdRef.current = nextPrimary || null;
+      setActiveTrackId(nextPrimary || null);
+      secondaryTrackIdRef.current = nextSecondary || null;
+      setSecondaryTrackId(nextSecondary || null);
+      setShowDualSubtitles(nextDual);
+      saveSubtitlePreferences(targetFile.id, nextPrimary || null, nextSecondary || null);
+
+      if (targetFile.bookContext || targetFile.id.startsWith("book-media-")) {
+        syncBookMediaSubtitlesInCache(targetFile.id, remaining, {
+          primaryTrackId: nextPrimary,
+          secondaryTrackId: nextSecondary,
+          showDualSubtitles: nextDual
+        });
       }
     } catch (err: any) {
       setErrorMsg(err.message || "حدث خطأ أثناء حذف الترجمة");
+    }
+  };
+
+  // Delete Subtitle Track (opens in-app confirmation modal)
+  const handleDeleteSubtitleTrack = (trackId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const targetFile = currentFileRef.current || currentFile;
+    if (!targetFile) return;
+    const foundTrack = (targetFile.subtitles || []).find((t) => t.id === trackId);
+    if (foundTrack) {
+      setTrackToDelete(foundTrack);
+    } else {
+      executeDeleteSubtitleTrack(trackId);
     }
   };
 
@@ -6461,6 +6563,50 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                     <button
                       type="button"
                       onClick={() => setCueToDelete(null)}
+                      className="py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer text-center"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {/* MODAL: CONFIRM DELETE SUBTITLE TRACK */}
+            {trackToDelete && (
+              <div className="fixed inset-0 z-[110] bg-black/75 flex items-center justify-center p-4">
+                <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-5 shadow-2xl text-white animate-scaleUp text-right">
+                  <div className="flex items-center gap-3 pb-3 border-b border-slate-800 mb-4">
+                    <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0 border border-rose-500/30">
+                      <Trash2 className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-bold text-sm text-slate-100">تأكيد حذف مسار الترجمة</h3>
+                      <p className="text-[11px] text-slate-400 truncate">
+                        {trackToDelete.label} ({trackToDelete.cues.length} جملة)
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-slate-300 mb-5 leading-relaxed">
+                    هل تريد حذف مسار الترجمة/التفريغ هذا نهائياً؟ لا يمكن التراجع بعد الحذف.
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const id = trackToDelete.id;
+                        setTrackToDelete(null);
+                        executeDeleteSubtitleTrack(id);
+                      }}
+                      className="py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-lg shadow-rose-600/30 flex items-center justify-center gap-1.5"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>نعم، احذف</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTrackToDelete(null)}
                       className="py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer text-center"
                     >
                       إلغاء

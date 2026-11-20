@@ -99,6 +99,55 @@ export async function saveBookToDB(book: InteractiveBook): Promise<void> {
   } catch (e) {}
 }
 
+export async function syncBookMediaSubtitlesInCache(
+  mediaId: string,
+  subtitles: any[],
+  prefs?: { primaryTrackId?: string; secondaryTrackId?: string; showDualSubtitles?: boolean }
+): Promise<void> {
+  const cleanId = mediaId.replace(/^book-media-/, "");
+  let anyChanged = false;
+  const updatedBooks: InteractiveBook[] = memoryBooksCache.map((book) => {
+    let bookDirty = false;
+    const patchMedia = (m: BookPageMedia): BookPageMedia => {
+      const isMatch = m.id === mediaId || m.id === cleanId || `book-media-${m.id}` === mediaId || m.fileName === cleanId;
+      if (!isMatch) return m;
+      bookDirty = true;
+      return {
+        ...m,
+        subtitles,
+        ...(prefs
+          ? {
+              primaryTrackId: prefs.primaryTrackId,
+              secondaryTrackId: prefs.secondaryTrackId,
+              showDualSubtitles: prefs.showDualSubtitles
+            }
+          : {})
+      };
+    };
+
+    const nextAllMedia = Array.isArray(book.allMedia) ? book.allMedia.map(patchMedia) : book.allMedia;
+    const nextPages = Array.isArray(book.pages)
+      ? book.pages.map((p) => ({
+          ...p,
+          media: Array.isArray(p.media) ? p.media.map(patchMedia) : p.media
+        }))
+      : book.pages;
+
+    if (!bookDirty) return book;
+    anyChanged = true;
+    return { ...book, allMedia: nextAllMedia, pages: nextPages };
+  });
+
+  if (!anyChanged) return;
+  memoryBooksCache = updatedBooks;
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    updatedBooks.forEach((b) => store.put(b));
+  } catch (e) {}
+}
+
 export async function deleteBookFromServer(id: string): Promise<boolean> {
   memoryBooksCache = memoryBooksCache.filter((b) => b.id !== id);
   try {

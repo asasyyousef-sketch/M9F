@@ -1603,18 +1603,22 @@ async function startServer() {
 
       // 1. Check if this is an interactive book media track in books.json
       let bookUpdated = false;
+      let bookSnapshot: any = null;
+      const shouldBePrimaryTrack = asPrimary === true || source === "transcribe" || Boolean(label && label.includes("_TRN_"));
       try {
         const books = loadBooksJson();
         for (const b of books) {
           let bDirty = false;
           const updateMediaItem = (m: any) => {
+            const urlTail = typeof m.url === "string" ? decodeURIComponent(m.url.split("/").pop() || "") : "";
             if (
               m.id === rawId ||
               m.id === cleanId ||
               m.fileName === rawId ||
               m.fileName === cleanId ||
               m.title === rawId ||
-              m.title === cleanId
+              m.title === cleanId ||
+              (urlTail && (urlTail === cleanId || urlTail === rawId))
             ) {
               if (!Array.isArray(m.subtitles)) {
                 m.subtitles = [];
@@ -1624,7 +1628,27 @@ async function startServer() {
                 m.subtitles[existingIdx] = newTrack;
               } else {
                 m.subtitles.push(newTrack);
+                if (shouldBePrimaryTrack) {
+                  const oldPrimary = m.primaryTrackId;
+                  m.primaryTrackId = newTrack.id;
+                  if (oldPrimary && oldPrimary !== newTrack.id) {
+                    m.secondaryTrackId = oldPrimary;
+                    m.showDualSubtitles = true;
+                  }
+                } else if (!m.primaryTrackId) {
+                  m.primaryTrackId = newTrack.id;
+                } else if (!m.secondaryTrackId && m.subtitles.length >= 2) {
+                  m.secondaryTrackId = newTrack.id;
+                  m.showDualSubtitles = true;
+                }
               }
+              bookSnapshot = {
+                id: rawId,
+                subtitles: m.subtitles,
+                primaryTrackId: m.primaryTrackId,
+                secondaryTrackId: m.secondaryTrackId,
+                showDualSubtitles: m.showDualSubtitles
+              };
               bDirty = true;
               bookUpdated = true;
             }
@@ -1676,7 +1700,7 @@ async function startServer() {
           });
         }
 
-        const shouldBePrimary = asPrimary === true || source === "transcribe" || Boolean(label && label.includes("_TRN_"));
+        const shouldBePrimary = shouldBePrimaryTrack;
         if (shouldBePrimary) {
           const oldPrimary = item.primaryTrackId;
           item.primaryTrackId = newTrack.id;
@@ -1707,7 +1731,7 @@ async function startServer() {
           success: true,
           message: "تم حفظ الترجمة وأرشفتها في الكتاب الرقمي بنجاح!",
           track: newTrack,
-          file: {
+          file: bookSnapshot || {
             id: rawId,
             subtitles: [newTrack],
             primaryTrackId: newTrack.id
@@ -1761,38 +1785,93 @@ async function startServer() {
         return res.status(400).json({ error: "قائمة مقاطع الترجمة (Cues) غير صالحة" });
       }
 
-      const list = loadMediaMeta();
-      const item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
-      if (!item) {
-        return res.status(404).json({ error: "الملف غير موجود" });
-      }
-
-      if (!item.subtitles) {
-        item.subtitles = [];
-      }
-
-      const targetTrack = item.subtitles.find((t) => t.id === trackId);
-      if (!targetTrack) {
-        return res.status(404).json({ error: "مسار الترجمة غير موجود" });
-      }
-
-      targetTrack.cues = cues.map((c: any, idx: number) => ({
+      const cleanCues: ServerSubtitleCue[] = cues.map((c: any, idx: number) => ({
         id: c.id || `cue-${idx + 1}`,
         startTime: Math.max(0, parseFloat(c.startTime) || 0),
         endTime: Math.max(0.1, parseFloat(c.endTime) || 1),
         text: (c.text || "").trim()
-      })).filter(c => c.text.length > 0);
+      })).filter((c) => c.text.length > 0);
 
-      if (label?.trim()) targetTrack.label = label.trim();
-      if (language) targetTrack.language = language;
+      let bookUpdated = false;
+      let updatedBookTrack: any = null;
+      let updatedBookSnapshot: any = null;
+      try {
+        const books = loadBooksJson();
+        for (const b of books) {
+          let bDirty = false;
+          const updateMediaItem = (m: any) => {
+            if (
+              m.id === rawId ||
+              m.id === cleanId ||
+              m.fileName === rawId ||
+              m.fileName === cleanId ||
+              m.title === rawId ||
+              m.title === cleanId
+            ) {
+              if (!Array.isArray(m.subtitles)) m.subtitles = [];
+              const target = m.subtitles.find((t: any) => t.id === trackId);
+              if (target) {
+                target.cues = cleanCues;
+                if (label?.trim()) target.label = label.trim();
+                if (language) target.language = language;
+                updatedBookTrack = target;
+                updatedBookSnapshot = {
+                  id: rawId,
+                  subtitles: m.subtitles,
+                  primaryTrackId: m.primaryTrackId,
+                  secondaryTrackId: m.secondaryTrackId,
+                  showDualSubtitles: m.showDualSubtitles
+                };
+                bDirty = true;
+                bookUpdated = true;
+              }
+            }
+          };
+          if (Array.isArray(b.allMedia)) for (const m of b.allMedia) updateMediaItem(m);
+          if (Array.isArray(b.pages)) {
+            for (const p of b.pages) {
+              if (Array.isArray(p.media)) for (const m of p.media) updateMediaItem(m);
+            }
+          }
+          if (bDirty) saveBooksJson(books);
+        }
+      } catch (bErr) {
+        console.error("Error updating book subtitle track:", bErr);
+      }
 
-      saveMediaMeta(list);
-      res.json({
-        success: true,
-        message: "تم تحديث مسار الترجمة بنجاح!",
-        track: targetTrack,
-        file: item
-      });
+      const list = loadMediaMeta();
+      const item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
+
+      if (item) {
+        if (!item.subtitles) {
+          item.subtitles = [];
+        }
+
+        const targetTrack = item.subtitles.find((t) => t.id === trackId);
+        if (targetTrack) {
+          targetTrack.cues = cleanCues;
+          if (label?.trim()) targetTrack.label = label.trim();
+          if (language) targetTrack.language = language;
+          saveMediaMeta(list);
+          return res.json({
+            success: true,
+            message: "تم تحديث مسار الترجمة بنجاح!",
+            track: targetTrack,
+            file: item
+          });
+        }
+      }
+
+      if (bookUpdated && updatedBookTrack) {
+        return res.json({
+          success: true,
+          message: "تم تحديث مسار الترجمة بنجاح!",
+          track: updatedBookTrack,
+          file: updatedBookSnapshot
+        });
+      }
+
+      return res.status(404).json({ error: item ? "مسار الترجمة غير موجود" : "الملف غير موجود" });
     } catch (e: any) {
       console.error("Update track error:", e);
       res.status(500).json({ error: e.message || "فشل تحديث الترجمة" });
@@ -1808,8 +1887,57 @@ async function startServer() {
 
       const { primaryTrackId, secondaryTrackId, showDualSubtitles } = req.body;
 
+      let bookUpdated = false;
+      let bookSnapshot: any = null;
+      try {
+        const books = loadBooksJson();
+        for (const b of books) {
+          let bDirty = false;
+          const updateMediaItem = (m: any) => {
+            if (
+              m.id === rawId ||
+              m.id === cleanId ||
+              m.fileName === rawId ||
+              m.fileName === cleanId ||
+              m.title === rawId ||
+              m.title === cleanId
+            ) {
+              if (primaryTrackId !== undefined) m.primaryTrackId = primaryTrackId || undefined;
+              if (secondaryTrackId !== undefined) m.secondaryTrackId = secondaryTrackId || undefined;
+              if (showDualSubtitles !== undefined) m.showDualSubtitles = Boolean(showDualSubtitles);
+              bookSnapshot = {
+                id: rawId,
+                subtitles: Array.isArray(m.subtitles) ? m.subtitles : [],
+                primaryTrackId: m.primaryTrackId,
+                secondaryTrackId: m.secondaryTrackId,
+                showDualSubtitles: m.showDualSubtitles
+              };
+              bDirty = true;
+              bookUpdated = true;
+            }
+          };
+          if (Array.isArray(b.allMedia)) for (const m of b.allMedia) updateMediaItem(m);
+          if (Array.isArray(b.pages)) {
+            for (const p of b.pages) {
+              if (Array.isArray(p.media)) for (const m of p.media) updateMediaItem(m);
+            }
+          }
+          if (bDirty) saveBooksJson(books);
+        }
+      } catch (bErr) {
+        console.error("Error updating book subtitle preferences:", bErr);
+      }
+
       const list = loadMediaMeta();
       let item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
+      if (!item && bookUpdated) {
+        return res.json({
+          success: true,
+          message: "تم حفظ خيارات ومسارات الترجمة للملف بنجاح",
+          file: bookSnapshot
+        });
+      }
+
       if (!item) {
         item = {
           id: rawId,
@@ -1849,7 +1977,7 @@ async function startServer() {
     }
   });
 
-  // 8. Delete Subtitle Track
+  // 8. Delete Subtitle Track (supports both Media Explorer files and Interactive Book tracks)
   app.delete("/api/media/:id(*)/subtitles/:trackId(*)", (req, res) => {
     try {
       let rawId = req.params.id || (req.params as any)[0] || "";
@@ -1858,13 +1986,67 @@ async function startServer() {
       try { trackId = decodeURIComponent(trackId); } catch (e) {}
       const cleanId = rawId.replace(/^book-media-/, "");
 
-      const list = loadMediaMeta();
-      const item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
-      if (!item) {
-        return res.status(404).json({ error: "الملف غير موجود" });
+      let bookUpdated = false;
+      let bookSnapshot: any = null;
+      try {
+        const books = loadBooksJson();
+        for (const b of books) {
+          let bDirty = false;
+          const deleteFromBookMedia = (m: any) => {
+            const urlTail = typeof m.url === "string" ? decodeURIComponent(m.url.split("/").pop() || "") : "";
+            const isMatch =
+              m.id === rawId ||
+              m.id === cleanId ||
+              m.fileName === rawId ||
+              m.fileName === cleanId ||
+              m.title === rawId ||
+              m.title === cleanId ||
+              (urlTail && (urlTail === cleanId || urlTail === rawId));
+
+            if (isMatch) {
+              if (!Array.isArray(m.subtitles)) m.subtitles = [];
+              const prevLen = m.subtitles.length;
+              m.subtitles = m.subtitles.filter((t: any) => t.id !== trackId);
+              if (m.primaryTrackId === trackId) {
+                m.primaryTrackId = m.subtitles[0]?.id || undefined;
+              }
+              if (m.secondaryTrackId === trackId) {
+                m.secondaryTrackId = m.subtitles.find((t: any) => t.id !== m.primaryTrackId)?.id || undefined;
+              }
+              if (!m.secondaryTrackId) {
+                m.showDualSubtitles = false;
+              }
+              if (m.subtitles.length !== prevLen || prevLen >= 0) {
+                bDirty = true;
+                bookUpdated = true;
+                bookSnapshot = {
+                  id: rawId,
+                  subtitles: m.subtitles,
+                  primaryTrackId: m.primaryTrackId,
+                  secondaryTrackId: m.secondaryTrackId,
+                  showDualSubtitles: m.showDualSubtitles
+                };
+              }
+            }
+          };
+
+          if (Array.isArray(b.allMedia)) for (const m of b.allMedia) deleteFromBookMedia(m);
+          if (Array.isArray(b.pages)) {
+            for (const p of b.pages) {
+              if (Array.isArray(p.media)) for (const m of p.media) deleteFromBookMedia(m);
+            }
+          }
+
+          if (bDirty) saveBooksJson(books);
+        }
+      } catch (bErr) {
+        console.error("Error deleting subtitle from book media:", bErr);
       }
 
-      if (item.subtitles) {
+      const list = loadMediaMeta();
+      const item = list.find((m) => m.id === rawId || m.id === cleanId || m.filename === rawId || m.filename === cleanId);
+
+      if (item && item.subtitles) {
         item.subtitles = item.subtitles.filter((t) => t.id !== trackId);
 
         // Re-adjust primary & secondary tracks if the deleted track was selected
@@ -1881,7 +2063,15 @@ async function startServer() {
         saveMediaMeta(list);
       }
 
-      res.json({ success: true, message: "تم حذف مسار الترجمة", file: item });
+      if (!item && !bookUpdated) {
+        return res.status(404).json({ error: "الملف غير موجود" });
+      }
+
+      res.json({
+        success: true,
+        message: "تم حذف مسار الترجمة",
+        file: item || bookSnapshot
+      });
     } catch (e: any) {
       res.status(500).json({ error: e.message || "فشل حذف الترجمة" });
     }
