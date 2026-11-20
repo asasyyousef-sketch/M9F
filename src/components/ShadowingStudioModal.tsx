@@ -427,7 +427,6 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     userWaveformSamplesRef.current = [];
     originalClockRef.current = createPlaybackClockState(cue.startTime);
     userClockRef.current = createPlaybackClockState(0);
-    originalTrackRef.current?.setProgress(0);
   }, [cue.id]);
 
   // Clean up on unmount
@@ -1205,9 +1204,6 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
                     const newSpeed = speeds[nextIdx];
                     setPlaybackSpeed(newSpeed);
                     if (isPlayingOriginal) {
-                      const pre = readOriginalSnapshot().currentTime;
-                      beginPlaybackSeekHold(originalClockRef.current, cue.startTime, performance.now(), pre);
-                      originalTrackRef.current?.setProgress(0);
                       onPlayOriginalSegment(cue.startTime, cue.endTime, newSpeed);
                     }
                   }}

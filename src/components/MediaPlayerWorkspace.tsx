@@ -3823,16 +3823,11 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   }, [secondaryCueMap, handleSeek]);
 
   // Sync media element events and buffer indicator
-  const isPlayingRef = useRef(isPlaying);
-  isPlayingRef.current = isPlaying;
-
   useEffect(() => {
     const el = currentFile?.type === "video" ? videoRef.current : audioRef.current;
     if (!el) return;
 
-    if (!isShadowingStudioOpenRef.current) {
-      el.playbackRate = playbackRate;
-    }
+    el.playbackRate = playbackRate;
     el.loop = isLooping;
     syncAudioGain(volume, isMuted, voiceClarifier);
 
@@ -3857,7 +3852,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const onLoadedMetadata = () => {
       setDuration(el.duration);
       syncAudioGain(volume, isMuted, voiceClarifier);
-      if (isPlayingRef.current) {
+      if (isPlaying) {
         el.play().catch(console.error);
       }
     };
@@ -3894,7 +3889,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       el.removeEventListener("progress", onProgress);
       el.removeEventListener("ended", onEnded);
     };
-  }, [currentFile, playbackRate, isLooping, volume, isMuted, voiceClarifier, duration, smoothPause, syncAudioGain]);
+  }, [currentFile, playbackRate, isLooping, volume, isMuted, voiceClarifier, isPlaying, duration, smoothPause, syncAudioGain]);
 
   // Keyboard Shortcuts ([ = Prev Sentence, ] = Next Sentence, R = Replay Sentence Only, Space = Play/Pause, + Pro controls)
   useEffect(() => {

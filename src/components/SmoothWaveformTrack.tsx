@@ -226,9 +226,10 @@ export const SmoothWaveformTrack = forwardRef<SmoothWaveformTrackHandle, SmoothW
         liveBarsRef.current = null;
       }
       if (!isDraggingRef.current) {
-        drawCanvas(lastFractionRef.current, true);
+        const target = isPlaying ? lastFractionRef.current : initialProgress;
+        drawCanvas(target, true);
       }
-    }, [peaks, isPlaying, isRecording, interactive, drawCanvas]);
+    }, [peaks, isPlaying, isRecording, interactive, initialProgress, drawCanvas]);
 
     const getFractionFromClientX = (clientX: number): number => {
       const el = containerRef.current;
