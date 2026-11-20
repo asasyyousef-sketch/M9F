@@ -29,7 +29,12 @@ import {
   getMicrophoneErrorMessage,
   createCompatibleMediaRecorder,
   isHttpInsecureOrigin,
-  getHttpsSwitchUrl
+  getHttpsSwitchUrl,
+  MediaPlaybackSnapshot,
+  PlaybackClockState,
+  createPlaybackClockState,
+  beginPlaybackSeekHold,
+  stepMonotonicPlaybackClock
 } from "../utils/audioRecording";
 import {
   SmoothWaveformTrack,
@@ -50,6 +55,7 @@ export interface ShadowingStudioModalProps {
   isPlayingOriginal: boolean;
   currentTime: number;
   getCurrentTime?: () => number;
+  getPlaybackSnapshot?: () => MediaPlaybackSnapshot;
   mediaUrl?: string;
 }
 
@@ -303,6 +309,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   isPlayingOriginal,
   currentTime,
   getCurrentTime,
+  getPlaybackSnapshot,
   mediaUrl
 }) => {
   // Modes: "listen-repeat" (استمع ثم ردّد), "simultaneous" (محاكاة متزامنة), "loop" (تكرار تدريبي)
@@ -354,13 +361,16 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   const originalTrackRef = useRef<SmoothWaveformTrackHandle | null>(null);
   const userTrackRef = useRef<SmoothWaveformTrackHandle | null>(null);
   const originalTimeTextRef = useRef<HTMLSpanElement | null>(null);
-  const lastScrubSeekMsRef = useRef<number>(0);
   const getCurrentTimeRef = useRef(getCurrentTime);
   getCurrentTimeRef.current = getCurrentTime;
+  const getPlaybackSnapshotRef = useRef(getPlaybackSnapshot);
+  getPlaybackSnapshotRef.current = getPlaybackSnapshot;
   const currentTimeRef = useRef(currentTime);
   currentTimeRef.current = currentTime;
   const playbackSpeedRef = useRef(playbackSpeed);
   playbackSpeedRef.current = playbackSpeed;
+  const originalClockRef = useRef<PlaybackClockState>(createPlaybackClockState(cue.startTime));
+  const userClockRef = useRef<PlaybackClockState>(createPlaybackClockState(0));
 
   // High-fidelity original audio waveform (80 bars)
   const [originalWaveform, setOriginalWaveform] = useState<number[]>(() => {
@@ -415,6 +425,8 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     setIsLoopingSegment(false);
     setUserWaveform([]);
     userWaveformSamplesRef.current = [];
+    originalClockRef.current = createPlaybackClockState(cue.startTime);
+    userClockRef.current = createPlaybackClockState(0);
   }, [cue.id]);
 
   // Clean up on unmount
@@ -476,14 +488,32 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   // Audio Playback progress calculation for Original Segment
   const segmentDuration = Math.max(0.2, cue.endTime - cue.startTime);
 
-  // Smooth 60/120fps GPU-composited playhead for original media segment (zero React re-renders)
+  // Smooth 60/120fps monotonic PLL playhead for original media segment (zero React re-renders)
   const originalAnimRef = useRef<number | null>(null);
 
   useEffect(() => {
+    const readOriginalSnapshot = (): MediaPlaybackSnapshot => {
+      if (getPlaybackSnapshotRef.current) {
+        return getPlaybackSnapshotRef.current();
+      }
+      const cur = getCurrentTimeRef.current ? getCurrentTimeRef.current() : currentTimeRef.current;
+      return {
+        currentTime: cur,
+        paused: !isPlayingOriginal,
+        seeking: false,
+        readyState: 4,
+        playbackRate: playbackSpeedRef.current
+      };
+    };
+
     if (!isPlayingOriginal) {
       if (originalAnimRef.current) cancelAnimationFrame(originalAnimRef.current);
-      const cur = getCurrentTimeRef.current ? getCurrentTimeRef.current() : currentTimeRef.current;
-      const clampedOffset = Math.max(0, Math.min(segmentDuration, cur - cue.startTime));
+      const snap = readOriginalSnapshot();
+      const targetTime =
+        originalClockRef.current.pendingSeekTarget !== null
+          ? originalClockRef.current.pendingSeekTarget
+          : snap.currentTime;
+      const clampedOffset = Math.max(0, Math.min(segmentDuration, targetTime - cue.startTime));
       const frac = Math.max(0, Math.min(1, clampedOffset / segmentDuration));
       originalTrackRef.current?.setProgress(frac);
       if (originalTimeTextRef.current) {
@@ -492,26 +522,18 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
       return;
     }
 
-    let lastMediaTime = getCurrentTimeRef.current ? getCurrentTimeRef.current() : currentTimeRef.current;
-    let lastPerfMs = performance.now();
-    let hasStartedAdvancing = false;
+    if (originalClockRef.current.pendingSeekTarget === null) {
+      const snap = readOriginalSnapshot();
+      originalClockRef.current = createPlaybackClockState(snap.currentTime);
+    }
     let lastTextUpdateMs = 0;
 
     const updateSmoothOriginal = (now: number) => {
-      const rawCur = getCurrentTimeRef.current ? getCurrentTimeRef.current() : currentTimeRef.current;
-      if (Math.abs(rawCur - lastMediaTime) > 0.002) {
-        lastMediaTime = rawCur;
-        lastPerfMs = now;
-        hasStartedAdvancing = true;
-      }
-
-      // Interpolate smoothly between coarse mobile HTMLMediaElement ticks (capped at +140ms)
-      const effectiveCur = hasStartedAdvancing
-        ? Math.min(
-            lastMediaTime + 0.14,
-            lastMediaTime + ((now - lastPerfMs) / 1000) * playbackSpeedRef.current
-          )
-        : rawCur;
+      const effectiveCur = stepMonotonicPlaybackClock(
+        originalClockRef.current,
+        readOriginalSnapshot(),
+        now
+      );
 
       const clampedOffset = Math.max(0, Math.min(segmentDuration, effectiveCur - cue.startTime));
       const frac = Math.max(0, Math.min(1, clampedOffset / segmentDuration));
@@ -532,7 +554,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     };
   }, [isPlayingOriginal, cue.startTime, segmentDuration]);
 
-  // Smooth 60/120fps GPU-composited playhead for user audio (zero React re-renders)
+  // Smooth 60/120fps monotonic PLL playhead for user audio (zero React re-renders)
   const userAnimRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -541,23 +563,25 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
       return;
     }
 
-    let lastMediaTime = userAudioElementRef.current?.currentTime ?? 0;
-    let lastPerfMs = performance.now();
-    let hasStartedAdvancing = false;
+    const audioInit = userAudioElementRef.current;
+    if (userClockRef.current.pendingSeekTarget === null) {
+      userClockRef.current = createPlaybackClockState(audioInit?.currentTime ?? 0);
+    }
 
     const updateSmoothUser = (now: number) => {
       const audio = userAudioElementRef.current;
       if (audio && audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
-        const rawCur = audio.currentTime;
-        if (Math.abs(rawCur - lastMediaTime) > 0.002) {
-          lastMediaTime = rawCur;
-          lastPerfMs = now;
-          hasStartedAdvancing = true;
-        }
-        const effectiveCur =
-          hasStartedAdvancing && !audio.paused && !audio.ended
-            ? Math.min(lastMediaTime + 0.14, lastMediaTime + ((now - lastPerfMs) / 1000) * (audio.playbackRate || 1))
-            : rawCur;
+        const effectiveCur = stepMonotonicPlaybackClock(
+          userClockRef.current,
+          {
+            currentTime: audio.currentTime,
+            paused: audio.paused,
+            seeking: audio.seeking,
+            readyState: audio.readyState,
+            playbackRate: audio.playbackRate || 1
+          },
+          now
+        );
         const frac = Math.max(0, Math.min(1, effectiveCur / audio.duration));
         userTrackRef.current?.setProgress(frac);
       }
@@ -581,34 +605,34 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     }
   };
 
-  // Touch & Mouse Scrub Seek within Original Segment Waveform
-  const seekOriginalByFraction = (frac: number) => {
+  // Preview time text during touch/mouse drag without spamming hardware media decoder seeks
+  const previewOriginalSeek = (frac: number) => {
+    const clampedOffset = frac * segmentDuration;
+    if (originalTimeTextRef.current) {
+      originalTimeTextRef.current.textContent = formatTimeSeconds(clampedOffset);
+    }
+  };
+
+  // Commit clean seek once pointer lifts (or tap ends) with seek-hold to prevent bounce-back
+  const commitOriginalSeek = (frac: number) => {
     const clampedOffset = frac * segmentDuration;
     const seekTarget = cue.startTime + clampedOffset;
     if (originalTimeTextRef.current) {
       originalTimeTextRef.current.textContent = formatTimeSeconds(clampedOffset);
     }
+    beginPlaybackSeekHold(originalClockRef.current, seekTarget, performance.now());
+    originalTrackRef.current?.setProgress(frac);
     onPlayOriginalSegment(seekTarget, cue.endTime, playbackSpeed);
   };
 
-  const handleOriginalSeekMove = (frac: number) => {
-    const clampedOffset = frac * segmentDuration;
-    if (originalTimeTextRef.current) {
-      originalTimeTextRef.current.textContent = formatTimeSeconds(clampedOffset);
-    }
-    const now = performance.now();
-    if (now - lastScrubSeekMsRef.current >= 110) {
-      lastScrubSeekMsRef.current = now;
-      onPlayOriginalSegment(cue.startTime + clampedOffset, cue.endTime, playbackSpeed);
-    }
-  };
-
-  // Touch & Mouse Scrub Seek within User Audio Waveform
+  // Commit clean seek within User Audio Waveform
   const seekUserByFraction = (frac: number, autoPlayIfPaused: boolean) => {
     const audio = userAudioElementRef.current;
     if (!audio || !recordedAudioUrl || isRecording) return;
     if (audio.duration && !isNaN(audio.duration)) {
-      audio.currentTime = frac * audio.duration;
+      const targetTime = frac * audio.duration;
+      beginPlaybackSeekHold(userClockRef.current, targetTime, performance.now());
+      audio.currentTime = targetTime;
       userTrackRef.current?.setProgress(frac);
       if (autoPlayIfPaused && !isPlayingUserAudio) {
         handlePlayUserAudio();
@@ -1148,7 +1172,11 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => onPlayOriginalSegment(cue.startTime, cue.endTime, playbackSpeed)}
+                  onClick={() => {
+                    beginPlaybackSeekHold(originalClockRef.current, cue.startTime, performance.now());
+                    originalTrackRef.current?.setProgress(0);
+                    onPlayOriginalSegment(cue.startTime, cue.endTime, playbackSpeed);
+                  }}
                   className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 flex items-center justify-center transition-colors cursor-pointer"
                   title="إعادة تشغيل من البداية"
                 >
@@ -1205,7 +1233,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
               </div>
             </div>
 
-            {/* Full-width GPU-Composited Waveform Track */}
+            {/* Full-width Single-Canvas Waveform Track */}
             <SmoothWaveformTrack
               ref={originalTrackRef}
               peaks={originalWaveform}
@@ -1213,9 +1241,9 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
               isPlaying={isPlayingOriginal}
               interactive={true}
               title="اسحب أو انقر لتحديد موضع التشغيل"
-              onSeekStart={seekOriginalByFraction}
-              onSeekMove={handleOriginalSeekMove}
-              onSeekEnd={seekOriginalByFraction}
+              onSeekStart={previewOriginalSeek}
+              onSeekMove={previewOriginalSeek}
+              onSeekEnd={commitOriginalSeek}
             />
           </div>
 
@@ -1296,7 +1324,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
               )}
             </div>
 
-            {/* Full-width GPU-Composited User Waveform Track */}
+            {/* Full-width Single-Canvas User Waveform Track */}
             <SmoothWaveformTrack
               ref={userTrackRef}
               peaks={displayUserWaveform}
@@ -1305,8 +1333,6 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
               isRecording={isRecording}
               interactive={Boolean(recordedAudioUrl)}
               title={recordedAudioUrl ? "اسحب أو انقر لتحديد موضع التشغيل" : ""}
-              onSeekStart={(frac) => seekUserByFraction(frac, false)}
-              onSeekMove={(frac) => seekUserByFraction(frac, false)}
               onSeekEnd={(frac) => seekUserByFraction(frac, true)}
             />
           </div>

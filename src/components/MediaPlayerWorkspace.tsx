@@ -654,6 +654,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
   // Shadowing Studio Modal State & Standard Practice Workflow
   const [isShadowingStudioOpen, setIsShadowingStudioOpen] = useState<boolean>(false);
+  const isShadowingStudioOpenRef = useRef<boolean>(false);
+  isShadowingStudioOpenRef.current = isShadowingStudioOpen;
   const [shadowingTargetCue, setShadowingTargetCue] = useState<(SubtitleCue & { secondaryText?: string }) | null>(null);
   const [trackToDelete, setTrackToDelete] = useState<MediaSubtitleTrack | null>(null);
 
@@ -2932,6 +2934,16 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const el = currentFileTypeRef.current === "video" ? videoRef.current : audioRef.current;
     return el?.currentTime ?? 0;
   }, []);
+  const getShadowingPlaybackSnapshot = useCallback(() => {
+    const el = currentFileTypeRef.current === "video" ? videoRef.current : audioRef.current;
+    return {
+      currentTime: el?.currentTime ?? 0,
+      paused: el?.paused ?? true,
+      seeking: el?.seeking ?? false,
+      readyState: el?.readyState ?? 0,
+      playbackRate: el?.playbackRate ?? 1
+    };
+  }, []);
 
   // ---------------------------------------------------------
   // High-Fidelity Studio Audio Engine & Playback Controls
@@ -3824,7 +3836,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     const onTimeUpdate = () => {
       if (isScrubbingRef.current) return;
       const cur = el.currentTime;
-      setCurrentTime(cur);
+      // Avoid 4Hz full-workspace React re-renders on low-end mobile while Shadowing modal is open
+      if (!isShadowingStudioOpenRef.current) {
+        setCurrentTime(cur);
+      }
       // Auto-stop when single-sentence playback limit is reached
       if (
         singleSentencePlaybackEndRef.current !== null &&
@@ -7371,6 +7386,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           isPlayingOriginal={isPlaying}
           currentTime={currentTime}
           getCurrentTime={getShadowingCurrentTime}
+          getPlaybackSnapshot={getShadowingPlaybackSnapshot}
           mediaUrl={currentFile?.url}
         />
       )}

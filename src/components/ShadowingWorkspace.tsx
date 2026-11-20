@@ -53,7 +53,11 @@ import {
   getMicrophoneErrorMessage,
   createCompatibleMediaRecorder,
   isHttpInsecureOrigin,
-  getHttpsSwitchUrl
+  getHttpsSwitchUrl,
+  PlaybackClockState,
+  createPlaybackClockState,
+  beginPlaybackSeekHold,
+  stepMonotonicPlaybackClock
 } from "../utils/audioRecording";
 import {
   SmoothWaveformTrack,
@@ -346,13 +350,15 @@ export function ShadowingWorkspace({
   const lastSampleTimeRef = useRef<number>(0);
   const audioCacheRef = useRef<Map<string, { url: string; blob?: Blob }>>(new Map());
 
-  // Animation frames & GPU track handles for zero-rerender 60/120fps playheads
+  // Animation frames & Canvas track handles for zero-rerender 60/120fps playheads
   const modelAnimRef = useRef<number | null>(null);
   const userAnimRef = useRef<number | null>(null);
   const modelTrackRef = useRef<SmoothWaveformTrackHandle | null>(null);
   const userTrackRef = useRef<SmoothWaveformTrackHandle | null>(null);
   const modelHeaderTimeRef = useRef<HTMLSpanElement | null>(null);
   const modelTrackTimeRef = useRef<HTMLSpanElement | null>(null);
+  const modelClockRef = useRef<PlaybackClockState>(createPlaybackClockState(0));
+  const userClockRef = useRef<PlaybackClockState>(createPlaybackClockState(0));
 
   // AI Translation State (Exclusive to Shadowing / Text Studio)
   const [isTranslatingWithAi, setIsTranslatingWithAi] = useState<boolean>(false);
@@ -486,6 +492,8 @@ export function ShadowingWorkspace({
       setUserWaveform([]);
     }
 
+    modelClockRef.current = createPlaybackClockState(0);
+    userClockRef.current = createPlaybackClockState(0);
     modelTrackRef.current?.setProgress(0);
     userTrackRef.current?.setProgress(0);
     if (modelHeaderTimeRef.current) modelHeaderTimeRef.current.textContent = "0.0s";
@@ -494,31 +502,33 @@ export function ShadowingWorkspace({
     setSpeechError(null);
   }, [currentSentence?.id]);
 
-  // Smooth 60/120fps GPU-composited tracking for Model Audio (zero React re-renders)
+  // Smooth 60/120fps monotonic PLL tracking for Model Audio (zero React re-renders)
   useEffect(() => {
     if (!isPlayingModel) {
       if (modelAnimRef.current) cancelAnimationFrame(modelAnimRef.current);
       return;
     }
 
-    let lastMediaTime = modelAudioRef.current?.currentTime ?? 0;
-    let lastPerfMs = performance.now();
-    let hasStartedAdvancing = false;
+    const audioInit = modelAudioRef.current;
+    if (modelClockRef.current.pendingSeekTarget === null) {
+      modelClockRef.current = createPlaybackClockState(audioInit?.currentTime ?? 0);
+    }
     let lastTextUpdateMs = 0;
 
     const updateSmoothModel = (now: number) => {
       const audio = modelAudioRef.current;
       if (audio && audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
-        const rawCur = audio.currentTime;
-        if (Math.abs(rawCur - lastMediaTime) > 0.002) {
-          lastMediaTime = rawCur;
-          lastPerfMs = now;
-          hasStartedAdvancing = true;
-        }
-        const effectiveCur =
-          hasStartedAdvancing && !audio.paused && !audio.ended
-            ? Math.min(lastMediaTime + 0.14, lastMediaTime + ((now - lastPerfMs) / 1000) * (audio.playbackRate || 1))
-            : rawCur;
+        const effectiveCur = stepMonotonicPlaybackClock(
+          modelClockRef.current,
+          {
+            currentTime: audio.currentTime,
+            paused: audio.paused,
+            seeking: audio.seeking,
+            readyState: audio.readyState,
+            playbackRate: audio.playbackRate || 1
+          },
+          now
+        );
         const frac = Math.max(0, Math.min(1, effectiveCur / audio.duration));
         modelTrackRef.current?.setProgress(frac);
 
@@ -539,30 +549,32 @@ export function ShadowingWorkspace({
     };
   }, [isPlayingModel]);
 
-  // Smooth 60/120fps GPU-composited tracking for User Audio (zero React re-renders)
+  // Smooth 60/120fps monotonic PLL tracking for User Audio (zero React re-renders)
   useEffect(() => {
     if (!isPlayingUserAudio) {
       if (userAnimRef.current) cancelAnimationFrame(userAnimRef.current);
       return;
     }
 
-    let lastMediaTime = userAudioRef.current?.currentTime ?? 0;
-    let lastPerfMs = performance.now();
-    let hasStartedAdvancing = false;
+    const audioInit = userAudioRef.current;
+    if (userClockRef.current.pendingSeekTarget === null) {
+      userClockRef.current = createPlaybackClockState(audioInit?.currentTime ?? 0);
+    }
 
     const updateSmoothUser = (now: number) => {
       const audio = userAudioRef.current;
       if (audio && audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
-        const rawCur = audio.currentTime;
-        if (Math.abs(rawCur - lastMediaTime) > 0.002) {
-          lastMediaTime = rawCur;
-          lastPerfMs = now;
-          hasStartedAdvancing = true;
-        }
-        const effectiveCur =
-          hasStartedAdvancing && !audio.paused && !audio.ended
-            ? Math.min(lastMediaTime + 0.14, lastMediaTime + ((now - lastPerfMs) / 1000) * (audio.playbackRate || 1))
-            : rawCur;
+        const effectiveCur = stepMonotonicPlaybackClock(
+          userClockRef.current,
+          {
+            currentTime: audio.currentTime,
+            paused: audio.paused,
+            seeking: audio.seeking,
+            readyState: audio.readyState,
+            playbackRate: audio.playbackRate || 1
+          },
+          now
+        );
         const frac = Math.max(0, Math.min(1, effectiveCur / audio.duration));
         userTrackRef.current?.setProgress(frac);
       }
@@ -1054,7 +1066,9 @@ export function ShadowingWorkspace({
         if (audio) {
           setModelAudioDuration(audio.duration);
           if (seekRatio !== undefined) {
-            audio.currentTime = seekRatio * audio.duration;
+            const targetTime = seekRatio * audio.duration;
+            beginPlaybackSeekHold(modelClockRef.current, targetTime, performance.now());
+            audio.currentTime = targetTime;
           }
         }
       };
@@ -1065,6 +1079,7 @@ export function ShadowingWorkspace({
         if (isLoopingModel) {
           loopTimerRef.current = window.setTimeout(() => {
             if (modelAudioRef.current) {
+              beginPlaybackSeekHold(modelClockRef.current, 0, performance.now());
               modelAudioRef.current.currentTime = 0;
               modelAudioRef.current.play().then(() => setIsPlayingModel(true)).catch(() => {});
             }
@@ -1079,7 +1094,9 @@ export function ShadowingWorkspace({
       };
 
       if (seekRatio !== undefined && audio.duration) {
-        audio.currentTime = seekRatio * audio.duration;
+        const targetTime = seekRatio * audio.duration;
+        beginPlaybackSeekHold(modelClockRef.current, targetTime, performance.now());
+        audio.currentTime = targetTime;
       }
 
       audio.play().then(() => {
@@ -1103,11 +1120,23 @@ export function ShadowingWorkspace({
     ]
   );
 
-  // Original Waveform Touch/Mouse Scrub-to-Seek
+  // Preview Model time readout during pointer drag (zero hardware seek spam)
+  const previewModelSeek = (frac: number) => {
+    const audio = modelAudioRef.current;
+    const dur = audio && audio.duration && !isNaN(audio.duration) ? audio.duration : modelAudioDuration;
+    if (dur > 0) {
+      const formatted = formatTimeSeconds(frac * dur);
+      if (modelHeaderTimeRef.current) modelHeaderTimeRef.current.textContent = formatted;
+      if (modelTrackTimeRef.current) modelTrackTimeRef.current.textContent = formatted;
+    }
+  };
+
+  // Original Waveform Touch/Mouse Scrub-to-Seek committed cleanly on release
   const seekModelByFraction = (frac: number, autoPlay: boolean) => {
     const audio = modelAudioRef.current;
     if (audio && audio.duration && !isNaN(audio.duration)) {
       const targetTime = frac * audio.duration;
+      beginPlaybackSeekHold(modelClockRef.current, targetTime, performance.now());
       audio.currentTime = targetTime;
       modelTrackRef.current?.setProgress(frac);
       const formatted = formatTimeSeconds(targetTime);
@@ -1159,12 +1188,14 @@ export function ShadowingWorkspace({
     }).catch(console.error);
   };
 
-  // User Waveform Touch/Mouse Scrub-to-Seek
+  // User Waveform Touch/Mouse Scrub-to-Seek committed cleanly on release
   const seekUserByFraction = (frac: number, autoPlay: boolean) => {
     const audio = userAudioRef.current;
     if (!audio || !recordedAudioUrl || isRecording) return;
     if (audio.duration && !isNaN(audio.duration)) {
-      audio.currentTime = frac * audio.duration;
+      const targetTime = frac * audio.duration;
+      beginPlaybackSeekHold(userClockRef.current, targetTime, performance.now());
+      audio.currentTime = targetTime;
       userTrackRef.current?.setProgress(frac);
       if (autoPlay && !isPlayingUserAudio) {
         handlePlayUserAudio();
@@ -1946,7 +1977,7 @@ export function ShadowingWorkspace({
                     </div>
                   </div>
 
-                  {/* Full-width GPU-Composited Waveform Track */}
+                  {/* Full-width Single-Canvas Waveform Track */}
                   <SmoothWaveformTrack
                     ref={modelTrackRef}
                     peaks={originalWaveform}
@@ -1954,8 +1985,8 @@ export function ShadowingWorkspace({
                     isPlaying={isPlayingModel}
                     interactive={true}
                     title="اسحب أو انقر لتحديد موضع التشغيل"
-                    onSeekStart={(frac) => seekModelByFraction(frac, false)}
-                    onSeekMove={(frac) => seekModelByFraction(frac, false)}
+                    onSeekStart={previewModelSeek}
+                    onSeekMove={previewModelSeek}
                     onSeekEnd={(frac) => seekModelByFraction(frac, true)}
                   />
                 </div>
@@ -2046,7 +2077,7 @@ export function ShadowingWorkspace({
                     )}
                   </div>
 
-                  {/* Full-width GPU-Composited User Waveform Track */}
+                  {/* Full-width Single-Canvas User Waveform Track */}
                   <SmoothWaveformTrack
                     ref={userTrackRef}
                     peaks={displayUserWaveform}
@@ -2055,8 +2086,6 @@ export function ShadowingWorkspace({
                     isRecording={isRecording}
                     interactive={Boolean(recordedAudioUrl)}
                     title={recordedAudioUrl ? "اسحب أو انقر لتحديد موضع التشغيل" : ""}
-                    onSeekStart={(frac) => seekUserByFraction(frac, false)}
-                    onSeekMove={(frac) => seekUserByFraction(frac, false)}
                     onSeekEnd={(frac) => seekUserByFraction(frac, true)}
                   />
                 </div>
