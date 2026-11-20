@@ -13,12 +13,18 @@ import {
   PanelRightClose,
   PanelRightOpen,
   BookOpen,
+  BookMarked,
+  NotebookPen,
   Headphones,
   Languages,
   LogOut
 } from "lucide-react";
 import { Folder as FolderType, Flashcard, DbStatus } from "../types";
 import { useAuth } from "../context/AuthContext";
+import {
+  loadSecondarySectionsVisibility,
+  SecondarySectionsVisibility
+} from "../utils/sidebarSections";
 
 interface SidebarProps {
   folders: FolderType[];
@@ -30,7 +36,8 @@ interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
   dbStatus?: DbStatus;
-  activeTab?: "library" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs";
+  activeTab?: "library" | "books" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs";
+  onSelectBooks?: () => void;
   onSelectAI?: () => void;
   onSelectTrash?: () => void;
   onSelectCorrector?: () => void;
@@ -52,6 +59,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   onClose,
   dbStatus,
   activeTab = "library",
+  onSelectBooks,
   onSelectAI,
   onSelectTrash,
   onSelectCorrector,
@@ -81,6 +89,26 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   };
 
 
+
+  // Secondary sidebar sections visibility (hidden by default; controlled from Settings)
+  const [secondaryVisibility, setSecondaryVisibility] = useState<SecondarySectionsVisibility>(
+    () => loadSecondarySectionsVisibility()
+  );
+
+  useEffect(() => {
+    const syncVisibility = () => {
+      setSecondaryVisibility(loadSecondarySectionsVisibility());
+    };
+    window.addEventListener("app_settings_changed", syncVisibility);
+    window.addEventListener("storage", syncVisibility);
+    return () => {
+      window.removeEventListener("app_settings_changed", syncVisibility);
+      window.removeEventListener("storage", syncVisibility);
+    };
+  }, []);
+
+  const hasAnySecondaryMediaSection =
+    secondaryVisibility.media || secondaryVisibility.notes || secondaryVisibility.shadowing;
 
   const { currentUser, authFetch, logout } = useAuth();
   const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
@@ -219,12 +247,21 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
         </div>
 
         {/* ========================================================================= */}
-        {/* 2. NAVIGATION ITEMS */}
+        {/* 2. CATEGORIZED NAVIGATION ITEMS */}
         {/* ========================================================================= */}
-        <nav className="py-2 px-2 flex-1 overflow-y-auto overflow-x-hidden space-y-1 custom-scrollbar">
-          
-          {/* SECTION 1: EDUCATIONAL LIBRARY (المكتبة) */}
-          <div className="space-y-0.5">
+        <nav className="py-3 px-2.5 flex-1 overflow-y-auto overflow-x-hidden space-y-4 custom-scrollbar">
+
+          {/* CATEGORY 1: التعلّم والمحتوى (CORE LEARNING) */}
+          <div className="space-y-1.5">
+            {!isCollapsed && (
+              <div className="px-2 pb-0.5 flex items-center justify-between">
+                <span className="text-[11px] font-extrabold text-slate-500 tracking-wide">
+                  التعلّم والمحتوى
+                </span>
+              </div>
+            )}
+
+            {/* المكتبة (Blue) */}
             <button
               type="button"
               onClick={() => {
@@ -232,176 +269,59 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                 onClose?.();
               }}
               title="المكتبة"
-              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
-                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
+              className={`w-full relative flex items-center gap-2.5 rounded-xl text-right transition-all duration-150 font-bold text-[12.5px] cursor-pointer group border ${
+                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : "px-2.5 py-2 min-h-[42px]"
               } ${
                 activeTab === "library"
-                  ? "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-2xs"
-                  : "text-slate-700 hover:bg-slate-100"
+                  ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                  : "bg-blue-50/45 text-slate-800 border-blue-100 hover:bg-blue-50 hover:border-blue-300"
               }`}
             >
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                activeTab === "library" 
-                  ? "bg-blue-600 text-white shadow-2xs" 
-                  : "bg-slate-100 text-slate-500 group-hover:bg-slate-200/80 group-hover:text-slate-800"
-              }`}>
-                <FolderOpen className="w-3.5 h-3.5" />
+              <div
+                className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                  activeTab === "library"
+                    ? "bg-white/20 text-white"
+                    : "bg-blue-100 text-blue-600 group-hover:bg-blue-600 group-hover:text-white"
+                }`}
+              >
+                <FolderOpen className="w-4 h-4" />
               </div>
               {!isCollapsed && (
-                <span className="truncate">المكتبة</span>
+                <span className="truncate whitespace-nowrap">المكتبة</span>
               )}
             </button>
-          </div>
 
-          {/* DIVIDER */}
-          <div className="my-1.5 border-t border-slate-100" />
-
-          {/* SECTION 2: LEARNING WORKSPACES & TOOLS (بدون شارات) */}
-          <div className="space-y-0.5">
-
-            {/* AI Assistant */}
+            {/* الكتب الرقمية (Indigo - Always Visible Shortcut) */}
             <button
               type="button"
               onClick={() => {
-                onSelectAI?.();
+                onSelectBooks?.();
                 onClose?.();
               }}
-              title="المساعد الذكي"
-              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
-                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
+              title="الكتب الرقمية"
+              className={`w-full relative flex items-center gap-2.5 rounded-xl text-right transition-all duration-150 font-bold text-[12.5px] cursor-pointer group border ${
+                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : "px-2.5 py-2 min-h-[42px]"
               } ${
-                activeTab === "ai"
-                  ? "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-2xs"
-                  : "text-slate-700 hover:bg-slate-100"
+                activeTab === "books"
+                  ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                  : "bg-indigo-50/45 text-slate-800 border-indigo-100 hover:bg-indigo-50 hover:border-indigo-300"
               }`}
             >
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                activeTab === "ai" 
-                  ? "bg-blue-600 text-white shadow-2xs" 
-                  : "bg-slate-100 text-slate-500 group-hover:bg-slate-200/80 group-hover:text-slate-800"
-              }`}>
-                <Sparkles className="w-3.5 h-3.5" />
+              <div
+                className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                  activeTab === "books"
+                    ? "bg-white/20 text-white"
+                    : "bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white"
+                }`}
+              >
+                <BookMarked className="w-4 h-4" />
               </div>
               {!isCollapsed && (
-                <span className="truncate">المساعد الذكي</span>
+                <span className="truncate whitespace-nowrap">الكتب الرقمية</span>
               )}
             </button>
 
-
-
-            {/* AI Corrector */}
-            <button
-              type="button"
-              onClick={() => {
-                onSelectCorrector?.();
-                onClose?.();
-              }}
-              title="المصحح اللغوي"
-              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
-                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
-              } ${
-                activeTab === "corrector"
-                  ? "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-2xs"
-                  : "text-slate-700 hover:bg-slate-100"
-              }`}
-            >
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                activeTab === "corrector" 
-                  ? "bg-blue-600 text-white shadow-2xs" 
-                  : "bg-slate-100 text-slate-500 group-hover:bg-slate-200/80 group-hover:text-slate-800"
-              }`}>
-                <PenTool className="w-3.5 h-3.5" />
-              </div>
-              {!isCollapsed && (
-                <span className="truncate">المصحح اللغوي</span>
-              )}
-            </button>
-
-            {/* Media Player */}
-            <button
-              type="button"
-              onClick={() => {
-                onSelectMedia?.();
-                onClose?.();
-              }}
-              title="مشغل الوسائط"
-              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
-                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
-              } ${
-                activeTab === "media"
-                  ? "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-2xs"
-                  : "text-slate-700 hover:bg-slate-100"
-              }`}
-            >
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                activeTab === "media" 
-                  ? "bg-blue-600 text-white shadow-2xs" 
-                  : "bg-slate-100 text-slate-500 group-hover:bg-slate-200/80 group-hover:text-slate-800"
-              }`}>
-                <Film className="w-3.5 h-3.5" />
-              </div>
-              {!isCollapsed && (
-                <span className="truncate">مشغل الوسائط</span>
-              )}
-            </button>
-
-            {/* Notes & Writings (الكتابات) */}
-            <button
-              type="button"
-              onClick={() => {
-                onSelectNotes?.();
-                onClose?.();
-              }}
-              title="الكتابات"
-              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
-                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
-              } ${
-                activeTab === "notes"
-                  ? "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-2xs"
-                  : "text-slate-700 hover:bg-slate-100"
-              }`}
-            >
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                activeTab === "notes" 
-                  ? "bg-blue-600 text-white shadow-2xs" 
-                  : "bg-slate-100 text-slate-500 group-hover:bg-slate-200/80 group-hover:text-slate-800"
-              }`}>
-                <BookOpen className="w-3.5 h-3.5" />
-              </div>
-              {!isCollapsed && (
-                <span className="truncate">الكتابات</span>
-              )}
-            </button>
-
-            {/* Shadowing Studio (استوديو الشادوينج) */}
-            <button
-              type="button"
-              onClick={() => {
-                onSelectShadowing?.();
-                onClose?.();
-              }}
-              title="استوديو الشادوينج"
-              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
-                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
-              } ${
-                activeTab === "shadowing"
-                  ? "bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-2xs"
-                  : "text-slate-700 hover:bg-slate-100"
-              }`}
-            >
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                activeTab === "shadowing" 
-                  ? "bg-blue-600 text-white shadow-2xs" 
-                  : "bg-slate-100 text-slate-500 group-hover:bg-slate-200/80 group-hover:text-slate-800"
-              }`}>
-                <Headphones className="w-3.5 h-3.5" />
-              </div>
-              {!isCollapsed && (
-                <span className="truncate">استوديو الشادوينج</span>
-              )}
-            </button>
-
-            {/* Verben Konjugation (تصريف الأفعال) */}
+            {/* تصريف الأفعال (Amber) */}
             <button
               type="button"
               onClick={() => {
@@ -409,33 +329,229 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                 onClose?.();
               }}
               title="تصريف الأفعال"
-              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
-                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
+              className={`w-full relative flex items-center gap-2.5 rounded-xl text-right transition-all duration-150 font-bold text-[12.5px] cursor-pointer group border ${
+                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : "px-2.5 py-2 min-h-[42px]"
               } ${
                 activeTab === "verbs"
-                  ? "bg-amber-50 text-amber-900 font-bold border border-amber-300 shadow-2xs"
-                  : "text-slate-700 hover:bg-slate-100"
+                  ? "bg-amber-500 text-white border-amber-500 shadow-sm"
+                  : "bg-amber-50/50 text-slate-800 border-amber-200/70 hover:bg-amber-50 hover:border-amber-300"
               }`}
             >
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                activeTab === "verbs" 
-                  ? "bg-[#FFC700] text-black shadow-2xs" 
-                  : "bg-amber-100/70 text-amber-700 group-hover:bg-amber-200 group-hover:text-black"
-              }`}>
-                <Languages className="w-3.5 h-3.5" />
+              <div
+                className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                  activeTab === "verbs"
+                    ? "bg-white/20 text-white"
+                    : "bg-amber-100 text-amber-700 group-hover:bg-amber-500 group-hover:text-white"
+                }`}
+              >
+                <Languages className="w-4 h-4" />
               </div>
               {!isCollapsed && (
-                <span className="truncate">تصريف الأفعال</span>
+                <span className="truncate whitespace-nowrap">تصريف الأفعال</span>
               )}
             </button>
           </div>
 
-          {/* DIVIDER */}
-          <div className="my-1.5 border-t border-slate-100" />
+          <div className="border-t border-slate-100" />
 
-          {/* SECTION 3: SYSTEM & RECYCLE BIN */}
-          <div className="space-y-0.5">
-            {/* Trash */}
+          {/* CATEGORY 2: الأدوات الذكية (SMART TOOLS) */}
+          <div className="space-y-1.5">
+            {!isCollapsed && (
+              <div className="px-2 pb-0.5 flex items-center justify-between">
+                <span className="text-[11px] font-extrabold text-slate-500 tracking-wide">
+                  الأدوات الذكية
+                </span>
+              </div>
+            )}
+
+            {/* المساعد الذكي (Violet) */}
+            <button
+              type="button"
+              onClick={() => {
+                onSelectAI?.();
+                onClose?.();
+              }}
+              title="المساعد الذكي"
+              className={`w-full relative flex items-center gap-2.5 rounded-xl text-right transition-all duration-150 font-bold text-[12.5px] cursor-pointer group border ${
+                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : "px-2.5 py-2 min-h-[42px]"
+              } ${
+                activeTab === "ai"
+                  ? "bg-violet-600 text-white border-violet-600 shadow-sm"
+                  : "bg-violet-50/45 text-slate-800 border-violet-100 hover:bg-violet-50 hover:border-violet-300"
+              }`}
+            >
+              <div
+                className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                  activeTab === "ai"
+                    ? "bg-white/20 text-white"
+                    : "bg-violet-100 text-violet-600 group-hover:bg-violet-600 group-hover:text-white"
+                }`}
+              >
+                <Sparkles className="w-4 h-4" />
+              </div>
+              {!isCollapsed && (
+                <span className="truncate whitespace-nowrap">المساعد الذكي</span>
+              )}
+            </button>
+
+            {/* المصحح اللغوي (Emerald - Secondary, visible only if enabled in Settings) */}
+            {secondaryVisibility.corrector && (
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectCorrector?.();
+                  onClose?.();
+                }}
+                title="المصحح اللغوي"
+                className={`w-full relative flex items-center gap-2.5 rounded-xl text-right transition-all duration-150 font-bold text-[12.5px] cursor-pointer group border ${
+                  isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : "px-2.5 py-2 min-h-[42px]"
+                } ${
+                  activeTab === "corrector"
+                    ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                    : "bg-emerald-50/45 text-slate-800 border-emerald-100 hover:bg-emerald-50 hover:border-emerald-300"
+                }`}
+              >
+                <div
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                    activeTab === "corrector"
+                      ? "bg-white/20 text-white"
+                      : "bg-emerald-100 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white"
+                  }`}
+                >
+                  <PenTool className="w-4 h-4" />
+                </div>
+                {!isCollapsed && (
+                  <span className="truncate whitespace-nowrap">المصحح اللغوي</span>
+                )}
+              </button>
+            )}
+          </div>
+
+          {/* CATEGORY 3: الأقسام الثانوية (MEDIA & EXTRA PRACTICE - Hidden by default unless toggled in Settings) */}
+          {hasAnySecondaryMediaSection && (
+            <>
+              <div className="border-t border-slate-100" />
+              <div className="space-y-1.5">
+                {!isCollapsed && (
+                  <div className="px-2 pb-0.5 flex items-center justify-between">
+                    <span className="text-[11px] font-extrabold text-slate-500 tracking-wide">
+                      الوسائط والممارسة
+                    </span>
+                  </div>
+                )}
+
+                {/* مشغل الوسائط (Cyan) */}
+                {secondaryVisibility.media && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSelectMedia?.();
+                      onClose?.();
+                    }}
+                    title="مشغل الوسائط"
+                    className={`w-full relative flex items-center gap-2.5 rounded-xl text-right transition-all duration-150 font-bold text-[12.5px] cursor-pointer group border ${
+                      isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : "px-2.5 py-2 min-h-[42px]"
+                    } ${
+                      activeTab === "media"
+                        ? "bg-cyan-600 text-white border-cyan-600 shadow-sm"
+                        : "bg-cyan-50/45 text-slate-800 border-cyan-100 hover:bg-cyan-50 hover:border-cyan-300"
+                    }`}
+                  >
+                    <div
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                        activeTab === "media"
+                          ? "bg-white/20 text-white"
+                          : "bg-cyan-100 text-cyan-700 group-hover:bg-cyan-600 group-hover:text-white"
+                      }`}
+                    >
+                      <Film className="w-4 h-4" />
+                    </div>
+                    {!isCollapsed && (
+                      <span className="truncate whitespace-nowrap">مشغل الوسائط</span>
+                    )}
+                  </button>
+                )}
+
+                {/* الكتابات (Teal) */}
+                {secondaryVisibility.notes && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSelectNotes?.();
+                      onClose?.();
+                    }}
+                    title="الكتابات"
+                    className={`w-full relative flex items-center gap-2.5 rounded-xl text-right transition-all duration-150 font-bold text-[12.5px] cursor-pointer group border ${
+                      isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : "px-2.5 py-2 min-h-[42px]"
+                    } ${
+                      activeTab === "notes"
+                        ? "bg-teal-600 text-white border-teal-600 shadow-sm"
+                        : "bg-teal-50/45 text-slate-800 border-teal-100 hover:bg-teal-50 hover:border-teal-300"
+                    }`}
+                  >
+                    <div
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                        activeTab === "notes"
+                          ? "bg-white/20 text-white"
+                          : "bg-teal-100 text-teal-700 group-hover:bg-teal-600 group-hover:text-white"
+                      }`}
+                    >
+                      <NotebookPen className="w-4 h-4" />
+                    </div>
+                    {!isCollapsed && (
+                      <span className="truncate whitespace-nowrap">الكتابات</span>
+                    )}
+                  </button>
+                )}
+
+                {/* استوديو الشادوينج (Orange) */}
+                {secondaryVisibility.shadowing && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSelectShadowing?.();
+                      onClose?.();
+                    }}
+                    title="استوديو الشادوينج"
+                    className={`w-full relative flex items-center gap-2.5 rounded-xl text-right transition-all duration-150 font-bold text-[12.5px] cursor-pointer group border ${
+                      isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : "px-2.5 py-2 min-h-[42px]"
+                    } ${
+                      activeTab === "shadowing"
+                        ? "bg-orange-600 text-white border-orange-600 shadow-sm"
+                        : "bg-orange-50/45 text-slate-800 border-orange-100 hover:bg-orange-50 hover:border-orange-300"
+                    }`}
+                  >
+                    <div
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                        activeTab === "shadowing"
+                          ? "bg-white/20 text-white"
+                          : "bg-orange-100 text-orange-600 group-hover:bg-orange-600 group-hover:text-white"
+                      }`}
+                    >
+                      <Headphones className="w-4 h-4" />
+                    </div>
+                    {!isCollapsed && (
+                      <span className="truncate whitespace-nowrap">استوديو الشادوينج</span>
+                    )}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+
+          <div className="border-t border-slate-100" />
+
+          {/* CATEGORY 4: النظام (SYSTEM) */}
+          <div className="space-y-1.5">
+            {!isCollapsed && (
+              <div className="px-2 pb-0.5 flex items-center justify-between">
+                <span className="text-[11px] font-extrabold text-slate-500 tracking-wide">
+                  النظام
+                </span>
+              </div>
+            )}
+
+            {/* سلة المهملات (Rose) */}
             <button
               type="button"
               onClick={() => {
@@ -443,22 +559,24 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                 onClose?.();
               }}
               title="سلة المهملات"
-              className={`w-full relative flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-right transition-colors font-semibold text-xs cursor-pointer group ${
-                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : ""
+              className={`w-full relative flex items-center gap-2.5 rounded-xl text-right transition-all duration-150 font-bold text-[12.5px] cursor-pointer group border ${
+                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : "px-2.5 py-2 min-h-[42px]"
               } ${
                 activeTab === "trash"
-                  ? "bg-rose-50 text-rose-700 border border-rose-200 font-bold shadow-2xs"
-                  : "text-slate-700 hover:bg-slate-100"
+                  ? "bg-rose-600 text-white border-rose-600 shadow-sm"
+                  : "bg-rose-50/40 text-slate-800 border-rose-100 hover:bg-rose-50 hover:border-rose-300"
               }`}
             >
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                activeTab === "trash" 
-                  ? "bg-rose-600 text-white shadow-2xs" 
-                  : "bg-slate-100 text-slate-500 group-hover:bg-rose-100 group-hover:text-rose-600"
-              }`}>
-                <Trash2 className="w-3.5 h-3.5" />
+              <div
+                className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                  activeTab === "trash"
+                    ? "bg-white/20 text-white"
+                    : "bg-rose-100 text-rose-600 group-hover:bg-rose-600 group-hover:text-white"
+                }`}
+              >
+                <Trash2 className="w-4 h-4" />
               </div>
-              {!isCollapsed && <span>سلة المهملات</span>}
+              {!isCollapsed && <span className="truncate whitespace-nowrap">سلة المهملات</span>}
             </button>
           </div>
         </nav>

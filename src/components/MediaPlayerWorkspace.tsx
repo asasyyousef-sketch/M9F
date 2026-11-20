@@ -402,6 +402,9 @@ interface UnifiedPillNotice {
 interface MediaPlayerWorkspaceProps {
   onToggleSidebar?: () => void;
   onBackToLibrary?: () => void;
+  pendingBookMedia?: Partial<MediaFile> | null;
+  onClearPendingBookMedia?: () => void;
+  onBackToBooksSection?: (context: MediaBookContext) => void;
 }
 
 // Helper to request screen orientation lock to landscape (like YouTube mobile)
@@ -451,7 +454,10 @@ const unlockScreenOrientation = () => {
 
 export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
   onToggleSidebar,
-  onBackToLibrary
+  onBackToLibrary,
+  pendingBookMedia,
+  onClearPendingBookMedia,
+  onBackToBooksSection
 }) => {
   const { currentUser, token, authFetch } = useAuth();
 
@@ -1399,7 +1405,11 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     setIsPlayerOpen(false);
     setIsImmersiveMode(false);
     if (activeBookContext) {
-      setMediaWorkspaceTab("books");
+      if (onBackToBooksSection) {
+        onBackToBooksSection(activeBookContext);
+      } else {
+        setMediaWorkspaceTab("books");
+      }
     }
   };
 
@@ -1444,6 +1454,14 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
       handleSelectFile(syntheticFile, true);
     }
   };
+
+  // Auto-open book media when launched from standalone Books section in Sidebar
+  useEffect(() => {
+    if (pendingBookMedia && !loading) {
+      handlePlayBookMediaInStudio(pendingBookMedia);
+      onClearPendingBookMedia?.();
+    }
+  }, [pendingBookMedia, loading]);
 
   // Folder management functions
   const getFolderPathName = (folder: MediaFolder): string => {

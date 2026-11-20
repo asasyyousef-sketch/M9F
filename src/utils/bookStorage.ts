@@ -46,11 +46,12 @@ export async function fetchBooksFromServer(): Promise<InteractiveBook[]> {
       const data = await res.json();
       if (data && Array.isArray(data.books)) {
         memoryBooksCache = data.books;
-        // Cache to IndexedDB for offline resilience
+        // Cache to IndexedDB for offline resilience (mirroring server state)
         try {
           const db = await openDB();
           const tx = db.transaction(STORE_NAME, "readwrite");
           const store = tx.objectStore(STORE_NAME);
+          store.clear();
           data.books.forEach((b: InteractiveBook) => store.put(b));
         } catch (e) {}
         return data.books;

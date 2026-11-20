@@ -23,7 +23,8 @@ import {
   ChevronUp,
   RefreshCw,
   Bug,
-  Sparkles
+  Sparkles,
+  Menu
 } from "lucide-react";
 import { InteractiveBook, BookPage, BookPageMedia, MediaFile } from "../types";
 import {
@@ -42,6 +43,7 @@ import {
 interface BookReaderWorkspaceProps {
   onPlayMediaInStudio?: (file: Partial<MediaFile>) => void;
   onBackToMediaExplorer?: () => void;
+  onToggleSidebar?: () => void;
   initialBookId?: string | null;
   initialPageIndex?: number;
 }
@@ -49,6 +51,7 @@ interface BookReaderWorkspaceProps {
 export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   onPlayMediaInStudio,
   onBackToMediaExplorer,
+  onToggleSidebar,
   initialBookId,
   initialPageIndex
 }) => {
@@ -893,7 +896,20 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
 
       {/* Top Header: "My Books" on left, Edit Pencil on right */}
       <div className="h-16 px-4 flex items-center justify-between border-b border-gray-100 shrink-0">
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">My Books</h1>
+        <div className="flex items-center gap-2.5">
+          {onToggleSidebar && (
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              className="md:hidden p-2 -mr-1 text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-xl cursor-pointer transition-colors"
+              aria-label="Open menu"
+              title="القائمة"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+          )}
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">My Books</h1>
+        </div>
 
         <button
           onClick={() => setIsEditMode((e) => !e)}

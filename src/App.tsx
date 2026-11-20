@@ -5,6 +5,7 @@ import { AIWorkspace, AIFolder, AICard } from "./components/AIWorkspace";
 import { AICorrectorWorkspace } from "./components/AICorrectorWorkspace";
 import { RecycleBin } from "./components/RecycleBin";
 import { MediaPlayerWorkspace } from "./components/MediaPlayerWorkspace";
+import { BookReaderWorkspace } from "./components/BookReaderWorkspace";
 import { NotesWorkspace } from "./components/NotesWorkspace";
 import { ShadowingWorkspace } from "./components/ShadowingWorkspace";
 import { VerbsWorkspace } from "./components/VerbsWorkspace";
@@ -19,7 +20,8 @@ import {
 } from "./components/Modals";
 import { ShareFolderModal, ImportSharedDeckModal } from "./components/ShareModals";
 import { ReviewSession } from "./components/ReviewSession";
-import { Folder, Flashcard, ReviewMethod, DbStatus, TranscriptDocument, SharedDeckData, DirectShareItem } from "./types";
+import { Folder, Flashcard, ReviewMethod, DbStatus, TranscriptDocument, SharedDeckData, DirectShareItem, MediaFile, MediaBookContext } from "./types";
+import { loadSecondarySectionsVisibility, SecondarySectionKey } from "./utils/sidebarSections";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { AuthScreen } from "./components/AuthScreen";
 import { CheckCircle2 } from "lucide-react";
@@ -121,8 +123,28 @@ function MainStudyApp() {
   // Mobile sidebar visibility state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Tab navigation view state: "library" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs"
-  const [viewMode, setViewMode] = useState<"library" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs">("library");
+  // Tab navigation view state: "library" | "books" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs"
+  const [viewMode, setViewMode] = useState<"library" | "books" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs">("library");
+  const [pendingBookMedia, setPendingBookMedia] = useState<Partial<MediaFile> | null>(null);
+  const [bookReturnContext, setBookReturnContext] = useState<MediaBookContext | null>(null);
+
+  // If a secondary section is toggled off from Settings while active, gracefully return to Library
+  useEffect(() => {
+    let prevVis = loadSecondarySectionsVisibility();
+    const handleSettingsChange = () => {
+      const nextVis = loadSecondarySectionsVisibility();
+      if (
+        (viewMode === "corrector" || viewMode === "media" || viewMode === "notes" || viewMode === "shadowing") &&
+        prevVis[viewMode as SecondarySectionKey] &&
+        !nextVis[viewMode as SecondarySectionKey]
+      ) {
+        setViewMode("library");
+      }
+      prevVis = nextVis;
+    };
+    window.addEventListener("app_settings_changed", handleSettingsChange);
+    return () => window.removeEventListener("app_settings_changed", handleSettingsChange);
+  }, [viewMode]);
 
   // YouTube transcripts (spT) state
   const [transcripts, setTranscripts] = useState<TranscriptDocument[]>(() => {
@@ -1067,6 +1089,12 @@ function MainStudyApp() {
     setIsSidebarOpen(true);
   }, []);
 
+  const handleSelectBooks = useCallback(() => {
+    setActiveReview(null);
+    setBookReturnContext(null);
+    setViewMode("books");
+  }, []);
+
   const handleSelectAI = useCallback(() => {
     setViewMode("ai");
   }, []);
@@ -1401,6 +1429,7 @@ function MainStudyApp() {
           onClose={handleCloseSidebar}
           dbStatus={dbStatus}
           activeTab={viewMode}
+          onSelectBooks={handleSelectBooks}
           onSelectAI={handleSelectAI}
           onSelectTrash={handleSelectTrash}
           onSelectCorrector={handleSelectCorrector}
@@ -1416,6 +1445,17 @@ function MainStudyApp() {
           <VerbsWorkspace
             onToggleSidebar={handleToggleSidebar}
             onBackToLibrary={handleHomeClick}
+          />
+        ) : viewMode === "books" ? (
+          <BookReaderWorkspace
+            onToggleSidebar={handleToggleSidebar}
+            initialBookId={bookReturnContext?.bookId}
+            initialPageIndex={bookReturnContext?.pageIndex}
+            onPlayMediaInStudio={(mediaInfo) => {
+              setPendingBookMedia(mediaInfo);
+              setViewMode("media");
+            }}
+            onBackToMediaExplorer={handleHomeClick}
           />
         ) : viewMode === "shadowing" ? (
           <ShadowingWorkspace
@@ -1434,6 +1474,12 @@ function MainStudyApp() {
           <MediaPlayerWorkspace
             onToggleSidebar={handleToggleSidebar}
             onBackToLibrary={handleHomeClick}
+            pendingBookMedia={pendingBookMedia}
+            onClearPendingBookMedia={() => setPendingBookMedia(null)}
+            onBackToBooksSection={(ctx) => {
+              setBookReturnContext(ctx);
+              setViewMode("books");
+            }}
           />
         ) : viewMode === "corrector" ? (
           <AICorrectorWorkspace

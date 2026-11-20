@@ -1,10 +1,16 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { X, Search, Image as ImageIcon, Volume2, Link as LinkIcon, Plus, Check, ChevronLeft, ChevronRight, ChevronDown, FolderOpen, HelpCircle, Trash2, Settings, AlertCircle, Play, Folder as LucideFolder, FileText, Eye, Pencil, Headphones, BookOpen, Layers, Copy, Shuffle, Move, Key, Timer, History, Download, RefreshCw, DownloadCloud, HardDrive, Sparkles, Cpu, Star, Square, VolumeX, Radio, Activity, Laptop, Server, Zap, CheckCircle2, Minimize2, Maximize2, Loader2, ExternalLink, Link2, Users, Share2, Send } from "lucide-react";
+import { X, Search, Image as ImageIcon, Volume2, Link as LinkIcon, Plus, Check, ChevronLeft, ChevronRight, ChevronDown, FolderOpen, HelpCircle, Trash2, Settings, AlertCircle, Play, Folder as LucideFolder, FileText, Eye, Pencil, Headphones, BookOpen, Layers, Copy, Shuffle, Move, Key, Timer, History, Download, RefreshCw, DownloadCloud, HardDrive, Sparkles, Cpu, Star, Square, VolumeX, Radio, Activity, Laptop, Server, Zap, CheckCircle2, Minimize2, Maximize2, Loader2, ExternalLink, Link2, Users, Share2, Send, PenTool, Film, NotebookPen, LayoutGrid } from "lucide-react";
 import { Folder, Flashcard, ReviewMethod, getSafeImageStyle, DEFAULT_GRADIO_VOICES, GRADIO_LANGUAGES, GradioVoice, sanitizeCardArticleAndSentence } from "../types";
 import { LivePiperSandboxModal } from "./LivePiperSandboxModal";
 import { AccountsSettingsTab } from "./AccountsSettingsTab";
 import { useAuth } from "../context/AuthContext";
+import {
+  loadSecondarySectionsVisibility,
+  saveSecondarySectionsVisibility,
+  SecondarySectionsVisibility,
+  SecondarySectionKey
+} from "../utils/sidebarSections";
 
 export { LivePiperSandboxModal };
 
@@ -4657,7 +4663,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   const [isCalculatingCache, setIsCalculatingCache] = useState(false);
 
   // Active Settings Tab
-  const [activeTab, setActiveTab] = useState<"audio" | "ai" | "images" | "storage" | "animations" | "diagnostics" | "accounts">("audio");
+  const [activeTab, setActiveTab] = useState<"audio" | "ai" | "images" | "storage" | "animations" | "sections" | "diagnostics" | "accounts">("audio");
+
+  // Secondary Sidebar Sections Visibility (hidden by default; shown via Settings)
+  const [secondarySections, setSecondarySections] = useState<SecondarySectionsVisibility>(
+    () => loadSecondarySectionsVisibility()
+  );
+
+  const handleToggleSecondarySection = (key: SecondarySectionKey) => {
+    setSecondarySections((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      saveSecondarySectionsVisibility(next);
+      return next;
+    });
+  };
+
+  const handleSetAllSecondarySections = (visible: boolean) => {
+    const next: SecondarySectionsVisibility = {
+      corrector: visible,
+      media: visible,
+      notes: visible,
+      shadowing: visible,
+    };
+    setSecondarySections(next);
+    saveSecondarySectionsVisibility(next);
+  };
 
   // Animation settings states
   const [enableChatAnimations, setEnableChatAnimations] = useState<boolean>(
@@ -5704,6 +5734,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       const initialScale = savedScale ? parseInt(savedScale, 10) : 100;
       setSiteScale(initialScale);
       initialScaleRef.current = initialScale;
+      setSecondarySections(loadSecondarySectionsVisibility());
 
       // reset test state
       setTestImages([]);
@@ -5830,6 +5861,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     localStorage.setItem("settings_secondary_piper_model_de", secondaryModelDe);
     localStorage.setItem("settings_secondary_piper_model_ar", secondaryModelAr);
     localStorage.setItem("settings_secondary_piper_model_en", secondaryModelEn);
+    saveSecondarySectionsVisibility(secondarySections);
     onClose();
   };
 
@@ -6407,6 +6439,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
             >
               <Sparkles className="w-4 h-4 text-amber-400" />
               <span>الحركات والأنيميشن</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("sections")}
+              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                activeTab === "sections"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-on-surface-variant hover:text-on-surface hover:bg-surface-container"
+              }`}
+            >
+              <LayoutGrid className="w-4 h-4 text-indigo-500" />
+              <span>أقسام القائمة</span>
             </button>
 
             <button
@@ -8914,6 +8959,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 </button>
               </div>
 
+              {/* Secondary Sidebar Sections Quick Shortcut Card */}
+              <div className="p-4 rounded-xl border border-indigo-500/30 bg-indigo-500/5 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 text-right">
+                  <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-600 shrink-0">
+                    <LayoutGrid className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-xs text-on-surface">إظهار وإخفاء الأقسام الثانوية في القائمة الجانبية</h4>
+                    <p className="text-[11px] text-on-surface-variant">
+                      المصحح اللغوي، مشغل الوسائط، الكتابات، واستوديو الشادوينج.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("sections")}
+                  className="px-3 py-1.5 bg-indigo-600 text-white hover:bg-indigo-700 font-bold text-xs rounded-lg transition-all shrink-0 cursor-pointer shadow-xs"
+                >
+                  إدارة الأقسام
+                </button>
+              </div>
+
               {/* Performance & Network / Audio Preload Quick Toggle Card */}
               <div className="p-5 rounded-2xl border border-outline-variant/40 bg-surface-container-low/50 space-y-3">
                 <div className="flex items-center justify-between">
@@ -9167,6 +9234,131 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                     </button>
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: SIDEBAR SECONDARY SECTIONS VISIBILITY */}
+          {activeTab === "sections" && (
+            <div className="space-y-5 animate-fade-in">
+              <div className="p-5 rounded-2xl border border-indigo-500/25 bg-indigo-500/5 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-bold text-base text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
+                      <LayoutGrid className="w-5 h-5" />
+                      <span>إدارة الأقسام الثانوية في القائمة الجانبية</span>
+                    </h3>
+                    <p className="text-xs text-on-surface-variant mt-1 leading-relaxed">
+                      الأقسام الأساسية (المكتبة، الكتب الرقمية، تصريف الأفعال، المساعد الذكي) تظهر دائماً. أما الأقسام الثانوية التالية فتكون مخفية افتراضياً لتقليل الازدحام، ويمكنك إظهار ما تحتاجه منها هنا فوراً.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleSetAllSecondarySections(true)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      إظهار الكل
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetAllSecondarySections(false)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-surface border border-outline-variant hover:bg-surface-container-high text-on-surface transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      إخفاء الكل
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                {([
+                  {
+                    key: "corrector" as SecondarySectionKey,
+                    title: "المصحح اللغوي",
+                    desc: "تدقيق النصوص والقواعد الألمانية بالذكاء الاصطناعي وتوليد البطاقات.",
+                    icon: PenTool,
+                    iconBg: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+                    activeBorder: "border-emerald-500/50 bg-emerald-500/5",
+                    toggleColor: "bg-emerald-600"
+                  },
+                  {
+                    key: "media" as SecondarySectionKey,
+                    title: "مشغل الوسائط",
+                    desc: "مشاهدة الفيديوهات والصوتيات مع الترجمة المزدوجة والتفريغ الصوتي.",
+                    icon: Film,
+                    iconBg: "bg-cyan-100 text-cyan-700 dark:bg-cyan-950/60 dark:text-cyan-300",
+                    activeBorder: "border-cyan-500/50 bg-cyan-500/5",
+                    toggleColor: "bg-cyan-600"
+                  },
+                  {
+                    key: "notes" as SecondarySectionKey,
+                    title: "الكتابات",
+                    desc: "دفتر كتابة الجمل والملاحظات اليومية والمقالات القصيرة.",
+                    icon: NotebookPen,
+                    iconBg: "bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300",
+                    activeBorder: "border-teal-500/50 bg-teal-500/5",
+                    toggleColor: "bg-teal-600"
+                  },
+                  {
+                    key: "shadowing" as SecondarySectionKey,
+                    title: "استوديو الشادوينج",
+                    desc: "تدريب النطق والمحاكاة الصوتية الفورية للجمل والمقاطع.",
+                    icon: Headphones,
+                    iconBg: "bg-orange-100 text-orange-700 dark:bg-orange-950/60 dark:text-orange-300",
+                    activeBorder: "border-orange-500/50 bg-orange-500/5",
+                    toggleColor: "bg-orange-600"
+                  }
+                ]).map((item) => {
+                  const Icon = item.icon;
+                  const isVisible = secondarySections[item.key];
+                  return (
+                    <div
+                      key={item.key}
+                      onClick={() => handleToggleSecondarySection(item.key)}
+                      className={`p-4 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                        isVisible
+                          ? item.activeBorder
+                          : "border-outline-variant/50 bg-surface-container-low/50 hover:bg-surface-container-low"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${item.iconBg}`}>
+                          <Icon className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-bold text-sm text-on-surface truncate">{item.title}</h4>
+                            <span className="text-[11px] font-semibold text-on-surface-variant">
+                              {isVisible ? "ظاهر" : "مخفي"}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-on-surface-variant leading-snug mt-0.5 line-clamp-2">
+                            {item.desc}
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleToggleSecondarySection(item.key);
+                        }}
+                        aria-label={isVisible ? `إخفاء ${item.title}` : `إظهار ${item.title}`}
+                        className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${
+                          isVisible ? item.toggleColor : "bg-slate-300 dark:bg-slate-700"
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-xs transition-all ${
+                            isVisible ? "right-0.5" : "right-[22px]"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
