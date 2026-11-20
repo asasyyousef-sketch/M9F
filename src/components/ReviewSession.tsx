@@ -2834,10 +2834,10 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     // Play initial tick
     playTickSound();
 
-    // If speak question on start is enabled, pronounce the question text
+    // If speak question on start is enabled, pronounce the question text (with article if available)
     if (challengeSpeakQuestionStart) {
       const questionText = challengeQuestionSource === "front" 
-        ? card.frontText 
+        ? getFrontSpeechText(card, true)
         : challengeQuestionSource === "back" 
           ? card.backText 
           : (card.pluralText || "");
@@ -2864,12 +2864,12 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
         setChallengeActive(false);
         setChallengeRevealed(true);
         
-        // Speak the selected target value
+        // Speak the selected target value (with article if front face has an article)
         let textToSpeak = "";
         let langToSpeak = "de";
         
         if (challengeTarget === "front") {
-          textToSpeak = card.frontText;
+          textToSpeak = getFrontSpeechText(card, true);
           langToSpeak = card.frontLang || "de";
         } else if (challengeTarget === "back") {
           textToSpeak = card.backText;
@@ -4189,7 +4189,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
       if (isAudioPreloadEnabled) {
         // Preload front text
         if (card.frontText) {
-          preloadTTS(getFrontSpeechText(card, speakFrontArticle), card.frontLang || "de");
+          preloadTTS(getFrontSpeechText(card, method === "listen" || method === "challenge" ? true : speakFrontArticle), card.frontLang || "de");
         }
         // Preload back text
         if (card.backText) {
@@ -4841,7 +4841,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
               let textToSpeak = "";
               let langToSpeak = "de";
               if (challengeTarget === "front") {
-                textToSpeak = currentCard.frontText;
+                textToSpeak = getFrontSpeechText(currentCard, true);
                 langToSpeak = currentCard.frontLang || "de";
               } else if (challengeTarget === "back") {
                 textToSpeak = currentCard.backText;
@@ -6572,270 +6572,278 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                 </div>
               )}
 
-              {/* 5. CHALLENGE MODE (وضع التحدي) */}
+              {/* 5. CHALLENGE MODE (وضع التحدي - متناغم مع المراجعة الكتابية والمربع) */}
               {method === "challenge" && currentCard && (() => {
                 const isTargetFront = challengeTarget === "front";
                 const isTargetBack = challengeTarget === "back";
                 const isTargetPlural = challengeTarget === "plural";
 
-                // Question details based on challengeQuestionSource state:
-                const questionText = challengeQuestionSource === "front" 
-                  ? currentCard.frontText 
-                  : challengeQuestionSource === "back" 
-                    ? currentCard.backText 
+                const questionText = challengeQuestionSource === "front"
+                  ? currentCard.frontText
+                  : challengeQuestionSource === "back"
+                    ? currentCard.backText
                     : (currentCard.pluralText || "");
-                    
-                const questionLang = challengeQuestionSource === "front" 
-                  ? (currentCard.frontLang || "de") 
-                  : challengeQuestionSource === "back" 
-                    ? (currentCard.backLang || "ar") 
+
+                const questionLang = challengeQuestionSource === "front"
+                  ? (currentCard.frontLang || "de")
+                  : challengeQuestionSource === "back"
+                    ? (currentCard.backLang || "ar")
                     : (currentCard.pluralLang || "de");
+
+                const targetText = (isTargetPlural && currentCard.isPluralMode && currentCard.pluralText)
+                  ? currentCard.pluralText
+                  : isTargetFront
+                    ? currentCard.frontText
+                    : currentCard.backText;
+
+                const targetLang = isTargetPlural
+                  ? (currentCard.pluralLang || "de")
+                  : isTargetFront
+                    ? (currentCard.frontLang || "de")
+                    : (currentCard.backLang || "ar");
 
                 const imageSrc = challengeAlwaysShowFrontImage
                   ? currentCard.frontImage
-                  : (challengeQuestionSource === "front" 
-                    ? currentCard.frontImage 
-                    : challengeQuestionSource === "back" 
-                      ? currentCard.backImage 
-                      : currentCard.frontImage); // default to front image for plural
+                  : (challengeQuestionSource === "front"
+                    ? currentCard.frontImage
+                    : challengeQuestionSource === "back"
+                      ? currentCard.backImage
+                      : currentCard.frontImage);
 
-                const hasImage = !!imageSrc;
+                const hasImage = Boolean(imageSrc);
                 const imagePos = challengeAlwaysShowFrontImage
                   ? currentCard.frontImagePosition
-                  : (challengeQuestionSource === "front" 
-                    ? currentCard.frontImagePosition 
-                    : challengeQuestionSource === "back" 
-                      ? currentCard.backImagePosition 
+                  : (challengeQuestionSource === "front"
+                    ? currentCard.frontImagePosition
+                    : challengeQuestionSource === "back"
+                      ? currentCard.backImagePosition
                       : currentCard.frontImagePosition);
 
-                const questionLabel = challengeQuestionSource === "front"
-                  ? "الوجه الأمامي"
-                  : challengeQuestionSource === "back"
-                    ? "الوجه الخلفي (المعنى)"
-                    : "صيغة الجمع 👥";
+                const isIdleBeforeStart = !challengeActive && !challengeRevealed;
+                const isFirstCardWaitingStart = currentIndex === 0 && isIdleBeforeStart;
+                const articleDot = getCardArticleDotInfo(currentCard);
+                const timerRatio = challengeSeconds > 0 ? Math.max(0, Math.min(1, challengeTimeLeft / challengeSeconds)) : 0;
+
+                const questionSpeechText = challengeQuestionSource === "front"
+                  ? getFrontSpeechText(currentCard, true)
+                  : questionText;
+
+                const targetSpeechText = isTargetFront
+                  ? getFrontSpeechText(currentCard, true)
+                  : targetText;
+
+                const triggerManualReveal = () => {
+                  if (challengeIntervalRef.current) clearInterval(challengeIntervalRef.current);
+                  setChallengeActive(false);
+                  setChallengeRevealed(true);
+                  if (targetSpeechText) {
+                    playPronunciation(targetSpeechText, targetLang, true);
+                  }
+                };
 
                 return (
-                  <div className="w-full flex flex-col items-center gap-6 sm:gap-7">
-                    
-                    {/* Main Card with beautiful countdown or revealed result - Styled EXACTLY like StudyCard */}
-                    <div className="relative w-full aspect-square bg-surface-container-lowest rounded-[26px] border border-outline-variant/30 shadow-sm p-4 sm:p-5 flex flex-col justify-between select-none overflow-hidden">
-                      <div className="absolute top-0 right-0 w-32 h-32 bg-primary/2.5 rounded-full blur-2xl pointer-events-none" />
+                  <div className="w-full flex flex-col items-center gap-5">
+                    {/* Master 1:1 Square Card - Identical structure to Writing & Listening Modes */}
+                    <div className="relative w-full aspect-square select-none overflow-hidden rounded-[26px] shadow-sm border border-outline-variant/30 bg-surface-container-lowest dark:bg-slate-900 flex flex-col justify-between p-4 sm:p-5">
 
-                      {/* If ready to start, show a blurred overlay over the whole card with a green start button */}
-                      {currentIndex === 0 && !challengeActive && !challengeRevealed && (
-                        <div className="absolute inset-0 bg-slate-950/65 backdrop-blur-[8px] z-20 flex flex-col items-center justify-center p-6 text-center animate-fadeIn">
-                          {/* A subtle glowing circle behind the button */}
-                          <div className="absolute w-36 h-36 rounded-full bg-emerald-500/20 blur-xl pointer-events-none" />
-                          
-                          <div className="relative flex flex-col items-center gap-4">
-                            {/* Swords / Challenge Icon */}
-                            <div className="w-16 h-16 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-lg shadow-emerald-500/10">
-                              <span className="material-symbols-outlined text-4xl">swords</span>
-                            </div>
-                            
-                            <div>
-                              <h4 className="text-white text-base font-extrabold font-sans">تحدي الذاكرة السريع</h4>
-                              <p className="text-white/70 text-[11px] font-sans mt-1 max-w-[200px] leading-relaxed">
-                                تذكر الإجابة والنطق الصحيح قبل نفاد الوقت!
-                              </p>
-                            </div>
-                            
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                startChallengeTimer(currentCard);
-                              }}
-                              className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-500/20 cursor-pointer transition-all flex items-center gap-2 font-sans active:scale-95 border border-emerald-400/20 hover:scale-105"
-                            >
-                              <Play className="w-4 h-4 fill-current" /> ابدأ التحدي الآن
-                            </button>
-                          </div>
+                      {/* Edge-to-edge ambient photo background if image exists */}
+                      {hasImage && (
+                        <div className="absolute inset-0 w-full h-full pointer-events-none select-none overflow-hidden">
+                          <ImageWithSkeleton
+                            src={imageSrc!}
+                            alt="Challenge illustration"
+                            className={`w-full h-full object-cover transition-all duration-300 ${isFirstCardWaitingStart ? "blur-md scale-105 opacity-70" : ""}`}
+                            style={getSafeImageStyle(imagePos)}
+                            referrerPolicy="no-referrer"
+                            loading="eager"
+                            fetchPriority="high"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/45 to-black/30" />
                         </div>
                       )}
 
-                      {/* TOP HALF - THE QUESTION (Styled precisely like StudyCard front face) */}
-                      <div className="flex flex-col flex-1 justify-start relative">
+                      {/* Top Bar: Floating Audio Button (Left) + Minimal Countdown Number (Right when active) */}
+                      <div className="w-full flex items-center justify-between relative z-20 select-none pointer-events-auto">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (challengeRevealed && targetSpeechText) {
+                              playPronunciation(targetSpeechText, targetLang, true);
+                            } else if (questionSpeechText) {
+                              playPronunciation(questionSpeechText, questionLang, true);
+                            }
+                          }}
+                          className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 shadow-sm ${
+                            hasImage
+                              ? "bg-black/40 hover:bg-black/65 backdrop-blur-md border border-white/25 text-white"
+                              : "border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50"
+                          }`}
+                          title={challengeRevealed ? "استمع للإجابة" : "استمع للسؤال"}
+                        >
+                          <Volume2 className="w-4.5 h-4.5" />
+                        </button>
 
-                        {/* Image section */}
-                        <div className="w-full aspect-square max-h-[190px] sm:max-h-[220px] rounded-xl overflow-hidden relative mb-2 sm:mb-3 border border-outline-variant/10 flex items-center justify-center bg-surface-container-low mx-auto shrink-0">
-                          {hasImage ? (
-                            <ImageWithSkeleton
-                              src={imageSrc!}
-                              alt="challenge question illustration"
-                              className="absolute inset-0 w-full h-full object-cover"
-                              style={getSafeImageStyle(imagePos)}
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : (
-                            <div className="text-primary/70 font-bold text-xs flex flex-col items-center gap-2">
-                              <span className="material-symbols-outlined text-4xl">psychology</span>
-                              <span className="font-sans">سؤال التحدي</span>
-                            </div>
-                          )}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              playPronunciation(questionText, questionLang, true);
-                            }}
-                            className="absolute top-3 left-3 p-2.5 rounded-full bg-white/90 backdrop-blur-sm text-primary hover:bg-primary hover:text-white transition-all shadow-sm cursor-pointer z-10"
-                            title="استمع لسؤال التحدي"
+                        {challengeActive && (
+                          <div
+                            className={`h-9.5 min-w-9.5 sm:h-10 sm:min-w-10 px-2.5 rounded-xl flex items-center justify-center font-mono font-black text-base tabular-nums transition-colors ${
+                              challengeTimeLeft <= 1
+                                ? "bg-rose-500 text-white shadow-sm"
+                                : hasImage
+                                  ? "bg-black/45 backdrop-blur-md border border-white/25 text-white"
+                                  : "bg-primary/10 border border-primary/25 text-primary"
+                            }`}
                           >
-                            <Volume2 className="w-4.5 h-4.5" />
-                          </button>
-                        </div>
-
-                        {/* Question text */}
-                        <div className="text-center pb-2">
-                          <span className="text-[10px] font-bold text-primary bg-primary/5 px-2.5 py-1 rounded-full font-sans inline-block mb-2">
-                            {questionLabel}
-                          </span>
-                          
-                          {challengeHideQuestionFace && !challengeQuestionRevealed ? (
-                            <div 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setChallengeQuestionRevealed(true);
-                              }}
-                              className="mx-auto max-w-[280px] py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 rounded-xl border border-dashed border-slate-300 transition-all cursor-pointer flex items-center justify-center gap-1.5 font-semibold text-xs font-sans active:scale-98 shadow-sm group"
-                            >
-                              <EyeOff className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-600 transition-colors" />
-                              <span>انقر هنا لإظهار نص السؤال</span>
-                            </div>
-                          ) : (
-                            <h3 className="text-2xl sm:text-3xl font-extrabold text-on-surface break-words whitespace-pre-wrap leading-snug px-2 flex flex-row items-center justify-center gap-2.5" dir={challengeQuestionSource === "back" ? "rtl" : "ltr"}>
-                              {challengeQuestionSource === "front" && currentCard.correctArticle && (
-                                <span className={`text-xs px-2.5 py-1 rounded-lg font-black shrink-0 ${
-                                  currentCard.correctArticle === "der" ? "bg-blue-600 text-white shadow-sm" :
-                                  currentCard.correctArticle === "die" ? "bg-rose-600 text-white shadow-sm" :
-                                  currentCard.correctArticle === "das" ? "bg-emerald-600 text-white shadow-sm" :
-                                  currentCard.correctArticle === "die-plural" ? "bg-amber-500 text-white shadow-sm" :
-                                  "bg-primary text-white"
-                                }`}>
-                                  {currentCard.correctArticle === "die-plural" ? "die" : currentCard.correctArticle}
-                                </span>
-                              )}
-                              <span className="whitespace-pre-wrap">{questionText}</span>
-                            </h3>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* BOTTOM HALF - INTERACTIVE (TIMER / REVEAL / ACTIONS) */}
-                      <div className="flex flex-col justify-end border-t border-dashed border-outline-variant/30 pt-4 mt-2">
-                        {challengeActive ? (
-                          /* COUNTDOWN TICKING */
-                          <div className="flex flex-col items-center gap-3 animate-fadeIn">
-                            {/* Countdown circle without pulsing */}
-                            <div className="relative w-20 h-20 flex items-center justify-center rounded-full border-4 border-primary/20 bg-primary/2.5">
-                              <span className="text-3xl font-extrabold text-primary select-none font-mono tracking-tight">
-                                {challengeTimeLeft}
-                              </span>
-                              <div className="absolute inset-[-4px] rounded-full border-4 border-transparent border-t-primary animate-spin" style={{ animationDuration: '1s' }} />
-                            </div>
-                            
-                            <div className="flex flex-col items-center gap-1">
-                              <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5 font-sans">
-                                جاري التحدي... استعد للنطق!
-                              </span>
-                              <button
-                                onClick={() => {
-                                  if (challengeIntervalRef.current) clearInterval(challengeIntervalRef.current);
-                                  setChallengeActive(false);
-                                  setChallengeRevealed(true);
-                                  
-                                  // Speak the selected target value
-                                  let textToSpeak = "";
-                                  let langToSpeak = "de";
-                                  const actualTarget = challengeTarget;
-                                  
-                                  if (actualTarget === "front") {
-                                    textToSpeak = currentCard.frontText;
-                                    langToSpeak = currentCard.frontLang || "de";
-                                  } else if (actualTarget === "back") {
-                                    textToSpeak = currentCard.backText;
-                                    langToSpeak = currentCard.backLang || "de";
-                                  } else if (actualTarget === "plural") {
-                                    textToSpeak = currentCard.pluralText || "";
-                                    langToSpeak = currentCard.pluralLang || "de";
-                                  }
-                                  if (textToSpeak) {
-                                    playPronunciation(textToSpeak, langToSpeak, true);
-                                  }
-                                }}
-                                className="text-[10px] font-bold text-primary hover:underline mt-1 cursor-pointer font-sans"
-                              >
-                                الكشف الآن (تخطي المؤقت)
-                              </button>
-                            </div>
-                          </div>
-                        ) : challengeRevealed ? (
-                          /* REVEALED ANSWER SCREEN */
-                          <div className="w-full flex flex-col items-center gap-3 text-center animate-scaleUp">
-                            <div className="flex flex-row items-center justify-center gap-2 mt-2">
-                              {/* The Revealed Value */}
-                              <h2 className="text-2xl font-extrabold text-on-surface break-all" dir={isTargetBack ? "rtl" : "ltr"}>
-                                {(isTargetPlural && currentCard.isPluralMode && currentCard.pluralText)
-                                  ? currentCard.pluralText
-                                  : (isTargetFront ? currentCard.frontText : currentCard.backText)}
-                              </h2>
-
-                              <button
-                                onClick={() => {
-                                  let textToSpeak = "";
-                                  let langToSpeak = "de";
-                                  const actualTarget = challengeTarget;
-                                  if (actualTarget === "front") {
-                                    textToSpeak = currentCard.frontText;
-                                    langToSpeak = currentCard.frontLang || "de";
-                                  } else if (actualTarget === "back") {
-                                    textToSpeak = currentCard.backText;
-                                    langToSpeak = currentCard.backLang || "de";
-                                  } else if (actualTarget === "plural") {
-                                    textToSpeak = currentCard.pluralText || "";
-                                    langToSpeak = currentCard.pluralLang || "de";
-                                  }
-                                  if (textToSpeak) {
-                                    playPronunciation(textToSpeak, langToSpeak, true);
-                                  }
-                                }}
-                                className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-primary rounded-lg transition-all cursor-pointer flex items-center justify-center shrink-0"
-                                title="إعادة النطق"
-                              >
-                                <Volume2 className="w-4 h-4" />
-                              </button>
-                            </div>
-
-                            {/* ACTION BUTTONS: KNEW IT / DIDN'T KNOW IT */}
-                            <div className="grid grid-cols-2 gap-3 w-full mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-                              <button
-                                onClick={() => handleClassicKnow(false)}
-                                className="flex items-center justify-center gap-2 py-3 px-4 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-300 border border-slate-200 dark:border-slate-700 hover:border-rose-200 dark:hover:border-rose-800/60 rounded-xl transition-all cursor-pointer group active:scale-95 shadow-3xs"
-                              >
-                                <ThumbsDown className="w-4 h-4 text-rose-500/80 group-hover:text-rose-500 group-hover:scale-110 transition-all" />
-                                <span className="text-[11px] font-bold font-sans">لم أعرفها</span>
-                              </button>
-                              <button
-                                onClick={() => handleClassicKnow(true)}
-                                className="flex items-center justify-center gap-2 py-3 px-4 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 hover:text-emerald-600 dark:hover:text-emerald-300 border border-slate-200 dark:border-slate-700 hover:border-emerald-200 dark:hover:border-emerald-800/60 rounded-xl transition-all cursor-pointer group active:scale-95 shadow-3xs"
-                              >
-                                <ThumbsUp className="w-4 h-4 text-emerald-500/80 group-hover:text-emerald-500 group-hover:scale-110 transition-all" />
-                                <span className="text-[11px] font-bold font-sans">عرفتها</span>
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          /* PAUSED / READY TO START */
-                          <div className="flex flex-col items-center gap-3 animate-fadeIn py-2">
-                            <span className="text-xs font-bold text-slate-400 font-sans">التحدي جاهز للبدء</span>
-                            <button
-                              onClick={() => startChallengeTimer(currentCard)}
-                              className="px-6 py-2.5 bg-[#0056f6] hover:bg-[#004bd7] text-white rounded-xl text-xs font-bold shadow-md cursor-pointer transition-colors flex items-center gap-1.5 font-sans active:scale-95"
-                            >
-                              <Play className="w-4 h-4 fill-current" /> ابدأ مؤقت التحدي الآن
-                            </button>
+                            {challengeTimeLeft}
                           </div>
                         )}
                       </div>
+
+                      {/* Center Content: Question & Revealed Answer */}
+                      <div className="relative z-20 flex-1 flex flex-col items-center justify-center text-center px-2 py-4 pointer-events-auto gap-4">
+                        {isFirstCardWaitingStart ? (
+                          <h2
+                            className={`text-2xl sm:text-3xl font-black filter blur-lg opacity-25 select-none pointer-events-none ${
+                              hasImage ? "text-white" : "text-on-surface"
+                            }`}
+                            dir={challengeQuestionSource === "back" ? "rtl" : "ltr"}
+                          >
+                            {questionText}
+                          </h2>
+                        ) : challengeHideQuestionFace && !challengeQuestionRevealed && !challengeRevealed ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setChallengeQuestionRevealed(true);
+                            }}
+                            className="relative inline-flex items-center justify-center cursor-pointer select-none group py-2 px-4 rounded-xl transition-all active:scale-95"
+                            title="انقر للكشف"
+                          >
+                            <h2
+                              className={`text-2xl sm:text-3xl font-black filter blur-lg opacity-25 select-none pointer-events-none ${
+                                hasImage ? "text-white drop-shadow-md" : "text-on-surface"
+                              }`}
+                              dir={challengeQuestionSource === "back" ? "rtl" : "ltr"}
+                            >
+                              {questionText}
+                            </h2>
+                            <EyeOff
+                              className={`absolute w-5 h-5 transition-colors ${
+                                hasImage
+                                  ? "text-white/80 group-hover:text-white"
+                                  : "text-slate-400 group-hover:text-slate-600 dark:text-slate-500 dark:group-hover:text-slate-300"
+                              }`}
+                            />
+                          </button>
+                        ) : (
+                          <div className="relative inline-flex items-center justify-center gap-2.5 max-w-full" dir={challengeQuestionSource === "back" ? "rtl" : "ltr"}>
+                            {challengeQuestionSource === "front" && articleDot && (
+                              <span
+                                className={`w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full shrink-0 ${articleDot.dotClass}`}
+                                title={articleDot.label}
+                              />
+                            )}
+                            <h2
+                              className={`font-black break-words whitespace-pre-wrap leading-snug transition-all ${
+                                challengeRevealed
+                                  ? hasImage
+                                    ? "text-lg sm:text-xl text-white/75"
+                                    : "text-lg sm:text-xl text-slate-500 dark:text-slate-400"
+                                  : hasImage
+                                    ? "text-2xl sm:text-3xl text-white drop-shadow-md"
+                                    : "text-2xl sm:text-3xl text-on-surface"
+                              }`}
+                            >
+                              {questionText}
+                            </h2>
+                          </div>
+                        )}
+
+                        {/* Revealed Target Answer directly inside the square card */}
+                        {challengeRevealed && (
+                          <button
+                            type="button"
+                            onClick={() => targetSpeechText && playPronunciation(targetSpeechText, targetLang, true)}
+                            className="inline-flex items-center justify-center gap-2.5 max-w-full px-3 py-1.5 rounded-2xl transition-transform active:scale-95 cursor-pointer animate-scaleUp"
+                            dir={isTargetBack ? "rtl" : "ltr"}
+                            title="استمع للإجابة"
+                          >
+                            {isTargetFront && articleDot && (
+                              <span
+                                className={`w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full shrink-0 ${articleDot.dotClass}`}
+                                title={articleDot.label}
+                              />
+                            )}
+                            <span
+                              className={`text-2xl sm:text-3xl font-black break-words whitespace-pre-wrap leading-snug ${
+                                hasImage ? "text-white drop-shadow-md" : "text-emerald-600 dark:text-emerald-400"
+                              }`}
+                            >
+                              {targetText}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Subtle bottom timer progress bar when active */}
+                      <div className="w-full h-2 relative z-20 pointer-events-none select-none flex items-end">
+                        {challengeActive && (
+                          <div className={`w-full h-1 rounded-full overflow-hidden ${hasImage ? "bg-white/20" : "bg-slate-200 dark:bg-slate-800"}`}>
+                            <div
+                              className={`h-full rounded-full transition-all duration-1000 ease-linear ${
+                                challengeTimeLeft <= 1 ? "bg-rose-500" : "bg-primary"
+                              }`}
+                              style={{ width: `${timerRatio * 100}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Clean Tactile Action Bar directly below the Square Card (Matches Writing / Listening / Article height) */}
+                    <div className="w-full">
+                      {challengeRevealed ? (
+                        <div className="w-full grid grid-cols-2 gap-3">
+                          <button
+                            type="button"
+                            onClick={() => handleClassicKnow(false)}
+                            className="h-14 sm:h-15 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
+                            title="لم أعرفها"
+                            aria-label="لم أعرفها"
+                          >
+                            <X className="w-7 h-7 stroke-[3]" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleClassicKnow(true)}
+                            className="h-14 sm:h-15 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer animate-scaleUp active:scale-[0.99]"
+                            title="عرفتها"
+                            aria-label="عرفتها"
+                          >
+                            <Check className="w-7 h-7 stroke-[3]" />
+                          </button>
+                        </div>
+                      ) : challengeActive ? (
+                        <button
+                          type="button"
+                          onClick={triggerManualReveal}
+                          className="w-full h-14 sm:h-15 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-black text-base flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.99]"
+                          title="كشف الإجابة"
+                        >
+                          <Eye className="w-5 h-5" />
+                          <span>كشف</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => startChallengeTimer(currentCard)}
+                          className="w-full h-14 sm:h-15 rounded-2xl bg-primary hover:opacity-95 text-white font-black text-base shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.99]"
+                        >
+                          <Play className="w-5 h-5 fill-current" />
+                          <span>ابدأ</span>
+                        </button>
+                      )}
                     </div>
 
                     {/* Unified Navigation Trackpad & Buttons */}
