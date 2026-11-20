@@ -172,6 +172,35 @@ export async function uploadBookCoverToServer(
   return data.book;
 }
 
+export async function downloadBookCoverFromUrlToServer(
+  id: string,
+  imageUrl: string,
+  fallbackUrl?: string
+): Promise<InteractiveBook> {
+  const res = await fetch(`/api/books/${encodeURIComponent(id)}/cover-from-url`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ imageUrl, fallbackUrl })
+  });
+
+  if (!res.ok) {
+    let errMsg = "فشل تنزيل وحفظ الصورة على السيرفر";
+    try {
+      const errData = await res.json();
+      if (errData?.error) errMsg = errData.error;
+    } catch {}
+    throw new Error(errMsg);
+  }
+
+  const data = await res.json();
+  if (!data?.book) {
+    throw new Error("استجابة غير مكتملة من السيرفر بعد تنزيل الصورة");
+  }
+
+  await saveBookToDB(data.book);
+  return data.book;
+}
+
 interface RawFileEntry {
   name: string;
   getBlob: () => Promise<Blob>;

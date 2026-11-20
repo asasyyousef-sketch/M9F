@@ -3281,6 +3281,117 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
     }
   });
 
+  // 8b. DOWNLOAD BOOK COVER FROM INTERNET URL TO SERVER DISK (Permanent local file, NOT an external link)
+  app.post("/api/books/:id/cover-from-url", express.json(), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { imageUrl, fallbackUrl } = req.body || {};
+
+      const list = loadBooksJson();
+      const book = list.find((b: any) => b.id === id);
+      if (!book) {
+        return res.status(404).json({ error: "الكتاب غير موجود" });
+      }
+
+      const candidates = [imageUrl, fallbackUrl]
+        .filter((u): u is string => typeof u === "string" && (u.startsWith("http://") || u.startsWith("https://")));
+
+      if (candidates.length === 0) {
+        return res.status(400).json({ error: "رابط الصورة غير صالح" });
+      }
+
+      let downloadedBuffer: Buffer | null = null;
+      let detectedExt = ".jpg";
+
+      for (const candidateUrl of candidates) {
+        try {
+          let refererHeader = "";
+          try {
+            refererHeader = new URL(candidateUrl).origin + "/";
+          } catch {}
+
+          const response = await fetch(candidateUrl, {
+            headers: {
+              "User-Agent": getRandomUserAgent(),
+              "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+              ...(refererHeader ? { Referer: refererHeader } : {})
+            },
+            signal: AbortSignal.timeout(12000)
+          });
+
+          if (!response.ok) continue;
+
+          const contentType = (response.headers.get("content-type") || "").toLowerCase();
+          const arrayBuf = await response.arrayBuffer();
+          const buf = Buffer.from(arrayBuf);
+
+          if (buf.length < 100 || buf.length > 20 * 1024 * 1024) continue;
+
+          // Verify it is actually an image (either via content-type or magic bytes)
+          const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+          const isJpg = buf[0] === 0xff && buf[1] === 0xd8;
+          const isGif = buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46;
+          const isWebp = buf.length > 12 && buf.slice(0, 4).toString("ascii") === "RIFF" && buf.slice(8, 12).toString("ascii") === "WEBP";
+          const isImageContentType = contentType.startsWith("image/");
+
+          if (!isImageContentType && !isPng && !isJpg && !isGif && !isWebp) {
+            continue;
+          }
+
+          if (isPng || contentType.includes("png")) detectedExt = ".png";
+          else if (isWebp || contentType.includes("webp")) detectedExt = ".webp";
+          else if (isGif || contentType.includes("gif")) detectedExt = ".gif";
+          else if (contentType.includes("svg")) detectedExt = ".svg";
+          else if (isJpg || contentType.includes("jpeg") || contentType.includes("jpg")) detectedExt = ".jpg";
+          else {
+            try {
+              const urlExt = path.extname(new URL(candidateUrl).pathname).toLowerCase();
+              if ([".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"].includes(urlExt)) {
+                detectedExt = urlExt;
+              }
+            } catch {}
+          }
+
+          downloadedBuffer = buf;
+          break;
+        } catch (err) {
+          console.warn(`[Books Server] Failed downloading candidate cover URL (${candidateUrl}):`, err);
+        }
+      }
+
+      if (!downloadedBuffer) {
+        return res.status(422).json({ error: "تعذر تنزيل الصورة المختارة من الإنترنت، جرّب صورة أخرى" });
+      }
+
+      const targetDir = path.join(BOOKS_DIR, id);
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+
+      // Remove previous custom uploaded cover file if one existed
+      if (typeof book.coverImage === "string" && book.coverImage.startsWith(`/uploads/books/${id}/cover-`)) {
+        const oldFileName = path.basename(book.coverImage);
+        const oldFilePath = path.join(targetDir, oldFileName);
+        if (fs.existsSync(oldFilePath)) {
+          try { fs.unlinkSync(oldFilePath); } catch (e) {}
+        }
+      }
+
+      const coverFileName = `cover-${Date.now()}${detectedExt}`;
+      const coverDiskPath = path.join(targetDir, coverFileName);
+      fs.writeFileSync(coverDiskPath, downloadedBuffer);
+
+      book.coverImage = `/uploads/books/${id}/${coverFileName}`;
+      saveBooksJson(list);
+
+      console.log(`[Books Server] Downloaded & saved internet cover image for book "${book.title}" -> ${book.coverImage}`);
+      res.json({ success: true, coverImage: book.coverImage, book });
+    } catch (e: any) {
+      console.error("[Books Server] Error downloading cover from URL:", e);
+      res.status(500).json({ error: e?.message || "فشل تنزيل وحفظ صورة الغلاف على السيرفر" });
+    }
+  });
+
   // 9. UPDATE BOOK METADATA (Saved permanently in books.json for all users)
   app.patch("/api/books/:id", express.json(), (req, res) => {
     try {

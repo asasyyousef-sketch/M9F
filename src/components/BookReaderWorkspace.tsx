@@ -27,7 +27,8 @@ import {
   Menu,
   ImagePlus,
   Save,
-  BookOpen
+  BookOpen,
+  Globe
 } from "lucide-react";
 import { InteractiveBook, BookPage, BookPageMedia, MediaFile } from "../types";
 import {
@@ -38,6 +39,7 @@ import {
   deleteBookFromServer,
   updateBookMetadataOnServer,
   uploadBookCoverToServer,
+  downloadBookCoverFromUrlToServer,
   UploadDiagnosticException
 } from "../utils/bookStorage";
 import {
@@ -169,6 +171,20 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   const [savingDetails, setSavingDetails] = useState<boolean>(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const coverInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Internet Cover Image Search State
+  const [showOnlineCoverSearch, setShowOnlineCoverSearch] = useState<boolean>(false);
+  const [onlineCoverQuery, setOnlineCoverQuery] = useState<string>("");
+  const [onlineCoverResults, setOnlineCoverResults] = useState<
+    Array<{ id: string; thumb: string; full: string; title?: string }>
+  >([]);
+  const [searchingOnlineCovers, setSearchingOnlineCovers] = useState<boolean>(false);
+  const [onlineCoverSearchError, setOnlineCoverSearchError] = useState<string | null>(null);
+  const [selectedOnlineCover, setSelectedOnlineCover] = useState<{
+    url: string;
+    fallbackUrl?: string;
+    previewUrl: string;
+  } | null>(null);
 
   // Load books on mount
   useEffect(() => {
@@ -454,6 +470,11 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     setEditCoverPreview(book.coverImage || "");
     setDetailsError(null);
     setSavingDetails(false);
+    setShowOnlineCoverSearch(false);
+    setOnlineCoverQuery(book.title || "");
+    setOnlineCoverResults([]);
+    setOnlineCoverSearchError(null);
+    setSelectedOnlineCover(null);
     if (coverInputRef.current) coverInputRef.current.value = "";
   };
 
@@ -466,6 +487,10 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
     setEditCoverFile(null);
     setEditCoverPreview("");
     setDetailsError(null);
+    setShowOnlineCoverSearch(false);
+    setOnlineCoverResults([]);
+    setOnlineCoverSearchError(null);
+    setSelectedOnlineCover(null);
     if (coverInputRef.current) coverInputRef.current.value = "";
   };
 
@@ -480,7 +505,78 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
       try { URL.revokeObjectURL(editCoverPreview); } catch {}
     }
     setEditCoverFile(file);
+    setSelectedOnlineCover(null);
     setEditCoverPreview(URL.createObjectURL(file));
+    setDetailsError(null);
+  };
+
+  const searchOnlineCovers = async (queryOverride?: string) => {
+    const q = (queryOverride !== undefined ? queryOverride : onlineCoverQuery).trim();
+    if (!q) {
+      setOnlineCoverSearchError("اكتب كلمة للبحث عن صورة الكتاب");
+      return;
+    }
+    setSearchingOnlineCovers(true);
+    setOnlineCoverSearchError(null);
+    try {
+      let mapped: Array<{ id: string; thumb: string; full: string; title?: string }> = [];
+
+      const res = await fetch(`/api/images?q=${encodeURIComponent(q)}&page=1&provider=duckduckgo`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data?.hits)) {
+          mapped = data.hits
+            .filter((h: any) => h?.webformatURL || h?.largeImageURL)
+            .map((h: any, idx: number) => ({
+              id: h.id || `ddg-${idx}`,
+              thumb: h.webformatURL || h.largeImageURL,
+              full: h.largeImageURL || h.webformatURL,
+              title: h.tags || ""
+            }));
+        }
+      }
+
+      if (mapped.length === 0) {
+        const resFallback = await fetch(`/api/duckduckgo-images?q=${encodeURIComponent(q)}`);
+        if (resFallback.ok) {
+          const dataFallback = await resFallback.json();
+          if (Array.isArray(dataFallback?.results)) {
+            mapped = dataFallback.results
+              .filter((r: any) => r?.image || r?.thumbnail)
+              .map((r: any, idx: number) => ({
+                id: `ddg2-${idx}`,
+                thumb: r.thumbnail || r.image,
+                full: r.image || r.thumbnail,
+                title: r.title || ""
+              }));
+          }
+        }
+      }
+
+      setOnlineCoverResults(mapped);
+      if (mapped.length === 0) {
+        setOnlineCoverSearchError("لم يتم العثور على صور مطابقة، جرّب كلمات بحث أخرى");
+      }
+    } catch (err) {
+      setOnlineCoverSearchError("تعذر البحث عن الصور حالياً، حاول مرة أخرى");
+    } finally {
+      setSearchingOnlineCovers(false);
+    }
+  };
+
+  const handleSelectOnlineCover = (item: { id: string; thumb: string; full: string; title?: string }) => {
+    if (editCoverPreview && editCoverPreview.startsWith("blob:")) {
+      try { URL.revokeObjectURL(editCoverPreview); } catch {}
+    }
+    setEditCoverFile(null);
+    if (coverInputRef.current) coverInputRef.current.value = "";
+    const previewUrl = `/api/proxy-image?url=${encodeURIComponent(item.thumb)}`;
+    setSelectedOnlineCover({
+      url: item.full,
+      fallbackUrl: item.thumb,
+      previewUrl
+    });
+    setEditCoverPreview(previewUrl);
     setDetailsError(null);
   };
 
@@ -500,6 +596,12 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
       let updatedBook: InteractiveBook = editingBook;
       if (editCoverFile) {
         updatedBook = await uploadBookCoverToServer(editingBook.id, editCoverFile);
+      } else if (selectedOnlineCover) {
+        updatedBook = await downloadBookCoverFromUrlToServer(
+          editingBook.id,
+          selectedOnlineCover.url,
+          selectedOnlineCover.fallbackUrl
+        );
       }
       updatedBook = await updateBookMetadataOnServer(editingBook.id, {
         title: trimmedTitle,
@@ -517,6 +619,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
       }
       setEditingBook(null);
       setEditCoverFile(null);
+      setSelectedOnlineCover(null);
       setEditCoverPreview("");
       if (coverInputRef.current) coverInputRef.current.value = "";
     } catch (err: any) {
@@ -1632,12 +1735,12 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
           onClick={closeBookDetailsModal}
         >
           <div
-            className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-100 overflow-hidden text-right"
+            className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-100 overflow-hidden text-right"
             dir="rtl"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80 shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-xl bg-blue-50 text-[#007aff]">
                   <BookOpen className="w-5 h-5" />
@@ -1660,7 +1763,7 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveBookDetails} className="p-5 space-y-4">
+            <form onSubmit={handleSaveBookDetails} className="p-5 space-y-4 overflow-y-auto flex-1">
               {/* Hidden Cover File Input */}
               <input
                 ref={coverInputRef}
@@ -1670,37 +1773,148 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
                 className="hidden"
               />
 
-              {/* Cover Preview + Upload Button */}
-              <div className="flex items-center gap-4 p-3 rounded-xl bg-slate-50 border border-slate-200/80">
-                <div className="w-20 h-28 rounded-lg overflow-hidden border border-slate-200 bg-white shrink-0 flex items-center justify-center shadow-xs">
-                  {editCoverPreview ? (
-                    <img
-                      src={editCoverPreview}
-                      alt={editTitle || editingBook.title}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <span className="text-xs text-slate-400 font-semibold">بدون صورة</span>
-                  )}
+              {/* Cover Preview + Upload / Internet Search Buttons */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-3">
+                <div className="flex items-center gap-4">
+                  <div className="w-20 h-28 rounded-lg overflow-hidden border border-slate-200 bg-white shrink-0 flex items-center justify-center shadow-xs">
+                    {editCoverPreview ? (
+                      <img
+                        src={editCoverPreview}
+                        alt={editTitle || editingBook.title}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-xs text-slate-400 font-semibold">بدون صورة</span>
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <div className="text-xs font-bold text-slate-800">صورة غلاف الكتاب</div>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      {editCoverFile
+                        ? `تم اختيار ملف محلي: ${editCoverFile.name}`
+                        : selectedOnlineCover
+                        ? "تم اختيار صورة من الإنترنت — سيقوم السيرفر بتنزيلها وحفظها على القرص الصلب عند الحفظ."
+                        : "ارفع صورة من جهازك أو ابحث عن غلاف في الإنترنت ليتم تنزيله وحفظه على السيرفر."}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => coverInputRef.current?.click()}
+                        disabled={savingDetails}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-300 hover:border-[#007aff] hover:text-[#007aff] text-xs font-semibold text-slate-700 transition-colors cursor-pointer shadow-2xs disabled:opacity-50"
+                      >
+                        <ImagePlus className="w-4 h-4" />
+                        <span>من الجهاز</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextOpen = !showOnlineCoverSearch;
+                          setShowOnlineCoverSearch(nextOpen);
+                          if (nextOpen && onlineCoverResults.length === 0) {
+                            const q = (onlineCoverQuery || editTitle || editingBook.title || "").trim();
+                            setOnlineCoverQuery(q);
+                            if (q) searchOnlineCovers(q);
+                          }
+                        }}
+                        disabled={savingDetails}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer shadow-2xs disabled:opacity-50 ${
+                          showOnlineCoverSearch
+                            ? "bg-blue-50 border-[#007aff] text-[#007aff]"
+                            : "bg-white border-slate-300 hover:border-[#007aff] hover:text-[#007aff] text-slate-700"
+                        }`}
+                      >
+                        <Globe className="w-4 h-4" />
+                        <span>بحث في الإنترنت</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex-1 min-w-0 space-y-2">
-                  <div className="text-xs font-bold text-slate-800">صورة غلاف الكتاب</div>
-                  <p className="text-[11px] text-slate-500 leading-relaxed">
-                    {editCoverFile
-                      ? `تم اختيار: ${editCoverFile.name}`
-                      : "اختر صورة من جهازك ليتم رفعها وحفظها كغلاف دائم على السيرفر."}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => coverInputRef.current?.click()}
-                    disabled={savingDetails}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-300 hover:border-[#007aff] hover:text-[#007aff] text-xs font-semibold text-slate-700 transition-colors cursor-pointer shadow-2xs disabled:opacity-50"
-                  >
-                    <ImagePlus className="w-4 h-4" />
-                    <span>{editCoverPreview ? "تغيير الصورة" : "إضافة صورة"}</span>
-                  </button>
-                </div>
+                {/* Inline Online Image Search Box */}
+                {showOnlineCoverSearch && (
+                  <div className="pt-3 border-t border-slate-200/80 space-y-2.5">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={onlineCoverQuery}
+                        onChange={(e) => setOnlineCoverQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            searchOnlineCovers();
+                          }
+                        }}
+                        placeholder="ابحث عن غلاف الكتاب..."
+                        className="flex-1 px-3 py-2 rounded-lg border border-slate-300 focus:border-[#007aff] focus:ring-2 focus:ring-blue-500/15 outline-none text-xs text-slate-900 bg-white"
+                        dir="auto"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => searchOnlineCovers()}
+                        disabled={searchingOnlineCovers}
+                        className="px-3.5 py-2 rounded-lg bg-[#007aff] hover:bg-[#0066d6] text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 disabled:opacity-60"
+                      >
+                        {searchingOnlineCovers ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Search className="w-3.5 h-3.5" />
+                        )}
+                        <span>بحث</span>
+                      </button>
+                    </div>
+
+                    {onlineCoverSearchError && (
+                      <div className="text-[11px] text-rose-600 font-medium px-1">
+                        {onlineCoverSearchError}
+                      </div>
+                    )}
+
+                    {searchingOnlineCovers ? (
+                      <div className="py-6 flex items-center justify-center gap-2 text-xs text-slate-500">
+                        <Loader2 className="w-4 h-4 animate-spin text-[#007aff]" />
+                        <span>جاري البحث عن صور الغلاف...</span>
+                      </div>
+                    ) : onlineCoverResults.length > 0 ? (
+                      <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto p-1">
+                        {onlineCoverResults.map((img) => {
+                          const isSelected = selectedOnlineCover?.url === img.full;
+                          const proxiedThumb = `/api/proxy-image?url=${encodeURIComponent(img.thumb)}`;
+                          return (
+                            <button
+                              key={img.id}
+                              type="button"
+                              onClick={() => handleSelectOnlineCover(img)}
+                              className={`relative aspect-[3/4] rounded-lg overflow-hidden border-2 transition-all cursor-pointer bg-white group ${
+                                isSelected
+                                  ? "border-[#007aff] ring-2 ring-blue-500/30 scale-[0.98]"
+                                  : "border-slate-200 hover:border-blue-400"
+                              }`}
+                              title={img.title || "اختيار هذه الصورة"}
+                            >
+                              <img
+                                src={proxiedThumb}
+                                alt={img.title || "Cover option"}
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                              />
+                              {isSelected && (
+                                <div className="absolute inset-0 bg-blue-600/20 flex items-center justify-center">
+                                  <span className="w-6 h-6 rounded-full bg-[#007aff] text-white flex items-center justify-center shadow">
+                                    <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                  </span>
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
               </div>
 
               {/* Title */}
