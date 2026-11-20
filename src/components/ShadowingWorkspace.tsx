@@ -48,6 +48,11 @@ import {
 } from "./ShadowingVoiceSettingsModal";
 import { ReviewChatModal } from "./ReviewChatModal";
 import { MessageSquare } from "lucide-react";
+import {
+  requestMobileSafeMicrophoneStream,
+  getMicrophoneErrorMessage,
+  createCompatibleMediaRecorder
+} from "../utils/audioRecording";
 
 export type ShadowingProvider = ShadowingVoiceProvider;
 
@@ -171,7 +176,7 @@ function levenshteinDistance(a: string, b: string): number {
   return matrix[b.length][a.length];
 }
 
-// Extract real audio waveform from an AudioBuffer or Blob
+// Extract real detailed audio waveform from an AudioBuffer or Blob
 async function extractRealWaveform(blob: Blob, barsCount = 80): Promise<number[]> {
   try {
     const arrayBuffer = await blob.arrayBuffer();
@@ -181,25 +186,35 @@ async function extractRealWaveform(blob: Blob, barsCount = 80): Promise<number[]
     const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
     const channelData = audioBuffer.getChannelData(0);
     const blockSize = Math.floor(channelData.length / barsCount);
+    if (blockSize <= 0) {
+      ctx.close().catch(() => {});
+      return [];
+    }
     const samples: number[] = [];
 
-    let maxVal = 0.005;
+    let maxVal = 0.001;
     for (let i = 0; i < barsCount; i++) {
-      let sum = 0;
+      let sumSq = 0;
+      let maxAbs = 0;
       const start = i * blockSize;
       const end = Math.min(start + blockSize, channelData.length);
       for (let j = start; j < end; j++) {
-        sum += Math.abs(channelData[j]);
+        const s = channelData[j];
+        const a = Math.abs(s);
+        sumSq += s * s;
+        if (a > maxAbs) maxAbs = a;
       }
-      const avg = sum / (end - start || 1);
-      samples.push(avg);
-      if (avg > maxVal) maxVal = avg;
+      const rms = Math.sqrt(sumSq / (end - start || 1));
+      const energy = rms * 0.65 + maxAbs * 0.35;
+      samples.push(energy);
+      if (energy > maxVal) maxVal = energy;
     }
     ctx.close().catch(() => {});
 
     return samples.map((s) => {
-      const norm = Math.max(0.12, Math.min(0.95, s / maxVal));
-      return parseFloat(norm.toFixed(2));
+      const ratio = Math.min(1, s / maxVal);
+      const norm = 0.1 + Math.pow(ratio, 0.85) * 0.88;
+      return parseFloat(Math.max(0.1, Math.min(0.98, norm)).toFixed(2));
     });
   } catch (err) {
     console.warn("Waveform decode error:", err);
@@ -1161,7 +1176,7 @@ export function ShadowingWorkspace({
     return Math.min(100, Math.max(10, calculated));
   }, []);
 
-  // Start Mic Recording & Web Speech Recognition
+  // Start Mic Recording & Web Speech Recognition (Mobile-Safe)
   const startRecording = async () => {
     setSpeechError(null);
     setRecognizedText("");
@@ -1172,13 +1187,7 @@ export function ShadowingWorkspace({
     lastSampleTimeRef.current = Date.now();
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      });
+      const stream = await requestMobileSafeMicrophoneStream();
       micStreamRef.current = stream;
 
       // Audio Analyzer for live visualizer
@@ -1186,6 +1195,7 @@ export function ShadowingWorkspace({
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioContextClass) {
           const ctx = new AudioContextClass();
+          ctx.resume?.().catch(() => {});
           audioContextRef.current = ctx;
           const source = ctx.createMediaStreamSource(stream);
           const analyser = ctx.createAnalyser();
@@ -1232,9 +1242,9 @@ export function ShadowingWorkspace({
         console.warn("AudioContext visualizer error:", e);
       }
 
-      // MediaRecorder to record user's audio file
+      // Cross-browser MediaRecorder
       audioChunksRef.current = [];
-      const mediaRecorder = new MediaRecorder(stream);
+      const { recorder: mediaRecorder, mimeType: recordedMimeType } = createCompatibleMediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
@@ -1244,7 +1254,7 @@ export function ShadowingWorkspace({
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const audioBlob = new Blob(audioChunksRef.current, { type: recordedMimeType });
         const url = URL.createObjectURL(audioBlob);
         setRecordedAudioUrl(url);
 
@@ -1308,10 +1318,7 @@ export function ShadowingWorkspace({
         };
 
         recognition.onerror = (event: any) => {
-          console.warn("Speech recognition error:", event.error);
-          if (event.error === "not-allowed") {
-            setSpeechError("يرجى إعطاء الإذن للمتصفح باستخدام الميكروفون.");
-          }
+          console.warn("Speech recognition notice:", event.error);
         };
 
         try {
@@ -1321,7 +1328,7 @@ export function ShadowingWorkspace({
       }
     } catch (err) {
       console.error("Microphone access error:", err);
-      setSpeechError("تعذر الوصول للميكروفون. يرجى التحقق من أذونات المتصفح.");
+      setSpeechError(getMicrophoneErrorMessage(err));
       setIsRecording(false);
     }
   };

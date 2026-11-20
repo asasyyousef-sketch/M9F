@@ -1409,6 +1409,163 @@ async function startServer() {
     }
   });
 
+  // 6b. Fast segment waveform peak extraction (uses ffmpeg on server disk to extract real detailed peaks in ~30ms)
+  const waveformSegmentCache = new Map<string, number[]>();
+
+  function resolveLocalMediaDiskPath(rawUrl: string): string | null {
+    if (!rawUrl || typeof rawUrl !== "string") return null;
+    let urlPath = rawUrl.trim();
+    if (urlPath.startsWith("http://") || urlPath.startsWith("https://")) {
+      try {
+        urlPath = new URL(urlPath).pathname;
+      } catch {
+        return null;
+      }
+    }
+    urlPath = urlPath.split("?")[0].split("#")[0];
+    try {
+      urlPath = decodeURIComponent(urlPath);
+    } catch {}
+
+    const rootDir = path.resolve(process.cwd());
+
+    if (urlPath.startsWith("/uploads/")) {
+      const rel = urlPath.replace(/^\/+/, "");
+      const directPath = path.resolve(rootDir, rel);
+      if (directPath.startsWith(rootDir) && fs.existsSync(directPath) && fs.statSync(directPath).isFile()) {
+        return directPath;
+      }
+      const publicPath = path.resolve(rootDir, "public", rel);
+      if (publicPath.startsWith(rootDir) && fs.existsSync(publicPath) && fs.statSync(publicPath).isFile()) {
+        return publicPath;
+      }
+    }
+
+    if (urlPath.startsWith("/api/media/stream/")) {
+      const rawParam = urlPath.slice("/api/media/stream/".length).replace(/^\/+/, "");
+      const filename = path.basename(rawParam);
+      const mediaPath = path.resolve(MEDIA_DIR, filename);
+      if (mediaPath.startsWith(path.resolve(MEDIA_DIR)) && fs.existsSync(mediaPath) && fs.statSync(mediaPath).isFile()) {
+        return mediaPath;
+      }
+      const directBookPath = path.resolve(BOOKS_DIR, rawParam);
+      if (directBookPath.startsWith(path.resolve(BOOKS_DIR)) && fs.existsSync(directBookPath) && fs.statSync(directBookPath).isFile()) {
+        return directBookPath;
+      }
+      const findInDir = (dir: string): string | null => {
+        if (!fs.existsSync(dir)) return null;
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const ent of entries) {
+          const full = path.join(dir, ent.name);
+          if (ent.isDirectory()) {
+            const sub = findInDir(full);
+            if (sub) return sub;
+          } else {
+            const entLower = ent.name.toLowerCase();
+            const targetLower = filename.toLowerCase();
+            if (entLower === targetLower || entLower.replace(/[^a-z0-9]/g, "") === targetLower.replace(/[^a-z0-9]/g, "")) {
+              return full;
+            }
+          }
+        }
+        return null;
+      };
+      const foundBook = findInDir(BOOKS_DIR);
+      if (foundBook) return foundBook;
+    }
+
+    return null;
+  }
+
+  app.get("/api/media/waveform-segment", async (req, res) => {
+    try {
+      const mediaUrl = (req.query.url as string) || "";
+      const startTime = Math.max(0, parseFloat(req.query.startTime as string) || 0);
+      const rawEnd = parseFloat(req.query.endTime as string);
+      const endTime = !isNaN(rawEnd) && rawEnd > startTime ? rawEnd : startTime + 2.5;
+      const duration = Math.min(120, Math.max(0.2, endTime - startTime));
+      const bars = Math.min(160, Math.max(20, parseInt(req.query.bars as string, 10) || 80));
+
+      const diskPath = resolveLocalMediaDiskPath(mediaUrl);
+      if (!diskPath) {
+        return res.json({ success: false, peaks: [] });
+      }
+
+      const cacheKey = `${diskPath}|${startTime.toFixed(3)}|${duration.toFixed(3)}|${bars}`;
+      const cached = waveformSegmentCache.get(cacheKey);
+      if (cached && cached.length > 0) {
+        return res.json({ success: true, peaks: cached });
+      }
+
+      const { stdout } = await execFileAsync(
+        "ffmpeg",
+        [
+          "-hide_banner",
+          "-loglevel", "error",
+          "-ss", startTime.toFixed(3),
+          "-t", duration.toFixed(3),
+          "-i", diskPath,
+          "-vn",
+          "-ac", "1",
+          "-ar", "4000",
+          "-f", "s16le",
+          "pipe:1"
+        ],
+        {
+          encoding: "buffer",
+          maxBuffer: 8 * 1024 * 1024,
+          timeout: 8000
+        }
+      );
+
+      const pcmBuf = Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout || "");
+      const totalSamples = Math.floor(pcmBuf.length / 2);
+      if (totalSamples < bars) {
+        return res.json({ success: false, peaks: [] });
+      }
+
+      const blockSize = Math.floor(totalSamples / bars);
+      const rawEnergy: number[] = [];
+      let maxEnergy = 0.0005;
+
+      for (let i = 0; i < bars; i++) {
+        const startIdx = i * blockSize;
+        const endIdx = Math.min(startIdx + blockSize, totalSamples);
+        let sumSq = 0;
+        let maxAbs = 0;
+        for (let j = startIdx; j < endIdx; j++) {
+          const sample = pcmBuf.readInt16LE(j * 2) / 32768;
+          const absVal = Math.abs(sample);
+          sumSq += sample * sample;
+          if (absVal > maxAbs) maxAbs = absVal;
+        }
+        const count = endIdx - startIdx || 1;
+        const rms = Math.sqrt(sumSq / count);
+        const energy = rms * 0.65 + maxAbs * 0.35;
+        rawEnergy.push(energy);
+        if (energy > maxEnergy) maxEnergy = energy;
+      }
+
+      const peaks = rawEnergy.map((e) => {
+        const ratio = Math.min(1, e / maxEnergy);
+        const detailed = Math.pow(ratio, 0.85);
+        const val = 0.1 + detailed * 0.88;
+        return parseFloat(Math.max(0.1, Math.min(0.98, val)).toFixed(2));
+      });
+
+      if (waveformSegmentCache.size > 1000) {
+        const firstKey = waveformSegmentCache.keys().next().value;
+        if (firstKey) waveformSegmentCache.delete(firstKey);
+      }
+      waveformSegmentCache.set(cacheKey, peaks);
+
+      return res.json({ success: true, peaks });
+    } catch (err: any) {
+      console.warn("[Waveform Segment] Extraction fallback:", err?.message || err);
+      return res.json({ success: false, peaks: [] });
+    }
+  });
+
   // 7. Save / Add / Update Subtitle Track on a Media File or Book Media Track
   app.post("/api/media/:id(*)/subtitles", (req, res) => {
     try {

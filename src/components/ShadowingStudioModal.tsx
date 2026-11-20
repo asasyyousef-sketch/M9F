@@ -24,6 +24,11 @@ import {
   ShadowingVoiceSettingsModal,
   ShadowingVoiceProvider
 } from "./ShadowingVoiceSettingsModal";
+import {
+  requestMobileSafeMicrophoneStream,
+  getMicrophoneErrorMessage,
+  createCompatibleMediaRecorder
+} from "../utils/audioRecording";
 
 export interface ShadowingStudioModalProps {
   isOpen: boolean;
@@ -86,7 +91,7 @@ function levenshteinDistance(a: string, b: string): number {
   return matrix[b.length][a.length];
 }
 
-// Real Audio Waveform Extraction from Blob (default 80 bars for high fidelity)
+// Real Audio Waveform Extraction from Blob (RMS + Peak envelope for detailed speech contrast)
 async function extractRealWaveform(blob: Blob, barsCount = 80): Promise<number[]> {
   try {
     const arrayBuffer = await blob.arrayBuffer();
@@ -96,25 +101,35 @@ async function extractRealWaveform(blob: Blob, barsCount = 80): Promise<number[]
     const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
     const channelData = audioBuffer.getChannelData(0);
     const blockSize = Math.floor(channelData.length / barsCount);
+    if (blockSize <= 0) {
+      ctx.close().catch(() => {});
+      return [];
+    }
     const samples: number[] = [];
 
-    let maxVal = 0.005;
+    let maxVal = 0.001;
     for (let i = 0; i < barsCount; i++) {
-      let sum = 0;
+      let sumSq = 0;
+      let maxAbs = 0;
       const start = i * blockSize;
       const end = Math.min(start + blockSize, channelData.length);
       for (let j = start; j < end; j++) {
-        sum += Math.abs(channelData[j]);
+        const s = channelData[j];
+        const a = Math.abs(s);
+        sumSq += s * s;
+        if (a > maxAbs) maxAbs = a;
       }
-      const avg = sum / (end - start || 1);
-      samples.push(avg);
-      if (avg > maxVal) maxVal = avg;
+      const rms = Math.sqrt(sumSq / (end - start || 1));
+      const energy = rms * 0.65 + maxAbs * 0.35;
+      samples.push(energy);
+      if (energy > maxVal) maxVal = energy;
     }
     ctx.close().catch(() => {});
 
     return samples.map((s) => {
-      const norm = Math.max(0.12, Math.min(0.95, s / maxVal));
-      return parseFloat(norm.toFixed(2));
+      const ratio = Math.min(1, s / maxVal);
+      const norm = 0.1 + Math.pow(ratio, 0.85) * 0.88;
+      return parseFloat(Math.max(0.1, Math.min(0.98, norm)).toFixed(2));
     });
   } catch (err) {
     console.warn("Waveform decode error:", err);
@@ -122,55 +137,127 @@ async function extractRealWaveform(blob: Blob, barsCount = 80): Promise<number[]
   }
 }
 
-// Cache of decoded AudioBuffers to avoid re-fetching
+// Caches for instant detailed waveforms across cues and re-entries
 const mediaAudioBufferCache = new Map<string, AudioBuffer>();
+const mediaAudioBufferPromiseCache = new Map<string, Promise<AudioBuffer | null>>();
+const segmentPeaksCache = new Map<string, number[]>();
+const segmentPeaksPromiseCache = new Map<string, Promise<number[]>>();
 
-// Extract exact peaks from Media URL slice between startTime and endTime
-async function getMediaSegmentPeaks(mediaUrl: string, startTime: number, endTime: number, barsCount = 80): Promise<number[]> {
-  try {
-    const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtxClass) return [];
+function makeSegmentPeaksKey(mediaUrl: string, startTime: number, endTime: number, barsCount: number): string {
+  return `${mediaUrl}|${startTime.toFixed(3)}|${endTime.toFixed(3)}|${barsCount}`;
+}
 
-    let audioBuffer = mediaAudioBufferCache.get(mediaUrl);
-    if (!audioBuffer) {
+async function getOrDecodeMediaBuffer(mediaUrl: string): Promise<AudioBuffer | null> {
+  const existing = mediaAudioBufferCache.get(mediaUrl);
+  if (existing) return existing;
+
+  const inflight = mediaAudioBufferPromiseCache.get(mediaUrl);
+  if (inflight) return inflight;
+
+  const promise = (async () => {
+    try {
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtxClass) return null;
       const resp = await fetch(mediaUrl);
-      if (!resp.ok) return [];
+      if (!resp.ok) return null;
       const arrayBuffer = await resp.arrayBuffer();
       const ctx = new AudioCtxClass();
-      audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-      mediaAudioBufferCache.set(mediaUrl, audioBuffer);
+      const decoded = await ctx.decodeAudioData(arrayBuffer);
+      mediaAudioBufferCache.set(mediaUrl, decoded);
       ctx.close().catch(() => {});
+      return decoded;
+    } catch {
+      return null;
+    } finally {
+      mediaAudioBufferPromiseCache.delete(mediaUrl);
     }
+  })();
 
-    const channelData = audioBuffer.getChannelData(0);
-    const sampleRate = audioBuffer.sampleRate;
-    const startSample = Math.max(0, Math.floor(startTime * sampleRate));
-    const endSample = Math.min(channelData.length, Math.floor(endTime * sampleRate));
-    const segmentLength = endSample - startSample;
-    if (segmentLength <= 0) return [];
+  mediaAudioBufferPromiseCache.set(mediaUrl, promise);
+  return promise;
+}
 
-    const blockSize = Math.floor(segmentLength / barsCount);
-    if (blockSize <= 0) return [];
+// Extract exact detailed peaks from Server ffmpeg endpoint first, with deduplicated client AudioBuffer fallback
+async function getMediaSegmentPeaks(mediaUrl: string, startTime: number, endTime: number, barsCount = 80): Promise<number[]> {
+  if (!mediaUrl) return [];
+  const key = makeSegmentPeaksKey(mediaUrl, startTime, endTime, barsCount);
+  const cached = segmentPeaksCache.get(key);
+  if (cached && cached.length > 0) return cached;
 
-    const peaks: number[] = [];
-    let max = 0.001;
+  const inflight = segmentPeaksPromiseCache.get(key);
+  if (inflight) return inflight;
 
-    for (let i = 0; i < barsCount; i++) {
-      let sum = 0;
-      const start = startSample + i * blockSize;
-      const end = Math.min(start + blockSize, endSample);
-      for (let j = start; j < end; j++) {
-        sum += Math.abs(channelData[j]);
+  const promise = (async () => {
+    try {
+      // 1. Fast Server Segment Extraction (~30ms for any file size, even large videos or mobile)
+      if (!mediaUrl.startsWith("blob:") && !mediaUrl.startsWith("data:")) {
+        try {
+          const qs = new URLSearchParams({
+            url: mediaUrl,
+            startTime: String(Math.max(0, startTime)),
+            endTime: String(Math.max(startTime + 0.2, endTime)),
+            bars: String(barsCount)
+          });
+          const res = await fetch(`/api/media/waveform-segment?${qs.toString()}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.success && Array.isArray(data.peaks) && data.peaks.length > 0) {
+              segmentPeaksCache.set(key, data.peaks);
+              return data.peaks as number[];
+            }
+          }
+        } catch {}
       }
-      const avg = sum / (end - start || 1);
-      peaks.push(avg);
-      if (avg > max) max = avg;
-    }
 
-    return peaks.map((p) => Math.max(0.12, Math.min(0.95, p / max)));
-  } catch (err) {
-    return [];
-  }
+      // 2. Client-side deduplicated AudioBuffer slice fallback
+      const audioBuffer = await getOrDecodeMediaBuffer(mediaUrl);
+      if (!audioBuffer) return [];
+
+      const channelData = audioBuffer.getChannelData(0);
+      const sampleRate = audioBuffer.sampleRate;
+      const startSample = Math.max(0, Math.floor(startTime * sampleRate));
+      const endSample = Math.min(channelData.length, Math.floor(endTime * sampleRate));
+      const segmentLength = endSample - startSample;
+      if (segmentLength <= 0) return [];
+
+      const blockSize = Math.floor(segmentLength / barsCount);
+      if (blockSize <= 0) return [];
+
+      const peaks: number[] = [];
+      let max = 0.0005;
+
+      for (let i = 0; i < barsCount; i++) {
+        let sumSq = 0;
+        let maxAbs = 0;
+        const start = startSample + i * blockSize;
+        const end = Math.min(start + blockSize, endSample);
+        for (let j = start; j < end; j++) {
+          const s = channelData[j];
+          const a = Math.abs(s);
+          sumSq += s * s;
+          if (a > maxAbs) maxAbs = a;
+        }
+        const rms = Math.sqrt(sumSq / (end - start || 1));
+        const energy = rms * 0.65 + maxAbs * 0.35;
+        peaks.push(energy);
+        if (energy > max) max = energy;
+      }
+
+      const normalized = peaks.map((p) => {
+        const ratio = Math.min(1, p / max);
+        return parseFloat(Math.max(0.1, Math.min(0.98, 0.1 + Math.pow(ratio, 0.85) * 0.88)).toFixed(2));
+      });
+      segmentPeaksCache.set(key, normalized);
+      return normalized;
+    } catch {
+      return [];
+    } finally {
+      segmentPeaksPromiseCache.delete(key);
+    }
+  })();
+
+  segmentPeaksPromiseCache.set(key, promise);
+  return promise;
 }
 
 // Natural speech-envelope simulated peaks (matches Repetition mode)
@@ -263,24 +350,45 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   const originalWaveformContainerRef = useRef<HTMLDivElement | null>(null);
 
   // High-fidelity original audio waveform (80 bars)
-  const [originalWaveform, setOriginalWaveform] = useState<number[]>(() => generateSimulatedPeaks(cue.text, 80));
+  const [originalWaveform, setOriginalWaveform] = useState<number[]>(() => {
+    if (mediaUrl) {
+      const cached = segmentPeaksCache.get(makeSegmentPeaksKey(mediaUrl, cue.startTime, cue.endTime, 80));
+      if (cached && cached.length > 0) return cached;
+    }
+    return generateSimulatedPeaks(cue.text, 80);
+  });
 
   useEffect(() => {
     let isCancelled = false;
-    setOriginalWaveform(generateSimulatedPeaks(cue.text, 80));
+    const cached = mediaUrl
+      ? segmentPeaksCache.get(makeSegmentPeaksKey(mediaUrl, cue.startTime, cue.endTime, 80))
+      : undefined;
 
-    if (mediaUrl) {
-      getMediaSegmentPeaks(mediaUrl, cue.startTime, cue.endTime, 80).then((peaks) => {
-        if (!isCancelled && peaks.length > 0) {
-          setOriginalWaveform(peaks);
-        }
-      });
+    if (cached && cached.length > 0) {
+      setOriginalWaveform(cached);
+    } else {
+      setOriginalWaveform(generateSimulatedPeaks(cue.text, 80));
+      if (mediaUrl) {
+        getMediaSegmentPeaks(mediaUrl, cue.startTime, cue.endTime, 80).then((peaks) => {
+          if (!isCancelled && peaks.length > 0) {
+            setOriginalWaveform(peaks);
+          }
+        });
+      }
+    }
+
+    // Background-preload next cue waveform so switching sentences is instantaneous
+    if (mediaUrl && allCues && currentCueIndex >= 0 && currentCueIndex + 1 < allCues.length) {
+      const nextCue = allCues[currentCueIndex + 1];
+      if (nextCue) {
+        getMediaSegmentPeaks(mediaUrl, nextCue.startTime, nextCue.endTime, 80).catch(() => {});
+      }
     }
 
     return () => {
       isCancelled = true;
     };
-  }, [cue.id, cue.startTime, cue.endTime, cue.text, mediaUrl]);
+  }, [cue.id, cue.startTime, cue.endTime, cue.text, mediaUrl, currentCueIndex, allCues]);
 
   // Reset state when cue changes
   useEffect(() => {
@@ -582,7 +690,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     }).catch(console.error);
   };
 
-  // Start Mic Recording & Web Speech Recognition
+  // Start Mic Recording & Web Speech Recognition (Mobile-Safe)
   const startRecording = async () => {
     setSpeechError(null);
     setRecognizedText("");
@@ -592,26 +700,21 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
     setUserWaveform([]);
     lastSampleTimeRef.current = Date.now();
 
-    // If simultaneous shadowing mode is on, play original audio at the exact same moment!
-    if (shadowingMode === "simultaneous") {
-      onPlayOriginalSegment(cue.startTime, cue.endTime, playbackSpeed);
-    }
-
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      // Request microphone FIRST inside user gesture before starting simultaneous playback
+      const stream = await requestMobileSafeMicrophoneStream();
       micStreamRef.current = stream;
+
+      if (shadowingMode === "simultaneous") {
+        onPlayOriginalSegment(cue.startTime, cue.endTime, playbackSpeed);
+      }
 
       // Audio Analyzer for live visualizer
       try {
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioContextClass) {
           const ctx = new AudioContextClass();
+          ctx.resume?.().catch(() => {});
           audioContextRef.current = ctx;
           const source = ctx.createMediaStreamSource(stream);
           const analyser = ctx.createAnalyser();
@@ -660,9 +763,9 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
         console.warn("AudioContext visualizer error:", e);
       }
 
-      // MediaRecorder to record user's audio file
+      // Cross-browser MediaRecorder (works on iOS Safari mp4/aac as well as Chrome Android webm)
       audioChunksRef.current = [];
-      const mediaRecorder = new MediaRecorder(stream);
+      const { recorder: mediaRecorder, mimeType: recordedMimeType } = createCompatibleMediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
@@ -672,7 +775,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const audioBlob = new Blob(audioChunksRef.current, { type: recordedMimeType });
         const url = URL.createObjectURL(audioBlob);
         setRecordedAudioUrl(url);
 
@@ -692,13 +795,12 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
         setRecordingSeconds((prev) => prev + 1);
       }, 1000);
 
-      // Web Speech Recognition
+      // Web Speech Recognition (Optional overlay; never stops MediaRecorder on mobile conflicts)
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRecognition) {
         const recognition = new SpeechRecognition();
         recognition.continuous = true;
         recognition.interimResults = true;
-        // Set speech language code based on primary language
         const langMap: Record<string, string> = {
           de: "de-DE",
           en: "en-US",
@@ -722,10 +824,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
         };
 
         recognition.onerror = (event: any) => {
-          console.warn("Speech recognition error:", event.error);
-          if (event.error === "not-allowed") {
-            setSpeechError("يرجى إعطاء الإذن للمتصفح باستخدام الميكروفون.");
-          }
+          console.warn("Speech recognition notice:", event.error);
         };
 
         try {
@@ -735,7 +834,7 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
       }
     } catch (err: any) {
       console.error("Microphone access error:", err);
-      setSpeechError("تعذر الوصول للميكروفون. يرجى التحقق من أذونات المتصفح.");
+      setSpeechError(getMicrophoneErrorMessage(err));
       setIsRecording(false);
     }
   };
