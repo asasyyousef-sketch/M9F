@@ -112,26 +112,60 @@ export async function deleteBookFromServer(id: string): Promise<boolean> {
 
 export async function updateBookMetadataOnServer(
   id: string,
-  updates: { title?: string; subtitle?: string; author?: string }
-): Promise<InteractiveBook | null> {
-  const books = await fetchBooksFromServer();
-  const book = books.find((b) => b.id === id);
-  if (!book) return null;
+  updates: { title?: string; subtitle?: string; author?: string; coverImage?: string }
+): Promise<InteractiveBook> {
+  const res = await fetch(`/api/books/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates)
+  });
 
-  if (updates.title) book.title = updates.title;
-  if (updates.subtitle !== undefined) book.subtitle = updates.subtitle;
-  if (updates.author !== undefined) book.author = updates.author;
+  if (!res.ok) {
+    let errMsg = "فشل حفظ تفاصيل الكتاب على السيرفر";
+    try {
+      const errData = await res.json();
+      if (errData?.error) errMsg = errData.error;
+    } catch {}
+    throw new Error(errMsg);
+  }
 
-  await saveBookToDB(book);
-  try {
-    await fetch(`/api/books/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(updates)
-    });
-  } catch (e) {}
+  const data = await res.json();
+  if (!data?.book) {
+    throw new Error("استجابة غير مكتملة من السيرفر");
+  }
 
-  return book;
+  await saveBookToDB(data.book);
+  return data.book;
+}
+
+export async function uploadBookCoverToServer(
+  id: string,
+  coverFile: File
+): Promise<InteractiveBook> {
+  const formData = new FormData();
+  formData.append("cover", coverFile, coverFile.name);
+
+  const res = await fetch(`/api/books/${encodeURIComponent(id)}/cover`, {
+    method: "POST",
+    body: formData
+  });
+
+  if (!res.ok) {
+    let errMsg = "فشل رفع صورة الغلاف إلى السيرفر";
+    try {
+      const errData = await res.json();
+      if (errData?.error) errMsg = errData.error;
+    } catch {}
+    throw new Error(errMsg);
+  }
+
+  const data = await res.json();
+  if (!data?.book) {
+    throw new Error("استجابة غير مكتملة من السيرفر بعد رفع الصورة");
+  }
+
+  await saveBookToDB(data.book);
+  return data.book;
 }
 
 interface RawFileEntry {

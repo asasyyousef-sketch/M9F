@@ -24,7 +24,10 @@ import {
   RefreshCw,
   Bug,
   Sparkles,
-  Menu
+  Menu,
+  ImagePlus,
+  Save,
+  BookOpen
 } from "lucide-react";
 import { InteractiveBook, BookPage, BookPageMedia, MediaFile } from "../types";
 import {
@@ -32,6 +35,8 @@ import {
   uploadBookToServer,
   uploadBookFolderToServer,
   deleteBookFromServer,
+  updateBookMetadataOnServer,
+  uploadBookCoverToServer,
   UploadDiagnosticException
 } from "../utils/bookStorage";
 import {
@@ -129,6 +134,17 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
   const [copiedReport, setCopiedReport] = useState<boolean>(false);
   const [showTechnicalDetails, setShowTechnicalDetails] = useState<boolean>(false);
   const [expandRealtimeStages, setExpandRealtimeStages] = useState<boolean>(true);
+
+  // Book Details & Edit Modal State (Persisted to Server for Everyone)
+  const [editingBook, setEditingBook] = useState<InteractiveBook | null>(null);
+  const [editTitle, setEditTitle] = useState<string>("");
+  const [editSubtitle, setEditSubtitle] = useState<string>("");
+  const [editAuthor, setEditAuthor] = useState<string>("");
+  const [editCoverFile, setEditCoverFile] = useState<File | null>(null);
+  const [editCoverPreview, setEditCoverPreview] = useState<string>("");
+  const [savingDetails, setSavingDetails] = useState<boolean>(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const coverInputRef = useRef<HTMLInputElement | null>(null);
 
   // Load books on mount
   useEffect(() => {
@@ -386,6 +402,92 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  // Open Book Details & Edit Modal
+  const openBookDetailsModal = (e: React.MouseEvent, book: InteractiveBook) => {
+    e.stopPropagation();
+    if (editCoverPreview && editCoverPreview.startsWith("blob:")) {
+      try { URL.revokeObjectURL(editCoverPreview); } catch {}
+    }
+    setEditingBook(book);
+    setEditTitle(book.title || "");
+    setEditSubtitle(book.subtitle || "");
+    setEditAuthor(book.author || "");
+    setEditCoverFile(null);
+    setEditCoverPreview(book.coverImage || "");
+    setDetailsError(null);
+    setSavingDetails(false);
+    if (coverInputRef.current) coverInputRef.current.value = "";
+  };
+
+  const closeBookDetailsModal = () => {
+    if (savingDetails) return;
+    if (editCoverPreview && editCoverPreview.startsWith("blob:")) {
+      try { URL.revokeObjectURL(editCoverPreview); } catch {}
+    }
+    setEditingBook(null);
+    setEditCoverFile(null);
+    setEditCoverPreview("");
+    setDetailsError(null);
+    if (coverInputRef.current) coverInputRef.current.value = "";
+  };
+
+  const handleCoverFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/") && !/\.(jpg|jpeg|png|webp|gif|svg)$/i.test(file.name)) {
+      setDetailsError("الرجاء اختيار ملف صورة صالح (PNG, JPG, WebP)");
+      return;
+    }
+    if (editCoverPreview && editCoverPreview.startsWith("blob:")) {
+      try { URL.revokeObjectURL(editCoverPreview); } catch {}
+    }
+    setEditCoverFile(file);
+    setEditCoverPreview(URL.createObjectURL(file));
+    setDetailsError(null);
+  };
+
+  const handleSaveBookDetails = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingBook) return;
+    const trimmedTitle = editTitle.trim();
+    if (!trimmedTitle) {
+      setDetailsError("الرجاء إدخال اسم للكتاب");
+      return;
+    }
+
+    setSavingDetails(true);
+    setDetailsError(null);
+
+    try {
+      let updatedBook: InteractiveBook = editingBook;
+      if (editCoverFile) {
+        updatedBook = await uploadBookCoverToServer(editingBook.id, editCoverFile);
+      }
+      updatedBook = await updateBookMetadataOnServer(editingBook.id, {
+        title: trimmedTitle,
+        subtitle: editSubtitle.trim(),
+        author: editAuthor.trim()
+      });
+
+      setBooks((prev) => prev.map((b) => (b.id === updatedBook.id ? updatedBook : b)));
+      if (selectedBook?.id === updatedBook.id) {
+        setSelectedBook(updatedBook);
+      }
+
+      if (editCoverPreview && editCoverPreview.startsWith("blob:")) {
+        try { URL.revokeObjectURL(editCoverPreview); } catch {}
+      }
+      setEditingBook(null);
+      setEditCoverFile(null);
+      setEditCoverPreview("");
+      if (coverInputRef.current) coverInputRef.current.value = "";
+    } catch (err: any) {
+      setDetailsError(err?.message || "حدث خطأ أثناء حفظ بيانات الكتاب على السيرفر");
+    } finally {
+      setSavingDetails(false);
     }
   };
 
@@ -1466,19 +1568,199 @@ export const BookReaderWorkspace: React.FC<BookReaderWorkspaceProps> = ({
                 {isEditMode ? (
                   <button
                     onClick={(e) => handleDeleteBook(e, book.id)}
-                    className="p-1 text-rose-500 hover:text-rose-700 text-xs font-bold"
+                    className="p-1 text-rose-500 hover:text-rose-700 text-xs font-bold cursor-pointer"
                   >
                     Delete
                   </button>
                 ) : (
                   <ChevronRight className="w-5 h-5 text-gray-400" />
                 )}
-                <Info className="w-5 h-5 text-gray-400" />
+                <button
+                  type="button"
+                  onClick={(e) => openBookDetailsModal(e, book)}
+                  className="p-1.5 -m-1.5 rounded-full text-gray-400 hover:text-[#007aff] hover:bg-blue-50 transition-colors cursor-pointer"
+                  title="تفاصيل وتعديل الكتاب"
+                  aria-label={`Details for ${book.title}`}
+                >
+                  <Info className="w-5 h-5" />
+                </button>
               </div>
             </div>
           ))
         )}
       </div>
+
+      {/* Book Details & Edit Modal (Saved directly on server for all users) */}
+      {editingBook && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={closeBookDetailsModal}
+        >
+          <div
+            className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-100 overflow-hidden text-right"
+            dir="rtl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-blue-50 text-[#007aff]">
+                  <BookOpen className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">تفاصيل الكتاب</h3>
+                  <p className="text-[11px] text-slate-500">
+                    التعديلات تُحفظ على السيرفر وتظهر لجميع المستخدمين
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeBookDetailsModal}
+                disabled={savingDetails}
+                className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200/70 transition-colors cursor-pointer disabled:opacity-50"
+                aria-label="إغلاق"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveBookDetails} className="p-5 space-y-4">
+              {/* Hidden Cover File Input */}
+              <input
+                ref={coverInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,image/*"
+                onChange={handleCoverFileSelect}
+                className="hidden"
+              />
+
+              {/* Cover Preview + Upload Button */}
+              <div className="flex items-center gap-4 p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+                <div className="w-20 h-28 rounded-lg overflow-hidden border border-slate-200 bg-white shrink-0 flex items-center justify-center shadow-xs">
+                  {editCoverPreview ? (
+                    <img
+                      src={editCoverPreview}
+                      alt={editTitle || editingBook.title}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-xs text-slate-400 font-semibold">بدون صورة</span>
+                  )}
+                </div>
+
+                <div className="flex-1 min-w-0 space-y-2">
+                  <div className="text-xs font-bold text-slate-800">صورة غلاف الكتاب</div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    {editCoverFile
+                      ? `تم اختيار: ${editCoverFile.name}`
+                      : "اختر صورة من جهازك ليتم رفعها وحفظها كغلاف دائم على السيرفر."}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => coverInputRef.current?.click()}
+                    disabled={savingDetails}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-300 hover:border-[#007aff] hover:text-[#007aff] text-xs font-semibold text-slate-700 transition-colors cursor-pointer shadow-2xs disabled:opacity-50"
+                  >
+                    <ImagePlus className="w-4 h-4" />
+                    <span>{editCoverPreview ? "تغيير الصورة" : "إضافة صورة"}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Title */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  اسم الكتاب <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  placeholder="أدخل اسم الكتاب..."
+                  disabled={savingDetails}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:border-[#007aff] focus:ring-2 focus:ring-blue-500/15 outline-none text-sm text-slate-900 bg-white transition-all"
+                  dir="auto"
+                />
+              </div>
+
+              {/* Subtitle */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  الوصف أو العنوان الفرعي
+                </label>
+                <input
+                  type="text"
+                  value={editSubtitle}
+                  onChange={(e) => setEditSubtitle(e.target.value)}
+                  placeholder="مثال: Kurs- und Arbeitsbuch"
+                  disabled={savingDetails}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:border-[#007aff] focus:ring-2 focus:ring-blue-500/15 outline-none text-sm text-slate-900 bg-white transition-all"
+                  dir="auto"
+                />
+              </div>
+
+              {/* Author */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  المؤلف / دار النشر
+                </label>
+                <input
+                  type="text"
+                  value={editAuthor}
+                  onChange={(e) => setEditAuthor(e.target.value)}
+                  placeholder="مثال: Hueber Verlag"
+                  disabled={savingDetails}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:border-[#007aff] focus:ring-2 focus:ring-blue-500/15 outline-none text-sm text-slate-900 bg-white transition-all"
+                  dir="auto"
+                />
+              </div>
+
+              {/* Book Info Stats */}
+              <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 text-[11px] text-slate-500">
+                <span>عدد الصفحات: <strong className="text-slate-700">{editingBook.pages?.length || editingBook.totalPages || 0}</strong></span>
+                <span>الملفات الصوتية والمرئية: <strong className="text-slate-700">{editingBook.allMedia?.length || 0}</strong></span>
+              </div>
+
+              {detailsError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{detailsError}</span>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="pt-2 flex items-center justify-end gap-2.5 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={closeBookDetailsModal}
+                  disabled={savingDetails}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingDetails}
+                  className="px-5 py-2 rounded-xl bg-[#007aff] hover:bg-[#0066d6] text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-2 shadow-xs disabled:opacity-60"
+                >
+                  {savingDetails ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>جاري الحفظ...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>حفظ على السيرفر</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

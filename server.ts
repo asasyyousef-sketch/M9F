@@ -3219,18 +3219,89 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
     }
   });
 
-  // 8. UPDATE BOOK METADATA
+  const coverUploadMulter = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 20 * 1024 * 1024 }
+  });
+
+  // 8. UPLOAD BOOK COVER IMAGE (Saved permanently on server disk for all users)
+  app.post("/api/books/:id/cover", coverUploadMulter.single("cover"), (req, res) => {
+    try {
+      const { id } = req.params;
+      const list = loadBooksJson();
+      const book = list.find((b: any) => b.id === id);
+      if (!book) {
+        return res.status(404).json({ error: "الكتاب غير موجود" });
+      }
+
+      if (!req.file || !req.file.buffer) {
+        return res.status(400).json({ error: "الرجاء اختيار صورة صالحة للغلاف" });
+      }
+
+      const allowedExts = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"];
+      let ext = path.extname(req.file.originalname || "").toLowerCase();
+      if (!allowedExts.includes(ext)) {
+        const mime = (req.file.mimetype || "").toLowerCase();
+        if (mime.includes("png")) ext = ".png";
+        else if (mime.includes("webp")) ext = ".webp";
+        else if (mime.includes("gif")) ext = ".gif";
+        else if (mime.includes("svg")) ext = ".svg";
+        else if (mime.includes("jpeg") || mime.includes("jpg")) ext = ".jpg";
+        else {
+          return res.status(400).json({ error: "صيغة الصورة غير مدعومة" });
+        }
+      }
+
+      const targetDir = path.join(BOOKS_DIR, id);
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+
+      // Remove previous custom uploaded cover file if one existed
+      if (typeof book.coverImage === "string" && book.coverImage.startsWith(`/uploads/books/${id}/cover-`)) {
+        const oldFileName = path.basename(book.coverImage);
+        const oldFilePath = path.join(targetDir, oldFileName);
+        if (fs.existsSync(oldFilePath)) {
+          try { fs.unlinkSync(oldFilePath); } catch (e) {}
+        }
+      }
+
+      const coverFileName = `cover-${Date.now()}${ext}`;
+      const coverDiskPath = path.join(targetDir, coverFileName);
+      fs.writeFileSync(coverDiskPath, req.file.buffer);
+
+      book.coverImage = `/uploads/books/${id}/${coverFileName}`;
+      saveBooksJson(list);
+
+      console.log(`[Books Server] Updated cover image for book "${book.title}" -> ${book.coverImage}`);
+      res.json({ success: true, coverImage: book.coverImage, book });
+    } catch (e: any) {
+      console.error("[Books Server] Error uploading cover:", e);
+      res.status(500).json({ error: e?.message || "فشل حفظ صورة الغلاف على السيرفر" });
+    }
+  });
+
+  // 9. UPDATE BOOK METADATA (Saved permanently in books.json for all users)
   app.patch("/api/books/:id", express.json(), (req, res) => {
     try {
       const { id } = req.params;
-      const { title, subtitle, author } = req.body;
+      const { title, subtitle, author, coverImage } = req.body;
       const list = loadBooksJson();
       const book = list.find((b: any) => b.id === id);
       if (!book) return res.status(404).json({ error: "الكتاب غير موجود" });
 
-      if (title) book.title = title.trim();
-      if (subtitle !== undefined) book.subtitle = subtitle;
-      if (author !== undefined) book.author = author;
+      if (typeof title === "string" && title.trim()) {
+        book.title = title.trim();
+      }
+      if (subtitle !== undefined) {
+        book.subtitle = typeof subtitle === "string" ? subtitle.trim() : "";
+      }
+      if (author !== undefined) {
+        book.author = typeof author === "string" ? author.trim() : "";
+      }
+      if (coverImage !== undefined) {
+        book.coverImage = typeof coverImage === "string" ? coverImage.trim() : "";
+      }
 
       saveBooksJson(list);
       res.json({ success: true, book });
