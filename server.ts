@@ -14,7 +14,6 @@ import { fileURLToPath } from "url";
 import multer from "multer";
 import { pipeline } from "stream";
 import JSZip from "jszip";
-import { generate as generateSelfSignedCert } from "selfsigned";
 import { initialFolders, initialCards } from "./src/data/seed";
 import { getSupabase, SUPABASE_SQL_SCHEMA } from "./src/supabaseClient";
 import { formatSubtitleTrackProtocol } from "./src/utils/subtitleNaming";
@@ -11250,41 +11249,114 @@ ${structureDirective}
       }
 
       const notAfterDate = new Date(now + 365 * 24 * 60 * 60 * 1000);
-      const altNames: Array<{ type: 2 | 7; value?: string; ip?: string }> = [
-        { type: 2, value: "localhost" },
-        { type: 7, ip: "127.0.0.1" },
-        { type: 7, ip: "::1" }
-      ];
       const host = os.hostname();
-      if (host && host !== "localhost") {
-        altNames.push({ type: 2, value: host });
-      }
-      for (const ip of currentIps) {
-        altNames.push({ type: 7, ip });
+      let generatedPrivate = "";
+      let generatedCert = "";
+
+      const selfsignedMod: any = await import("selfsigned").catch(() => null);
+      if (selfsignedMod?.generate) {
+        const altNames: Array<{ type: 2 | 7; value?: string; ip?: string }> = [
+          { type: 2, value: "localhost" },
+          { type: 7, ip: "127.0.0.1" },
+          { type: 7, ip: "::1" }
+        ];
+        if (host && host !== "localhost") {
+          altNames.push({ type: 2, value: host });
+        }
+        for (const ip of currentIps) {
+          altNames.push({ type: 7, ip });
+        }
+
+        const pems = await selfsignedMod.generate(
+          [{ name: "commonName", value: currentIps[0] || "localhost" }],
+          {
+            keyType: "ec",
+            curve: "P-256",
+            algorithm: "sha256",
+            notAfterDate,
+            extensions: [
+              { name: "basicConstraints", cA: false },
+              { name: "keyUsage", digitalSignature: true, keyEncipherment: true },
+              { name: "extKeyUsage", serverAuth: true },
+              { name: "subjectAltName", altNames }
+            ]
+          }
+        );
+        generatedPrivate = pems.private;
+        generatedCert = pems.cert;
+      } else {
+        // Fallback to OpenSSL CLI when selfsigned package is not yet installed in node_modules
+        const tmpPrefix = path.join(os.tmpdir(), `studysmarter-tls-${process.pid}-${Date.now()}`);
+        const cnfPath = `${tmpPrefix}.cnf`;
+        const keyPath = `${tmpPrefix}.key`;
+        const certPath = `${tmpPrefix}.crt`;
+        try {
+          const dnsEntries = ["localhost", ...(host && host !== "localhost" ? [host] : [])];
+          const ipEntries = ["127.0.0.1", "::1", ...currentIps];
+          const altLines = [
+            ...dnsEntries.map((d, i) => `DNS.${i + 1} = ${d}`),
+            ...ipEntries.map((ip, i) => `IP.${i + 1} = ${ip}`)
+          ];
+          const cnfContent = [
+            "[req]",
+            "distinguished_name = dn",
+            "x509_extensions = v3_req",
+            "prompt = no",
+            "",
+            "[dn]",
+            `CN = ${currentIps[0] || "localhost"}`,
+            "",
+            "[v3_req]",
+            "basicConstraints = CA:FALSE",
+            "keyUsage = digitalSignature, keyEncipherment",
+            "extendedKeyUsage = serverAuth",
+            "subjectAltName = @alt_names",
+            "",
+            "[alt_names]",
+            ...altLines,
+            ""
+          ].join("\n");
+          fs.writeFileSync(cnfPath, cnfContent, "utf-8");
+          await execFileAsync(
+            "openssl",
+            [
+              "req",
+              "-x509",
+              "-newkey",
+              "rsa:2048",
+              "-nodes",
+              "-keyout",
+              keyPath,
+              "-out",
+              certPath,
+              "-days",
+              "365",
+              "-config",
+              cnfPath,
+              "-extensions",
+              "v3_req"
+            ],
+            { timeout: 15000 }
+          );
+          generatedPrivate = fs.readFileSync(keyPath, "utf-8");
+          generatedCert = fs.readFileSync(certPath, "utf-8");
+        } finally {
+          for (const f of [cnfPath, keyPath, certPath]) {
+            try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {}
+          }
+        }
       }
 
-      const pems = await generateSelfSignedCert(
-        [{ name: "commonName", value: currentIps[0] || "localhost" }],
-        {
-          keyType: "ec",
-          curve: "P-256",
-          algorithm: "sha256",
-          notAfterDate,
-          extensions: [
-            { name: "basicConstraints", cA: false },
-            { name: "keyUsage", digitalSignature: true, keyEncipherment: true },
-            { name: "extKeyUsage", serverAuth: true },
-            { name: "subjectAltName", altNames }
-          ]
-        }
-      );
+      if (!generatedPrivate || !generatedCert) {
+        return null;
+      }
 
       try {
         fs.writeFileSync(
           certFilePath,
           JSON.stringify({
-            private: pems.private,
-            cert: pems.cert,
+            private: generatedPrivate,
+            cert: generatedCert,
             ips: currentIps,
             expiresAt: notAfterDate.getTime()
           }),
@@ -11292,7 +11364,7 @@ ${structureDirective}
         );
       } catch {}
 
-      return { private: pems.private, cert: pems.cert, ips: currentIps };
+      return { private: generatedPrivate, cert: generatedCert, ips: currentIps };
     } catch (err) {
       console.warn("[Local HTTPS] Could not generate local TLS certificate, falling back to HTTP only:", err);
       return null;
