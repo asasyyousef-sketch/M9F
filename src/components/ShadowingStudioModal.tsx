@@ -16,7 +16,8 @@ import {
   Waves,
   RefreshCw,
   Repeat,
-  Sliders
+  Sliders,
+  Scissors
 } from "lucide-react";
 import { SubtitleCue } from "../types";
 import { fetchGradioAudioBlob, speakClient } from "./Modals";
@@ -57,6 +58,7 @@ export interface ShadowingStudioModalProps {
   getCurrentTime?: () => number;
   getPlaybackSnapshot?: () => MediaPlaybackSnapshot;
   mediaUrl?: string;
+  onSplitCue?: (cue: SubtitleCue) => void;
 }
 
 // Format time to 00:01.4
@@ -190,7 +192,7 @@ async function getOrDecodeMediaBuffer(mediaUrl: string): Promise<AudioBuffer | n
 }
 
 // Extract exact detailed peaks from Server ffmpeg endpoint first, with deduplicated client AudioBuffer fallback
-async function getMediaSegmentPeaks(mediaUrl: string, startTime: number, endTime: number, barsCount = 80): Promise<number[]> {
+export async function getMediaSegmentPeaks(mediaUrl: string, startTime: number, endTime: number, barsCount = 80): Promise<number[]> {
   if (!mediaUrl) return [];
   const key = makeSegmentPeaksKey(mediaUrl, startTime, endTime, barsCount);
   const cached = segmentPeaksCache.get(key);
@@ -273,7 +275,7 @@ async function getMediaSegmentPeaks(mediaUrl: string, startTime: number, endTime
 }
 
 // Natural speech-envelope simulated peaks (matches Repetition mode)
-function generateSimulatedPeaks(text: string, count = 80): number[] {
+export function generateSimulatedPeaks(text: string, count = 80): number[] {
   const peaks: number[] = [];
   let hash = 0;
   for (let i = 0; i < text.length; i++) {
@@ -310,7 +312,8 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
   currentTime,
   getCurrentTime,
   getPlaybackSnapshot,
-  mediaUrl
+  mediaUrl,
+  onSplitCue
 }) => {
   // Modes: "listen-repeat" (استمع ثم ردّد), "simultaneous" (محاكاة متزامنة), "loop" (تكرار تدريبي)
   const [shadowingMode, setShadowingMode] = useState<"listen-repeat" | "simultaneous" | "loop">("listen-repeat");
@@ -1039,6 +1042,19 @@ export const ShadowingStudioModal: React.FC<ShadowingStudioModalProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Split Long Sentence Button */}
+            {onSplitCue && (
+              <button
+                type="button"
+                onClick={() => onSplitCue(cue)}
+                className="px-2.5 py-2 rounded-xl border bg-slate-800/90 hover:bg-sky-500/20 text-sky-300 hover:text-sky-200 border-slate-700/80 hover:border-sky-500/50 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-bold"
+                title="تقطيع هذه الجملة الطويلة إلى مقاطع صوتية ونصية"
+              >
+                <Scissors className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">تقطيع</span>
+              </button>
+            )}
+
             {/* Voice Settings Icon Button */}
             <button
               type="button"

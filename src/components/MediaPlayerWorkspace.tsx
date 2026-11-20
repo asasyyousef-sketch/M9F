@@ -70,7 +70,8 @@ import {
   FolderInput,
   FolderArchive,
   FileSpreadsheet,
-  CornerUpRight
+  CornerUpRight,
+  Scissors
 } from "lucide-react";
 import { MediaFile, MediaSubtitleTrack, SubtitleCue, MediaFolder, MediaBookContext } from "../types";
 import {
@@ -87,6 +88,7 @@ import { GradioTranscriberModal } from "./GradioTranscriberModal";
 import { SubtitleStyleModal, SubtitleStylePanel } from "./SubtitleStyleModal";
 import { SubtitleOptionsModal, SubtitleOptionsPanel } from "./SubtitleOptionsModal";
 import { CleanCueEditorModal } from "./CleanCueEditorModal";
+import { CueSplitModal } from "./CueSplitModal";
 import { ALL_AVAILABLE_MODELS, AIModelOption } from "./AICorrectorWorkspace";
 import { MediaExplorerView } from "./MediaExplorerView";
 import { BookReaderWorkspace } from "./BookReaderWorkspace";
@@ -603,6 +605,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     openAbove: boolean;
   } | null>(null);
   const [cueToDelete, setCueToDelete] = useState<SubtitleCue | null>(null);
+  const [cueToSplit, setCueToSplit] = useState<SubtitleCue | null>(null);
 
   // Transient In-Memory AI Sentence Chat State (Cleared when exiting or switching video/audio)
   const fullscreenExitCooldownRef = useRef<number>(0);
@@ -699,8 +702,8 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
 
     const rect = event.currentTarget.getBoundingClientRect();
-    const menuWidth = 145;
-    const menuHeight = 120;
+    const menuWidth = 165;
+    const menuHeight = 215;
     const padding = 12;
 
     // Smart vertical calculation: if close to bottom of window, flip above
@@ -2790,6 +2793,112 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
 
     setEditingCue(null);
     originalCueTimesRef.current = null;
+  };
+
+  // Split a long cue into 2+ smaller cues (and optionally split synced secondary cue cleanly)
+  const handleSaveSplitCues = async (
+    originalCueId: string,
+    splitCues: SubtitleCue[],
+    shouldSyncSecondary?: boolean
+  ) => {
+    if (!currentFile || !activeTrack || splitCues.length < 2) return;
+
+    const origCue = activeTrack.cues.find((c) => c.id === originalCueId);
+    const updatedCues = activeTrack.cues
+      .filter((c) => c.id !== originalCueId)
+      .concat(splitCues)
+      .sort((a, b) => a.startTime - b.startTime);
+
+    setCueToSplit(null);
+
+    await saveSubtitleTrackToServer(
+      currentFile.id,
+      activeTrack.label,
+      updatedCues,
+      "manual",
+      activeTrack.id,
+      { language: activeTrack.language }
+    );
+
+    const doSync = shouldSyncSecondary !== undefined ? shouldSyncSecondary : syncWithSecondaryTrack;
+    let firstSecondarySplitText: string | undefined;
+
+    if (doSync && secondaryTrack && secondaryTrack.id !== activeTrack.id && secondaryTrack.cues.length > 0) {
+      let matchingSecCue: SubtitleCue | undefined = secondaryCueMap.get(originalCueId);
+      if (!matchingSecCue) {
+        matchingSecCue = secondaryTrack.cues.find((sc) => sc.id === originalCueId);
+      }
+      if (!matchingSecCue && origCue) {
+        let bestIdx = -1;
+        let maxOverlap = 0;
+        secondaryTrack.cues.forEach((sc, idx) => {
+          const overlap = Math.max(0, Math.min(sc.endTime, origCue.endTime) - Math.max(sc.startTime, origCue.startTime));
+          if (overlap > maxOverlap) {
+            maxOverlap = overlap;
+            bestIdx = idx;
+          }
+        });
+        if (bestIdx !== -1 && maxOverlap > 0.1) {
+          matchingSecCue = secondaryTrack.cues[bestIdx];
+        }
+      }
+
+      if (matchingSecCue) {
+        const secWords = matchingSecCue.text.trim().split(/\s+/).filter(Boolean);
+        const totalCharWeight = splitCues.reduce((sum, sc) => sum + Math.max(1, sc.text.trim().length), 0);
+        let wordCursor = 0;
+
+        const secSplitCues: SubtitleCue[] = splitCues.map((sc, idx) => {
+          let partText = "";
+          if (secWords.length === 0) {
+            partText = "";
+          } else if (idx === splitCues.length - 1) {
+            partText = secWords.slice(wordCursor).join(" ");
+          } else {
+            const weight = Math.max(1, sc.text.trim().length) / totalCharWeight;
+            const remainingParts = splitCues.length - idx - 1;
+            const remainingWords = secWords.length - wordCursor;
+            const targetCount = Math.max(
+              remainingWords > remainingParts ? 1 : 0,
+              Math.min(Math.max(0, remainingWords - remainingParts), Math.round(secWords.length * weight))
+            );
+            partText = secWords.slice(wordCursor, wordCursor + targetCount).join(" ");
+            wordCursor += targetCount;
+          }
+          if (idx === 0) firstSecondarySplitText = partText || matchingSecCue!.text;
+          return {
+            id: sc.id,
+            startTime: sc.startTime,
+            endTime: sc.endTime,
+            text: partText || matchingSecCue!.text
+          };
+        });
+
+        const updatedSecCues = secondaryTrack.cues
+          .filter((sc) => sc.id !== matchingSecCue!.id)
+          .concat(secSplitCues)
+          .sort((a, b) => a.startTime - b.startTime);
+
+        await saveSubtitleTrackToServer(
+          currentFile.id,
+          secondaryTrack.label,
+          updatedSecCues,
+          "manual",
+          secondaryTrack.id,
+          { language: secondaryTrack.language }
+        );
+      }
+    }
+
+    if (shadowingTargetCue && shadowingTargetCue.id === originalCueId && splitCues[0]) {
+      setShadowingTargetCue({
+        ...splitCues[0],
+        secondaryText: firstSecondarySplitText ?? shadowingTargetCue.secondaryText
+      });
+    }
+
+    triggerHud(`تم تقطيع الجملة إلى ${splitCues.length} مقاطع ✓`, "✂️");
+    setSuccessMsg(`تم تقطيع الجملة إلى ${splitCues.length} مقاطع وحفظها بنجاح ✂️`);
   };
 
   // Delete single cue
@@ -6463,7 +6572,24 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                   <span>نسخ</span>
                 </button>
 
-                {/* 3. Shadowing / شادوينج ومحاكاة النطق 🎙️ */}
+                {/* 3. Split Long Sentence / تقطيع الجملة ✂️ */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const targetCue = cueMenuAnchor.cue;
+                    setCueOptionsMenuId(null);
+                    setCueMenuAnchor(null);
+                    smoothPause();
+                    setCueToSplit(targetCue);
+                  }}
+                  className="w-full px-2.5 py-2 hover:bg-sky-500/20 text-sky-300 hover:text-sky-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer border-0"
+                >
+                  <Scissors className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                  <span>تقطيع الجملة ✂️</span>
+                </button>
+
+                {/* 4. Shadowing / شادوينج ومحاكاة النطق 🎙️ */}
                 <button
                   type="button"
                   onClick={(e) => {
@@ -7388,6 +7514,32 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
           getCurrentTime={getShadowingCurrentTime}
           getPlaybackSnapshot={getShadowingPlaybackSnapshot}
           mediaUrl={currentFile?.url}
+          onSplitCue={(targetCue) => {
+            handleStopShadowingSegment();
+            setCueToSplit(targetCue);
+          }}
+        />
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: CUE SPLIT STUDIO (SPLIT LONG SENTENCE INTO 2+ PARTS) */}
+      {/* ======================================================== */}
+      {cueToSplit && (
+        <CueSplitModal
+          cue={cueToSplit}
+          mediaUrl={currentFile?.url}
+          activeTrackLabel={activeTrack?.label || "الترجمة"}
+          secondaryTrackLabel={secondaryTrack && secondaryTrack.id !== activeTrackId ? secondaryTrack.label : undefined}
+          initialSyncSecondary={Boolean(secondaryTrack && secondaryTrack.id !== activeTrackId)}
+          isPlaying={isPlaying}
+          getPlaybackSnapshot={getShadowingPlaybackSnapshot}
+          onPlaySegment={(start, end) => handlePlayShadowingSegment(start, end, 1.0)}
+          onStopSegment={handleStopShadowingSegment}
+          onSaveSplit={handleSaveSplitCues}
+          onClose={() => {
+            handleStopShadowingSegment();
+            setCueToSplit(null);
+          }}
         />
       )}
 
