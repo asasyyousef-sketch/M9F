@@ -51,7 +51,9 @@ import { MessageSquare } from "lucide-react";
 import {
   requestMobileSafeMicrophoneStream,
   getMicrophoneErrorMessage,
-  createCompatibleMediaRecorder
+  createCompatibleMediaRecorder,
+  isHttpInsecureOrigin,
+  getHttpsSwitchUrl
 } from "../utils/audioRecording";
 
 export type ShadowingProvider = ShadowingVoiceProvider;
@@ -2110,9 +2112,28 @@ export function ShadowingWorkspace({
 
               {/* Pronunciation Error Notice */}
               {speechError && (
-                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-                  <span>{speechError}</span>
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                    <span>{speechError}</span>
+                  </div>
+                  {isHttpInsecureOrigin() && (
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1.5 border-t border-rose-500/20">
+                      <span className="text-[11px] text-rose-200/80">
+                        عند الفتح لأول مرة، اضغط «خيارات متقدمة (Advanced)» ثم «المتابعة (Proceed)».
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const httpsUrl = getHttpsSwitchUrl();
+                          if (httpsUrl) window.location.href = httpsUrl;
+                        }}
+                        className="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[11px] transition-colors cursor-pointer"
+                      >
+                        فتح عبر HTTPS الآن
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 

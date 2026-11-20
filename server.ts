@@ -2,6 +2,9 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import os from "os";
+import http from "http";
+import https from "https";
+import net from "net";
 import crypto from "crypto";
 import { spawn, execSync, execFile } from "child_process";
 import { promisify } from "util";
@@ -11,6 +14,7 @@ import { fileURLToPath } from "url";
 import multer from "multer";
 import { pipeline } from "stream";
 import JSZip from "jszip";
+import { generate as generateSelfSignedCert } from "selfsigned";
 import { initialFolders, initialCards } from "./src/data/seed";
 import { getSupabase, SUPABASE_SQL_SCHEMA } from "./src/supabaseClient";
 import { formatSubtitleTrackProtocol } from "./src/utils/subtitleNaming";
@@ -11211,15 +11215,137 @@ ${structureDirective}
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const getLocalLanIps = (): string[] => {
+    const ips = new Set<string>();
+    try {
+      const nets = os.networkInterfaces();
+      for (const ifaceList of Object.values(nets)) {
+        if (!ifaceList) continue;
+        for (const info of ifaceList) {
+          if (info.family === "IPv4" && !info.internal && info.address) {
+            ips.add(info.address);
+          }
+        }
+      }
+    } catch {}
+    return Array.from(ips).sort();
+  };
+
+  const getOrCreateLocalTlsCredentials = async (): Promise<{ private: string; cert: string; ips: string[] } | null> => {
+    try {
+      const certFilePath = path.join(process.cwd(), ".local_https_cert.json");
+      const currentIps = getLocalLanIps();
+      const now = Date.now();
+
+      if (fs.existsSync(certFilePath)) {
+        try {
+          const cached = JSON.parse(fs.readFileSync(certFilePath, "utf-8"));
+          const cachedIps: string[] = Array.isArray(cached?.ips) ? cached.ips : [];
+          const ipsMatch = currentIps.every((ip) => cachedIps.includes(ip));
+          const notExpired = typeof cached?.expiresAt === "number" && cached.expiresAt > now + 7 * 24 * 60 * 60 * 1000;
+          if (cached?.private && cached?.cert && ipsMatch && notExpired) {
+            return { private: cached.private, cert: cached.cert, ips: currentIps };
+          }
+        } catch {}
+      }
+
+      const notAfterDate = new Date(now + 365 * 24 * 60 * 60 * 1000);
+      const altNames: Array<{ type: 2 | 7; value?: string; ip?: string }> = [
+        { type: 2, value: "localhost" },
+        { type: 7, ip: "127.0.0.1" },
+        { type: 7, ip: "::1" }
+      ];
+      const host = os.hostname();
+      if (host && host !== "localhost") {
+        altNames.push({ type: 2, value: host });
+      }
+      for (const ip of currentIps) {
+        altNames.push({ type: 7, ip });
+      }
+
+      const pems = await generateSelfSignedCert(
+        [{ name: "commonName", value: currentIps[0] || "localhost" }],
+        {
+          keyType: "ec",
+          curve: "P-256",
+          algorithm: "sha256",
+          notAfterDate,
+          extensions: [
+            { name: "basicConstraints", cA: false },
+            { name: "keyUsage", digitalSignature: true, keyEncipherment: true },
+            { name: "extKeyUsage", serverAuth: true },
+            { name: "subjectAltName", altNames }
+          ]
+        }
+      );
+
+      try {
+        fs.writeFileSync(
+          certFilePath,
+          JSON.stringify({
+            private: pems.private,
+            cert: pems.cert,
+            ips: currentIps,
+            expiresAt: notAfterDate.getTime()
+          }),
+          "utf-8"
+        );
+      } catch {}
+
+      return { private: pems.private, cert: pems.cert, ips: currentIps };
+    } catch (err) {
+      console.warn("[Local HTTPS] Could not generate local TLS certificate, falling back to HTTP only:", err);
+      return null;
+    }
+  };
+
+  const httpServer = http.createServer(app);
+  const tlsCreds = await getOrCreateLocalTlsCredentials();
+  const httpsServer = tlsCreds ? https.createServer({ key: tlsCreds.private, cert: tlsCreds.cert }, app) : null;
+
+  const onListening = () => {
     console.log(`Server is running at http://localhost:${PORT}`);
+    if (httpsServer) {
+      const lanIps = tlsCreds?.ips || [];
+      console.log(`[HTTPS Ready] Local TLS active on same port (${PORT}): https://localhost:${PORT}`);
+      for (const ip of lanIps) {
+        console.log(`[Mobile HTTPS URL] https://${ip}:${PORT}`);
+      }
+    }
     console.log(`[Piper Server] Ready. Running background verification for Piper binaries and default models...`);
     repairPiperServerCore().then((res) => {
       console.log(`[Piper Server Startup Check] Verification complete. Executable status: ${res.success}`);
     }).catch((err) => {
       console.warn(`[Piper Server Startup Check] Non-blocking startup check error:`, err);
     });
-  });
+  };
+
+  if (httpsServer) {
+    const dualServer = net.createServer((socket) => {
+      socket.on("error", () => {});
+      const onReadable = () => {
+        const chunk = socket.read();
+        if (chunk === null) {
+          if (socket.readableEnded || socket.destroyed) {
+            socket.destroy();
+          } else {
+            socket.once("readable", onReadable);
+          }
+          return;
+        }
+        socket.unshift(chunk);
+        if (chunk[0] === 0x16) {
+          httpsServer.emit("connection", socket);
+        } else {
+          httpServer.emit("connection", socket);
+        }
+      };
+      socket.once("readable", onReadable);
+    });
+    dualServer.listen(PORT, "0.0.0.0", onListening);
+  } else {
+    httpServer.listen(PORT, "0.0.0.0", onListening);
+  }
 }
 
 startServer();

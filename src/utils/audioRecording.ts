@@ -108,3 +108,14 @@ export function createCompatibleMediaRecorder(stream: MediaStream): {
   const finalMime = recorder.mimeType || selectedMime || "audio/webm";
   return { recorder, mimeType: finalMime };
 }
+
+export function isHttpInsecureOrigin(): boolean {
+  if (typeof window === "undefined") return false;
+  return !window.isSecureContext && window.location.protocol === "http:";
+}
+
+export function getHttpsSwitchUrl(): string {
+  if (typeof window === "undefined") return "";
+  return window.location.href.replace(/^http:/i, "https:");
+}
+
