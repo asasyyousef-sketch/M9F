@@ -4390,50 +4390,53 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
     }
   });
 
-  // API Route - Lazy Fetch Single Image for a Spoken Challenge on Demand
+  // API Route - Lazy Fetch Image + Candidates for a Spoken Challenge on Demand
   app.get("/api/spoken-challenges/image", async (req, res) => {
     const query = String(req.query.q || "").trim();
-    if (!query) {
-      return res.json({ success: false, imageUrl: "" });
+    const fallbackQuery = String(req.query.fallback || "").trim();
+    if (!query && !fallbackQuery) {
+      return res.json({ success: false, imageUrl: "", candidateUrls: [] });
     }
 
     try {
-      const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}`;
-      const pageRes = await fetch(searchUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-          "Accept-Language": "en-US,en;q=0.9,ar;q=0.8"
-        }
-      });
+      const searchAttempts = Array.from(
+        new Set(
+          [
+            query,
+            query ? cleanQueryForSearch(query, 2) : "",
+            fallbackQuery,
+            fallbackQuery ? cleanQueryForSearch(fallbackQuery, 2) : ""
+          ]
+            .map((s) => s.trim())
+            .filter(Boolean)
+        )
+      );
 
-      let imageUrl = "";
-      if (pageRes.ok) {
-        const html = await pageRes.text();
-        const match = html.match(/vqd=['"]?([^'"&]+)/) || html.match(/vqd=([0-9-]+)/);
-        if (match && match[1]) {
-          const vqd = match[1];
-          const imgApiUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,`;
-          const imgRes = await fetch(imgApiUrl, {
-            headers: {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-              "Referer": "https://duckduckgo.com/"
+      const candidateUrls: string[] = [];
+
+      for (const attemptQuery of searchAttempts) {
+        if (candidateUrls.length >= 6) break;
+        const { hits } = await searchDuckDuckGoImages(attemptQuery, "1");
+        if (hits && hits.length > 0) {
+          for (const h of hits) {
+            const url = h.largeImageURL || h.webformatURL || h.image || h.url;
+            if (url && typeof url === "string" && url.startsWith("http") && !candidateUrls.includes(url)) {
+              candidateUrls.push(url);
             }
-          });
-          if (imgRes.ok) {
-            const data = await imgRes.json();
-            if (data.results && Array.isArray(data.results) && data.results.length > 0) {
-              const firstValid = data.results.find((it: any) => it.image && it.image.startsWith("http"));
-              if (firstValid) {
-                imageUrl = firstValid.image;
-              }
-            }
+            if (candidateUrls.length >= 8) break;
           }
         }
+        if (candidateUrls.length > 0) break;
       }
 
-      return res.json({ success: true, imageUrl });
-    } catch (e: any) {
-      return res.json({ success: false, imageUrl: "" });
+      const imageUrl = candidateUrls[0] || "";
+      return res.json({
+        success: Boolean(imageUrl),
+        imageUrl,
+        candidateUrls
+      });
+    } catch {
+      return res.json({ success: false, imageUrl: "", candidateUrls: [] });
     }
   });
 

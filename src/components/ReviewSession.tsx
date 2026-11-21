@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, Flag, Volume2, HelpCircle, RefreshCw, CheckCircle, AlertCircle, Timer, Award, Trophy, ArrowLeft, ArrowRight, Play, Pause, Eye, RotateCcw, ThumbsUp, ThumbsDown, Sparkles, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, MoreHorizontal, Sliders, Shuffle, EyeOff, VolumeX, Clock, Layers, Pencil, Plus, Check, DownloadCloud, Image as ImageIcon, CheckCircle2, Loader2, Download, Minimize2, Maximize2, Repeat, Trash2, ArrowUp, ArrowDown, Music, Mic, Save, Square, Bot, MessageSquare, Activity } from "lucide-react";
+import { X, Flag, Volume2, HelpCircle, RefreshCw, CheckCircle, AlertCircle, Timer, Award, Trophy, ArrowLeft, ArrowRight, Play, Pause, Eye, RotateCcw, ThumbsUp, ThumbsDown, Sparkles, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, MoreHorizontal, Sliders, Shuffle, EyeOff, VolumeX, Clock, Layers, Pencil, Plus, Check, DownloadCloud, Image as ImageIcon, CheckCircle2, Loader2, Download, Minimize2, Maximize2, Repeat, Trash2, ArrowUp, ArrowDown, Music, Mic, Save, Square, Bot, MessageSquare, Activity, Search } from "lucide-react";
 import { Flashcard, Folder, ReviewMethod, getSafeImageStyle, getCardSearchQuery, SpeakingChallengeItem, sanitizeCardArticleAndSentence, isGermanSentence } from "../types";
 import { speakClient, preloadTTS, ttsCache, stopActiveAudio, fadeAndStopAudio, preloadImage, imageCache, invalidateImageCache, playPiperLocalWasm, playGradioClientAudio } from "./Modals";
 import { motion, AnimatePresence, MotionConfig } from "motion/react";
@@ -2215,6 +2215,37 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
     currentIndex: number;
   } | null>(null);
 
+  const handleUpdateSpokenChallengeContext = React.useCallback((ctx: {
+    currentChallenge: SpeakingChallengeItem | null;
+    challenges: SpeakingChallengeItem[];
+    currentIndex: number;
+  }) => {
+    setSpokenChallengeContext((prev) => {
+      if (
+        prev &&
+        prev.currentIndex === ctx.currentIndex &&
+        prev.challenges === ctx.challenges &&
+        prev.currentChallenge === ctx.currentChallenge
+      ) {
+        return prev;
+      }
+      return ctx;
+    });
+  }, []);
+
+  const handleOpenSpokenChallengeChat = React.useCallback((ctx: {
+    currentChallenge: SpeakingChallengeItem | null;
+    challenges: SpeakingChallengeItem[];
+    currentIndex: number;
+  }) => {
+    handleUpdateSpokenChallengeContext(ctx);
+    setIsReviewChatOpen(true);
+  }, [handleUpdateSpokenChallengeContext]);
+
+  const handleSpokenChallengeFinish = React.useCallback((_score: number, _total: number) => {
+    // Handled by component summary or close
+  }, []);
+
   // Derive folder info and surrounding cards for AI Context Awareness
   const derivedFolder = React.useMemo(() => {
     if (folder) return folder;
@@ -3600,6 +3631,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   const [squaresCards, setSquaresCards] = useState<Flashcard[]>([]);
   const [speakingSquareCardId, setSpeakingSquareCardId] = useState<string | null>(null);
   const [squaresSearchQuery, setSquaresSearchQuery] = useState<string>("");
+  const [isSquaresSearchOpen, setIsSquaresSearchOpen] = useState<boolean>(false);
   const [isSquaresSequentialPlaying, setIsSquaresSequentialPlaying] = useState<boolean>(false);
   const squaresSeqRef = useRef<boolean>(false);
   squaresSeqRef.current = isSquaresSequentialPlaying;
@@ -5182,11 +5214,21 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
           
           {/* Center: Card Position Counter in Top Progress Header */}
           <div className="flex-1 flex justify-center items-center">
-            {sessionCards.length > 0 && (
+            {method === "spoken_challenge" ? (
+              spokenChallengeContext && spokenChallengeContext.challenges.length > 0 ? (
+                <span className="text-xs sm:text-sm font-bold font-mono text-slate-300 select-none tabular-nums" dir="rtl">
+                  {`${spokenChallengeContext.currentIndex + 1} / ${spokenChallengeContext.challenges.length}`}
+                </span>
+              ) : sessionCards.length > 0 ? (
+                <span className="text-xs sm:text-sm font-bold font-mono text-slate-300 select-none tabular-nums" dir="rtl">
+                  {`${sessionCards.length} بطاقة`}
+                </span>
+              ) : null
+            ) : sessionCards.length > 0 ? (
               <span className="text-xs sm:text-sm font-bold font-mono text-slate-300 select-none" dir="rtl">
                 {method === "match" ? `${sessionCards.length} مفردة` : `${currentIndex + 1} / ${sessionCards.length}`}
               </span>
-            )}
+            ) : null}
           </div>
 
           {/* Right: Timer */}
@@ -5197,15 +5239,28 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
           </div>
 
           {/* Integrated thin progress line at the absolute bottom (acts as border) */}
-          {method !== "match" && sessionCards.length > 0 && (
-            <div className="absolute bottom-0 right-0 left-0 h-[2.5px] bg-slate-800/80 overflow-hidden">
-              <motion.div 
-                className="absolute right-0 top-0 h-full bg-emerald-500 rounded-full"
-                initial={{ width: 0 }}
-                animate={{ width: `${((currentIndex + 1) / sessionCards.length) * 100}%` }}
-                transition={{ duration: 0.3, ease: "easeOut" }}
-              />
-            </div>
+          {method !== "match" && (
+            method === "spoken_challenge"
+              ? (spokenChallengeContext && spokenChallengeContext.challenges.length > 0 && (
+                <div className="absolute bottom-0 right-0 left-0 h-[2.5px] bg-slate-800/80 overflow-hidden">
+                  <motion.div 
+                    className="absolute right-0 top-0 h-full bg-emerald-500 rounded-full"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${((spokenChallengeContext.currentIndex + 1) / spokenChallengeContext.challenges.length) * 100}%` }}
+                    transition={{ duration: 0.3, ease: "easeOut" }}
+                  />
+                </div>
+              ))
+              : (sessionCards.length > 0 && (
+                <div className="absolute bottom-0 right-0 left-0 h-[2.5px] bg-slate-800/80 overflow-hidden">
+                  <motion.div 
+                    className="absolute right-0 top-0 h-full bg-emerald-500 rounded-full"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${((currentIndex + 1) / sessionCards.length) * 100}%` }}
+                    transition={{ duration: 0.3, ease: "easeOut" }}
+                  />
+                </div>
+              ))
           )}
         </header>
       )}
@@ -5521,7 +5576,9 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
               className={`w-full flex flex-col items-center gap-6 sm:gap-7 shrink-0 ${
                 method === "match" 
                   ? "max-w-4xl px-1 sm:px-2" 
-                  : "max-w-[min(420px,calc(100dvh-250px))]"
+                  : method === "spoken_challenge"
+                    ? "max-w-md"
+                    : "max-w-[min(420px,calc(100dvh-250px))]"
               }`}
             >
               {/* Action Bar (Shuffle & Settings & Night Mode & Autoplay & Edit) with expandable distraction-free toggle */}
@@ -5772,14 +5829,9 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                     cards={sessionCards}
                     folderName={derivedFolder?.name || "مجموعة البطاقات"}
                     onClose={onClose}
-                    onUpdateContext={(ctx) => setSpokenChallengeContext(ctx)}
-                    onOpenChat={(ctx) => {
-                      setSpokenChallengeContext(ctx);
-                      setIsReviewChatOpen(true);
-                    }}
-                    onFinish={(score, total) => {
-                      // Handled by component summary or close
-                    }}
+                    onUpdateContext={handleUpdateSpokenChallengeContext}
+                    onOpenChat={handleOpenSpokenChallengeChat}
+                    onFinish={handleSpokenChallengeFinish}
                   />
                 </div>
               )}
@@ -6395,177 +6447,206 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
               {/* 4. SQUARES MODE / وضع المربعات */}
               {method === "match" && (
-                <div className="w-full flex flex-col items-center gap-4 animate-fadeIn">
-                  {/* Top Squares Toolbar: Search & Actions */}
-                  <div className="w-full bg-slate-900/90 border border-slate-800 rounded-2xl p-2 sm:p-2.5 flex flex-wrap items-center justify-between gap-2 shadow-xs backdrop-blur-md">
-                    {/* Search filter input */}
-                    <div className="flex-1 min-w-[180px] relative">
-                      <input
-                        type="text"
-                        placeholder="ابحث في مفردات المربعات..."
-                        value={squaresSearchQuery}
-                        onChange={(e) => setSquaresSearchQuery(e.target.value)}
-                        className="w-full text-xs font-bold px-3 py-2 pr-8 rounded-xl bg-slate-950/70 border border-slate-800 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 transition-colors"
-                      />
-                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none text-xs">
-                        🔍
-                      </span>
-                      {squaresSearchQuery && (
-                        <button
-                          type="button"
-                          onClick={() => setSquaresSearchQuery("")}
-                          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5 rounded cursor-pointer"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Action buttons */}
-                    <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-                      {/* Play all sequentially */}
+                <div className="w-full flex flex-col items-center gap-5 animate-fadeIn">
+                  {/* Unified 48px Compact Toolbar (Matches Classic / Write / Spoken Challenge) */}
+                  <div className="w-full max-w-md mx-auto flex flex-col items-center gap-2.5 shrink-0" dir="rtl">
+                    <div className="w-full h-12 bg-white/95 dark:bg-slate-900/95 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-1 shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 select-none backdrop-blur-xs">
+                      {/* Play / Stop Sequential */}
                       <button
                         type="button"
                         onClick={handleToggleSquaresSequential}
-                        className={`h-9 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 border ${
+                        title={isSquaresSequentialPlaying ? "إيقاف الاستماع المتتابع" : "استماع متتابع لكل المربعات"}
+                        className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center ${
                           isSquaresSequentialPlaying
-                            ? "bg-sky-500/20 text-sky-300 border-sky-500/40 animate-pulse"
-                            : "bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-700/60"
+                            ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25"
+                            : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 border border-transparent"
                         }`}
-                        title={isSquaresSequentialPlaying ? "إيقاف الاستماع المتسلسل" : "تشغيل ونطق كل المربعات بالتتابع"}
                       >
-                        {isSquaresSequentialPlaying ? (
-                          <>
-                            <Pause className="w-3.5 h-3.5" />
-                            <span>إيقاف</span>
-                          </>
-                        ) : (
-                          <>
-                            <Play className="w-3.5 h-3.5" />
-                            <span>استماع متتابع</span>
-                          </>
-                        )}
+                        {isSquaresSequentialPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                       </button>
 
                       {/* Shuffle */}
                       <button
                         type="button"
                         onClick={handleShuffleSquares}
-                        className="h-9 px-3 rounded-xl text-xs font-bold bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/60 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95"
-                        title="خلط وتوزيع ترتيب المربعات"
+                        title="خلط ترتيب المربعات"
+                        className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 cursor-pointer active:scale-95 flex items-center justify-center border border-transparent"
                       >
-                        <Shuffle className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">خلط الترتيب</span>
+                        <Shuffle className="w-4 h-4" />
                       </button>
 
-                      {/* Complete / Finish Session */}
+                      {/* Toggle Search */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsSquaresSearchOpen((prev) => {
+                            if (prev) setSquaresSearchQuery("");
+                            return !prev;
+                          });
+                        }}
+                        title="بحث في المربعات"
+                        className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center ${
+                          isSquaresSearchOpen || squaresSearchQuery
+                            ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25"
+                            : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 border border-transparent"
+                        }`}
+                      >
+                        <Search className="w-4 h-4" />
+                      </button>
+
+                      {/* Settings */}
+                      <button
+                        type="button"
+                        onClick={() => openReviewSettings("match")}
+                        title="إعدادات وضع المربعات"
+                        className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 cursor-pointer active:scale-95 flex items-center justify-center border border-transparent"
+                      >
+                        <Sliders className="w-4 h-4" />
+                      </button>
+
+                      {/* Sound Mute / Unmute */}
+                      <button
+                        type="button"
+                        onClick={() => setIsSoundEnabled(!isSoundEnabled)}
+                        title={isSoundEnabled ? "كتم الصوت العام" : "تشغيل الصوت العام"}
+                        className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center ${
+                          isSoundEnabled
+                            ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25"
+                            : "text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100/50 dark:hover:bg-slate-800/40 border border-transparent"
+                        }`}
+                      >
+                        {isSoundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                      </button>
+
+                      <div className="w-px h-5 bg-slate-200 dark:bg-slate-800 mx-0.5 shrink-0" />
+
+                      {/* Complete Session */}
                       <button
                         type="button"
                         onClick={() => setIsCompleted(true)}
-                        className="h-9 px-3.5 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-500 text-white transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 shadow-sm"
-                        title="إنهاء وعرض ملخص المراجعة"
+                        title="إنهاء المراجعة"
+                        className="h-9.5 px-3 sm:h-10 rounded-lg text-xs font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/25 transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
                       >
-                        <Check className="w-4 h-4 stroke-[3]" />
+                        <Check className="w-4 h-4 stroke-[2.5]" />
                         <span>إكمال</span>
                       </button>
                     </div>
+
+                    {/* Optional Search Input (Revealed only when toggled) */}
+                    {(isSquaresSearchOpen || squaresSearchQuery) && (
+                      <div className="w-full relative">
+                        <input
+                          type="text"
+                          autoFocus
+                          placeholder="ابحث في المفردات..."
+                          value={squaresSearchQuery}
+                          onChange={(e) => setSquaresSearchQuery(e.target.value)}
+                          className="w-full h-10 text-xs font-semibold px-3.5 pr-9 pl-8 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-primary shadow-xs"
+                        />
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        {squaresSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setSquaresSearchQuery("")}
+                            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-white p-0.5 rounded cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
 
-                  {/* The Visual Squares Grid (شبكة صور المفردات) */}
-                  <div className="w-full grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4 p-2 sm:p-3 bg-slate-900/40 rounded-3xl border border-slate-800/80 backdrop-blur-md">
-                    {displayedSquares.map((c, idx) => {
+                  {/* Clean Squares Grid — Direct Cards without Cluttered Corner Chips or Nested Containers */}
+                  <div className="w-full grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
+                    {displayedSquares.map((c) => {
                       const isSpeaking = speakingSquareCardId === c.id;
                       const sanitized = sanitizeCardArticleAndSentence(c);
+                      const articleDot = getCardArticleDotInfo(c);
                       const hasImage = Boolean(c.frontImage || c.backImage);
                       const imageSrc = c.frontImage || c.backImage;
                       const imagePos = c.frontImage ? c.frontImagePosition : c.backImagePosition;
 
+                      const displayArticle = sanitized.correctArticle === "die-plural" ? "die" : sanitized.correctArticle;
+                      const displayWord = displayArticle ? `${displayArticle} ${sanitized.frontText}` : sanitized.frontText;
+
                       return (
-                        <div
+                        <button
                           key={c.id}
+                          type="button"
                           onClick={() => handleSquareClick(c)}
-                          className={`group relative aspect-square rounded-2xl overflow-hidden border transition-all duration-200 cursor-pointer select-none bg-slate-900 ${
+                          className={`group relative aspect-square rounded-[22px] overflow-hidden border transition-all duration-150 cursor-pointer select-none text-center flex flex-col justify-end ${
+                            hasImage
+                              ? "bg-slate-900"
+                              : "bg-white dark:bg-slate-900"
+                          } ${
                             isSpeaking
-                              ? "border-sky-400 ring-2 ring-sky-400/50 shadow-lg shadow-sky-500/25 scale-[1.03] z-10"
-                              : "border-slate-800 hover:border-slate-700 hover:scale-[1.02] active:scale-95 shadow-sm"
+                              ? "border-primary ring-2 ring-primary/40 shadow-md scale-[1.02] z-10"
+                              : "border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 active:scale-[0.98] shadow-xs"
                           }`}
-                          title={`انقر لنطق المفردة: ${c.frontText}`}
+                          title={c.frontText}
                         >
-                          {/* Image or fallback */}
                           {hasImage ? (
-                            <ImageWithSkeleton
-                              src={imageSrc!}
-                              alt={c.frontText}
-                              className="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                              style={getSafeImageStyle(imagePos)}
-                              referrerPolicy="no-referrer"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center p-3 bg-gradient-to-br from-slate-900 via-slate-850 to-slate-950 text-slate-400">
-                              <div className="w-10 h-10 rounded-xl bg-slate-800/80 border border-slate-700/60 flex items-center justify-center mb-1 text-slate-400 group-hover:text-sky-400 transition-colors">
-                                <ImageIcon className="w-5 h-5 opacity-70" />
+                            <>
+                              <ImageWithSkeleton
+                                src={imageSrc!}
+                                alt={c.frontText}
+                                className="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                                style={getSafeImageStyle(imagePos)}
+                                referrerPolicy="no-referrer"
+                                loading="lazy"
+                              />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent pointer-events-none" />
+                              <div className="relative z-10 w-full px-3 pb-3 pt-8 flex flex-col items-center gap-0.5 pointer-events-none">
+                                <div className="flex items-center justify-center gap-1.5 max-w-full" dir="ltr">
+                                  {articleDot && (
+                                    <span className={`w-2 h-2 rounded-full shrink-0 ${articleDot.dotClass}`} />
+                                  )}
+                                  <span className="font-black text-sm sm:text-base text-white drop-shadow-sm truncate">
+                                    {displayWord}
+                                  </span>
+                                </div>
+                                {c.backText && (
+                                  <span className="text-[11px] font-medium text-white/75 truncate max-w-full" dir="rtl">
+                                    {c.backText}
+                                  </span>
+                                )}
                               </div>
-                              <span className="text-[11px] font-semibold text-slate-400 line-clamp-1">{c.backText || "مفردة"}</span>
-                            </div>
-                          )}
-
-                          {/* Top Speaker Indicator */}
-                          <div className={`absolute top-2.5 left-2.5 z-20 transition-all ${
-                            isSpeaking
-                              ? "px-2 py-1 rounded-full bg-sky-500 text-white flex items-center gap-1 shadow-md shadow-sky-500/30 animate-pulse text-[10px] font-bold"
-                              : "w-7 h-7 rounded-full bg-black/50 backdrop-blur-xs text-white/70 group-hover:text-white group-hover:bg-black/70 flex items-center justify-center opacity-80 group-hover:opacity-100"
-                          }`}>
-                            <Volume2 className="w-3.5 h-3.5" />
-                            {isSpeaking && <span className="hidden sm:inline">جاري النطق</span>}
-                          </div>
-
-                          {/* Top-right card index chip */}
-                          <div className="absolute top-2.5 right-2.5 z-20 px-1.5 py-0.5 rounded-md bg-black/50 backdrop-blur-xs text-slate-300 text-[10px] font-mono font-bold select-none opacity-70 group-hover:opacity-100 transition-opacity">
-                            #{idx + 1}
-                          </div>
-
-                          {/* Bottom Word & Article Overlay */}
-                          <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/95 via-black/60 to-transparent pt-10 pb-2.5 px-2.5 flex flex-col items-center justify-end text-center pointer-events-none">
-                            <div className="flex items-center justify-center gap-1.5 max-w-full">
-                              {sanitized.correctArticle && (
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-black shrink-0 ${
-                                  sanitized.correctArticle === "der" ? "bg-blue-600 text-white shadow-xs" :
-                                  sanitized.correctArticle === "die" ? "bg-rose-600 text-white shadow-xs" :
-                                  sanitized.correctArticle === "das" ? "bg-emerald-600 text-white shadow-xs" :
-                                  sanitized.correctArticle === "die-plural" ? "bg-amber-500 text-white shadow-xs" :
-                                  "bg-sky-600 text-white"
-                                }`}>
-                                  {sanitized.correctArticle === "die-plural" ? "die" : sanitized.correctArticle}
+                            </>
+                          ) : (
+                            <div className="relative z-10 w-full h-full p-3.5 flex flex-col items-center justify-center text-center gap-1.5 pointer-events-none">
+                              <div className="flex items-center justify-center gap-1.5 max-w-full" dir="ltr">
+                                {articleDot && (
+                                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${articleDot.dotClass}`} />
+                                )}
+                                <span className="font-black text-base sm:text-lg text-slate-900 dark:text-white leading-snug line-clamp-2">
+                                  {displayWord}
+                                </span>
+                              </div>
+                              {c.backText && (
+                                <span className="text-xs font-medium text-slate-500 dark:text-slate-400 line-clamp-2" dir="rtl">
+                                  {c.backText}
                                 </span>
                               )}
-                              <span className="font-black text-xs sm:text-sm text-white drop-shadow-md truncate max-w-full" dir="ltr">
-                                {sanitized.frontText}
-                              </span>
                             </div>
-
-                            {c.backText && (
-                              <span className="text-[10px] sm:text-[11px] font-medium text-slate-300 drop-shadow-xs truncate max-w-full mt-0.5" dir="rtl">
-                                {c.backText}
-                              </span>
-                            )}
-                          </div>
-                        </div>
+                          )}
+                        </button>
                       );
                     })}
                   </div>
 
                   {/* Empty search results fallback */}
                   {displayedSquares.length === 0 && (
-                    <div className="w-full py-12 flex flex-col items-center justify-center gap-2 text-center bg-slate-900/40 rounded-2xl border border-slate-800">
-                      <HelpCircle className="w-8 h-8 text-slate-500" />
-                      <p className="text-xs font-bold text-slate-400">لا توجد مفردات مطابقة للبحث "{squaresSearchQuery}"</p>
+                    <div className="w-full max-w-md py-10 flex flex-col items-center justify-center gap-2 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
+                      <p className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                        لا توجد مفردات مطابقة لـ "{squaresSearchQuery}"
+                      </p>
                       <button
                         type="button"
                         onClick={() => setSquaresSearchQuery("")}
-                        className="text-xs text-sky-400 hover:underline font-bold mt-1 cursor-pointer"
+                        className="text-xs text-primary hover:underline font-bold cursor-pointer"
                       >
-                        إلغاء البحث
+                        مسح البحث
                       </button>
                     </div>
                   )}

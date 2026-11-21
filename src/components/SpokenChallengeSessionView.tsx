@@ -3,62 +3,49 @@ import {
   Volume2,
   VolumeX,
   RotateCcw,
-  Sparkles,
   Bot,
   Play,
-  Pause,
-  ArrowRight,
-  ArrowLeft,
-  CheckCircle2,
+  Square,
   AlertCircle,
-  Clock,
   Mic,
   MicOff,
   Sliders,
-  Maximize2,
-  Minimize2,
-  ChevronLeft,
-  ChevronRight,
-  HelpCircle,
   Trophy,
-  Award,
-  Layers,
-  BookOpen,
-  RefreshCw,
   Loader2,
   Check,
   X,
-  Zap,
-  Image as ImageIcon
+  Eye,
+  Timer
 } from "lucide-react";
 import { Flashcard, SpeakingChallengeItem, DEFAULT_GRADIO_VOICES } from "../types";
-import { preloadImage, speakClient, stopActiveAudio, playPiperLocalWasm, fetchGradioAudioBlob } from "./Modals";
+import { preloadImage, speakClient, stopActiveAudio } from "./Modals";
 import { ALL_AVAILABLE_MODELS } from "./AICorrectorWorkspace";
-import { motion, AnimatePresence } from "motion/react";
+import { motion } from "motion/react";
 import { ReviewChatModal } from "./ReviewChatModal";
+import { UnifiedNavigationTrack } from "./UnifiedNavigationTrack";
 
 export const CHALLENGE_VOICE_OPTIONS = [
   {
-    group: "🚀 أصوات سيرفر Gradio العصبية (Qwen3-TTS)",
+    group: "أصوات Gradio العصبية",
     options: DEFAULT_GRADIO_VOICES.map((v) => ({
       id: `gradio:${v.id}`,
-      name: `🚀 Gradio: ${v.name} (${v.gender === "female" ? "أنثوي" : "ذكوري"})`
+      name: `${v.name} (${v.gender === "female" ? "أنثوي" : "ذكوري"})`
     }))
   },
   {
-    group: "⚡ محركات النطق المباشرة",
+    group: "محركات النطق المباشرة",
     options: [
-      { id: "google", name: "⚡ Google Translate TTS (نطق ألماني مباشر وسريع)" },
-      { id: "webspeech", name: "🌐 Web Speech API (محرك نطق المتصفح الداخلي)" }
+      { id: "google", name: "Google Translate TTS" },
+      { id: "webspeech", name: "Web Speech (المتصفح)" }
     ]
   },
   {
-    group: "🧠 نماذج Piper العصبية (ألمانية)",
+    group: "نماذج Piper (ألمانية)",
     options: [
-      { id: "de_DE-thorsten-medium", name: "🇩🇪 Thorsten Medium (ذكوري ألماني طبيعي - موصى به)" },
-      { id: "de_DE-thorsten_emotional-medium", name: "🇩🇪 Thorsten Emotional (تعبيري متنوع)" },
-      { id: "de_DE-ramona-medium", name: "🇩🇪 Ramona Medium (أنثوي ألماني واضح)" },
-      { id: "de_DE-karlsson-low", name: "🇩🇪 Karlsson Low (ذكوري سريع)" }
+      { id: "de_DE-thorsten-medium", name: "Thorsten Medium (ذكوري)" },
+      { id: "de_DE-thorsten_emotional-medium", name: "Thorsten Emotional" },
+      { id: "de_DE-ramona-medium", name: "Ramona Medium (أنثوي)" },
+      { id: "de_DE-karlsson-low", name: "Karlsson Low (سريع)" }
     ]
   }
 ];
@@ -88,7 +75,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
   onOpenChat,
   onUpdateContext
 }) => {
-  // Setup / Pre-Analysis State
+  // Setup state
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
       return (
@@ -134,42 +121,71 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
 
   const [isPlayingVoiceSample, setIsPlayingVoiceSample] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
-  const [generationStep, setGenerationStep] = useState<string>("");
   const [generationError, setGenerationError] = useState<string | null>(null);
 
-  // Active Session State
+  // Active session state
   const [challenges, setChallenges] = useState<SpeakingChallengeItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isRevealed, setIsRevealed] = useState<boolean>(false);
   const [timeLeft, setTimeLeft] = useState<number>(6);
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
+  // Timing mode: "ai" (default AI seconds), "custom" (fixed user seconds), "manual" (no timer)
+  const [timerMode, setTimerMode] = useState<"ai" | "custom" | "manual">(() => {
+    try {
+      const savedMode = localStorage.getItem("spoken_challenge_timer_mode");
+      if (savedMode === "ai" || savedMode === "custom" || savedMode === "manual") {
+        return savedMode;
+      }
+      const legacyCountdown = localStorage.getItem("spoken_challenge_use_countdown");
+      return legacyCountdown === "false" ? "manual" : "ai";
+    } catch {
+      return "ai";
+    }
+  });
+  const [lastTimedMode, setLastTimedMode] = useState<"ai" | "custom">(() => {
+    try {
+      const saved = localStorage.getItem("spoken_challenge_last_timed_mode");
+      return saved === "custom" ? "custom" : "ai";
+    } catch {
+      return "ai";
+    }
+  });
+  const [customSeconds, setCustomSeconds] = useState<number>(() => {
+    try {
+      const saved = parseInt(localStorage.getItem("spoken_challenge_custom_seconds") || "", 10);
+      if (!isNaN(saved) && saved >= 1 && saved <= 120) return saved;
+    } catch {}
+    return 8;
+  });
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const useCountdown = timerMode !== "manual";
   const [isSessionCompleted, setIsSessionCompleted] = useState<boolean>(false);
 
-  // Audio Playback State
+  // Audio playback state
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
-  const [audioSpeed, setAudioSpeed] = useState<number>(() => {
+  const [autoPlayAudio, setAutoPlayAudio] = useState<boolean>(() => {
     try {
-      const saved = localStorage.getItem("spoken_challenge_speed");
-      if (saved) {
-        const parsed = parseFloat(saved);
-        if (!isNaN(parsed) && parsed > 0) return parsed;
-      }
-    } catch {}
-    return 1.0;
+      const saved = localStorage.getItem("spoken_challenge_autoplay");
+      return saved === null ? true : saved === "true";
+    } catch {
+      return true;
+    }
   });
-  const [autoPlayAudio, setAutoPlayAudio] = useState<boolean>(true);
 
-  // Audio Single-Controller Refs
-  const audioTimeoutRef = useRef<any>(null);
+  const audioTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const spokenChallengesSetRef = useRef<Set<string>>(new Set());
 
-  // Speech Recognition (Mic Check) State
+  // Speech recognition state
+  const [isSpeechSupported, setIsSpeechSupported] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return Boolean((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+  });
   const [isListening, setIsListening] = useState<boolean>(false);
   const [userSpokenText, setUserSpokenText] = useState<string>("");
   const [matchScore, setMatchScore] = useState<number | null>(null);
   const [speechError, setSpeechError] = useState<string | null>(null);
 
-  // Scores and Stats
+  // Completion results
   const [completedItems, setCompletedItems] = useState<{
     id: number | string;
     isCorrect: boolean;
@@ -177,14 +193,36 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
     similarity?: number;
   }[]>([]);
 
-  // Timer reference
-  const timerRef = useRef<any>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recognitionRef = useRef<any>(null);
   const fetchingIndicesRef = useRef<Set<number>>(new Set());
+  const imageCandidatesRef = useRef<Map<number, string[]>>(new Map());
+  const failedImageUrlsRef = useRef<Set<string>>(new Set());
+  const [isInternalChatOpen, setIsInternalChatOpen] = useState(false);
 
   const currentChallenge = challenges[currentIndex] || null;
 
-  // Lazy load images on-demand: always fetch current card and next card
+  const advanceChallengeImageCandidate = useCallback((index: number, brokenUrl?: string) => {
+    if (brokenUrl) {
+      failedImageUrlsRef.current.add(brokenUrl);
+    }
+    const candidates = imageCandidatesRef.current.get(index) || [];
+    const nextUrl = candidates.find((u) => u && !failedImageUrlsRef.current.has(u)) || "";
+    setChallenges((prev) => {
+      if (!prev[index]) return prev;
+      if (prev[index].imageUrl === nextUrl) return prev;
+      const updated = [...prev];
+      updated[index] = { ...updated[index], imageUrl: nextUrl };
+      return updated;
+    });
+    if (nextUrl) {
+      preloadImage(nextUrl).catch(() => {
+        advanceChallengeImageCandidate(index, nextUrl);
+      });
+    }
+  }, []);
+
+  // Lazy load images for current and next card
   const fetchChallengeImage = useCallback(async (index: number, challengeList: SpeakingChallengeItem[]) => {
     if (index < 0 || index >= challengeList.length) return;
     const item = challengeList[index];
@@ -192,36 +230,71 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
 
     fetchingIndicesRef.current.add(index);
     try {
-      const q = item.image_prompt || `${item.target_german} illustration`;
-      const res = await fetch(`/api/spoken-challenges/image?q=${encodeURIComponent(q)}`);
+      const q = (item.image_prompt || `${item.target_german} illustration`).trim();
+      const fallback = (item.vocab_focus?.[0] || item.target_german || "").trim();
+      const res = await fetch(
+        `/api/spoken-challenges/image?q=${encodeURIComponent(q)}&fallback=${encodeURIComponent(fallback)}`
+      );
       if (res.ok) {
         const data = await res.json();
-        if (data.success && data.imageUrl) {
-          setChallenges((prev) => {
-            if (!prev[index] || prev[index].imageUrl) return prev;
-            const updated = [...prev];
-            updated[index] = { ...updated[index], imageUrl: data.imageUrl };
-            return updated;
-          });
-          preloadImage(data.imageUrl).catch(() => {});
+        const candidateList: string[] = Array.isArray(data.candidateUrls) && data.candidateUrls.length > 0
+          ? data.candidateUrls
+          : (data.imageUrl ? [data.imageUrl] : []);
+
+        if (candidateList.length > 0) {
+          imageCandidatesRef.current.set(index, candidateList);
+          const firstValid = candidateList.find((u) => !failedImageUrlsRef.current.has(u)) || "";
+          if (firstValid) {
+            setChallenges((prev) => {
+              if (!prev[index] || prev[index].imageUrl) return prev;
+              const updated = [...prev];
+              updated[index] = { ...updated[index], imageUrl: firstValid };
+              return updated;
+            });
+            preloadImage(firstValid).catch(() => {
+              advanceChallengeImageCandidate(index, firstValid);
+            });
+          }
         }
       }
     } catch (e) {
       console.warn(`Failed lazy loading image for challenge ${index}:`, e);
     }
-  }, []);
+  }, [advanceChallengeImageCandidate]);
 
   useEffect(() => {
     if (challenges.length === 0) return;
-    // Always fetch current card image if missing
     fetchChallengeImage(currentIndex, challenges);
-    // And fetch the next card image (lazy prefetch)
     if (currentIndex + 1 < challenges.length) {
       fetchChallengeImage(currentIndex + 1, challenges);
     }
   }, [currentIndex, challenges, fetchChallengeImage]);
 
-  // Initialize Speech Recognition if supported
+  const cleanForMatch = (str: string): string => {
+    return str
+      .toLowerCase()
+      .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'«»]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  };
+
+  const calculateSimilarity = useCallback((spoken: string, target: string): number => {
+    const s = cleanForMatch(spoken);
+    const t = cleanForMatch(target);
+    if (!s || !t) return 0;
+    if (s === t) return 100;
+
+    const sWords = s.split(" ");
+    const tWords = t.split(" ");
+    let matchingWords = 0;
+    for (const w of sWords) {
+      if (tWords.includes(w)) matchingWords++;
+    }
+    const wordScore = (matchingWords / Math.max(tWords.length, 1)) * 100;
+    return Math.min(Math.round(wordScore), 100);
+  }, []);
+
+  // Initialize Speech Recognition
   useEffect(() => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -251,11 +324,10 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
       };
 
       recognition.onerror = (event: any) => {
-        console.warn("Speech recognition error:", event.error);
         if (event.error === "not-allowed") {
-          setSpeechError("يرجى السماح بالوصول إلى الميكروفون للتحقق من النطق.");
-        } else if (event.error !== "no-speech") {
-          setSpeechError("تعذر التقاط الصوت، يمكنك المحاولة مرة أخرى.");
+          setSpeechError("يرجى السماح بالوصول إلى الميكروفون.");
+        } else if (event.error !== "no-speech" && event.error !== "aborted") {
+          setSpeechError("تعذر التقاط الصوت، حاول مجدداً.");
         }
         setIsListening(false);
       };
@@ -271,23 +343,22 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
-        } catch (e) {}
+        } catch {}
       }
     };
-  }, [currentChallenge]);
+  }, [currentChallenge, calculateSimilarity]);
 
-  const [isInternalChatOpen, setIsInternalChatOpen] = useState(false);
+  const onUpdateContextRef = useRef(onUpdateContext);
+  onUpdateContextRef.current = onUpdateContext;
 
-  // Keep parent context updated whenever current challenge or list changes
+  // Keep parent context synced without triggering loops from unstable callback identities
   useEffect(() => {
-    if (onUpdateContext) {
-      onUpdateContext({
-        currentChallenge,
-        challenges,
-        currentIndex
-      });
-    }
-  }, [currentChallenge, challenges, currentIndex, onUpdateContext]);
+    onUpdateContextRef.current?.({
+      currentChallenge,
+      challenges,
+      currentIndex
+    });
+  }, [currentChallenge, challenges, currentIndex]);
 
   const handleOpenAiChat = () => {
     if (!currentChallenge) return;
@@ -302,50 +373,189 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
     }
   };
 
-  // Clean String for fuzzy matching
-  const cleanForMatch = (str: string): string => {
-    return str
-      .toLowerCase()
-      .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'«»]/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-  };
-
-  // Simple word-level and Levenshtein similarity calculation
-  const calculateSimilarity = (spoken: string, target: string): number => {
-    const s = cleanForMatch(spoken);
-    const t = cleanForMatch(target);
-
-    if (!s || !t) return 0;
-    if (s === t) return 100;
-
-    const sWords = s.split(" ");
-    const tWords = t.split(" ");
-
-    let matchingWords = 0;
-    for (const w of sWords) {
-      if (tWords.includes(w)) matchingWords++;
+  const cancelAllAudio = useCallback(() => {
+    if (audioTimeoutRef.current) {
+      clearTimeout(audioTimeoutRef.current);
+      audioTimeoutRef.current = null;
     }
+    stopActiveAudio();
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
+    }
+    setIsPlayingAudio(false);
+    setIsPlayingVoiceSample(false);
+  }, []);
 
-    const wordScore = (matchingWords / Math.max(tWords.length, 1)) * 100;
-    return Math.min(Math.round(wordScore), 100);
-  };
-
-  // Start Generation via API
-  const handleStartGeneration = async () => {
-    if (cards.length === 0) return;
-
-    setIsGenerating(true);
-    setGenerationError(null);
-    setGenerationStep("جاري تحليل القواعد والمفردات في المجلد...");
+  const speakGerman = useCallback((text: string) => {
+    if (!text) return;
+    cancelAllAudio();
+    setIsPlayingAudio(true);
 
     try {
-      // Step 1: Request challenges from backend
-      setGenerationStep("جاري صياغة التحديات باللغة العربية وتحديد أزمنة النطق...");
+      speakClient(text, "de", selectedVoice);
+      const estDuration = Math.max(2000, Math.min(6000, text.split(" ").length * 500));
+      audioTimeoutRef.current = setTimeout(() => {
+        setIsPlayingAudio(false);
+      }, estDuration);
+    } catch {
+      setIsPlayingAudio(false);
+    }
+  }, [selectedVoice, cancelAllAudio]);
 
+  const handleToggleVoicePreview = () => {
+    if (isPlayingVoiceSample) {
+      cancelAllAudio();
+      return;
+    }
+    cancelAllAudio();
+    setIsPlayingVoiceSample(true);
+    try {
+      speakClient("Hallo, das ist eine Sprachprobe.", "de", selectedVoice);
+      audioTimeoutRef.current = setTimeout(() => {
+        setIsPlayingVoiceSample(false);
+      }, 2800);
+    } catch {
+      setIsPlayingVoiceSample(false);
+    }
+  };
+
+  const handleReveal = useCallback(() => {
+    if (isRevealed) return;
+    setIsRevealed(true);
+    setIsTimerRunning(false);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    if (currentChallenge && autoPlayAudio) {
+      const challengeKey = `${currentChallenge.id || currentIndex}_${currentChallenge.target_german}`;
+      if (!spokenChallengesSetRef.current.has(challengeKey)) {
+        spokenChallengesSetRef.current.add(challengeKey);
+        if (audioTimeoutRef.current) clearTimeout(audioTimeoutRef.current);
+        audioTimeoutRef.current = setTimeout(() => {
+          speakGerman(currentChallenge.target_german);
+        }, 250);
+      }
+    }
+  }, [isRevealed, currentChallenge, currentIndex, autoPlayAudio, speakGerman]);
+
+  const useCountdownRef = useRef(useCountdown);
+  useCountdownRef.current = useCountdown;
+  const timerModeRef = useRef(timerMode);
+  timerModeRef.current = timerMode;
+  const customSecondsRef = useRef(customSeconds);
+  customSecondsRef.current = customSeconds;
+
+  const getTargetSeconds = useCallback((
+    ch: SpeakingChallengeItem | null,
+    mode: "ai" | "custom" | "manual" = timerModeRef.current,
+    custom: number = customSecondsRef.current
+  ) => {
+    if (mode === "custom") return Math.max(1, Math.min(120, custom || 8));
+    return ch?.estimated_seconds || 6;
+  }, []);
+
+  const applyTimerMode = useCallback((nextMode: "ai" | "custom" | "manual", nextCustom?: number) => {
+    const resolvedCustom = Math.max(1, Math.min(120, nextCustom ?? customSecondsRef.current));
+    setTimerMode(nextMode);
+    if (nextMode !== "manual") {
+      setLastTimedMode(nextMode);
+      try {
+        localStorage.setItem("spoken_challenge_last_timed_mode", nextMode);
+      } catch {}
+    }
+    if (nextCustom !== undefined) {
+      setCustomSeconds(resolvedCustom);
+      try {
+        localStorage.setItem("spoken_challenge_custom_seconds", String(resolvedCustom));
+      } catch {}
+    }
+    try {
+      localStorage.setItem("spoken_challenge_timer_mode", nextMode);
+      localStorage.setItem("spoken_challenge_use_countdown", String(nextMode !== "manual"));
+    } catch {}
+
+    if (currentChallenge && !isRevealed) {
+      if (nextMode === "manual") {
+        setIsTimerRunning(false);
+      } else {
+        setTimeLeft(getTargetSeconds(currentChallenge, nextMode, resolvedCustom));
+        setIsTimerRunning(true);
+      }
+    }
+  }, [currentChallenge, isRevealed, getTargetSeconds]);
+
+  // Countdown effect (pauses automatically while user speaks or settings modal is open)
+  useEffect(() => {
+    if (!currentChallenge || !useCountdown || !isTimerRunning || isRevealed || isListening || isSettingsOpen) return;
+
+    timerRef.current = setInterval(() => {
+      setTimeLeft((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [currentChallenge, useCountdown, isTimerRunning, isRevealed, isListening, isSettingsOpen]);
+
+  // Trigger reveal cleanly once countdown reaches zero
+  useEffect(() => {
+    if (currentChallenge && useCountdown && isTimerRunning && !isRevealed && !isSettingsOpen && timeLeft === 0) {
+      handleReveal();
+    }
+  }, [currentChallenge, useCountdown, isTimerRunning, isRevealed, isSettingsOpen, timeLeft, handleReveal]);
+
+  const activeChallengeId = currentChallenge?.id ?? null;
+  const activeChallengeTarget = currentChallenge?.target_german ?? "";
+  const activeChallengeSeconds = currentChallenge?.estimated_seconds || 6;
+
+  // Reset per card index / challenge identity (avoid resetting when imageUrl lazy-loads)
+  useEffect(() => {
+    if (challenges.length > 0 && activeChallengeTarget) {
+      cancelAllAudio();
+      setIsRevealed(false);
+      setTimeLeft(
+        timerModeRef.current === "custom"
+          ? Math.max(1, Math.min(120, customSecondsRef.current || 8))
+          : activeChallengeSeconds
+      );
+      setIsTimerRunning(useCountdownRef.current);
+      setUserSpokenText("");
+      setMatchScore(null);
+      setSpeechError(null);
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
+    }
+  }, [currentIndex, challenges.length, activeChallengeId, activeChallengeTarget, activeChallengeSeconds, cancelAllAudio]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      cancelAllAudio();
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {}
+      }
+    };
+  }, [cancelAllAudio]);
+
+  const handleStartGeneration = async () => {
+    if (cards.length === 0) return;
+    setIsGenerating(true);
+    setGenerationError(null);
+
+    try {
       try {
         localStorage.setItem("spoken_challenge_selected_model", selectedModel);
-      } catch (e) {}
+      } catch {}
 
       let userApiKey = "";
       let groqApiKey = "";
@@ -358,7 +568,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
           localStorage.getItem("groq_api_key") ||
           localStorage.getItem("settings_groq_api_key") ||
           "";
-      } catch (e) {}
+      } catch {}
 
       const response = await fetch("/api/generate-spoken-challenges", {
         method: "POST",
@@ -377,169 +587,41 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "فشل توليد التحديات الصوتية من المجلد.");
+        throw new Error(errorData.error || "فشل توليد التحديات.");
       }
 
       const data = await response.json();
       if (!data.challenges || !Array.isArray(data.challenges) || data.challenges.length === 0) {
-        throw new Error("لم يتم استخراج تحديات من المجلد. يرجى التأكد من محتوى البطاقات.");
+        throw new Error("لم يتم استخراج تحديات من المجلد.");
       }
 
       fetchingIndicesRef.current.clear();
+      spokenChallengesSetRef.current.clear();
       setChallenges(data.challenges);
       setCurrentIndex(0);
       setIsRevealed(false);
       setTimeLeft(data.challenges[0].estimated_seconds || 6);
-      setIsTimerRunning(true);
+      setIsTimerRunning(useCountdown);
       setCompletedItems([]);
       setIsSessionCompleted(false);
     } catch (err: any) {
-      console.error("Spoken challenges error:", err);
-      setGenerationError(err.message || "حدث خطأ أثناء التواصل مع الذكاء الاصطناعي.");
+      setGenerationError(err.message || "حدث خطأ أثناء الاتصال بالذكاء الاصطناعي.");
     } finally {
       setIsGenerating(false);
     }
   };
 
-  // Stop active audio helper across all engines
-  const cancelAllAudio = useCallback(() => {
-    if (audioTimeoutRef.current) {
-      clearTimeout(audioTimeoutRef.current);
-      audioTimeoutRef.current = null;
-    }
-    stopActiveAudio();
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch (e) {}
-    }
-    setIsPlayingAudio(false);
-    setIsPlayingVoiceSample(false);
-  }, []);
-
-  // Pronounce German sentence with selected voice and audio collision prevention
-  const speakGerman = useCallback((text: string) => {
-    if (!text) return;
-    cancelAllAudio();
-    setIsPlayingAudio(true);
-
-    try {
-      speakClient(text, "de", selectedVoice);
-      const estDuration = Math.max(2200, Math.min(6500, text.split(" ").length * 500));
-      audioTimeoutRef.current = setTimeout(() => {
-        setIsPlayingAudio(false);
-      }, estDuration);
-    } catch (e) {
-      setIsPlayingAudio(false);
-    }
-  }, [selectedVoice, cancelAllAudio]);
-
-  // Preview Voice Sample
-  const handleToggleVoicePreview = () => {
-    if (isPlayingVoiceSample) {
-      cancelAllAudio();
-      return;
-    }
-    cancelAllAudio();
-    setIsPlayingVoiceSample(true);
-    try {
-      speakClient("Hallo, das ist eine Sprachprobe für diese Übung.", "de", selectedVoice);
-      audioTimeoutRef.current = setTimeout(() => {
-        setIsPlayingVoiceSample(false);
-      }, 3000);
-    } catch {
-      setIsPlayingVoiceSample(false);
-    }
-  };
-
-  // Handle Reveal German Sentence (Strict single audio trigger)
-  const handleReveal = useCallback(() => {
-    if (isRevealed) return;
-    setIsRevealed(true);
-    setIsTimerRunning(false);
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-
-    if (currentChallenge && autoPlayAudio) {
-      const challengeKey = `${currentChallenge.id || currentIndex}_${currentChallenge.target_german}`;
-      if (!spokenChallengesSetRef.current.has(challengeKey)) {
-        spokenChallengesSetRef.current.add(challengeKey);
-        if (audioTimeoutRef.current) {
-          clearTimeout(audioTimeoutRef.current);
-        }
-        audioTimeoutRef.current = setTimeout(() => {
-          speakGerman(currentChallenge.target_german);
-        }, 300);
-      }
-    }
-  }, [isRevealed, currentChallenge, currentIndex, autoPlayAudio, speakGerman]);
-
-  // Countdown timer effect
-  useEffect(() => {
-    if (!currentChallenge || !isTimerRunning || isRevealed) return;
-
-    timerRef.current = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(timerRef.current);
-          handleReveal();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [currentChallenge, isTimerRunning, isRevealed, handleReveal]);
-
-  // Reset challenge item when index changes
-  useEffect(() => {
-    if (challenges.length > 0 && challenges[currentIndex]) {
-      cancelAllAudio();
-      const ch = challenges[currentIndex];
-      setIsRevealed(false);
-      setTimeLeft(ch.estimated_seconds || 6);
-      setIsTimerRunning(true);
-      setUserSpokenText("");
-      setMatchScore(null);
-      setSpeechError(null);
-      if (isListening && recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch (e) {}
-      }
-    }
-  }, [currentIndex, challenges, cancelAllAudio]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      cancelAllAudio();
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.abort();
-        } catch (e) {}
-      }
-    };
-  }, [cancelAllAudio]);
-
-  // Toggle Mic Listener
   const handleToggleMic = () => {
     if (!recognitionRef.current) {
-      setSpeechError("خاصية التعرف على الصوت غير مدعومة في هذا المتصفح.");
+      setSpeechError("التعرف على الصوت غير مدعوم في هذا المتصفح.");
       return;
     }
-
     if (isListening) {
       try {
         recognitionRef.current.stop();
-      } catch (e) {}
+      } catch {}
     } else {
+      cancelAllAudio();
       setUserSpokenText("");
       setMatchScore(null);
       setSpeechError(null);
@@ -551,154 +633,162 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
     }
   };
 
-  // Rate answer and proceed
   const handleCompleteChallenge = (isCorrect: boolean) => {
     if (!currentChallenge) return;
 
-    setCompletedItems((prev) => [
-      ...prev.filter((it) => it.id !== currentChallenge.id),
+    const updatedCompleted = [
+      ...completedItems.filter((it) => it.id !== currentChallenge.id),
       {
         id: currentChallenge.id,
         isCorrect,
         userTranscript: userSpokenText,
-        similarity: matchScore || (isCorrect ? 100 : 0)
+        similarity: matchScore ?? (isCorrect ? 100 : 0)
       }
-    ]);
+    ];
+    setCompletedItems(updatedCompleted);
 
     if (currentIndex < challenges.length - 1) {
       setCurrentIndex((prev) => prev + 1);
     } else {
+      cancelAllAudio();
       setIsSessionCompleted(true);
-      const totalCorrect = completedItems.filter((i) => i.isCorrect).length + (isCorrect ? 1 : 0);
+      const totalCorrect = updatedCompleted.filter((i) => i.isCorrect).length;
       if (onFinish) onFinish(totalCorrect, challenges.length);
     }
   };
 
-  // Safe Exit helper (stops all audio immediately)
+  const handleReturnToSetup = useCallback(() => {
+    cancelAllAudio();
+    if (timerRef.current) clearInterval(timerRef.current);
+    spokenChallengesSetRef.current.clear();
+    fetchingIndicesRef.current.clear();
+    imageCandidatesRef.current.clear();
+    setChallenges([]);
+    setCurrentIndex(0);
+    setIsRevealed(false);
+    setCompletedItems([]);
+    setIsSessionCompleted(false);
+  }, [cancelAllAudio]);
+
   const handleSafeClose = useCallback(() => {
     cancelAllAudio();
     onClose();
   }, [cancelAllAudio, onClose]);
 
-  // Calculate circular progress SVG values
-  const totalSeconds = currentChallenge?.estimated_seconds || 6;
-  const timerPercentage = Math.max(0, Math.min(100, (timeLeft / totalSeconds) * 100));
-  const strokeDashoffset = 100 - timerPercentage;
+  const totalSeconds = getTargetSeconds(currentChallenge, timerMode, customSeconds);
+  const timerRatio = totalSeconds > 0 ? Math.max(0, Math.min(1, timeLeft / totalSeconds)) : 0;
 
-  // 1. SETUP & PRE-ANALYSIS SCREEN
+  // =========================================================================
+  // 1. CLEAN SETUP SCREEN
+  // =========================================================================
   if (challenges.length === 0) {
+    const quickCounts = Array.from(new Set([5, 10, 15, 25].filter((n) => n < cards.length)));
     return (
-      <div className="w-full max-w-2xl mx-auto bg-surface dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl text-right">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-5 mb-6">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center shadow-inner">
-              <Sparkles className="w-6 h-6" />
-            </div>
-            <div>
-              <h2 className="text-xl font-black text-slate-900 dark:text-white">
-                تحدي التحدث والنطق بالذكاء الاصطناعي
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Spoken Recall & Repetition Challenge
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={handleSafeClose}
-            className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+      <div className="w-full max-w-md mx-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[26px] p-5 sm:p-6 shadow-sm text-right space-y-5" dir="rtl">
+        <div className="space-y-1 border-b border-slate-100 dark:border-slate-800 pb-3.5">
+          <h2 className="text-lg font-black text-slate-900 dark:text-white">
+            تحدي النطق
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+            {folderName || "المجلد الحالي"} · {cards.length} بطاقة
+          </p>
         </div>
 
-        {/* 1. Prominent Current Cards Counter Card */}
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-blue-500/10 border border-purple-200 dark:border-purple-800/80 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-purple-600 text-white flex items-center justify-center font-black text-lg shadow-md shadow-purple-500/25 shrink-0">
-              {cards.length}
-            </div>
-            <div>
-              <div className="text-sm font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                <span>رصيد البطاقات الحالية في المجلد:</span>
-                <span className="text-purple-600 dark:text-purple-400 font-extrabold text-base">
-                  {cards.length} بطاقة
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
-                مجلد: <strong className="text-slate-700 dark:text-slate-200">{folderName || "المجلد الحالي"}</strong> — سيقوم الذكاء الاصطناعي باستخراج الكلمات والقواعد منها لتكوين التحديات.
-              </p>
-            </div>
-          </div>
-          {cards.length === 0 ? (
-            <span className="text-xs text-rose-600 dark:text-rose-400 font-bold bg-rose-100 dark:bg-rose-950/60 px-3 py-1.5 rounded-xl shrink-0">
-              المجلد فارغ
-            </span>
-          ) : (
-            <span className="text-xs text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-100 dark:bg-emerald-950/60 px-3 py-1.5 rounded-xl flex items-center gap-1 shrink-0">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>جاهزة للتحليل ({cards.length})</span>
-            </span>
-          )}
-        </div>
-
-        {/* Configuration Controls */}
-        <div className="space-y-5 mb-8">
-          {/* AI Model Selector */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
-              موديل الذكاء الاصطناعي للتحليل والتوليد:
+        {/* Count Selector */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+              عدد الجمل
             </label>
-            <select
-              value={selectedModel}
+            <input
+              type="number"
+              min="1"
+              max={Math.max(cards.length, 100)}
+              value={challengeCount}
               onChange={(e) => {
-                const val = e.target.value;
-                setSelectedModel(val);
+                const val = parseInt(e.target.value, 10) || 1;
+                const clamped = Math.max(1, Math.min(Math.max(cards.length, 100), val));
+                setChallengeCount(clamped);
                 try {
-                  localStorage.setItem("spoken_challenge_selected_model", val);
-                  localStorage.setItem("ai_corrector_selected_model", val);
-                } catch (err) {}
+                  localStorage.setItem("spoken_challenge_count", String(clamped));
+                } catch {}
               }}
-              className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer shadow-xs"
-            >
-              <optgroup label="🔥 الموديلات ذات الطلبات الكثيرة (500 RPD)">
-                {ALL_AVAILABLE_MODELS.filter((m) => m.group === "high_quota").map((m) => (
-                  <option key={m.key} value={m.key}>
-                    {m.name}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="✨ النماذج العامة والمتقدمة">
-                {ALL_AVAILABLE_MODELS.filter((m) => m.group !== "high_quota").map((m) => (
-                  <option key={m.key} value={m.key}>
-                    {m.name}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
+              className="w-16 h-8 text-center font-mono font-bold text-sm tabular-nums text-slate-800 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-primary"
+            />
           </div>
 
-          {/* 2. Voice / Speaker Selector for Automatic Pronunciation */}
-          <div>
-            <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
-              <span className="flex items-center gap-1.5">
-                <Volume2 className="w-4 h-4 text-purple-600" />
-                <span>الناطق ومحرك الصوت للنطق التلقائي:</span>
-              </span>
+          <div className="flex flex-wrap gap-1.5">
+            {quickCounts.map((num) => (
+              <button
+                key={num}
+                type="button"
+                onClick={() => {
+                  setChallengeCount(num);
+                  try {
+                    localStorage.setItem("spoken_challenge_count", String(num));
+                  } catch {}
+                }}
+                className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-colors cursor-pointer tabular-nums ${
+                  challengeCount === num
+                    ? "bg-primary text-white border-primary"
+                    : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-750"
+                }`}
+              >
+                {num}
+              </button>
+            ))}
+            {cards.length > 0 && (
               <button
                 type="button"
-                onClick={handleToggleVoicePreview}
-                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1 cursor-pointer ${
-                  isPlayingVoiceSample
-                    ? "bg-purple-600 text-white border-purple-600 animate-pulse"
-                    : "bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800 hover:bg-purple-100"
+                onClick={() => {
+                  setChallengeCount(cards.length);
+                  try {
+                    localStorage.setItem("spoken_challenge_count", String(cards.length));
+                  } catch {}
+                }}
+                className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-colors cursor-pointer tabular-nums ${
+                  challengeCount === cards.length
+                    ? "bg-primary text-white border-primary"
+                    : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-750"
                 }`}
-                title="استمع إلى عينة صوتية بالصوت المحدد"
               >
-                <Volume2 className="w-3.5 h-3.5" />
-                <span>{isPlayingVoiceSample ? "جاري الاستماع..." : "استمع لعينة الصوت"}</span>
+                الكل ({cards.length})
               </button>
-            </div>
+            )}
+          </div>
+        </div>
+
+        {/* AI Model */}
+        <div className="space-y-1.5">
+          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+            النموذج
+          </label>
+          <select
+            value={selectedModel}
+            onChange={(e) => {
+              const val = e.target.value;
+              setSelectedModel(val);
+              try {
+                localStorage.setItem("spoken_challenge_selected_model", val);
+                localStorage.setItem("ai_corrector_selected_model", val);
+              } catch {}
+            }}
+            className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:border-primary cursor-pointer"
+          >
+            {ALL_AVAILABLE_MODELS.map((m) => (
+              <option key={m.key} value={m.key}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Voice Selector + Compact Preview */}
+        <div className="space-y-1.5">
+          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+            الصوت
+          </label>
+          <div className="flex items-center gap-2">
             <select
               value={selectedVoice}
               onChange={(e) => {
@@ -706,9 +796,9 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
                 setSelectedVoice(val);
                 try {
                   localStorage.setItem("spoken_challenge_voice", val);
-                } catch (err) {}
+                } catch {}
               }}
-              className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer shadow-xs"
+              className="flex-1 px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:border-primary cursor-pointer"
             >
               {CHALLENGE_VOICE_OPTIONS.map((grp) => (
                 <optgroup key={grp.group} label={grp.group}>
@@ -720,572 +810,522 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
                 </optgroup>
               ))}
             </select>
-            <span className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 block">
-              💡 هذا هو الصوت الذي سينطق الجملة الألمانية تلقائياً أو عند الضغط على زر الاستماع.
-            </span>
-          </div>
-
-          {/* 3. Custom Description / Conditions for the AI */}
-          <div>
-            <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
-              <span className="flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                <span>شروط أو وصف مخصص للذكاء الاصطناعي (اختياري):</span>
-              </span>
-              {customConditions.trim() && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCustomConditions("");
-                    try {
-                      localStorage.removeItem("spoken_challenge_custom_conditions");
-                    } catch {}
-                  }}
-                  className="text-[11px] text-slate-400 hover:text-rose-500 transition-colors cursor-pointer"
-                >
-                  مسح الشروط
-                </button>
-              )}
-            </div>
-            <textarea
-              rows={3}
-              value={customConditions}
-              onChange={(e) => {
-                const val = e.target.value;
-                setCustomConditions(val);
-                try {
-                  localStorage.setItem("spoken_challenge_custom_conditions", val);
-                } catch {}
-              }}
-              placeholder="اكتب هنا أي شروط أو متطلبات خاصة ترغب أن يلتزم بها الذكاء الاصطناعي (مثال: ركز على صيغة الماضي التام Perfekt، أو اجعل الجمل عن حجز الفنادق والسفر، أو استخدم الروابط weil و dass...). إن تركت هذا المربع فارغاً، سيتصرف الذكاء الاصطناعي بطريقته الطبيعية المعتادة."
-              className="w-full p-3 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none leading-relaxed"
-            />
-            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-              {customConditions.trim()
-                ? "⚡ سيلتزم الذكاء الاصطناعي بشروطك المكتوبة أثناء صياغة الجمل والتحديات."
-                : "💡 لم يتم إدخال شروط، سيقوم الذكاء الاصطناعي ببناء التحديات بالطريقة المعتادة وفقاً لمستوى البطاقات."}
-            </p>
-          </div>
-
-          {/* 4. Number of Challenges (Supports 518 cards or full deck) */}
-          <div>
-            <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
-              <span>عدد التحديات والجمل المطلوبة:</span>
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-400 text-xs">أدخل العدد:</span>
-                <input
-                  type="number"
-                  min="1"
-                  max={Math.max(cards.length, 1000)}
-                  value={challengeCount}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value, 10) || 1;
-                    const clamped = Math.max(1, Math.min(Math.max(cards.length, 1000), val));
-                    setChallengeCount(clamped);
-                    try {
-                      localStorage.setItem("spoken_challenge_count", String(clamped));
-                    } catch {}
-                  }}
-                  className="w-20 px-2 py-1 text-center font-black text-sm text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                />
-                <span className="text-xs text-slate-500 font-bold">جملة</span>
-              </div>
-            </div>
-
-            {/* Quick selector chips */}
-            <div className="flex flex-wrap gap-1.5 mb-3">
-              {[5, 10, 15, 20, 25, 30, 50].map((num) => (
-                <button
-                  key={num}
-                  type="button"
-                  onClick={() => {
-                    setChallengeCount(num);
-                    try {
-                      localStorage.setItem("spoken_challenge_count", String(num));
-                    } catch {}
-                  }}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
-                    challengeCount === num
-                      ? "bg-purple-600 text-white border-purple-600 shadow-md shadow-purple-500/20 scale-105"
-                      : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-purple-300"
-                  }`}
-                >
-                  {num}
-                </button>
-              ))}
-
-              {/* All Cards in Deck Chip (e.g. 518) */}
-              {cards.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setChallengeCount(cards.length);
-                    try {
-                      localStorage.setItem("spoken_challenge_count", String(cards.length));
-                    } catch {}
-                  }}
-                  className={`px-3.5 py-1.5 text-xs font-black rounded-xl border transition-all cursor-pointer ${
-                    challengeCount === cards.length
-                      ? "bg-purple-600 text-white border-purple-600 shadow-md shadow-purple-500/20 scale-105"
-                      : "bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800 hover:bg-purple-100"
-                  }`}
-                >
-                  ⚡ كل بطاقات المجلد ({cards.length})
-                </button>
-              )}
-            </div>
-
-            <input
-              type="range"
-              min="1"
-              max={Math.max(cards.length, 100)}
-              value={Math.min(challengeCount, Math.max(cards.length, 100))}
-              onChange={(e) => {
-                const val = parseInt(e.target.value, 10);
-                setChallengeCount(val);
-                try {
-                  localStorage.setItem("spoken_challenge_count", String(val));
-                } catch {}
-              }}
-              className="w-full accent-purple-600 cursor-pointer"
-            />
-            {challengeCount > 50 && (
-              <span className="text-[11px] text-purple-600 dark:text-purple-400 font-bold block mt-1">
-                ⭐ تم اختيار {challengeCount} جملة وتحدياً للممارسة.
-              </span>
-            )}
+            <button
+              type="button"
+              onClick={handleToggleVoicePreview}
+              className={`h-10 w-10 rounded-xl border flex items-center justify-center shrink-0 transition-colors cursor-pointer ${
+                isPlayingVoiceSample
+                  ? "bg-primary text-white border-primary"
+                  : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-750"
+              }`}
+              title={isPlayingVoiceSample ? "إيقاف المعاينة" : "تجربة الصوت"}
+            >
+              {isPlayingVoiceSample ? <Square className="w-3.5 h-3.5 fill-current" /> : <Volume2 className="w-4 h-4" />}
+            </button>
           </div>
         </div>
 
-        {/* Error Message */}
+        {/* Timing Mode Selector */}
+        <div className="space-y-2">
+          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+            توقيت الكشف والإجابة
+          </label>
+          <div className="grid grid-cols-3 gap-1.5">
+            {[
+              { id: "ai" as const, label: "الافتراضي (الذكاء)" },
+              { id: "custom" as const, label: "وقت محدد" },
+              { id: "manual" as const, label: "كشف يدوي" }
+            ].map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => applyTimerMode(opt.id)}
+                className={`py-2 px-2 rounded-xl text-[11px] font-bold border transition-colors cursor-pointer ${
+                  timerMode === opt.id
+                    ? "bg-primary text-white border-primary"
+                    : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-750"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          {timerMode === "custom" && (
+            <div className="flex items-center justify-between gap-2 pt-1 bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2">
+              <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                المدة لكل سؤال (بالثواني)
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => applyTimerMode("custom", Math.max(1, customSeconds - 1))}
+                  className="w-7 h-7 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 cursor-pointer"
+                >
+                  -
+                </button>
+                <input
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={customSeconds}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    if (!isNaN(val)) applyTimerMode("custom", val);
+                  }}
+                  className="w-14 h-7 text-center font-mono font-bold text-xs tabular-nums text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-primary"
+                />
+                <button
+                  type="button"
+                  onClick={() => applyTimerMode("custom", Math.min(120, customSeconds + 1))}
+                  className="w-7 h-7 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 cursor-pointer"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Optional Custom Instructions */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+              توجيه إضافي (اختياري)
+            </label>
+            {customConditions.trim() && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomConditions("");
+                  try {
+                    localStorage.removeItem("spoken_challenge_custom_conditions");
+                  } catch {}
+                }}
+                className="text-[11px] font-bold text-slate-400 hover:text-rose-500 transition-colors cursor-pointer"
+              >
+                مسح
+              </button>
+            )}
+          </div>
+          <textarea
+            rows={2}
+            value={customConditions}
+            onChange={(e) => {
+              const val = e.target.value;
+              setCustomConditions(val);
+              try {
+                if (val.trim()) localStorage.setItem("spoken_challenge_custom_conditions", val);
+                else localStorage.removeItem("spoken_challenge_custom_conditions");
+              } catch {}
+            }}
+            placeholder="مثال: ركز على زمن الماضي Perfekt أو جمل السفر..."
+            className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-primary resize-none leading-relaxed"
+          />
+        </div>
+
         {generationError && (
-          <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-xl text-xs text-red-600 dark:text-red-400 flex items-center gap-2 mb-6">
+          <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-600 dark:text-rose-400 flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{generationError}</span>
           </div>
         )}
 
-        {/* Action Button / Loading State */}
-        {isGenerating ? (
-          <div className="w-full py-6 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/50 rounded-2xl flex flex-col items-center justify-center gap-3 text-center">
-            <Loader2 className="w-7 h-7 text-purple-600 animate-spin" />
-            <div className="text-sm font-black text-purple-900 dark:text-purple-200">
-              {generationStep || "جاري التحليل والتوليد..."}
-            </div>
-            <p className="text-[11px] text-purple-600/80 dark:text-purple-400">
-              يستغرق التحليل بضع ثوانٍ لإعداد الصور والأزمنة التقديرية بدقة.
-            </p>
-          </div>
-        ) : (
-          <button
-            onClick={handleStartGeneration}
-            disabled={cards.length === 0}
-            className="w-full py-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black text-base rounded-2xl shadow-lg shadow-purple-500/25 flex items-center justify-center gap-3 transition-all transform active:scale-[0.99] cursor-pointer disabled:opacity-50"
-          >
-            <Sparkles className="w-5 h-5" />
-            <span>بدء التحليل وتحدي التحدث ({challengeCount} جمل)</span>
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={handleStartGeneration}
+          disabled={cards.length === 0 || isGenerating}
+          className="w-full h-14 rounded-2xl bg-primary hover:opacity-95 text-white font-black text-base shadow-sm flex items-center justify-center gap-2 transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
+        >
+          {isGenerating ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span>جاري التجهيز...</span>
+            </>
+          ) : (
+            <>
+              <Play className="w-4 h-4 fill-current" />
+              <span>ابدأ</span>
+            </>
+          )}
+        </button>
       </div>
     );
   }
 
-  // 3. SESSION COMPLETED SUMMARY SCREEN
+  // =========================================================================
+  // 2. CLEAN COMPLETION SUMMARY SCREEN
+  // =========================================================================
   if (isSessionCompleted) {
     const totalCorrect = completedItems.filter((i) => i.isCorrect).length;
+    const totalIncorrect = challenges.length - totalCorrect;
     const accuracy = Math.round((totalCorrect / challenges.length) * 100) || 0;
 
     return (
-      <div className="w-full max-w-xl mx-auto bg-surface dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 shadow-2xl text-center text-slate-900 dark:text-white">
-        <div className="w-20 h-20 mx-auto mb-4 rounded-3xl bg-gradient-to-tr from-purple-500 to-indigo-500 flex items-center justify-center text-white shadow-xl shadow-purple-500/30 animate-bounce">
-          <Trophy className="w-10 h-10" />
+      <div className="w-full max-w-md mx-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[26px] p-6 shadow-sm text-center text-slate-900 dark:text-white space-y-5" dir="rtl">
+        <div className="w-16 h-16 mx-auto rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-sm">
+          <Trophy className="w-8 h-8" />
         </div>
 
-        <h2 className="text-2xl font-black mb-1">اكتمل التحدي بنجاح!</h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-          أحسنت! أنهيت جلسة التحدث والنطق التفاعلي لمجلد {folderName}
-        </p>
+        <div className="space-y-1">
+          <h2 className="text-xl font-black">اكتمل التحدي</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+            {folderName || "المجلد الحالي"} · {challenges.length} جملة
+          </p>
+        </div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-3 gap-3 mb-6 text-right">
-          <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-2xl border border-slate-100 dark:border-slate-800">
-            <span className="text-[11px] text-slate-500 block mb-1">النتيجة الكلية</span>
-            <span className="text-xl font-black text-purple-600 dark:text-purple-400">
-              {totalCorrect} / {challenges.length}
-            </span>
+        <div className="grid grid-cols-3 gap-2.5">
+          <div className="bg-slate-50 dark:bg-slate-800/80 p-3 rounded-2xl border border-slate-200/70 dark:border-slate-800">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">الدقة</span>
+            <span className="text-xl font-black text-primary font-mono tabular-nums">{accuracy}%</span>
           </div>
-          <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-2xl border border-slate-100 dark:border-slate-800">
-            <span className="text-[11px] text-slate-500 block mb-1">نسبة الإتقان</span>
-            <span className="text-xl font-black text-emerald-600 dark:text-emerald-400">
-              {accuracy}%
-            </span>
+          <div className="bg-slate-50 dark:bg-slate-800/80 p-3 rounded-2xl border border-slate-200/70 dark:border-slate-800">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">صحيحة</span>
+            <span className="text-xl font-black text-emerald-500 font-mono tabular-nums">{totalCorrect}</span>
           </div>
-          <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-2xl border border-slate-100 dark:border-slate-800">
-            <span className="text-[11px] text-slate-500 block mb-1">المستوى</span>
-            <span className="text-xl font-black text-indigo-600 dark:text-indigo-400">
-              {challenges[0]?.cefr_level || "A1"}
-            </span>
+          <div className="bg-slate-50 dark:bg-slate-800/80 p-3 rounded-2xl border border-slate-200/70 dark:border-slate-800">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">مراجعة</span>
+            <span className="text-xl font-black text-rose-500 font-mono tabular-nums">{totalIncorrect}</span>
           </div>
         </div>
 
-        {/* Mastered Rules List */}
-        <div className="bg-slate-50 dark:bg-slate-800/50 rounded-2xl p-4 mb-6 text-right border border-slate-100 dark:border-slate-800 max-h-48 overflow-y-auto">
-          <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-2">
-            القواعد والمفردات التي تم التدرب عليها:
-          </span>
-          <div className="flex flex-wrap gap-1.5">
-            {Array.from(new Set(challenges.map((c) => c.grammar_focus))).map((g, idx) => (
-              <span
-                key={idx}
-                className="bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 text-[11px] px-2.5 py-1 rounded-lg font-bold"
-              >
-                {g}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 pt-1">
           <button
+            type="button"
             onClick={() => {
+              spokenChallengesSetRef.current.clear();
               setCurrentIndex(0);
               setIsSessionCompleted(false);
               setCompletedItems([]);
               setIsRevealed(false);
-              setTimeLeft(challenges[0]?.estimated_seconds || 6);
-              setIsTimerRunning(true);
+              setTimeLeft(getTargetSeconds(challenges[0] || null));
+              setIsTimerRunning(useCountdown);
             }}
-            className="flex-1 py-3.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+            className="flex-1 h-12 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-sm rounded-2xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
           >
             <RotateCcw className="w-4 h-4" />
-            <span>إعادة التحدي</span>
+            <span>إعادة</span>
           </button>
           <button
+            type="button"
             onClick={handleSafeClose}
-            className="flex-1 py-3.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-lg shadow-purple-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+            className="flex-1 h-12 bg-primary hover:opacity-95 text-white font-bold text-sm rounded-2xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
           >
             <Check className="w-4 h-4" />
-            <span>إنهاء والعودة</span>
+            <span>إنهاء</span>
           </button>
         </div>
+
+        <button
+          type="button"
+          onClick={handleReturnToSetup}
+          className="text-xs font-bold text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+        >
+          توليد جمل جديدة
+        </button>
       </div>
     );
   }
 
-  // 2. ACTIVE CHALLENGE INTERACTION VIEW
+  // =========================================================================
+  // 3. ACTIVE CHALLENGE VIEW — MATCHES CHALLENGE / WRITE / ARTICLE / CLASSIC
+  // =========================================================================
+  const hasImage = Boolean(currentChallenge?.imageUrl);
+
   return (
-    <div className="w-full max-w-4xl mx-auto flex flex-col items-center">
-      {/* Top Floating Control Bar */}
-      <div className="w-full flex items-center justify-between bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-3 mb-4 shadow-sm">
-        <div className="flex items-center gap-2">
-          <span className="bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 text-xs px-2.5 py-1 rounded-full font-black">
-            {currentIndex + 1} / {challenges.length}
-          </span>
-          {currentChallenge.cefr_level && (
-            <span className="bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-xs px-2.5 py-1 rounded-full font-black">
-              {currentChallenge.cefr_level}
-            </span>
-          )}
-          {currentChallenge.grammar_focus && (
-            <span className="hidden sm:inline-block bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs px-2.5 py-1 rounded-full font-semibold">
-              {currentChallenge.grammar_focus}
-            </span>
-          )}
-        </div>
-
-        {/* Audio & Playback Controls - Sleek, Clean, Final */}
-        <div className="flex items-center gap-2">
-          {/* Autoplay Toggle */}
-          <button
-            type="button"
-            onClick={() => setAutoPlayAudio(!autoPlayAudio)}
-            className={`px-2.5 py-1.5 text-xs rounded-xl font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-              autoPlayAudio
-                ? "bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-800 shadow-2xs"
-                : "bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-slate-600"
-            }`}
-            title="تشغيل الصوت تلقائياً عند كشف الجملة"
-          >
-            <Volume2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">نطق تلقائي</span>
-          </button>
-
-          {/* Speed Toggle Chip */}
+    <div className="w-full max-w-[min(420px,calc(100dvh-250px))] mx-auto flex flex-col items-center gap-5">
+      {/* Unified 48px Compact Toolbar (Matches ReviewSession Toolbar) */}
+      <div className="w-full shrink-0" dir="rtl">
+        <div className="w-full h-12 bg-white/95 dark:bg-slate-900/95 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-1 shadow-xs flex items-center justify-center gap-1.5 select-none backdrop-blur-xs">
+          {/* Auto-play audio on reveal */}
           <button
             type="button"
             onClick={() => {
-              const nextSpeed = audioSpeed === 1.0 ? 1.2 : audioSpeed === 1.2 ? 0.8 : 1.0;
-              setAudioSpeed(nextSpeed);
+              const next = !autoPlayAudio;
+              setAutoPlayAudio(next);
               try {
-                localStorage.setItem("spoken_challenge_speed", String(nextSpeed));
+                localStorage.setItem("spoken_challenge_autoplay", String(next));
               } catch {}
             }}
-            className="px-2.5 py-1.5 text-xs rounded-xl font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer border border-slate-200/60 dark:border-slate-700/60"
-            title="سرعة نطق الصوت (انقر للتبديل: 1x / 1.2x / 0.8x)"
+            title={autoPlayAudio ? "إيقاف النطق التلقائي عند الكشف" : "تفعيل النطق التلقائي عند الكشف"}
+            className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center ${
+              autoPlayAudio
+                ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 border border-transparent"
+            }`}
           >
-            {audioSpeed}x
+            {autoPlayAudio ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
           </button>
 
-          {/* AI Chat / Spoken Challenge Discussion Button */}
-          {currentChallenge && (
-            <button
-              type="button"
-              onClick={handleOpenAiChat}
-              title="محادثة ومناقشة بالذكاء الاصطناعي حول هذه الجملة وسياق التحدي"
-              className="px-2.5 py-1 text-xs rounded-lg font-bold transition-all flex items-center gap-1.5 cursor-pointer bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 active:scale-95 shadow-2xs"
-            >
-              <Bot className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">محادثة الذكاء</span>
-            </button>
-          )}
-
+          {/* Toggle Countdown Timer */}
           <button
-            onClick={handleSafeClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+            type="button"
+            onClick={() => {
+              if (useCountdown) {
+                applyTimerMode("manual");
+              } else {
+                applyTimerMode(lastTimedMode);
+              }
+            }}
+            title={useCountdown ? "التبديل إلى الكشف اليدوي (بدون مؤقت)" : "تفعيل المؤقت التلقائي"}
+            className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center ${
+              useCountdown
+                ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 border border-transparent"
+            }`}
           >
-            <X className="w-4 h-4" />
+            <Timer className="w-4 h-4" />
+          </button>
+
+          {/* AI Chat */}
+          <button
+            type="button"
+            onClick={handleOpenAiChat}
+            title="مناقشة الجملة بالذكاء الاصطناعي"
+            className="h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 cursor-pointer active:scale-95 flex items-center justify-center border border-transparent"
+          >
+            <Bot className="w-4 h-4" />
+          </button>
+
+          {/* In-Session Settings */}
+          <button
+            type="button"
+            onClick={() => setIsSettingsOpen(true)}
+            title="إعدادات التحدي"
+            className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-lg transition-all duration-150 cursor-pointer active:scale-95 flex items-center justify-center ${
+              isSettingsOpen
+                ? "bg-sky-500/[0.08] dark:bg-sky-400/[0.12] text-sky-700 dark:text-sky-300 border border-sky-500/20 dark:border-sky-400/25"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/60 border border-transparent"
+            }`}
+          >
+            <Sliders className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {/* Main Split Challenge Card - Sleek Repetition Mode Aesthetic */}
-      <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-xl overflow-hidden min-h-[460px]">
-        {/* Left/Top Panel: Expressive Illustration Context */}
-        <div className="flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-800/50 rounded-2xl p-4 border border-slate-100 dark:border-slate-800/80 relative overflow-hidden group">
-          {currentChallenge.imageUrl ? (
-            <div className="w-full h-56 sm:h-72 rounded-xl overflow-hidden relative shadow-md">
-              <img
-                src={currentChallenge.imageUrl}
-                alt={currentChallenge.image_prompt || "Challenge context"}
-                className="w-full h-full object-cover object-center transition-transform duration-500 group-hover:scale-105"
-                referrerPolicy="no-referrer"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60 pointer-events-none" />
-              {currentChallenge.vocab_focus && currentChallenge.vocab_focus.length > 0 && (
-                <div className="absolute bottom-3 right-3 left-3 flex flex-wrap gap-1">
-                  {currentChallenge.vocab_focus.map((v, i) => (
-                    <span
-                      key={i}
-                      className="bg-black/70 backdrop-blur-md text-white text-[10px] font-bold px-2 py-0.5 rounded-md"
-                    >
-                      {v}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="w-full h-56 sm:h-72 rounded-xl bg-slate-200 dark:bg-slate-700/50 flex flex-col items-center justify-center text-slate-400 gap-2">
-              <ImageIcon className="w-10 h-10" />
-              <span className="text-xs font-semibold">صورة توضيحية للسياق</span>
-            </div>
-          )}
-
-          {/* Grammar Focus Pill under Image */}
-          <div className="w-full mt-3 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 px-1">
-            <span className="font-semibold">{currentChallenge.image_prompt}</span>
-            <span className="font-bold text-purple-600 dark:text-purple-400">
-              {currentChallenge.grammar_focus}
-            </span>
+      {/* Master 1:1 Square Card (Identical Structure to Challenge / Write / Article / Classic) */}
+      <div className="relative w-full aspect-square select-none overflow-hidden rounded-[26px] shadow-sm border border-outline-variant/30 dark:border-slate-800 bg-surface-container-lowest dark:bg-slate-900 flex flex-col justify-between p-4 sm:p-5">
+        {/* Full-bleed background illustration when loaded */}
+        {hasImage && (
+          <div className="absolute inset-0 w-full h-full pointer-events-none select-none overflow-hidden">
+            <img
+              src={currentChallenge.imageUrl}
+              alt={currentChallenge.arabic_prompt || "Challenge illustration"}
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+              onError={() => advanceChallengeImageCandidate(currentIndex, currentChallenge.imageUrl)}
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/45 to-black/30" />
           </div>
-        </div>
+        )}
 
-        {/* Right/Bottom Panel: Arabic Prompt & Interactive Reveal/TTS & Mic Check */}
-        <div className="flex flex-col justify-between p-2 sm:p-4 text-right">
-          {/* Section 1: Arabic Directive */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-bold tracking-wider text-purple-600 dark:text-purple-400 uppercase">
-                ما يجب قوله بالألمانية:
-              </span>
-              <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                <Clock className="w-3.5 h-3.5" />
-                <span>الزمن المقدر: {currentChallenge.estimated_seconds} ثوانٍ</span>
-              </div>
-            </div>
+        {/* Top Bar inside Square Card: Speaker + Mic (Left) | Countdown Number (Right) */}
+        <div className="w-full flex items-center justify-between relative z-20 select-none pointer-events-auto">
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                speakGerman(currentChallenge.target_german);
+              }}
+              className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 shadow-sm ${
+                isPlayingAudio
+                  ? "bg-primary border border-primary text-white"
+                  : hasImage
+                    ? "bg-black/40 hover:bg-black/65 backdrop-blur-md border border-white/25 text-white"
+                    : "border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50"
+              }`}
+              title="استمع للنطق"
+            >
+              <Volume2 className="w-4.5 h-4.5" />
+            </button>
 
-            {/* Arabic Instruction in Large Bold Typography */}
-            <div className="p-4 bg-purple-50/50 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/40 rounded-2xl mb-5">
-              <h3 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white leading-relaxed">
-                "{currentChallenge.arabic_prompt}"
-              </h3>
-            </div>
-
-            {/* Countdown Timer or German Sentence Reveal */}
-            {!isRevealed ? (
-              <div className="flex flex-col items-center justify-center py-6 gap-4">
-                {/* Circular Animated Countdown Timer */}
-                <div className="relative w-28 h-28 flex items-center justify-center">
-                  <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
-                    {/* Background Ring */}
-                    <path
-                      className="text-slate-100 dark:text-slate-800"
-                      strokeWidth="3"
-                      stroke="currentColor"
-                      fill="none"
-                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                    />
-                    {/* Active Animated Ring */}
-                    <path
-                      className={`transition-all duration-1000 ${
-                        timeLeft > 3
-                          ? "text-purple-600"
-                          : timeLeft > 1
-                          ? "text-amber-500"
-                          : "text-rose-500 animate-pulse"
-                      }`}
-                      strokeDasharray="100, 100"
-                      strokeDashoffset={strokeDashoffset}
-                      strokeWidth="3.2"
-                      strokeLinecap="round"
-                      stroke="currentColor"
-                      fill="none"
-                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                    />
-                  </svg>
-                  <div className="absolute flex flex-col items-center justify-center">
-                    <span className="text-3xl font-black text-slate-900 dark:text-white">
-                      {timeLeft}
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-bold">ثانية</span>
-                  </div>
-                </div>
-
-                <button
-                  onClick={handleReveal}
-                  className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white text-sm font-black rounded-xl shadow-md shadow-purple-500/20 transition-all active:scale-95 cursor-pointer flex items-center gap-2"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>كشف الجملة الألمانية والتحقق</span>
-                </button>
-              </div>
-            ) : (
-              /* REVEALED GERMAN SENTENCE & AUDIO & MIC CHECK */
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="space-y-4"
+            {isSpeechSupported && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleToggleMic();
+                }}
+                className={`h-9.5 w-9.5 sm:h-10 sm:w-10 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 shadow-sm ${
+                  isListening
+                    ? "bg-rose-500 border border-rose-500 text-white animate-pulse"
+                    : hasImage
+                      ? "bg-black/40 hover:bg-black/65 backdrop-blur-md border border-white/25 text-white"
+                      : "border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50"
+                }`}
+                title={isListening ? "إيقاف الميكروفون" : "اختبر نطقك"}
               >
-                {/* Target German Sentence Card */}
-                <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl relative">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                      الجملة الألمانية المستهدفة:
-                    </span>
-                    <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-950 text-purple-600 dark:text-purple-300">
-                      DE (LTR)
-                    </span>
-                  </div>
-                  <div
-                    dir="ltr"
-                    className="text-xl sm:text-2xl font-black text-purple-700 dark:text-purple-300 select-text text-left font-sans tracking-wide leading-relaxed py-1"
-                  >
-                    {currentChallenge.target_german}
-                  </div>
-
-                  {/* Audio Replay Button */}
-                  <div className="mt-3 flex items-center gap-2">
-                    <button
-                      onClick={() => speakGerman(currentChallenge.target_german)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                        isPlayingAudio
-                          ? "bg-purple-600 text-white animate-pulse"
-                          : "bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 hover:bg-purple-200"
-                      }`}
-                    >
-                      <Volume2 className="w-4 h-4" />
-                      <span>إعادة النطق</span>
-                    </button>
-
-                    {/* Mic Check Button */}
-                    <button
-                      onClick={handleToggleMic}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                        isListening
-                          ? "bg-rose-600 text-white animate-pulse"
-                          : "bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200"
-                      }`}
-                    >
-                      {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                      <span>{isListening ? "جاري الاستماع... (اضغط للإيقاف)" : "تحقق من نطقك (ميكروفون)"}</span>
-                    </button>
-
-                    {/* AI Chat Discussion Button */}
-                    <button
-                      type="button"
-                      onClick={handleOpenAiChat}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 hover:bg-purple-100 dark:hover:bg-purple-900/60 active:scale-95"
-                      title="مناقشة واستفسار بالذكاء الاصطناعي حول هذه الجملة وسياقها"
-                    >
-                      <Bot className="w-4 h-4" />
-                      <span>مناقشة الجملة بالذكاء</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Live Speech Recognition Results */}
-                {userSpokenText && (
-                  <div className="p-3 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs">
-                    <span className="text-slate-500 dark:text-slate-400 block mb-1 font-semibold">
-                      ما تم التقاطه من صوتك (بالألمانية):
-                    </span>
-                    <p
-                      dir="ltr"
-                      className="font-bold text-slate-800 dark:text-slate-100 text-sm text-left font-sans py-0.5"
-                    >
-                      "{userSpokenText}"
-                    </p>
-                    {matchScore !== null && (
-                      <div className="mt-2 flex items-center gap-2">
-                        <span
-                          className={`px-2 py-0.5 rounded-md font-black text-xs ${
-                            matchScore >= 80
-                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                              : matchScore >= 50
-                              ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                              : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
-                          }`}
-                        >
-                          تطابق: {matchScore}%
-                        </span>
-                        <span className="text-slate-500 text-[11px]">
-                          {matchScore >= 80 ? "نطق ممتاز ومطابق!" : matchScore >= 50 ? "جيد جداً، حاول مجدداً لتحسين النطق" : "حاول التحدث بوضوح أكثر"}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {speechError && (
-                  <div className="p-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-700 dark:text-amber-300">
-                    {speechError}
-                  </div>
-                )}
-              </motion.div>
+                {isListening ? <MicOff className="w-4.5 h-4.5" /> : <Mic className="w-4.5 h-4.5" />}
+              </button>
             )}
           </div>
 
-          {/* Section 2: Action Rating & Next Controls */}
-          {isRevealed && (
-            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center gap-3">
-              <button
-                onClick={() => handleCompleteChallenge(false)}
-                className="flex-1 py-3 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-950/70 text-rose-600 dark:text-rose-400 font-bold text-xs rounded-xl border border-rose-200 dark:border-rose-800 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>أحتاج تكرارها</span>
-              </button>
-              <button
-                onClick={() => handleCompleteChallenge(true)}
-                className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>أتقنتها بنجاح!</span>
-              </button>
+          {!isRevealed && useCountdown && isTimerRunning && (
+            <div
+              className={`h-9.5 min-w-9.5 sm:h-10 sm:min-w-10 px-2.5 rounded-xl flex items-center justify-center font-mono font-black text-base tabular-nums transition-colors ${
+                timeLeft <= 1
+                  ? "bg-rose-500 text-white shadow-sm"
+                  : hasImage
+                    ? "bg-black/45 backdrop-blur-md border border-white/25 text-white"
+                    : "bg-primary/10 border border-primary/25 text-primary"
+              }`}
+            >
+              {timeLeft}
             </div>
           )}
         </div>
+
+        {/* Center Prompt & Revealed Target Sentence */}
+        <div className="relative z-20 flex-1 flex flex-col items-center justify-center text-center px-2 py-4 pointer-events-auto gap-3.5">
+          <h2
+            dir="rtl"
+            className={`font-black break-words whitespace-pre-wrap leading-snug transition-all ${
+              isRevealed
+                ? hasImage
+                  ? "text-lg sm:text-xl text-white/75"
+                  : "text-lg sm:text-xl text-slate-500 dark:text-slate-400"
+                : hasImage
+                  ? "text-2xl sm:text-3xl text-white drop-shadow-md"
+                  : "text-2xl sm:text-3xl text-on-surface dark:text-white"
+            }`}
+          >
+            {currentChallenge.arabic_prompt}
+          </h2>
+
+          {isRevealed && (
+            <motion.button
+              type="button"
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.18 }}
+              onClick={() => speakGerman(currentChallenge.target_german)}
+              className="inline-flex items-center justify-center max-w-full px-3 py-1.5 rounded-2xl transition-transform active:scale-95 cursor-pointer"
+              dir="ltr"
+              title="استمع للجملة"
+            >
+              <span
+                className={`text-2xl sm:text-3xl font-black break-words whitespace-pre-wrap leading-snug ${
+                  hasImage ? "text-white drop-shadow-md" : "text-emerald-600 dark:text-emerald-400"
+                }`}
+              >
+                {currentChallenge.target_german}
+              </span>
+            </motion.button>
+          )}
+
+          {/* Minimal Speech Recognition Result */}
+          {userSpokenText && (
+            <div
+              className={`max-w-full px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 ${
+                hasImage
+                  ? "bg-black/55 backdrop-blur-md text-white border border-white/15"
+                  : "bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
+              }`}
+            >
+              <span dir="ltr" className="truncate max-w-[200px]">
+                {userSpokenText}
+              </span>
+              {matchScore !== null && (
+                <span
+                  className={`font-mono tabular-nums shrink-0 ${
+                    matchScore >= 80
+                      ? "text-emerald-400"
+                      : matchScore >= 50
+                        ? "text-amber-400"
+                        : "text-rose-400"
+                  }`}
+                >
+                  {matchScore}%
+                </span>
+              )}
+            </div>
+          )}
+
+          {speechError && (
+            <p className="text-[11px] font-bold text-amber-400 bg-black/50 px-3 py-1 rounded-lg">
+              {speechError}
+            </p>
+          )}
+        </div>
+
+        {/* Subtle Bottom Timer Progress Bar (Identical to Challenge Mode) */}
+        <div className="w-full h-2 relative z-20 pointer-events-none select-none flex items-end">
+          {!isRevealed && useCountdown && isTimerRunning && (
+            <div className={`w-full h-1 rounded-full overflow-hidden ${hasImage ? "bg-white/20" : "bg-slate-200 dark:bg-slate-800"}`}>
+              <div
+                className={`h-full rounded-full transition-all duration-1000 ease-linear ${
+                  timeLeft <= 1 ? "bg-rose-500" : "bg-primary"
+                }`}
+                style={{ width: `${timerRatio * 100}%` }}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Tactile Action Bar directly below Square Card */}
+      <div className="w-full">
+        {isRevealed ? (
+          <div className="w-full grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => handleCompleteChallenge(false)}
+              className="h-14 sm:h-15 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer active:scale-[0.99]"
+              title="أحتاج تكرارها"
+              aria-label="أحتاج تكرارها"
+            >
+              <X className="w-7 h-7 stroke-[3]" />
+            </button>
+            <button
+              type="button"
+              onClick={() => handleCompleteChallenge(true)}
+              className="h-14 sm:h-15 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm flex items-center justify-center transition-all cursor-pointer active:scale-[0.99]"
+              title="نطقتها بنجاح"
+              aria-label="نطقتها بنجاح"
+            >
+              <Check className="w-7 h-7 stroke-[3]" />
+            </button>
+          </div>
+        ) : (
+          <div className="w-full flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={handleReveal}
+              className="flex-1 h-14 sm:h-15 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-black text-base flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.99]"
+              title="كشف الجملة"
+            >
+              <Eye className="w-5 h-5" />
+              <span>كشف</span>
+            </button>
+
+            {isSpeechSupported && (
+              <button
+                type="button"
+                onClick={handleToggleMic}
+                className={`h-14 sm:h-15 w-14 sm:w-16 rounded-2xl shadow-sm flex items-center justify-center transition-all cursor-pointer active:scale-[0.98] shrink-0 ${
+                  isListening
+                    ? "bg-rose-500 hover:bg-rose-600 text-white animate-pulse"
+                    : "bg-primary hover:opacity-95 text-white"
+                }`}
+                title={isListening ? "إيقاف الميكروفون" : "انطق الآن"}
+                aria-label={isListening ? "إيقاف الميكروفون" : "انطق الآن"}
+              >
+                {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Unified Navigation Trackpad & Buttons */}
+      <div className="w-full shrink-0">
+        <UnifiedNavigationTrack
+          currentIndex={currentIndex}
+          totalCards={challenges.length}
+          onPrev={() => setCurrentIndex((prev) => Math.max(0, prev - 1))}
+          onNext={() => setCurrentIndex((prev) => Math.min(challenges.length - 1, prev + 1))}
+        />
       </div>
 
       {/* Spoken Challenge Context-Aware AI Chat Modal */}
@@ -1326,7 +1366,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
             grammarFocus: ch.grammar_focus
           }))}
           folderInfo={{
-            name: `تحدي التحدث (${currentIndex + 1} من ${challenges.length})`,
+            name: `تحدي النطق (${currentIndex + 1} من ${challenges.length})`,
             description: `ممارسة نطق وتحدث الجمل الألمانية - ${folderName}`,
             targetLanguage: "de",
             sourceLanguage: "ar"
@@ -1344,6 +1384,230 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
             speakGerman(text);
           }}
         />
+      )}
+
+      {/* In-Session Settings Modal (Voice Engine + Timer Mode) */}
+      {isSettingsOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setIsSettingsOpen(false)}
+          dir="rtl"
+        >
+          <div
+            className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[26px] p-5 sm:p-6 shadow-xl text-right space-y-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3.5">
+              <h3 className="text-base font-black text-slate-900 dark:text-white">
+                إعدادات تحدي النطق
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen(false)}
+                aria-label="إغلاق الإعدادات"
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Selected Voice Engine */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                محرك الصوت المختار
+              </label>
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedVoice}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSelectedVoice(val);
+                    try {
+                      localStorage.setItem("spoken_challenge_voice", val);
+                    } catch {}
+                  }}
+                  className="flex-1 px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:border-primary cursor-pointer"
+                >
+                  {CHALLENGE_VOICE_OPTIONS.map((grp) => (
+                    <optgroup key={grp.group} label={grp.group}>
+                      {grp.options.map((opt) => (
+                        <option key={opt.id} value={opt.id}>
+                          {opt.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleToggleVoicePreview}
+                  className={`h-10 w-10 rounded-xl border flex items-center justify-center shrink-0 transition-colors cursor-pointer ${
+                    isPlayingVoiceSample
+                      ? "bg-primary text-white border-primary"
+                      : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-750"
+                  }`}
+                  title={isPlayingVoiceSample ? "إيقاف المعاينة" : "تجربة الصوت"}
+                >
+                  {isPlayingVoiceSample ? <Square className="w-3.5 h-3.5 fill-current" /> : <Volume2 className="w-4 h-4" />}
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !autoPlayAudio;
+                  setAutoPlayAudio(next);
+                  try {
+                    localStorage.setItem("spoken_challenge_autoplay", String(next));
+                  } catch {}
+                }}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer"
+              >
+                <span>النطق التلقائي عند كشف الإجابة</span>
+                <span
+                  className={`px-2 py-0.5 rounded-lg text-[11px] font-bold ${
+                    autoPlayAudio
+                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                      : "bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400"
+                  }`}
+                >
+                  {autoPlayAudio ? "مفعل" : "متوقف"}
+                </span>
+              </button>
+            </div>
+
+            {/* Question / Reveal Timing Mode */}
+            <div className="space-y-2.5">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                توقيت السؤال والإجابة
+              </label>
+
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => applyTimerMode("ai")}
+                  className={`p-2.5 rounded-xl border text-center transition-colors cursor-pointer space-y-0.5 ${
+                    timerMode === "ai"
+                      ? "bg-primary text-white border-primary"
+                      : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  <div className="text-xs font-bold">ثواني الذكاء</div>
+                  <div className={`text-[10px] tabular-nums ${timerMode === "ai" ? "text-white/85" : "text-slate-400"}`}>
+                    الافتراضي ({currentChallenge?.estimated_seconds || 6}ث)
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => applyTimerMode("custom")}
+                  className={`p-2.5 rounded-xl border text-center transition-colors cursor-pointer space-y-0.5 ${
+                    timerMode === "custom"
+                      ? "bg-primary text-white border-primary"
+                      : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  <div className="text-xs font-bold">وقت محدد</div>
+                  <div className={`text-[10px] tabular-nums ${timerMode === "custom" ? "text-white/85" : "text-slate-400"}`}>
+                    {customSeconds} ثانية
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => applyTimerMode("manual")}
+                  className={`p-2.5 rounded-xl border text-center transition-colors cursor-pointer space-y-0.5 ${
+                    timerMode === "manual"
+                      ? "bg-primary text-white border-primary"
+                      : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  <div className="text-xs font-bold">كشف يدوي</div>
+                  <div className={`text-[10px] ${timerMode === "manual" ? "text-white/85" : "text-slate-400"}`}>
+                    بدون توقيت
+                  </div>
+                </button>
+              </div>
+
+              {timerMode === "custom" && (
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      عدد الثواني لكل سؤال
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => applyTimerMode("custom", Math.max(1, customSeconds - 1))}
+                        className="w-8 h-8 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 cursor-pointer"
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min={1}
+                        max={120}
+                        value={customSeconds}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          if (!isNaN(val)) applyTimerMode("custom", val);
+                        }}
+                        className="w-16 h-8 text-center font-mono font-bold text-sm tabular-nums text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-primary"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => applyTimerMode("custom", Math.min(120, customSeconds + 1))}
+                        className="w-8 h-8 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 cursor-pointer"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5">
+                    {[3, 5, 8, 10, 15, 20].map((sec) => (
+                      <button
+                        key={sec}
+                        type="button"
+                        onClick={() => applyTimerMode("custom", sec)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold font-mono tabular-nums border transition-colors cursor-pointer ${
+                          customSeconds === sec
+                            ? "bg-primary text-white border-primary"
+                            : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100"
+                        }`}
+                      >
+                        {sec}ث
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="pt-1 space-y-2.5">
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen(false)}
+                className="w-full h-11 rounded-2xl bg-primary hover:opacity-95 text-white font-black text-sm shadow-sm transition-all cursor-pointer active:scale-[0.99]"
+              >
+                حفظ وإغلاق
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSettingsOpen(false);
+                  handleReturnToSetup();
+                }}
+                className="w-full py-2 text-xs font-bold text-slate-400 hover:text-rose-500 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>توليد جمل جديدة (العودة للبداية)</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
