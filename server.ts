@@ -4231,7 +4231,7 @@ Generate exactly ${countNum} speaking challenges derived directly from the provi
 2. Arabic Directive (arabic_prompt): Provide a clear instruction in Arabic specifying what the user needs to say or answer in German (e.g., "قل: أنا أشرب الماء الآن", "أجب بالنفي: هل تريد قهوة؟", "قل أنك ذاهب إلى الطبيب غداً").
 3. Target German Sentence (target_german): The exact grammatically correct German sentence.
 4. Speaking Time Estimate (estimated_seconds): Realistic speaking time in seconds (4 to 12 seconds).
-5. Visual Image Prompt (image_prompt): Concise English prompt for illustration (e.g., "A person drinking fresh water").
+5. Visual Image Prompt (image_prompt): Strictly 2 to 3 concrete, photographic English keywords representing the scene or main noun (NO full sentences, NO filler words like "a person", NO art-style words like "flat vector" or "illustration" — e.g., "glass water", "coffee cup", "doctor hospital", "train station").
 6. Grammar & Vocab Metadata: Highlight grammar rule (grammar_focus) and key words (vocab_focus).
 
 ### OUTPUT FORMAT:
@@ -4242,7 +4242,7 @@ Respond ONLY with a valid JSON array of objects following this schema (No markdo
     "arabic_prompt": "قل: أنا أشرب الماء الآن",
     "target_german": "Ich trinke jetzt Wasser",
     "estimated_seconds": 6,
-    "image_prompt": "A person drinking a glass of fresh water, flat vector style",
+    "image_prompt": "drinking glass water",
     "cefr_level": "A1",
     "grammar_focus": "Präsens - Regelmäßige Verben",
     "vocab_focus": ["trinken", "das Wasser", "jetzt"]
@@ -4361,19 +4361,35 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         }));
       }
 
+      // Helper to strip verbose filler/art-style terms (common in Lite model outputs) into crisp search keywords
+      const sanitizeChallengeImageQuery = (raw: string): string => {
+        if (!raw) return "";
+        const cleaned = raw
+          .replace(/\b(flat|vector|style|illustration|cartoon|drawing|minimalist|aesthetic|educational|realistic|3d|render|icon|clipart|someone|person|people|man|woman|a|an|the|in|on|at|with|of|to|for|and|or|is|are)\b/gi, " ")
+          .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        const words = cleaned.split(" ").filter((w) => w.length > 1);
+        return words.slice(0, 3).join(" ").trim();
+      };
+
       // Return challenges immediately without parallel image fetching (Lazy loaded per card by client)
       const enrichedChallenges = parsedChallenges.slice(0, countNum).map((item: any, idx: number) => {
-        const query = item.image_prompt || `${item.target_german || "German language"} illustration`;
+        const rawPrompt = String(item.image_prompt || "").trim();
+        const sanitizedPrompt = sanitizeChallengeImageQuery(rawPrompt);
+        const vocabArr = Array.isArray(item.vocab_focus) ? item.vocab_focus.map(String) : [];
+        const fallbackText = vocabArr[0] || String(item.target_german || "").trim();
+        const finalQuery = sanitizedPrompt || sanitizeChallengeImageQuery(fallbackText) || rawPrompt || fallbackText;
         return {
           id: item.id || idx + 1,
           arabic_prompt: String(item.arabic_prompt || "قل هذه الجملة بالألمانية:"),
           target_german: String(item.target_german || "").trim(),
           estimated_seconds: Math.max(parseInt(String(item.estimated_seconds), 10) || 6, 3),
-          image_prompt: String(item.image_prompt || query),
+          image_prompt: finalQuery,
           imageUrl: "",
           cefr_level: String(item.cefr_level || "A1"),
           grammar_focus: String(item.grammar_focus || "عام"),
-          vocab_focus: Array.isArray(item.vocab_focus) ? item.vocab_focus.map(String) : []
+          vocab_focus: vocabArr
         };
       });
 
@@ -4390,32 +4406,60 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
     }
   });
 
+  // Paced sequential queue for spoken-challenge image searches to avoid DDG burst 403/429 rate-limits
+  let spokenChallengeImageQueue: Promise<any> = Promise.resolve();
+  let lastSpokenChallengeDdgFetchAt = 0;
+
   // API Route - Lazy Fetch Image + Candidates for a Spoken Challenge on Demand
   app.get("/api/spoken-challenges/image", async (req, res) => {
-    const query = String(req.query.q || "").trim();
-    const fallbackQuery = String(req.query.fallback || "").trim();
-    if (!query && !fallbackQuery) {
+    const rawQuery = String(req.query.q || "").trim();
+    const rawFallback = String(req.query.fallback || "").trim();
+    if (!rawQuery && !rawFallback) {
       return res.json({ success: false, imageUrl: "", candidateUrls: [] });
     }
 
-    try {
+    const extractKeywords = (text: string): string => {
+      return text
+        .replace(/\b(flat|vector|style|illustration|cartoon|drawing|minimalist|aesthetic|educational|realistic|3d|render|icon|clipart|someone|person|people|a|an|the|der|die|das|dem|den|des|ein|eine|einen|in|on|at|with|of|to|for|and|or|is|are)\b/gi, " ")
+        .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .split(" ")
+        .filter((w) => w.length > 1)
+        .slice(0, 3)
+        .join(" ")
+        .trim();
+    };
+
+    const runLookup = async () => {
       const searchAttempts = Array.from(
         new Set(
           [
-            query,
-            query ? cleanQueryForSearch(query, 2) : "",
-            fallbackQuery,
-            fallbackQuery ? cleanQueryForSearch(fallbackQuery, 2) : ""
+            extractKeywords(rawQuery),
+            rawQuery,
+            extractKeywords(rawFallback),
+            rawFallback ? cleanQueryForSearch(rawFallback, 2) : ""
           ]
             .map((s) => s.trim())
             .filter(Boolean)
         )
-      );
+      ).slice(0, 3);
 
       const candidateUrls: string[] = [];
 
+      // 1. Try DuckDuckGo with polite spacing between live queries
       for (const attemptQuery of searchAttempts) {
-        if (candidateUrls.length >= 6) break;
+        if (Date.now() < ddgCooldownUntil) break;
+        const cacheKey = `${attemptQuery.toLowerCase()}_page_1_offset_0`;
+        const isCached = ddgImageCache.has(cacheKey);
+        if (!isCached) {
+          const elapsed = Date.now() - lastSpokenChallengeDdgFetchAt;
+          if (elapsed < 380) {
+            await new Promise((r) => setTimeout(r, 380 - elapsed));
+          }
+          lastSpokenChallengeDdgFetchAt = Date.now();
+        }
+
         const { hits } = await searchDuckDuckGoImages(attemptQuery, "1");
         if (hits && hits.length > 0) {
           for (const h of hits) {
@@ -4429,12 +4473,36 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         if (candidateUrls.length > 0) break;
       }
 
+      // 2. Reliable fallback to Wikimedia Commons if DDG returned empty or hit cooldown
+      if (candidateUrls.length === 0) {
+        for (const wikiAttempt of searchAttempts) {
+          const wikiHits = await searchWikimediaImages(wikiAttempt);
+          if (wikiHits && wikiHits.length > 0) {
+            for (const h of wikiHits) {
+              const url = h.webformatURL || h.largeImageURL;
+              if (url && typeof url === "string" && url.startsWith("http") && !candidateUrls.includes(url)) {
+                candidateUrls.push(url);
+              }
+              if (candidateUrls.length >= 8) break;
+            }
+          }
+          if (candidateUrls.length > 0) break;
+        }
+      }
+
       const imageUrl = candidateUrls[0] || "";
-      return res.json({
+      return {
         success: Boolean(imageUrl),
         imageUrl,
         candidateUrls
-      });
+      };
+    };
+
+    try {
+      const queuedTask = spokenChallengeImageQueue.then(runLookup, runLookup);
+      spokenChallengeImageQueue = queuedTask.catch(() => {});
+      const result = await queuedTask;
+      return res.json(result);
     } catch {
       return res.json({ success: false, imageUrl: "", candidateUrls: [] });
     }
