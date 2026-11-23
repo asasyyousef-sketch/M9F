@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X, Flag, Volume2, HelpCircle, RefreshCw, CheckCircle, AlertCircle, Timer, Award, Trophy, ArrowLeft, ArrowRight, Play, Pause, Eye, RotateCcw, ThumbsUp, ThumbsDown, Sparkles, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, MoreHorizontal, Sliders, Shuffle, EyeOff, VolumeX, Clock, Layers, Pencil, Plus, Check, DownloadCloud, Image as ImageIcon, CheckCircle2, Loader2, Download, Minimize2, Maximize2, Repeat, Trash2, ArrowUp, ArrowDown, Music, Mic, Save, Square, Bot, MessageSquare, Activity, Search } from "lucide-react";
-import { Flashcard, Folder, ReviewMethod, getSafeImageStyle, getCardSearchQuery, SpeakingChallengeItem, sanitizeCardArticleAndSentence, isGermanSentence } from "../types";
+import { Flashcard, Folder, ReviewMethod, getSafeImageStyle, getCardSearchQuery, SpeakingChallengeItem, sanitizeCardArticleAndSentence, isGermanSentence, isImageUrlBroken, markImageUrlBroken, healBrokenCardImage, promoteCandidateListToCard } from "../types";
 import { speakClient, preloadTTS, ttsCache, stopActiveAudio, fadeAndStopAudio, preloadImage, imageCache, invalidateImageCache, playPiperLocalWasm, playGradioClientAudio } from "./Modals";
 import { motion, AnimatePresence, MotionConfig } from "motion/react";
 import { ReviewChatModal } from "./ReviewChatModal";
@@ -482,17 +482,12 @@ export const ImageWithSkeleton: React.FC<ImageWithSkeletonProps> = ({
   });
   const [error, setError] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
-
-  // If the src is known to be broken, immediately trigger onError
-  useEffect(() => {
-    if (src && brokenImagesSet.has(src)) {
-      if (onError) onError(src);
-    }
-  }, [src, onError]);
+  const reportedErrorSrcRef = useRef<string | null>(null);
 
   // Synchronize state immediately in the render pass if src prop changes
   if (src !== prevSrc) {
     setPrevSrc(src);
+    reportedErrorSrcRef.current = null;
     setForceDirectSrc(false);
     const nextResolved = (src && imageCache[src]) ? imageCache[src] : src;
     setResolvedSrc(nextResolved);
@@ -500,6 +495,17 @@ export const ImageWithSkeleton: React.FC<ImageWithSkeletonProps> = ({
     setLoaded(alreadyLoaded);
     setError(false);
   }
+
+  // If the src is already known to be broken, trigger onError once for this src
+  useEffect(() => {
+    if (src && (brokenImagesSet.has(src) || isImageUrlBroken(src))) {
+      brokenImagesSet.add(src);
+      if (reportedErrorSrcRef.current !== src) {
+        reportedErrorSrcRef.current = src;
+        if (onError) onError(src);
+      }
+    }
+  }, [src, onError]);
 
   const handleImageError = () => {
     if (src && resolvedSrc !== src) {
@@ -512,9 +518,13 @@ export const ImageWithSkeleton: React.FC<ImageWithSkeletonProps> = ({
     } else {
       if (src) {
         brokenImagesSet.add(src);
+        markImageUrlBroken(src);
       }
       setError(true);
-      if (onError && src) onError(src);
+      if (onError && src && reportedErrorSrcRef.current !== src) {
+        reportedErrorSrcRef.current = src;
+        onError(src);
+      }
     }
   };
 
@@ -675,8 +685,17 @@ const StudyCard: React.FC<StudyCardProps> = ({
   speakFrontArticle = true,
   onUpdateCard,
 }) => {
-  // Capture card in local state so it stays exactly the same when unmounting/exiting
+  // Capture card in local state and keep ref in sync for async error healing
   const [localCard, setLocalCard] = useState(card);
+  const localCardRef = useRef(card);
+  localCardRef.current = localCard;
+  const needsFrontPromotionRef = useRef(false);
+
+  useEffect(() => {
+    setLocalCard(card);
+    localCardRef.current = card;
+    needsFrontPromotionRef.current = false;
+  }, [card.id, card.frontImage, card.backImage, card.autoImageCandidates]);
   
   // Track flipping locally but synchronized with global state changes
   const [localFlipped, setLocalFlipped] = useState(globalFlipped);
@@ -900,46 +919,82 @@ const StudyCard: React.FC<StudyCardProps> = ({
     }
   };
 
+  const extraImagesRef = useRef<string[]>([]);
+  extraImagesRef.current = extraImages;
+
   const handleImageError = (failedUrl: string) => {
     if (!failedUrl) return;
     brokenImagesSet.add(failedUrl);
+    markImageUrlBroken(failedUrl);
 
-    setExtraImages(prev => {
-      const filtered = prev.filter(url => url !== failedUrl && !brokenImagesSet.has(url));
-      
-      // If remaining images are low, fetch next page seamlessly in background
-      if (filtered.length < 3 && !isLoadingMore) {
-        const nextPage = imagePage + 1;
-        setImagePage(nextPage);
-        const qTerm = getCardSearchQuery(localCard);
-        if (qTerm) fetchDdgImages(qTerm, nextPage, false);
-      }
+    const currentCardObj = localCardRef.current;
+    const wasPrimaryBroken =
+      failedUrl === currentCardObj.frontImage ||
+      !currentCardObj.frontImage ||
+      brokenImagesSet.has(currentCardObj.frontImage) ||
+      isImageUrlBroken(currentCardObj.frontImage);
 
+    const { updatedCard, remainingCandidates, changed } = healBrokenCardImage(
+      currentCardObj,
+      failedUrl,
+      extraImagesRef.current
+    );
+
+    localCardRef.current = updatedCard;
+    setLocalCard(updatedCard);
+    setExtraImages(remainingCandidates);
+
+    if (wasPrimaryBroken) {
+      setCurrentImageIndex(0);
+    } else {
       setCurrentImageIndex(prevIndex => {
-        if (prevIndex >= filtered.length) {
-          return Math.max(0, filtered.length - 1);
+        if (prevIndex >= remainingCandidates.length) {
+          return Math.max(0, remainingCandidates.length - 1);
         }
         return prevIndex;
       });
+    }
 
-      return filtered;
-    });
+    if (changed && onUpdateCard) {
+      onUpdateCard(updatedCard);
+    }
+
+    if (wasPrimaryBroken && !updatedCard.frontImage) {
+      needsFrontPromotionRef.current = true;
+    }
+
+    // If remaining images are low, fetch next page seamlessly in background
+    if (remainingCandidates.length < 3 && !isLoadingMore) {
+      const nextPage = imagePage + 1;
+      setImagePage(nextPage);
+      const qTerm = getCardSearchQuery(updatedCard);
+      if (qTerm) fetchDdgImages(qTerm, nextPage, false);
+    }
   };
 
   const fetchDdgImages = async (query: string, pageNum: number, isInitial: boolean) => {
     if (!query) return;
 
     if (isInitial && ddgImagesCache[query]) {
-      const cachedUrls = ddgImagesCache[query].filter(url => !brokenImagesSet.has(url));
+      const cachedUrls = ddgImagesCache[query].filter(url => !brokenImagesSet.has(url) && !isImageUrlBroken(url));
       setExtraImages(prev => {
         const combined = [...prev];
         cachedUrls.forEach((url: string) => {
-          if (url && !combined.includes(url) && !brokenImagesSet.has(url)) {
+          if (url && !combined.includes(url) && !brokenImagesSet.has(url) && !isImageUrlBroken(url)) {
             combined.push(url);
           }
         });
         return combined;
       });
+      if (needsFrontPromotionRef.current && cachedUrls.length > 0) {
+        const { updatedCard, promotedUrl } = promoteCandidateListToCard(localCardRef.current, cachedUrls);
+        if (promotedUrl) {
+          needsFrontPromotionRef.current = false;
+          localCardRef.current = updatedCard;
+          setLocalCard(updatedCard);
+          if (onUpdateCard) onUpdateCard(updatedCard);
+        }
+      }
       return;
     }
 
@@ -951,16 +1006,28 @@ const StudyCard: React.FC<StudyCardProps> = ({
         if (data && data.hits && data.hits.length > 0) {
           const newImageUrls = data.hits.slice(0, 10)
             .map((h: any) => h.largeImageURL || h.webformatURL || h.image || h.url)
-            .filter((url: string) => typeof url === "string" && url.startsWith("http") && !brokenImagesSet.has(url));
+            .filter((url: string) => typeof url === "string" && url.startsWith("http") && !brokenImagesSet.has(url) && !isImageUrlBroken(url));
           
           if (isInitial) {
             ddgImagesCache[query] = newImageUrls;
+          }
+
+          // If card had lost its broken frontImage and needed a working replacement, promote immediately & save
+          if (needsFrontPromotionRef.current && newImageUrls.length > 0) {
+            const { updatedCard, promotedUrl } = promoteCandidateListToCard(localCardRef.current, newImageUrls);
+            if (promotedUrl) {
+              needsFrontPromotionRef.current = false;
+              localCardRef.current = updatedCard;
+              setLocalCard(updatedCard);
+              if (onUpdateCard) onUpdateCard(updatedCard);
+            }
           }
 
           // Preload and cache all new images in background asynchronously without blocking UI update
           newImageUrls.forEach((url: string) => {
             preloadImage(url).catch(() => {
               brokenImagesSet.add(url);
+              markImageUrlBroken(url);
               handleImageError(url);
             });
           });
@@ -968,7 +1035,7 @@ const StudyCard: React.FC<StudyCardProps> = ({
           setExtraImages(prev => {
             const combined = [...prev];
             newImageUrls.forEach((url: string) => {
-              if (url && !combined.includes(url) && !brokenImagesSet.has(url)) {
+              if (url && !combined.includes(url) && !brokenImagesSet.has(url) && !isImageUrlBroken(url)) {
                 combined.push(url);
               }
             });
@@ -985,12 +1052,15 @@ const StudyCard: React.FC<StudyCardProps> = ({
 
   useEffect(() => {
     if (!isSwipeImageEnabled) {
+      if (localCard.frontImage && (brokenImagesSet.has(localCard.frontImage) || isImageUrlBroken(localCard.frontImage))) {
+        handleImageError(localCard.frontImage);
+      }
       setExtraImages([]);
       setCurrentImageIndex(0);
       return;
     }
 
-    const initialList = (localCard.frontImage && !brokenImagesSet.has(localCard.frontImage)) ? [localCard.frontImage] : [];
+    const initialList: string[] = (localCard.frontImage && !brokenImagesSet.has(localCard.frontImage) && !isImageUrlBroken(localCard.frontImage)) ? [localCard.frontImage] : [];
     
     // Load pre-stored auto 10 images from offline cache if available
     try {
@@ -999,7 +1069,7 @@ const StudyCard: React.FC<StudyCardProps> = ({
         const parsedAuto = JSON.parse(rawAuto);
         if (Array.isArray(parsedAuto)) {
           parsedAuto.forEach((url: string) => {
-            if (url && typeof url === "string" && !initialList.includes(url) && !brokenImagesSet.has(url)) {
+            if (url && typeof url === "string" && !initialList.includes(url) && !brokenImagesSet.has(url) && !isImageUrlBroken(url)) {
               initialList.push(url);
             }
           });
@@ -1009,10 +1079,16 @@ const StudyCard: React.FC<StudyCardProps> = ({
 
     if (Array.isArray(localCard.autoImageCandidates)) {
       localCard.autoImageCandidates.forEach((url: string) => {
-        if (url && typeof url === "string" && !initialList.includes(url) && !brokenImagesSet.has(url)) {
+        if (url && typeof url === "string" && !initialList.includes(url) && !brokenImagesSet.has(url) && !isImageUrlBroken(url)) {
           initialList.push(url);
         }
       });
+    }
+
+    // If current frontImage is already broken, heal & promote immediately so persistent state matches
+    if (localCard.frontImage && (brokenImagesSet.has(localCard.frontImage) || isImageUrlBroken(localCard.frontImage))) {
+      handleImageError(localCard.frontImage);
+      return;
     }
 
     setExtraImages(initialList);
@@ -1655,6 +1731,7 @@ const StudyCard: React.FC<StudyCardProps> = ({
                     referrerPolicy="no-referrer"
                     loading="eager"
                     fetchPriority="high"
+                    onError={handleImageError}
                   />
                   <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-xs" />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/60 to-black/70" />
@@ -2201,12 +2278,48 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   const [sessionCards, setSessionCards] = useState<Flashcard[]>(filteredCards);
   const [currentIndex, setCurrentIndex] = useState(0);
 
+  const healingSessionUrlsRef = useRef<Set<string>>(new Set());
+
   const handleCardUpdateInternal = React.useCallback((updatedCard: Flashcard) => {
     setSessionCards(prev => prev.map(c => c.id === updatedCard.id ? updatedCard : c));
     if (onUpdateCard) {
       onUpdateCard(updatedCard);
     }
   }, [onUpdateCard]);
+
+  const handleSessionCardImageError = React.useCallback((targetCard: Flashcard, failedUrl: string) => {
+    if (!targetCard || !failedUrl) return;
+    const key = `${targetCard.id}::${failedUrl}`;
+    if (healingSessionUrlsRef.current.has(key)) return;
+    healingSessionUrlsRef.current.add(key);
+
+    brokenImagesSet.add(failedUrl);
+    const { updatedCard, replacementUrl, changed } = healBrokenCardImage(targetCard, failedUrl);
+    if (changed) {
+      handleCardUpdateInternal(updatedCard);
+    }
+
+    if (!replacementUrl) {
+      const qTerm = getCardSearchQuery(updatedCard);
+      if (qTerm) {
+        fetch(`/api/images?q=${encodeURIComponent(qTerm)}&page=1&provider=duckduckgo`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (!data?.hits?.length) return;
+            const urls = data.hits.slice(0, 10)
+              .map((h: any) => h.largeImageURL || h.webformatURL || h.image || h.url)
+              .filter((u: string) => typeof u === "string" && u.startsWith("http") && !brokenImagesSet.has(u) && !isImageUrlBroken(u));
+            if (urls.length > 0) {
+              const { updatedCard: promotedCard, promotedUrl } = promoteCandidateListToCard(updatedCard, urls);
+              if (promotedUrl) {
+                handleCardUpdateInternal(promotedCard);
+              }
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [handleCardUpdateInternal]);
   const [hasStartedStep, setHasStartedStep] = useState(false);
   const [isReviewChatOpen, setIsReviewChatOpen] = useState(false);
   const [spokenChallengeContext, setSpokenChallengeContext] = useState<{
@@ -5859,6 +5972,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                       sourceLanguage: currentCard.backLang || derivedFolder?.backLang || "ar"
                     }}
                     onOpenChat={() => setIsReviewChatOpen(true)}
+                    onUpdateCard={handleCardUpdateInternal}
                   />
                 </div>
               )}
@@ -5980,6 +6094,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           referrerPolicy="no-referrer"
                           loading="eager"
                           fetchPriority="high"
+                          onError={(failedUrl) => handleSessionCardImageError(currentCard, failedUrl)}
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-black/30" />
                       </div>
@@ -6217,6 +6332,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                                     referrerPolicy="no-referrer"
                                     loading="eager"
                                     fetchPriority="low"
+                                    onError={() => handleSessionCardImageError(choice, choice.frontImage!)}
                                   />
                                 </div>
                               ) : (
@@ -6595,6 +6711,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                                 style={getSafeImageStyle(imagePos)}
                                 referrerPolicy="no-referrer"
                                 loading="lazy"
+                                onError={(failedUrl) => handleSessionCardImageError(c, failedUrl)}
                               />
                               <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent pointer-events-none" />
                               <div className="relative z-10 w-full px-3 pb-3 pt-8 flex flex-col items-center gap-0.5 pointer-events-none">
@@ -6738,6 +6855,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                             referrerPolicy="no-referrer"
                             loading="eager"
                             fetchPriority="high"
+                            onError={(failedUrl) => handleSessionCardImageError(currentCard, failedUrl)}
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/45 to-black/30" />
                         </div>

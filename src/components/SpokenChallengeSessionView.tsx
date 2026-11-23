@@ -17,7 +17,7 @@ import {
   Eye,
   Timer
 } from "lucide-react";
-import { Flashcard, SpeakingChallengeItem, DEFAULT_GRADIO_VOICES } from "../types";
+import { Flashcard, SpeakingChallengeItem, DEFAULT_GRADIO_VOICES, isImageUrlBroken, markImageUrlBroken } from "../types";
 import { preloadImage, speakClient, stopActiveAudio } from "./Modals";
 import { ALL_AVAILABLE_MODELS } from "./AICorrectorWorkspace";
 import { motion } from "motion/react";
@@ -214,7 +214,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
 
     for (const card of cards) {
       const cardImg = card.frontImage || card.backImage || card.autoImageCandidates?.[0] || "";
-      if (!cardImg || failedImageUrlsRef.current.has(cardImg)) continue;
+      if (!cardImg || failedImageUrlsRef.current.has(cardImg) || isImageUrlBroken(cardImg)) continue;
       const cleanCardWord = (card.frontText || "")
         .replace(/^(der|die|das)\s+/i, "")
         .trim()
@@ -229,9 +229,10 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
   const advanceChallengeImageCandidate = useCallback((index: number, brokenUrl?: string) => {
     if (brokenUrl) {
       failedImageUrlsRef.current.add(brokenUrl);
+      markImageUrlBroken(brokenUrl);
     }
     const candidates = imageCandidatesRef.current.get(index) || [];
-    let nextUrl = candidates.find((u) => u && !failedImageUrlsRef.current.has(u)) || "";
+    let nextUrl = candidates.find((u) => u && !failedImageUrlsRef.current.has(u) && !isImageUrlBroken(u)) || "";
     if (!nextUrl && challengesRef.current[index]) {
       nextUrl = getDeckFallbackImageForChallenge(challengesRef.current[index]);
     }

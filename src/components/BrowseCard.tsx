@@ -14,6 +14,7 @@ interface BrowseCardProps {
   onDiscard: () => void;
   onKeep: () => void;
   onEdit?: () => void;
+  onImageError?: (failedUrl: string) => void;
 }
 
 export const BrowseCard: React.FC<BrowseCardProps> = React.memo(({
@@ -27,6 +28,7 @@ export const BrowseCard: React.FC<BrowseCardProps> = React.memo(({
   onDiscard,
   onKeep,
   onEdit,
+  onImageError,
 }) => {
   // Capture card in local state so it stays exactly the same when unmounting/exiting
   const [localCard, setLocalCard] = useState(card);
@@ -73,6 +75,11 @@ export const BrowseCard: React.FC<BrowseCardProps> = React.memo(({
                   className="absolute inset-0 w-full h-full object-cover"
                   style={getSafeImageStyle(localCard.frontImagePosition)}
                   referrerPolicy="no-referrer"
+                  onError={() => {
+                    if (localCard.frontImage && onImageError) {
+                      onImageError(localCard.frontImage);
+                    }
+                  }}
                 />
               ) : (
                 <div className="text-primary/70 font-bold text-xs flex flex-col items-center gap-2">

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { Explorer } from "./components/Explorer";
 import { AIWorkspace, AIFolder, AICard } from "./components/AIWorkspace";
@@ -20,7 +20,7 @@ import {
 } from "./components/Modals";
 import { ShareFolderModal, ImportSharedDeckModal } from "./components/ShareModals";
 import { ReviewSession } from "./components/ReviewSession";
-import { Folder, Flashcard, ReviewMethod, DbStatus, TranscriptDocument, SharedDeckData, DirectShareItem, MediaFile, MediaBookContext } from "./types";
+import { Folder, Flashcard, ReviewMethod, DbStatus, TranscriptDocument, SharedDeckData, DirectShareItem, MediaFile, MediaBookContext, isImageUrlBroken } from "./types";
 import { loadSecondarySectionsVisibility, SecondarySectionKey } from "./utils/sidebarSections";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { AuthScreen } from "./components/AuthScreen";
@@ -47,6 +47,10 @@ function MainStudyApp() {
     }
   });
   const [activeFolderId, setActiveFolderId] = useState<string>("");
+  const foldersRef = useRef<Folder[]>(folders);
+  foldersRef.current = folders;
+  const cardsRef = useRef<Flashcard[]>(cards);
+  cardsRef.current = cards;
 
   // Track and save activeFolderId to user-specific key for seamless refresh persistence
   useEffect(() => {
@@ -748,9 +752,9 @@ function MainStudyApp() {
     persistDB(updatedFolders, cards);
   };
 
-  // Edit card action handler
+  // Edit card action handler (uses refs so concurrent broken-image heals never overwrite one another)
   const handleEditCard = (id: string, cardData: Omit<Flashcard, "id" | "createdAt">) => {
-    const updatedCards = cards.map((c) => {
+    const updatedCards = cardsRef.current.map((c) => {
       if (c.id === id) {
         return {
           ...c,
@@ -759,8 +763,9 @@ function MainStudyApp() {
       }
       return c;
     });
+    cardsRef.current = updatedCards;
     setCards(updatedCards);
-    persistDB(folders, updatedCards);
+    persistDB(foldersRef.current, updatedCards);
 
     // Propagate changes to the active review session cards snapshot
     if (activeReview) {
@@ -1260,14 +1265,30 @@ function MainStudyApp() {
         updatedAt: new Date().toISOString()
       };
 
-      // Map cards preserving exact order
+      // Map cards preserving exact order & cleaned image candidates
       const newCards: Flashcard[] = (shared.cards || []).map((c, index) => {
         const assignedFolderId = idMap[c.folderId] || newFolderId;
+        const newCardId = "c_" + baseTs + "_" + index + "_" + Math.random().toString(36).substring(2, 7);
+        const cleanCandidates = Array.isArray(c.autoImageCandidates)
+          ? c.autoImageCandidates.filter((u) => typeof u === "string" && u && !isImageUrlBroken(u))
+          : undefined;
+        const resolvedFrontImg = (c.frontImage && !isImageUrlBroken(c.frontImage))
+          ? c.frontImage
+          : (cleanCandidates?.[0] || undefined);
+
+        if (cleanCandidates && cleanCandidates.length > 0) {
+          try {
+            localStorage.setItem(`auto_images_${newCardId}`, JSON.stringify(cleanCandidates));
+          } catch (e) {}
+        }
+
         return {
           ...c,
-          id: "c_" + baseTs + "_" + index + "_" + Math.random().toString(36).substring(2, 7),
+          id: newCardId,
           userId: currentUser?.id,
           folderId: assignedFolderId,
+          frontImage: resolvedFrontImg,
+          autoImageCandidates: cleanCandidates,
           streak: 0,
           createdAt: new Date(baseTs + index * 100).toISOString()
         };
@@ -1334,14 +1355,32 @@ function MainStudyApp() {
         updatedAt: new Date().toISOString()
       };
 
-      const newCards: Flashcard[] = (item.cards || []).map((c, index) => ({
-        ...c,
-        id: "c_" + baseTs + "_" + index + "_" + Math.random().toString(36).substring(2, 7),
-        userId: currentUser?.id,
-        folderId: idMap[c.folderId] || newFolderId,
-        streak: 0,
-        createdAt: new Date(baseTs + index * 100).toISOString()
-      }));
+      const newCards: Flashcard[] = (item.cards || []).map((c, index) => {
+        const newCardId = "c_" + baseTs + "_" + index + "_" + Math.random().toString(36).substring(2, 7);
+        const cleanCandidates = Array.isArray(c.autoImageCandidates)
+          ? c.autoImageCandidates.filter((u) => typeof u === "string" && u && !isImageUrlBroken(u))
+          : undefined;
+        const resolvedFrontImg = (c.frontImage && !isImageUrlBroken(c.frontImage))
+          ? c.frontImage
+          : (cleanCandidates?.[0] || undefined);
+
+        if (cleanCandidates && cleanCandidates.length > 0) {
+          try {
+            localStorage.setItem(`auto_images_${newCardId}`, JSON.stringify(cleanCandidates));
+          } catch (e) {}
+        }
+
+        return {
+          ...c,
+          id: newCardId,
+          userId: currentUser?.id,
+          folderId: idMap[c.folderId] || newFolderId,
+          frontImage: resolvedFrontImg,
+          autoImageCandidates: cleanCandidates,
+          streak: 0,
+          createdAt: new Date(baseTs + index * 100).toISOString()
+        };
+      });
 
       const updatedFolders = [...folders, newFolder, ...newSubfolders];
       const updatedCards = [...cards, ...newCards];
@@ -1557,6 +1596,7 @@ function MainStudyApp() {
             onInsertDirectShare={handleInsertDirectShare}
             onDeleteDirectShare={handleDeleteDirectShare}
             onTryReviewDirectShare={handleTryReviewDirectShare}
+            onUpdateCard={(updatedCard) => handleEditCard(updatedCard.id, updatedCard)}
           />
         )}
       </div>

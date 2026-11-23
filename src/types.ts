@@ -261,6 +261,212 @@ export function cleanImageSearchQuery(query: string, userInstruction?: string): 
   return clean;
 }
 
+const BROKEN_IMAGES_STORAGE_KEY = "broken_images_cache";
+const MAX_BROKEN_IMAGES_CACHE = 400;
+let brokenImagesMemorySet: Set<string> | null = null;
+
+function getBrokenImagesSet(): Set<string> {
+  if (brokenImagesMemorySet) return brokenImagesMemorySet;
+  const set = new Set<string>();
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const raw = window.localStorage.getItem(BROKEN_IMAGES_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((u) => {
+            if (typeof u === "string" && u) set.add(u);
+          });
+        }
+      }
+    }
+  } catch {}
+  brokenImagesMemorySet = set;
+  return set;
+}
+
+export function isImageUrlBroken(url?: string | null): boolean {
+  if (!url || typeof url !== "string") return false;
+  return getBrokenImagesSet().has(url);
+}
+
+export function markImageUrlBroken(url?: string | null): void {
+  if (!url || typeof url !== "string") return;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.startsWith("data:") || trimmed.startsWith("blob:")) return;
+  const set = getBrokenImagesSet();
+  if (set.has(trimmed)) return;
+  set.add(trimmed);
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const arr = Array.from(set);
+      const bounded = arr.length > MAX_BROKEN_IMAGES_CACHE ? arr.slice(arr.length - MAX_BROKEN_IMAGES_CACHE) : arr;
+      window.localStorage.setItem(BROKEN_IMAGES_STORAGE_KEY, JSON.stringify(bounded));
+    }
+  } catch {}
+}
+
+export function getCleanedCardCandidates(
+  cardId: string,
+  cardCandidates?: string[],
+  extraUrls?: string[]
+): string[] {
+  const broken = getBrokenImagesSet();
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  const appendValid = (list?: string[] | null) => {
+    if (!Array.isArray(list)) return;
+    for (const item of list) {
+      if (typeof item === "string") {
+        const u = item.trim();
+        if (u && !broken.has(u) && !seen.has(u)) {
+          seen.add(u);
+          result.push(u);
+        }
+      }
+    }
+  };
+
+  appendValid(extraUrls);
+  try {
+    if (typeof window !== "undefined" && window.localStorage && cardId) {
+      const raw = window.localStorage.getItem(`auto_images_${cardId}`);
+      if (raw) {
+        appendValid(JSON.parse(raw));
+      }
+    }
+  } catch {}
+  appendValid(cardCandidates);
+
+  return result;
+}
+
+export interface CardImageHealable {
+  id: string;
+  frontImage?: string;
+  frontImagePosition?: string;
+  backImage?: string;
+  backImagePosition?: string;
+  autoImageCandidates?: string[];
+}
+
+export function healBrokenCardImage<T extends CardImageHealable>(
+  card: T,
+  failedUrl: string,
+  extraUrls?: string[]
+): {
+  updatedCard: T;
+  replacementUrl?: string;
+  remainingCandidates: string[];
+  changed: boolean;
+} {
+  if (!card || !failedUrl) {
+    return {
+      updatedCard: card,
+      replacementUrl: card?.frontImage,
+      remainingCandidates: card?.autoImageCandidates || [],
+      changed: false
+    };
+  }
+
+  markImageUrlBroken(failedUrl);
+
+  const combinedInput = [
+    ...(card.frontImage && card.frontImage !== failedUrl && !isImageUrlBroken(card.frontImage) ? [card.frontImage] : []),
+    ...(Array.isArray(extraUrls) ? extraUrls : []),
+    ...(Array.isArray(card.autoImageCandidates) ? card.autoImageCandidates : [])
+  ];
+
+  const remainingCandidates = getCleanedCardCandidates(card.id, card.autoImageCandidates, combinedInput)
+    .filter((u) => u !== failedUrl && !isImageUrlBroken(u));
+
+  try {
+    if (typeof window !== "undefined" && window.localStorage && card.id) {
+      window.localStorage.setItem(`auto_images_${card.id}`, JSON.stringify(remainingCandidates));
+    }
+  } catch {}
+
+  const isPrimaryFrontBroken =
+    card.frontImage === failedUrl ||
+    !card.frontImage ||
+    isImageUrlBroken(card.frontImage);
+
+  const isPrimaryBackBroken = card.backImage === failedUrl;
+
+  let nextFrontImage = card.frontImage;
+  let nextFrontPos = card.frontImagePosition;
+  let nextBackImage = card.backImage;
+  let nextBackPos = card.backImagePosition;
+
+  if (isPrimaryFrontBroken) {
+    const nextCandidate = remainingCandidates[0] || undefined;
+    nextFrontImage = nextCandidate;
+    nextFrontPos = nextCandidate ? (card.frontImagePosition || "50% 50%") : undefined;
+  }
+
+  if (isPrimaryBackBroken) {
+    nextBackImage = undefined;
+    nextBackPos = undefined;
+  }
+
+  const prevCandidatesStr = JSON.stringify(card.autoImageCandidates || []);
+  const nextCandidatesStr = JSON.stringify(remainingCandidates);
+  const changed =
+    nextFrontImage !== card.frontImage ||
+    nextBackImage !== card.backImage ||
+    prevCandidatesStr !== nextCandidatesStr;
+
+  const updatedCard: T = {
+    ...card,
+    frontImage: nextFrontImage,
+    frontImagePosition: nextFrontPos,
+    backImage: nextBackImage,
+    backImagePosition: nextBackPos,
+    autoImageCandidates: remainingCandidates
+  };
+
+  return {
+    updatedCard,
+    replacementUrl: nextFrontImage,
+    remainingCandidates,
+    changed
+  };
+}
+
+export function promoteCandidateListToCard<T extends CardImageHealable>(
+  card: T,
+  newUrls: string[]
+): {
+  updatedCard: T;
+  promotedUrl?: string;
+  cleanedUrls: string[];
+} {
+  const cleanedUrls = getCleanedCardCandidates(card.id, card.autoImageCandidates, newUrls);
+  try {
+    if (typeof window !== "undefined" && window.localStorage && card.id) {
+      window.localStorage.setItem(`auto_images_${card.id}`, JSON.stringify(cleanedUrls));
+    }
+  } catch {}
+
+  const currentValidFront =
+    card.frontImage && !isImageUrlBroken(card.frontImage) ? card.frontImage : undefined;
+  const promotedUrl = currentValidFront || cleanedUrls[0] || undefined;
+
+  const updatedCard: T = {
+    ...card,
+    frontImage: promotedUrl,
+    frontImagePosition: promotedUrl ? (card.frontImagePosition || "50% 50%") : undefined,
+    autoImageCandidates: cleanedUrls
+  };
+
+  return {
+    updatedCard,
+    promotedUrl,
+    cleanedUrls
+  };
+}
+
 export type ReviewMethod = 'challenge' | 'write' | 'listen' | 'article' | 'match' | 'classic' | 'puzzles' | 'repetition' | 'spoken_challenge';
 
 export interface SpeakingChallengeItem {

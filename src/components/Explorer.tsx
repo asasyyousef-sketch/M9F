@@ -1,9 +1,9 @@
 import React from "react";
 import { ChevronLeft, Folder, Volume2, Trash2, FolderPlus, Bell, User, Play, Plus, Search, Pencil, Menu, Home, Layers, BookOpen, RectangleVertical, CheckSquare, Scissors, Copy, X, Check, Clipboard, ListChecks, Sparkles, History, Headphones, DownloadCloud, Download, CheckCircle2, Loader2, VolumeX, FileAudio, Image as ImageIcon, FileImage, Minimize2, Maximize2, Share2, MoreVertical, ChevronDown, Info, Calendar, Send, Inbox } from "lucide-react";
-import { Folder as FolderType, Flashcard, DirectShareItem, getSafeImageStyle, getCardSearchQuery, isGermanSentence } from "../types";
+import { Folder as FolderType, Flashcard, DirectShareItem, getSafeImageStyle, getCardSearchQuery, isGermanSentence, isImageUrlBroken, healBrokenCardImage, promoteCandidateListToCard } from "../types";
 import { FolderThumbnail, CardThumbnail } from "./ThumbnailStyles";
 import { speakClient, preloadTTS, preloadImage, fetchGradioAudioBlob, fetchAudioBlob } from "./Modals";
-import { ImageWithSkeleton } from "./ReviewSession";
+import { ImageWithSkeleton, brokenImagesSet } from "./ReviewSession";
 import { SharedFolderPreview } from "./SharedFolderPreview";
 import { useAuth } from "../context/AuthContext";
 import { motion } from "motion/react";
@@ -100,6 +100,7 @@ interface ExplorerProps {
   onInsertDirectShare?: (item: DirectShareItem) => void;
   onDeleteDirectShare?: (id: string) => void;
   onTryReviewDirectShare?: (cards: Flashcard[], folder: FolderType, folders: FolderType[]) => void;
+  onUpdateCard?: (card: Flashcard) => void;
 }
 
 export const Explorer: React.FC<ExplorerProps> = React.memo(({
@@ -131,11 +132,50 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
   onCloseDirectSharePreview,
   onInsertDirectShare,
   onDeleteDirectShare,
-  onTryReviewDirectShare
+  onTryReviewDirectShare,
+  onUpdateCard
 }) => {
   const { currentUser } = useAuth();
   const activeFolder = folders.find((f) => f.id === activeFolderId);
   const folderColor = activeFolder?.color || "#0056f6";
+  const healingCardUrlsRef = React.useRef<Set<string>>(new Set());
+
+  const handleHealCardImage = React.useCallback((targetCard: Flashcard, failedUrl: string) => {
+    if (!targetCard || !failedUrl) return;
+    const key = `${targetCard.id}::${failedUrl}`;
+    if (healingCardUrlsRef.current.has(key)) return;
+    healingCardUrlsRef.current.add(key);
+
+    brokenImagesSet.add(failedUrl);
+    const { updatedCard, replacementUrl, changed } = healBrokenCardImage(targetCard, failedUrl);
+    if (changed && onUpdateCard) {
+      onUpdateCard(updatedCard);
+      setPreviewCard(prev => (prev && prev.id === updatedCard.id ? updatedCard : prev));
+    }
+
+    if (!replacementUrl) {
+      const qTerm = getCardSearchQuery(updatedCard);
+      if (qTerm) {
+        fetch(`/api/images?q=${encodeURIComponent(qTerm)}&page=1&provider=duckduckgo`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (!data?.hits?.length) return;
+            const urls = data.hits.slice(0, 10)
+              .map((h: any) => h.largeImageURL || h.webformatURL || h.image || h.url)
+              .filter((u: string) => typeof u === "string" && u.startsWith("http") && !brokenImagesSet.has(u) && !isImageUrlBroken(u));
+            if (urls.length > 0) {
+              const { updatedCard: promotedCard, promotedUrl } = promoteCandidateListToCard(updatedCard, urls);
+              if (promotedUrl && onUpdateCard) {
+                onUpdateCard(promotedCard);
+                setPreviewCard(prev => (prev && prev.id === promotedCard.id ? promotedCard : prev));
+              }
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [onUpdateCard]);
+
   const [confirmDelete, setConfirmDelete] = React.useState<{
     type: "folder" | "card";
     id: string;
@@ -2668,7 +2708,7 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                     )}
 
                     {/* Card Thumbnail with chosen style S18 */}
-                    <CardThumbnail card={card} cardColor={cardColor} styleId="S18" />
+                    <CardThumbnail card={card} cardColor={cardColor} styleId="S18" onImageError={handleHealCardImage} />
 
                     {/* Text block */}
                     <div className="flex-1 min-w-0">
@@ -2855,6 +2895,7 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                           className="absolute inset-0 w-full h-full object-cover"
                           style={getSafeImageStyle(previewCard.frontImagePosition)}
                           referrerPolicy="no-referrer"
+                          onError={(failedUrl) => handleHealCardImage(previewCard, failedUrl)}
                         />
                       </div>
                     ) : (
@@ -2946,6 +2987,7 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
                           className="absolute inset-0 w-full h-full object-cover"
                           style={getSafeImageStyle(previewCard.backImagePosition)}
                           referrerPolicy="no-referrer"
+                          onError={(failedUrl) => handleHealCardImage(previewCard, failedUrl)}
                         />
                       </div>
                     )}

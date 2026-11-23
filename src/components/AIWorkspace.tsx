@@ -49,10 +49,11 @@ import {
   Upload,
   DownloadCloud,
   CheckCircle2,
-  Search
+  Search,
+  Bookmark
 } from "lucide-react";
-import { Folder as FolderType, Flashcard, getSafeImageStyle, TranscriptDocument, getCardSearchQuery, sanitizeCardArticleAndSentence, cleanImageSearchQuery, isGermanSentence } from "../types";
-import { ImageWithSkeleton } from "./ReviewSession";
+import { Folder as FolderType, Flashcard, getSafeImageStyle, TranscriptDocument, getCardSearchQuery, sanitizeCardArticleAndSentence, cleanImageSearchQuery, isGermanSentence, isImageUrlBroken, healBrokenCardImage, promoteCandidateListToCard } from "../types";
+import { ImageWithSkeleton, brokenImagesSet } from "./ReviewSession";
 import { speakClient, EditCardModal, ImagePickerModal, preloadImage } from "./Modals";
 import { BrowseCard } from "./BrowseCard";
 import { motion, AnimatePresence } from "motion/react";
@@ -109,6 +110,24 @@ export interface AIFolder {
   folderDescCondition?: string;
   coverImage?: string;
   coverImagePosition?: string;
+}
+
+export interface InstructionPreset {
+  id: string;
+  name: string;
+  prompt?: string;
+  frontInstructions: string;
+  backInstructions: string;
+  folderDescMode: "on" | "off" | "auto";
+  folderDescCondition: string;
+  descriptionMode: "on" | "off" | "auto";
+  descInstructions: string;
+  imagesMode: "on" | "off" | "auto";
+  imageInstructions: string;
+  germanArticlesMode: "on" | "off" | "auto";
+  germanPluralMode: "on" | "off" | "auto";
+  germanPluralInstruction: string;
+  cardsCount: number | "auto";
 }
 
 export interface AICard {
@@ -328,7 +347,7 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
     }
   }, [selectedTranscriptId, transcripts]);
 
-  const [cardsCount, setCardsCount] = useState<number | "auto">(10);
+  const [cardsCount, setCardsCount] = useState<number | "auto">("auto");
   const [frontInstructions, setFrontInstructions] = useState("");
   const [backInstructions, setBackInstructions] = useState("");
   const [descInstructions, setDescInstructions] = useState("");
@@ -345,6 +364,27 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
   const [customFolderDesc, setCustomFolderDesc] = useState("");
   const [folderDescMode, setFolderDescMode] = useState<"on" | "off" | "auto">("auto");
   const [folderDescCondition, setFolderDescCondition] = useState("");
+
+  // Saved Instruction Presets (secondary)
+  const [instructionPresets, setInstructionPresets] = useState<InstructionPreset[]>(() => {
+    try {
+      const saved = localStorage.getItem("ai_instruction_presets");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [showSavePresetInput, setShowSavePresetInput] = useState(false);
+  const [newPresetName, setNewPresetName] = useState("");
+  const [activePresetId, setActivePresetId] = useState<string>("");
+
+  // Quick Single-Card Add & Open-Folder Card Filter (secondary)
+  const [showQuickAddCard, setShowQuickAddCard] = useState(false);
+  const [quickAddInput, setQuickAddInput] = useState("");
+  const [quickAddLoading, setQuickAddLoading] = useState(false);
+  const [quickAddError, setQuickAddError] = useState<string | null>(null);
+  const [cardFilterMode, setCardFilterMode] = useState<"all" | "no_image" | "has_article">("all");
+  const [cardSearchQuery, setCardSearchQuery] = useState("");
   
   // Image Fetching & Storage Options States
   const [primaryImageTiming, setPrimaryImageTiming] = useState<"auto_after_ai" | "manual_download">(() => {
@@ -1096,6 +1136,8 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
 
   const [serverQuotas, setServerQuotas] = useState<any>(null);
   const [quotaLoading, setQuotaLoading] = useState(false);
+  const [showTelemetryDrawer, setShowTelemetryDrawer] = useState(false);
+  const [telemetryTab, setTelemetryTab] = useState<"logs" | "quotas">("logs");
 
   const fetchServerQuotas = async (forceRefresh = false) => {
     setQuotaLoading(true);
@@ -1351,9 +1393,29 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
 
   const activeAiFolder = aiFolders.find(f => f.id === activeAiFolderId);
   const folderCards = aiCards.filter(c => c.folderId === activeAiFolderId);
+  const filteredFolderCards = folderCards.filter((card) => {
+    if (cardFilterMode === "no_image" && card.frontImage) return false;
+    if (cardFilterMode === "has_article" && (!card.isArticleMode || !card.correctArticle)) return false;
+    if (cardSearchQuery.trim()) {
+      const q = cardSearchQuery.trim().toLowerCase();
+      const matchFront = (card.frontText || "").toLowerCase().includes(q);
+      const matchBack = (card.backText || "").toLowerCase().includes(q);
+      const matchHint = (card.translationHint || "").toLowerCase().includes(q);
+      const matchPlural = (card.pluralText || "").toLowerCase().includes(q);
+      if (!matchFront && !matchBack && !matchHint && !matchPlural) return false;
+    }
+    return true;
+  });
 
   // Synchronize options when active folder changes
   useEffect(() => {
+    setCardFilterMode("all");
+    setCardSearchQuery("");
+    setShowQuickAddCard(false);
+    setQuickAddInput("");
+    setQuickAddError(null);
+    setShowSavePresetInput(false);
+
     if (activeAiFolder) {
       setCustomImportName(activeAiFolder.name);
       setDescriptionMode(activeAiFolder.descriptionMode || "auto");
@@ -1883,6 +1945,248 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
     }
   };
 
+  const handleSavePreset = () => {
+    const trimmed = newPresetName.trim();
+    if (!trimmed) return;
+    const preset: InstructionPreset = {
+      id: `preset-${Date.now()}`,
+      name: trimmed,
+      prompt: prompt,
+      frontInstructions,
+      backInstructions,
+      folderDescMode,
+      folderDescCondition,
+      descriptionMode,
+      descInstructions,
+      imagesMode,
+      imageInstructions,
+      germanArticlesMode,
+      germanPluralMode,
+      germanPluralInstruction,
+      cardsCount
+    };
+    const updated = [preset, ...instructionPresets];
+    setInstructionPresets(updated);
+    try {
+      localStorage.setItem("ai_instruction_presets", JSON.stringify(updated));
+    } catch {}
+    setActivePresetId(preset.id);
+    setNewPresetName("");
+    setShowSavePresetInput(false);
+  };
+
+  const handleApplyPreset = (preset: InstructionPreset) => {
+    if (typeof preset.prompt === "string" && preset.prompt.trim()) {
+      setPrompt(preset.prompt);
+    }
+    setFrontInstructions(preset.frontInstructions || "");
+    setBackInstructions(preset.backInstructions || "");
+    setFolderDescMode(preset.folderDescMode || "auto");
+    setFolderDescCondition(preset.folderDescCondition || "");
+    setDescriptionMode(preset.descriptionMode || "auto");
+    setDescInstructions(preset.descInstructions || "");
+    setImagesMode(preset.imagesMode || "auto");
+    setImageInstructions(preset.imageInstructions || "");
+    setGermanArticlesMode(preset.germanArticlesMode || "auto");
+    setGermanPluralMode(preset.germanPluralMode || "auto");
+    setGermanPluralInstruction(preset.germanPluralInstruction || "");
+    setCardsCount(preset.cardsCount ?? "auto");
+    setActivePresetId(preset.id);
+  };
+
+  const handleDeletePreset = (presetId: string) => {
+    const updated = instructionPresets.filter(p => p.id !== presetId);
+    setInstructionPresets(updated);
+    try {
+      localStorage.setItem("ai_instruction_presets", JSON.stringify(updated));
+    } catch {}
+    if (activePresetId === presetId) {
+      setActivePresetId("");
+    }
+  };
+
+  const handleQuickAddSingleCard = async () => {
+    const term = quickAddInput.trim();
+    if (!activeAiFolder || !term || quickAddLoading) return;
+
+    setQuickAddLoading(true);
+    setQuickAddError(null);
+
+    const combinedExcludeList = folderCards.map(c => c.frontText);
+    let finalPromptToSend = `أنشئ بطاقة تعليمية واحدة فقط (1 card) للمفهوم أو الكلمة التالية: "${term}"\nلغة الوجه الأمامي: ${activeAiFolder.frontLang || "de"} | لغة الوجه الخلفي: ${activeAiFolder.backLang || "ar"}\nالسياق العام للمجلد: ${activeAiFolder.prompt}`;
+
+    const extraInstructionsList: string[] = [];
+    if (activeAiFolder.frontInstructions?.trim()) {
+      extraInstructionsList.push(`- بالنسبة للوجه الأمامي للبطاقة (frontText): ${activeAiFolder.frontInstructions.trim()}`);
+    }
+    if (activeAiFolder.backInstructions?.trim()) {
+      extraInstructionsList.push(`- بالنسبة للوجه الخلفي للبطاقة (backText): ${activeAiFolder.backInstructions.trim()}`);
+    }
+    if (activeAiFolder.descInstructions?.trim()) {
+      extraInstructionsList.push(`- بالنسبة للوصف أو التلميح (translationHint): ${activeAiFolder.descInstructions.trim()}`);
+    }
+    if (activeAiFolder.imageInstructions?.trim()) {
+      extraInstructionsList.push(`- بالنسبة لكلمة البحث عن الصورة (imageSearchQuery): ${activeAiFolder.imageInstructions.trim()}`);
+    }
+    if (activeAiFolder.germanPluralInstruction?.trim()) {
+      extraInstructionsList.push(`- بالنسبة لصيغة الجمع الألمانية (pluralText): ${activeAiFolder.germanPluralInstruction.trim()}`);
+    }
+    if (extraInstructionsList.length > 0) {
+      finalPromptToSend += "\n\nتعليمات المجلد المخصصة:\n" + extraInstructionsList.join("\n");
+    }
+
+    const activeProvider = nextBatchAiProvider;
+    const customApiKey = activeProvider === "groq"
+      ? localStorage.getItem("settings_groq_api_key") || ""
+      : localStorage.getItem("settings_gemini_api_key") || "";
+
+    let rawReqBody = "";
+    let rawResBody = "";
+
+    try {
+      const requestPayload = {
+        prompt: finalPromptToSend,
+        excludeList: combinedExcludeList,
+        customApiKey: customApiKey || undefined,
+        descriptionMode: activeAiFolder.descriptionMode || "auto",
+        imagesMode: activeAiFolder.imagesMode || "auto",
+        germanArticlesMode: activeAiFolder.germanArticlesMode || "auto",
+        germanPluralMode: activeAiFolder.germanPluralMode || "auto",
+        germanPluralInstruction: activeAiFolder.germanPluralInstruction || undefined,
+        aiProvider: activeProvider,
+        cardsCount: 1
+      };
+      rawReqBody = JSON.stringify(requestPayload, null, 2);
+
+      const response = await fetch("/api/ai/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: rawReqBody
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        rawResBody = errText;
+        let errMsg = "فشل الذكاء الاصطناعي في إنشاء البطاقة السريعة";
+        try {
+          const parsed = JSON.parse(errText);
+          errMsg = parsed.error || errMsg;
+        } catch {
+          errMsg = errText || errMsg;
+        }
+        throw new Error(errMsg);
+      }
+
+      const { data, usage, rawModelResponse } = await readNdjson(response, undefined, (rawText) => {
+        rawResBody = rawText;
+      });
+      if (rawModelResponse) rawResBody = rawModelResponse;
+
+      if (data && data.cards && data.cards.length > 0) {
+        const c = data.cards[0];
+        let newCard = sanitizeCardArticleAndSentence({
+          id: `ai-card-${Date.now()}-quick`,
+          folderId: activeAiFolder.id,
+          frontText: c.frontText,
+          backText: c.backText,
+          isArticleMode: c.isArticleMode || false,
+          correctArticle: c.correctArticle || "",
+          isPluralMode: c.isPluralMode || false,
+          pluralText: c.pluralText || "",
+          pluralLang: c.pluralLang || "de",
+          translationHint: c.translationHint || "",
+          difficulty: c.difficulty || "medium",
+          frontImage: c.frontImage || undefined,
+          frontImagePosition: c.frontImagePosition || undefined,
+          imageSearchQuery: c.imageSearchQuery || undefined
+        });
+
+        setAiCards((prev) => {
+          const updated = [newCard, ...prev];
+          try {
+            localStorage.setItem("ai_workspace_cards", JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+
+        setSelectedCardIds(prev => [newCard.id, ...prev]);
+        setQuickAddInput("");
+
+        logAiRequest({
+          prompt: `بطاقة سريعة: ${term}`,
+          rawPrompt: finalPromptToSend,
+          response: `1. الوجه الأمامي: "${newCard.frontText}" | الوجه الخلفي: "${newCard.backText}"`,
+          provider: activeProvider,
+          model: activeProvider === "groq" ? "llama-3.3-70b-versatile" : "gemini-3.5-flash",
+          cardsCount: 1,
+          status: "success",
+          usage: usage || undefined,
+          rawRequestBody: rawReqBody,
+          rawResponseBody: rawResBody
+        });
+        fetchUsageStats();
+
+        if (activeAiFolder.imagesMode !== "off" && primaryImageTiming === "auto_after_ai") {
+          try {
+            const q = getCardQueryTerm(newCard);
+            if (q) {
+              const imgRes = await fetch(`/api/images?q=${encodeURIComponent(q)}&page=1&provider=duckduckgo`);
+              if (imgRes.ok) {
+                const imgData = await imgRes.json();
+                const hits = (imgData.hits || []).slice(0, 10);
+                const candidateUrls = hits
+                  .map((h: any) => h.largeImageURL || h.webformatURL || h.image || h.url)
+                  .filter((u: string) => typeof u === "string" && u.startsWith("http"));
+                if (candidateUrls.length > 0) {
+                  try {
+                    localStorage.setItem(`auto_images_${newCard.id}`, JSON.stringify(candidateUrls));
+                  } catch {}
+                  const topUrl = candidateUrls[0];
+                  preloadImage(topUrl).catch(() => {});
+                  setAiCards((prev) => {
+                    const updated = prev.map(item =>
+                      item.id === newCard.id
+                        ? {
+                            ...item,
+                            frontImage: item.frontImage || topUrl,
+                            frontImagePosition: "50% 50%",
+                            autoImageCandidates: candidateUrls
+                          }
+                        : item
+                    );
+                    try {
+                      localStorage.setItem("ai_workspace_cards", JSON.stringify(updated));
+                    } catch {}
+                    return updated;
+                  });
+                }
+              }
+            }
+          } catch {}
+        }
+      } else {
+        throw new Error("لم يرجع الذكاء الاصطناعي بطاقة صالحة.");
+      }
+    } catch (err) {
+      const errMsg = (err as Error).message || "تعذر إنشاء البطاقة السريعة.";
+      setQuickAddError(errMsg);
+      logAiRequest({
+        prompt: `بطاقة سريعة: ${term}`,
+        rawPrompt: finalPromptToSend,
+        provider: activeProvider,
+        model: activeProvider === "groq" ? "llama-3.3-70b-versatile" : "gemini-3.5-flash",
+        cardsCount: 1,
+        status: "failed",
+        error: errMsg,
+        rawRequestBody: rawReqBody,
+        rawResponseBody: rawResBody
+      });
+      fetchUsageStats();
+    } finally {
+      setQuickAddLoading(false);
+    }
+  };
+
   const parseImageProgress = (status: string) => {
     if (!status) return null;
     const isImageRelated = status.includes("صورة") || status.includes("الصور") || status.includes("غلاف") || status.includes("تنزيل");
@@ -2168,6 +2472,61 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
       setLoading(false);
     }
   };
+
+  const healingAiCardUrlsRef = React.useRef<Set<string>>(new Set());
+
+  const handleHealAiCardImage = React.useCallback((cardId: string, failedUrl: string) => {
+    if (!cardId || !failedUrl) return;
+    const key = `${cardId}::${failedUrl}`;
+    if (healingAiCardUrlsRef.current.has(key)) return;
+    healingAiCardUrlsRef.current.add(key);
+
+    brokenImagesSet.add(failedUrl);
+    let healedTarget: AICard | null = null;
+    let needsFetch = false;
+
+    setAiCards((prevCards) => {
+      const target = prevCards.find(c => c.id === cardId);
+      if (!target) return prevCards;
+      const { updatedCard, replacementUrl, changed } = healBrokenCardImage(target, failedUrl);
+      healedTarget = updatedCard;
+      needsFetch = !replacementUrl;
+      if (!changed) return prevCards;
+      const updated = prevCards.map(c => (c.id === cardId ? updatedCard : c));
+      try {
+        localStorage.setItem("ai_workspace_cards", JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    setTimeout(() => {
+      if (!needsFetch || !healedTarget) return;
+      const qTerm = getCardQueryTerm(healedTarget);
+      if (!qTerm) return;
+      fetch(`/api/images?q=${encodeURIComponent(qTerm)}&page=1&provider=duckduckgo`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (!data?.hits?.length) return;
+          const urls = data.hits.slice(0, 10)
+            .map((h: any) => h.largeImageURL || h.webformatURL || h.image || h.url)
+            .filter((u: string) => typeof u === "string" && u.startsWith("http") && !brokenImagesSet.has(u) && !isImageUrlBroken(u));
+          if (urls.length > 0) {
+            setAiCards((prevCards) => {
+              const target = prevCards.find(c => c.id === cardId);
+              if (!target) return prevCards;
+              const { updatedCard: promotedCard, promotedUrl } = promoteCandidateListToCard(target, urls);
+              if (!promotedUrl) return prevCards;
+              const updated = prevCards.map(c => (c.id === cardId ? promotedCard : c));
+              try {
+                localStorage.setItem("ai_workspace_cards", JSON.stringify(updated));
+              } catch {}
+              return updated;
+            });
+          }
+        })
+        .catch(() => {});
+    }, 0);
+  }, [getCardQueryTerm]);
 
   const handleRefineCards = async () => {
     if (!activeAiFolder || folderCards.length === 0) return;
@@ -2693,207 +3052,147 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto bg-slate-50/50 p-6 md:p-8 text-right" dir="rtl">
-      
-      {/* Upper Navigation / Title Row */}
-      <div className="max-w-4xl mx-auto mb-8 flex items-center justify-between border-b border-slate-100 pb-4">
-        {/* Right side: Hamburger and Back to Library buttons */}
-        <div className="flex items-center gap-2">
+    <div className="flex-1 overflow-y-auto bg-surface text-on-surface text-right font-sans" dir="rtl">
+
+      {/* Clean Sticky Top Header */}
+      <header className="sticky top-0 z-20 h-14 bg-white/95 backdrop-blur-md border-b border-[#c7daf6] px-4 sm:px-6 flex items-center justify-between gap-4 shadow-2xs">
+        <div className="flex items-center gap-2 min-w-0">
           {onToggleSidebar && (
             <button
+              type="button"
               onClick={onToggleSidebar}
-              className="p-2 text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer transition-colors active:scale-95"
+              className="h-9 w-9 flex items-center justify-center text-on-surface-variant hover:text-[#004ac6] hover:bg-[#edf4ff] rounded-xl cursor-pointer transition-colors active:scale-95 shrink-0"
               title="القائمة الجانبية"
             >
               <Menu className="w-5 h-5" />
             </button>
           )}
-          
-          <button
-            onClick={() => {
-              if (onClearAiRefineFolderId) onClearAiRefineFolderId();
-              onBackToLibrary();
-            }}
-            className="flex items-center gap-1.5 py-1.5 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-[10px] font-bold text-slate-700 transition-all cursor-pointer active:scale-95"
-          >
-            <Compass className="w-3.5 h-3.5 text-slate-400" />
-            <span>الرجوع للمكتبة</span>
-          </button>
+
+          {activeAiFolderId ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (onClearAiRefineFolderId) onClearAiRefineFolderId();
+                setActiveAiFolderId("");
+              }}
+              className="h-9 px-3 rounded-xl border border-[#cdddf5] bg-[#f4f8ff] hover:bg-[#e6effe] text-xs font-bold text-on-surface transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+            >
+              <ChevronRight className="w-3.5 h-3.5 text-[#004ac6]" />
+              <span>المساعد الذكي</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                if (onClearAiRefineFolderId) onClearAiRefineFolderId();
+                onBackToLibrary();
+              }}
+              className="h-9 px-3 rounded-xl border border-[#cdddf5] bg-[#f4f8ff] hover:bg-[#e6effe] text-xs font-bold text-on-surface transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+            >
+              <Compass className="w-3.5 h-3.5 text-[#004ac6]" />
+              <span>المكتبة</span>
+            </button>
+          )}
         </div>
 
-        {/* Left side: Simple Icon + Title */}
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-bold text-slate-800">المساعد الذكي</span>
-          <Sparkles className="w-4 h-4 text-[#0056f6]" />
+        <div className="flex items-center gap-2 min-w-0">
+          <h1 className="text-sm font-black text-on-surface truncate">
+            {activeAiFolder ? activeAiFolder.name : "المساعد الذكي"}
+          </h1>
+          <span className="w-7 h-7 rounded-lg bg-[#e8f0fe] text-[#004ac6] flex items-center justify-center shrink-0">
+            <Sparkles className="w-4 h-4" />
+          </span>
         </div>
-      </div>
+      </header>
 
-      <div className="max-w-4xl mx-auto space-y-6">
-        
-        {/* Breadcrumb Navigation inside AI Workspace */}
-        {activeAiFolderId && (
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
-            <span className="hover:text-primary cursor-pointer" onClick={() => {
-              if (onClearAiRefineFolderId) onClearAiRefineFolderId();
-              setActiveAiFolderId("");
-            }}>مساعد التوليد الذكي</span>
-            <ChevronLeft className="w-3 h-3 text-slate-300 shrink-0" />
-            <span className="text-slate-800 font-black">{activeAiFolder?.name}</span>
-          </div>
-        )}
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
 
         {/* LOADING INDICATOR */}
         {loading && (
-          <div className="bg-white rounded-3xl border border-slate-100 p-8 flex flex-col items-center justify-center text-center shadow-lg space-y-5 animate-fade-in max-w-md mx-auto">
-            <div className="relative">
-              <div className="w-16 h-16 rounded-full border-4 border-slate-100 border-t-[#0056f6] animate-spin" />
-              <Sparkles className="absolute inset-0 m-auto w-6 h-6 text-[#0056f6] animate-pulse" />
+          <div className="bg-white rounded-[24px] border border-[#c7daf6] p-7 flex flex-col items-center justify-center text-center shadow-elevation-3 space-y-4 max-w-md mx-auto">
+            <div className="w-12 h-12 rounded-2xl bg-[#e8f0fe] text-[#004ac6] flex items-center justify-center">
+              <Loader2 className="w-6 h-6 animate-spin" />
             </div>
 
             <div className="space-y-1">
-              <h4 className="font-extrabold text-slate-800 text-base">
-                جاري التفكير والتوليد الذكي...
+              <h4 className="font-black text-on-surface text-sm">
+                جاري التوليد
               </h4>
-              <p className="text-xs text-slate-500 font-medium">
-                يرجى الانتظار أثناء معالجة وقراءة البيانات
+              <p className="text-xs text-on-surface-variant font-medium">
+                {loadingStatus}
               </p>
             </div>
 
-            {/* Structured Image Progress Box */}
             {(() => {
               const imgProg = parseImageProgress(loadingStatus);
-              if (imgProg && imgProg.isImageRelated) {
+              if (imgProg && imgProg.isImageRelated && imgProg.totalCards > 0) {
                 return (
-                  <div className="w-full bg-slate-50 border border-slate-200/80 rounded-2xl p-4 text-right space-y-3 shadow-3xs">
-                    <div className="flex items-center justify-between text-xs font-bold">
-                      <span className="flex items-center gap-1.5 text-[#0056f6]">
-                        <Loader2 className="w-4 h-4 animate-spin text-[#0056f6]" />
-                        {imgProg.isListFetching ? "جاري جلب قوائم الصور..." : "جاري تنزيل وتخزين الصور..."}
-                      </span>
-                      {imgProg.totalCards > 0 && (
-                        <span className="text-slate-700 bg-white px-2 py-0.5 rounded-md border border-slate-200">
-                          {imgProg.currentFetched} من {imgProg.totalCards}
-                        </span>
-                      )}
+                  <div className="w-full space-y-2 pt-1">
+                    <div className="flex items-center justify-between text-xs font-bold text-on-surface tabular-nums">
+                      <span>{imgProg.isListFetching ? "جلب قوائم الصور" : "تنزيل الصور"}</span>
+                      <span>{imgProg.currentFetched} / {imgProg.totalCards}</span>
                     </div>
-
-                    {imgProg.totalCards > 0 && (
-                      <div className="w-full bg-slate-200/80 h-2.5 rounded-full overflow-hidden">
-                        <div
-                          className="bg-gradient-to-r from-[#0056f6] via-purple-600 to-emerald-500 h-full transition-all duration-300 rounded-full"
-                          style={{ width: `${imgProg.percent}%` }}
-                        />
-                      </div>
-                    )}
-
+                    <div className="w-full bg-[#dce8fb] h-2 rounded-full overflow-hidden">
+                      <div
+                        className="bg-[#004ac6] h-full transition-all duration-300 rounded-full"
+                        style={{ width: `${imgProg.percent}%` }}
+                      />
+                    </div>
                     {imgProg.cooldownSec > 0 && (
-                      <div className="flex items-center gap-2 bg-amber-50 text-amber-800 border border-amber-200 p-2 rounded-xl text-[11px] font-bold">
-                        <Clock className="w-3.5 h-3.5 text-amber-600 animate-spin" />
-                        <span>مهلة تبريد لفك حظر الخادم: متبقي {imgProg.cooldownSec} ثوانٍ...</span>
-                      </div>
+                      <p className="text-[11px] text-amber-700 font-bold tabular-nums">
+                        انتظار مؤقت: {imgProg.cooldownSec} ثانية
+                      </p>
                     )}
-
-                    <p className="text-[11px] text-slate-600 font-bold leading-relaxed pt-1 border-t border-slate-200/50">
-                      {loadingStatus}
-                    </p>
                   </div>
                 );
               }
-
-              return (
-                <div className="bg-blue-50/70 border border-blue-100 rounded-2xl p-3 text-xs text-[#0056f6] font-extrabold max-w-sm">
-                  {loadingStatus}
-                </div>
-              );
+              return null;
             })()}
           </div>
         )}
 
         {/* ERROR DISPLAY */}
         {error && !loading && (() => {
-          const isQuotaError = error.includes("429") || 
-                               error.includes("RESOURCE_EXHAUSTED") || 
-                               error.toLowerCase().includes("quota") || 
+          const isQuotaError = error.includes("429") ||
+                               error.includes("RESOURCE_EXHAUSTED") ||
+                               error.toLowerCase().includes("quota") ||
                                error.toLowerCase().includes("limit") ||
                                error.toLowerCase().includes("rate") ||
                                error.includes("توقّف مؤقت") ||
                                error.includes("توقف مؤقت") ||
                                error.includes("الحد اليومي") ||
                                countdownSeconds !== null;
-          
+
           const parsedLimit = parseRateLimitError(error);
-          const isGroq = error.toLowerCase().includes("groq") || error.toLowerCase().includes("llama");
-          
-          let limitName = "حصة الطلبات المؤقتة";
-          if (parsedLimit?.limitType === "TPD") limitName = "الحصة اليومية للتوكنات (TPD)";
-          else if (parsedLimit?.limitType === "RPM") limitName = "حصة الطلبات في الدقيقة (RPM)";
-          else if (parsedLimit?.limitType === "TPM") limitName = "حصة التوكنات في الدقيقة (TPM)";
-          else if (parsedLimit?.limitType === "RPD") limitName = "حصة الطلبات اليومية (RPD)";
+
+          let limitName = "الحصة المؤقتة";
+          if (parsedLimit?.limitType === "TPD") limitName = "الحد اليومي للتوكنات";
+          else if (parsedLimit?.limitType === "RPM") limitName = "حد الطلبات بالدقيقة";
+          else if (parsedLimit?.limitType === "TPM") limitName = "حد التوكنات بالدقيقة";
+          else if (parsedLimit?.limitType === "RPD") limitName = "الحد اليومي للطلبات";
 
           if (isQuotaError) {
             return (
-              <div className="bg-slate-50 border border-slate-200 text-slate-900 p-8 rounded-[32px] text-center space-y-6 shadow-xl max-w-lg mx-auto animate-fade-in border-t-4 border-t-amber-500" dir="rtl">
-                <div className="space-y-2">
-                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-amber-50 text-amber-500 mb-2 animate-bounce">
-                    <Clock className="w-8 h-8" />
-                  </div>
-                  <h3 className="text-lg font-black text-slate-900 tracking-tight">توقّف مؤقت للخدمة</h3>
-                  <p className="text-xs text-slate-500 font-bold max-w-sm mx-auto leading-relaxed">
-                    يرجى الانتظار حتى انتهاء العد التنازلي لإرسال طلب جديد، أو ترقية حسابك الآن لتجنب أي توقف.
+              <div className="bg-white border border-[#c7daf6] text-on-surface p-6 rounded-[24px] text-center space-y-4 max-w-md mx-auto shadow-elevation-3" dir="rtl">
+                <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center">
+                  <Clock className="w-6 h-6" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-base font-black text-on-surface">تم بلوغ الحد المؤقت</h3>
+                  <p className="text-xs text-on-surface-variant font-medium">
+                    {limitName} — انتظر إعادة التفعيل أو بدّل المزود.
                   </p>
                 </div>
 
-                {/* COUNTDOWN TIMER */}
-                <div className="py-5 px-8 bg-white border border-slate-200/60 rounded-2xl inline-block shadow-xs">
-                  <span className="text-3xl font-black text-slate-800 tracking-tight font-mono block">
-                    {countdownSeconds !== null 
-                      ? formatCountdown(countdownSeconds) 
-                      : (parsedLimit?.resetIn ? formatArabicResetTime(parsedLimit.resetIn) : "12:44")}
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-black tracking-wider uppercase mt-1 block">
-                    متبقية لإعادة التفعيل
+                <div className="py-3 px-6 bg-[#f4f8ff] border border-[#d5e3f8] rounded-2xl inline-block">
+                  <span className="text-2xl font-black font-mono tabular-nums text-on-surface">
+                    {countdownSeconds !== null
+                      ? formatCountdown(countdownSeconds)
+                      : (parsedLimit?.resetIn ? formatArabicResetTime(parsedLimit.resetIn) : "--:--")}
                   </span>
                 </div>
 
-                {/* Quota details if available */}
-                {(parsedLimit?.limit !== undefined || serverQuotas?.usageStats) && (
-                  <div className="bg-white/80 border border-slate-100 p-3 rounded-xl text-right text-[10px] text-slate-500 space-y-1 max-w-xs mx-auto font-medium">
-                    <div className="flex justify-between">
-                      <span>نوع الحصة الحالية:</span>
-                      <span className="font-bold text-slate-700">{limitName}</span>
-                    </div>
-                    {parsedLimit?.limit !== undefined && (
-                      <div className="flex justify-between">
-                        <span>الحد الأقصى للمقاييس:</span>
-                        <span className="font-mono font-bold text-slate-700">{parsedLimit.limit.toLocaleString()}</span>
-                      </div>
-                    )}
-                    {parsedLimit?.used !== undefined && (
-                      <div className="flex justify-between">
-                        <span>المستهلك الفعلي:</span>
-                        <span className="font-mono font-bold text-slate-700">{parsedLimit.used.toLocaleString()}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* PREMIUM CTA BUTTON */}
-                <div className="pt-2">
-                  <a
-                    href="https://console.groq.com/settings/billing"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full py-3.5 px-6 bg-gradient-to-r from-[#0056f6] to-[#0047cc] hover:from-[#0047cc] hover:to-[#003bb3] text-white font-black text-xs rounded-2xl shadow-md transition-all transform hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 cursor-pointer animate-pulse"
-                    style={{ animationDuration: "3s" }}
-                  >
-                    <Sparkles className="w-4 h-4 fill-white animate-spin" style={{ animationDuration: "12s" }} />
-                    <span>ترقية الباقة والاشتراك الآن</span>
-                  </a>
-                </div>
-
-                {/* ALTERNATIVE PROVIDER SWITCH */}
-                <div className="pt-4 border-t border-slate-100 flex flex-col items-center gap-2">
-                  <span className="text-[10px] text-slate-400 font-semibold">هل تريد الاستمرار فوراً؟ يمكنك التبديل للمزود الاحتياطي:</span>
+                <div className="flex items-center justify-center gap-2.5 pt-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -2901,39 +3200,44 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                       setError(null);
                       setCountdownSeconds(null);
                     }}
-                    className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[10px] rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                    className="h-10 px-4 bg-[#004ac6] hover:bg-[#003da6] text-white font-bold text-xs rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
-                    <span>التبديل واستكمال العمل عبر نموذج {aiProvider === "groq" ? "Google Gemini" : "Groq"}</span>
+                    <span>التبديل إلى {aiProvider === "groq" ? "Gemini" : "Groq"}</span>
                   </button>
+                  <a
+                    href="https://console.groq.com/settings/billing"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="h-10 px-4 bg-[#f4f8ff] hover:bg-[#e6effe] border border-[#cdddf5] text-on-surface font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors"
+                  >
+                    <span>الترقية</span>
+                  </a>
                 </div>
               </div>
             );
           }
 
           return (
-            <div className="bg-rose-50 border border-rose-100 text-rose-800 p-5 rounded-[22px] text-xs space-y-3 shadow-xs text-right animate-fade-in" dir="rtl">
-              <div className="flex items-center gap-2 text-rose-700 font-extrabold pb-2 border-b border-rose-100">
-                <AlertCircle className="w-4 h-4 text-rose-500" />
-                <h4 className="text-sm font-black text-right">حدث خطأ أثناء معالجة الطلب</h4>
-              </div>
-              <p className="font-bold text-rose-900 leading-relaxed text-[11px] font-mono break-words bg-rose-100/30 p-2 rounded-lg border border-rose-200/40 text-right">{error}</p>
-              
-              <div className="bg-white/60 p-3 rounded-xl border border-rose-200/30 text-rose-950 font-semibold text-[10px] leading-relaxed space-y-2 text-right">
-                <span>💡 <strong>اقتراح سريع لحل المشكلة:</strong></span>
-                <p>إذا كانت هناك مشكلة اتصال بمزود الذكاء الاصطناعي الحالي، يمكنك التبديل الفوري لتجربة المزود الآخر:</p>
+            <div className="bg-white border border-rose-300 text-rose-800 p-4 rounded-2xl text-xs space-y-3 text-right shadow-elevation-1" dir="rtl">
+              <div className="flex items-center justify-between gap-2 font-black">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>تعذر إتمام الطلب</span>
+                </div>
                 <button
                   type="button"
                   onClick={() => {
                     handleProviderChange(aiProvider === "groq" ? "gemini" : "groq");
                     setError(null);
                   }}
-                  className="px-3.5 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg font-bold transition-all text-[9px] cursor-pointer inline-flex items-center gap-1"
+                  className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl font-bold text-[11px] cursor-pointer inline-flex items-center gap-1.5 transition-colors"
                 >
                   <RefreshCw className="w-3 h-3" />
-                  <span>التبديل إلى {aiProvider === "groq" ? "Google Gemini" : "Groq"}</span>
+                  <span>تبديل إلى {aiProvider === "groq" ? "Gemini" : "Groq"}</span>
                 </button>
               </div>
+              <p className="font-mono text-[11px] break-words text-rose-900 bg-rose-50/70 p-2.5 rounded-xl border border-rose-100">{error}</p>
             </div>
           );
         })()}
@@ -2941,360 +3245,409 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
         {/* MAIN VIEWS */}
         {!loading && !activeAiFolderId ? (
           /* =========================================================================
-             1. HOME VIEW: Prompt box + Suggestions + List of Temporary AI Folders
+             1. HOME VIEW: Prompt box + Organized Controls + Temporary AI Folders
              ========================================================================= */
           <>
-            {/* Prompt Input Panel */}
-            <div className="bg-white rounded-[24px] border border-slate-200/50 p-6 space-y-5 shadow-elevation-2">
-              <div className="flex items-center gap-2 text-slate-700">
-                <Sparkles className="w-4 h-4 text-[#0056f6]" />
-                <h3 className="font-bold text-sm text-slate-800">توليد مجلد دراسي ذكي جديد</h3>
+            {/* Elevated Main Generator Card */}
+            <div className="bg-white rounded-[24px] border border-[#c7daf6] p-5 sm:p-6 space-y-5 shadow-elevation-3">
+              {/* Zone 1: Card Header */}
+              <div className="flex items-center justify-between gap-3 pb-3 border-b border-[#e5eefb]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-[#e8f0fe] text-[#004ac6] flex items-center justify-center shrink-0">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <h2 className="font-black text-sm text-on-surface">توليد مجلد جديد</h2>
+                </div>
+
+                {/* Compact Provider Pill in Header */}
+                <div className="flex items-center gap-1 bg-[#e6effd] p-1 rounded-xl border border-[#d0dff7]" dir="rtl">
+                  <button
+                    type="button"
+                    onClick={() => handleProviderChange("gemini")}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      aiProvider === "gemini"
+                        ? "bg-white text-[#004ac6] shadow-2xs"
+                        : "text-on-surface-variant hover:text-on-surface"
+                    }`}
+                  >
+                    Gemini
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleProviderChange("groq")}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      aiProvider === "groq"
+                        ? "bg-white text-orange-600 shadow-2xs"
+                        : "text-on-surface-variant hover:text-on-surface"
+                    }`}
+                  >
+                    Groq
+                  </button>
+                </div>
               </div>
 
-              <div className="relative">
+              {/* Zone 2: Prompt Input */}
+              <div className="space-y-2">
                 <textarea
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="مثال: أهم 15 فعلاً إنجليزياً مع الترجمة..."
-                  className="w-full min-h-[90px] p-4 bg-slate-50 border border-slate-200/60 rounded-2xl text-xs font-semibold placeholder-slate-400 focus:outline-none focus:border-[#0056f6] focus:bg-white transition-all resize-y leading-relaxed"
+                  placeholder="مثال: أهم 15 فعلاً ألمانياً مع الترجمة..."
+                  className="w-full min-h-[96px] p-3.5 bg-[#f5f9ff] border border-[#cdddf5] rounded-2xl text-xs font-semibold text-on-surface placeholder-[#627289] focus:outline-none focus:border-[#004ac6] focus:bg-white focus:ring-2 focus:ring-[#004ac6]/12 transition-all resize-y leading-relaxed"
                 />
-              </div>
 
-              {/* Lego piece YT Transcript Selector */}
-              {transcripts && transcripts.length > 0 && (
-                <div className="p-4 bg-amber-50/50 border border-amber-200/60 rounded-2xl space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Layers className="w-4 h-4 text-amber-600 animate-pulse" />
-                      <span className="text-xs font-bold text-slate-700">ربط مع وثيقة تفريغ يوتيوب (spT) - كقطعة ليغو منفصلة</span>
+                {/* Optional YT Transcript Selector */}
+                {transcripts && transcripts.length > 0 && (
+                  <div className="bg-[#f4f8ff] border border-[#dbe7fa] rounded-2xl p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-on-surface flex items-center gap-1.5">
+                        <Layers className="w-3.5 h-3.5 text-[#004ac6]" />
+                        <span>ربط وثيقة تفريغ (اختياري)</span>
+                      </label>
+                      {selectedTranscriptId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedTranscriptId("");
+                            if (onClearInitialSelectedTranscriptId) {
+                              onClearInitialSelectedTranscriptId();
+                            }
+                          }}
+                          className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer"
+                        >
+                          إلغاء الربط
+                        </button>
+                      )}
                     </div>
-                    {selectedTranscriptId && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedTranscriptId("");
-                          if (onClearInitialSelectedTranscriptId) {
-                            onClearInitialSelectedTranscriptId();
-                          }
-                        }}
-                        className="text-[10px] font-bold text-rose-600 hover:underline cursor-pointer"
-                      >
-                        إلغاء الربط
-                      </button>
-                    )}
-                  </div>
-                  
-                  <div className="relative">
+
                     <select
                       value={selectedTranscriptId}
                       onChange={(e) => setSelectedTranscriptId(e.target.value)}
-                      className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-[#0056f6] transition-all cursor-pointer"
+                      className="w-full h-9 px-3 bg-white border border-[#cdddf5] rounded-xl text-xs font-semibold text-on-surface focus:outline-none focus:border-[#004ac6] cursor-pointer"
                     >
-                      <option value="">-- اختر وثيقة spT لربطها بالتوليد الذكي (اختياري) --</option>
+                      <option value="">بدون وثيقة تفريغ</option>
                       {transcripts.map((t) => (
                         <option key={t.id} value={t.id}>
-                          🎬 {t.title} ({t.segments.length} فقرة)
+                          {t.title} ({t.segments.length} فقرة)
                         </option>
                       ))}
                     </select>
-                  </div>
 
-                  {selectedTranscriptId && (() => {
-                    const sel = transcripts.find(t => t.id === selectedTranscriptId);
-                    if (!sel) return null;
-                    return (
-                      <div className="p-3 bg-white rounded-xl border border-amber-100 text-[10px] text-slate-500 flex items-start gap-2">
-                        <span className="p-1 bg-amber-100 text-amber-700 rounded font-black shrink-0">spT متصل</span>
-                        <div className="text-right flex-1">
-                          <p className="font-bold text-slate-700">{sel.title}</p>
-                          <p className="mt-1 line-clamp-2">النص المتاح: {sel.segments.map(s => s.text).join(" ")}</p>
+                    {selectedTranscriptId && (() => {
+                      const sel = transcripts.find(t => t.id === selectedTranscriptId);
+                      if (!sel) return null;
+                      return (
+                        <p className="text-[11px] text-on-surface-variant line-clamp-1 px-1">
+                          {sel.title} · {sel.segments.map(s => s.text).join(" ")}
+                        </p>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+
+              {/* Zone 3: Quick Settings Strip (Card Count + Advanced Toggle) */}
+              <div className="bg-[#f4f8ff] border border-[#dbe7fa] rounded-2xl p-3.5 space-y-3">
+                {/* Card Count Row */}
+                <div className="flex flex-wrap items-center justify-between gap-3" dir="rtl">
+                  <span className="text-xs font-bold text-on-surface">عدد البطاقات</span>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex bg-[#e3edfc] p-1 rounded-xl border border-[#d0dff7]" dir="rtl">
+                      <button
+                        type="button"
+                        onClick={() => setCardsCount("auto")}
+                        className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                          cardsCount === "auto"
+                            ? "bg-white text-[#004ac6] shadow-2xs"
+                            : "text-on-surface-variant hover:text-on-surface"
+                        }`}
+                      >
+                        تلقائي
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (cardsCount === "auto") setCardsCount(10);
+                        }}
+                        className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                          cardsCount !== "auto"
+                            ? "bg-white text-[#004ac6] shadow-2xs"
+                            : "text-on-surface-variant hover:text-on-surface"
+                        }`}
+                      >
+                        محدد
+                      </button>
+                    </div>
+
+                    {cardsCount !== "auto" && (
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex items-center gap-1 bg-white px-1.5 py-1 rounded-xl border border-[#cdddf5]">
+                          <button
+                            type="button"
+                            onClick={() => setCardsCount(prev => typeof prev === "number" ? Math.max(1, prev - 1) : 9)}
+                            className="w-7 h-7 flex items-center justify-center text-on-surface hover:bg-[#edf4ff] rounded-lg text-sm font-bold cursor-pointer transition-colors"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="number"
+                            min="1"
+                            max="50"
+                            value={cardsCount}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              if (!isNaN(val)) {
+                                setCardsCount(Math.min(Math.max(val, 1), 50));
+                              } else {
+                                setCardsCount(10);
+                              }
+                            }}
+                            className="w-10 text-center text-xs font-mono font-black tabular-nums text-on-surface bg-transparent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setCardsCount(prev => typeof prev === "number" ? Math.min(50, prev + 1) : 11)}
+                            className="w-7 h-7 flex items-center justify-center text-on-surface hover:bg-[#edf4ff] rounded-lg text-sm font-bold cursor-pointer transition-colors"
+                          >
+                            +
+                          </button>
                         </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-              )}
-
-              {/* Card Count Selector */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/70 p-4 rounded-2xl border border-slate-100" dir="rtl">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-[#0056f6]/10 text-[#0056f6] rounded-xl">
-                    <Hash className="w-4 h-4" />
-                  </div>
-                  <div className="text-right">
-                    <span className="text-xs font-bold text-slate-700 block">عدد البطاقات المراد توليدها</span>
-                    <span className="text-[10px] text-slate-400 font-semibold">
-                      {cardsCount === "auto" 
-                        ? "سيقوم الذكاء الاصطناعي بتحديد العدد الأمثل لتغطية الموضوع بالكامل تلقائياً ✨" 
-                        : "الافتراضي 10 بطاقات، ويمكنك الاختيار من 1 إلى 50"}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-4 justify-between sm:justify-end">
-                  {/* Segmented Control */}
-                  <div className="flex bg-slate-200/60 p-1 rounded-xl" dir="rtl">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (cardsCount === "auto") {
-                          setCardsCount(10);
-                        }
-                      }}
-                      className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${cardsCount !== "auto" ? "bg-white text-[#0056f6] shadow-sm font-black" : "text-slate-500 hover:text-slate-800"}`}
-                    >
-                      محدّد
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCardsCount("auto")}
-                      className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${cardsCount === "auto" ? "bg-white text-[#0056f6] shadow-sm font-black" : "text-slate-500 hover:text-slate-800"}`}
-                    >
-                      تلقائي ✨
-                    </button>
-                  </div>
-
-                  {cardsCount !== "auto" ? (
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center gap-2 bg-white px-2 py-1 rounded-xl border border-slate-200">
-                        <button
-                          type="button"
-                          onClick={() => setCardsCount(prev => typeof prev === "number" ? Math.max(1, prev - 1) : 9)}
-                          className="w-7 h-7 flex items-center justify-center text-slate-500 hover:text-[#0056f6] hover:bg-slate-50 rounded-lg text-sm font-bold transition-all active:scale-90"
-                        >
-                          -
-                        </button>
                         <input
-                          type="number"
+                          type="range"
                           min="1"
                           max="50"
                           value={cardsCount}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value);
-                            if (!isNaN(val)) {
-                              setCardsCount(Math.min(Math.max(val, 1), 50));
-                            } else {
-                              setCardsCount(10); // default fallback
-                            }
-                          }}
-                          className="w-12 text-center text-xs font-black text-[#0056f6] focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          onChange={(e) => setCardsCount(parseInt(e.target.value, 10) || 10)}
+                          className="w-24 sm:w-28 h-1.5 bg-[#cdddf5] rounded-lg appearance-none cursor-pointer accent-[#004ac6]"
                         />
-                        <button
-                          type="button"
-                          onClick={() => setCardsCount(prev => typeof prev === "number" ? Math.min(50, prev + 1) : 11)}
-                          className="w-7 h-7 flex items-center justify-center text-slate-500 hover:text-[#0056f6] hover:bg-slate-50 rounded-lg text-sm font-bold transition-all active:scale-90"
-                        >
-                          +
-                        </button>
                       </div>
-                      <input
-                        type="range"
-                        min="1"
-                        max="50"
-                        value={cardsCount}
-                        onChange={(e) => setCardsCount(parseInt(e.target.value) || 10)}
-                        className="w-24 sm:w-32 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#0056f6]"
-                      />
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-100/50 animate-pulse">
-                      <span>توليد مرن وذكي</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Advanced Specific Custom Fields collapsible accordion */}
-              <div className="border border-slate-200/50 rounded-2xl overflow-hidden bg-slate-50/40">
-                <button
-                  type="button"
-                  onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
-                  className="w-full flex items-center justify-between p-3.5 text-right font-black text-xs text-slate-700 hover:bg-slate-100/40 transition-colors cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <Sliders className="w-3.5 h-3.5 text-[#0056f6]" />
-                    <span>تخصيص الإعدادات والبطاقات</span>
+                    )}
                   </div>
-                  <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${showAdvancedOptions ? "rotate-180" : ""}`} />
-                </button>
-                
-                {showAdvancedOptions && (
-                  <div className="p-5 bg-white border-t border-slate-100 space-y-5 animate-fade-in text-right">
-                    {/* Tabs Selection Bar */}
-                    <div className="flex border-b border-slate-100 pb-1.5 mb-2 gap-1.5 overflow-x-auto scrollbar-none" dir="rtl">
-                      <button
-                        type="button"
-                        onClick={() => setAdvancedTab("general")}
-                        className={`px-4 py-2 text-xs font-black rounded-xl transition-all border cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-                          advancedTab === "general"
-                            ? "bg-[#0056f6]/5 text-[#0056f6] border-[#0056f6]/20 font-black"
-                            : "bg-transparent text-slate-500 border-transparent hover:bg-slate-50 hover:text-slate-700"
-                        }`}
-                      >
-                        <Sliders className="w-3.5 h-3.5" />
-                        <span>عام وتسمية المجلد</span>
-                      </button>
-                      
-                      <button
-                        type="button"
-                        onClick={() => setAdvancedTab("smart")}
-                        className={`px-4 py-2 text-xs font-black rounded-xl transition-all border cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-                          advancedTab === "smart"
-                            ? "bg-emerald-50 text-emerald-600 border-emerald-200 font-black"
-                            : "bg-transparent text-slate-500 border-transparent hover:bg-slate-50 hover:text-slate-700"
-                        }`}
-                      >
-                        <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
-                        <span>مفاتيح ذكية وصور</span>
-                      </button>
-                      
-                      <button
-                        type="button"
-                        onClick={() => setAdvancedTab("german")}
-                        className={`px-4 py-2 text-xs font-black rounded-xl transition-all border cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-                          advancedTab === "german"
-                            ? "bg-purple-50 text-purple-600 border-purple-200 font-black"
-                            : "bg-transparent text-slate-500 border-transparent hover:bg-slate-50 hover:text-slate-700"
-                        }`}
-                      >
-                        <Globe className="w-3.5 h-3.5 text-purple-500" />
-                        <span>قواعد اللغة الألمانية</span>
-                      </button>
-                    </div>
+                </div>
 
-                    {/* Tab 1: General Settings */}
-                    {advancedTab === "general" && (
-                      <div className="space-y-5 animate-fade-in">
-                        {/* Primary Customization: Front & Back Instructions */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          {/* Front face constraints */}
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] font-black text-slate-500 block">تعليمات الوجه الأمامي:</label>
-                            <input
-                              type="text"
-                              value={frontInstructions}
-                              onChange={(e) => setFrontInstructions(e.target.value)}
-                              placeholder="مثال: اذكر نوع الكلمة"
-                              className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-[#0056f6] focus:bg-white transition-all text-right"
-                            />
+                {/* Advanced Options Collapsible */}
+                <div className="pt-2 border-t border-[#e0ebfb]">
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
+                    className={`w-full h-10 px-3.5 rounded-xl border flex items-center justify-between text-xs font-bold transition-all cursor-pointer ${
+                      showAdvancedOptions
+                        ? "bg-white border-[#b5ccf2] text-[#004ac6] shadow-2xs"
+                        : "bg-white/80 hover:bg-white border-[#d5e3f8] text-on-surface"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Sliders className="w-3.5 h-3.5 text-[#004ac6]" />
+                      <span>تخصيص الإعدادات</span>
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-on-surface-variant transition-transform duration-150 ${showAdvancedOptions ? "rotate-180" : ""}`} />
+                  </button>
+
+                  {showAdvancedOptions && (
+                    <div className="mt-3 pt-3 border-t border-[#e0ebfb] space-y-4 text-right">
+                      {/* Saved Instruction Presets (Secondary) */}
+                      <div className="bg-white border border-[#dbe7fa] rounded-xl p-2.5 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-on-surface">
+                            <Bookmark className="w-3.5 h-3.5 text-[#004ac6]" />
+                            <span>الوصفات المحفوظة</span>
+                            {instructionPresets.length > 0 && (
+                              <span className="px-1.5 py-0.2 rounded-full bg-[#e8f0fe] text-[#004ac6] text-[10px] font-black tabular-nums">
+                                {instructionPresets.length}
+                              </span>
+                            )}
                           </div>
-                          {/* Back face constraints */}
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] font-black text-slate-500 block">تعليمات الوجه الخلفي:</label>
-                            <input
-                              type="text"
-                              value={backInstructions}
-                              onChange={(e) => setBackInstructions(e.target.value)}
-                              placeholder="مثال: اذكر الترجمة والترابط"
-                              className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-[#0056f6] focus:bg-white transition-all text-right"
-                            />
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSavePresetInput(!showSavePresetInput);
+                              setNewPresetName("");
+                            }}
+                            className="text-[11px] font-bold text-[#004ac6] hover:bg-[#f4f8ff] px-2 py-1 rounded-lg transition-colors cursor-pointer"
+                          >
+                            {showSavePresetInput ? "إلغاء" : "+ حفظ الحالي"}
+                          </button>
                         </div>
 
-                        {/* Divider and Folder Customization Section (At the bottom of the options) */}
-                        <div className="border-t border-slate-100 pt-4">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {/* Folder Name card */}
-                            <div className="p-4 bg-slate-50/50 border border-slate-200/60 rounded-2xl space-y-3 flex flex-col justify-between">
-                              <div className="space-y-1.5">
-                                <div className="flex items-center gap-2">
-                                  <div className="p-1 bg-[#0056f6]/10 text-[#0056f6] rounded-lg">
-                                    <Folder className="w-3.5 h-3.5" />
-                                  </div>
-                                  <span className="text-xs font-bold text-slate-800">اسم المجلد</span>
+                        {showSavePresetInput && (
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              value={newPresetName}
+                              onChange={(e) => setNewPresetName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  handleSavePreset();
+                                }
+                              }}
+                              placeholder="اسم الوصفة (مثال: ألماني بالصور)..."
+                              className="flex-1 h-8 px-2.5 bg-[#f4f8ff] border border-[#cdddf5] rounded-lg text-xs font-semibold text-on-surface placeholder-[#627289] focus:outline-none focus:border-[#004ac6]"
+                              dir="rtl"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleSavePreset}
+                              disabled={!newPresetName.trim()}
+                              className="h-8 px-3 bg-[#004ac6] hover:bg-[#003ea8] disabled:opacity-40 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                            >
+                              حفظ
+                            </button>
+                          </div>
+                        )}
+
+                        {instructionPresets.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {instructionPresets.map((preset) => {
+                              const isApplied = activePresetId === preset.id;
+                              return (
+                                <div
+                                  key={preset.id}
+                                  className={`inline-flex items-center gap-1 rounded-lg border text-[11px] font-bold transition-colors ${
+                                    isApplied
+                                      ? "bg-[#e8f0fe] border-[#8bb1f5] text-[#004ac6]"
+                                      : "bg-[#f4f8ff] border-[#cdddf5] text-on-surface hover:border-[#8bb1f5]"
+                                  }`}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApplyPreset(preset)}
+                                    className="px-2.5 py-1 cursor-pointer"
+                                    title="تطبيق الوصفة"
+                                  >
+                                    {preset.name}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeletePreset(preset.id)}
+                                    className="pl-1.5 pr-1 py-1 text-on-surface-variant hover:text-rose-600 cursor-pointer"
+                                    title="حذف الوصفة"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
                                 </div>
-                              </div>
-                              
+                              );
+                            })}
+                          </div>
+                        ) : !showSavePresetInput && (
+                          <p className="text-[11px] text-on-surface-variant">
+                            احفظ إعدادات التعليمات المفضلة لتطبيقها بنقرة واحدة لاحقاً.
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Compact Segmented Tabs */}
+                      <div className="flex bg-[#e3edfc] p-1 rounded-xl gap-1 border border-[#d0dff7] overflow-x-auto scrollbar-none" dir="rtl">
+                        <button
+                          type="button"
+                          onClick={() => setAdvancedTab("general")}
+                          className={`flex-1 px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+                            advancedTab === "general"
+                              ? "bg-white text-[#004ac6] shadow-2xs"
+                              : "text-on-surface-variant hover:text-on-surface"
+                          }`}
+                        >
+                          المجلد والنصوص
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAdvancedTab("smart")}
+                          className={`flex-1 px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+                            advancedTab === "smart"
+                              ? "bg-white text-[#004ac6] shadow-2xs"
+                              : "text-on-surface-variant hover:text-on-surface"
+                          }`}
+                        >
+                          التلميح والصور
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAdvancedTab("german")}
+                          className={`flex-1 px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+                            advancedTab === "german"
+                              ? "bg-white text-[#004ac6] shadow-2xs"
+                              : "text-on-surface-variant hover:text-on-surface"
+                          }`}
+                        >
+                          قواعد الألمانية
+                        </button>
+                      </div>
+
+                      {/* Tab 1: General Settings */}
+                      {advancedTab === "general" && (
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="space-y-1.5">
+                              <label className="text-[11px] font-bold text-on-surface-variant block">تعليمات الوجه</label>
+                              <input
+                                type="text"
+                                value={frontInstructions}
+                                onChange={(e) => setFrontInstructions(e.target.value)}
+                                placeholder="مثال: اذكر نوع الكلمة"
+                                className="w-full h-9 px-3 bg-white border border-[#cdddf5] rounded-xl text-xs font-semibold text-on-surface placeholder-[#627289] focus:outline-none focus:border-[#004ac6]"
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className="text-[11px] font-bold text-on-surface-variant block">تعليمات الظهر</label>
+                              <input
+                                type="text"
+                                value={backInstructions}
+                                onChange={(e) => setBackInstructions(e.target.value)}
+                                placeholder="مثال: ترجمة عربية مختصرة"
+                                className="w-full h-9 px-3 bg-white border border-[#cdddf5] rounded-xl text-xs font-semibold text-on-surface placeholder-[#627289] focus:outline-none focus:border-[#004ac6]"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-[#e0ebfb]">
+                            <div className="space-y-1.5">
+                              <label className="text-[11px] font-bold text-on-surface-variant block">اسم المجلد</label>
                               <input
                                 type="text"
                                 value={customFolderName}
                                 onChange={(e) => setCustomFolderName(e.target.value)}
                                 placeholder="تلقائي إن ترك فارغاً"
-                                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:border-[#0056f6] transition-all text-right"
+                                className="w-full h-9 px-3 bg-white border border-[#cdddf5] rounded-xl text-xs font-semibold text-on-surface placeholder-[#627289] focus:outline-none focus:border-[#004ac6]"
                                 dir="rtl"
                               />
                             </div>
 
-                            {/* Folder Description card */}
-                            <div className="p-4 bg-slate-50/50 border border-slate-200/60 rounded-2xl space-y-3 flex flex-col justify-between">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <div className="p-1 bg-amber-50 text-amber-600 rounded-lg">
-                                    <FileText className="w-3.5 h-3.5" />
-                                  </div>
-                                  <span className="text-xs font-bold text-slate-800">وصف المجلد</span>
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-bold text-on-surface-variant">وصف المجلد</span>
+                                <div className="flex bg-[#e3edfc] p-0.5 rounded-lg text-[11px] border border-[#d0dff7]">
+                                  {(["auto", "on", "off"] as const).map((mode) => (
+                                    <button
+                                      key={mode}
+                                      type="button"
+                                      onClick={() => setFolderDescMode(mode)}
+                                      className={`px-2.5 py-0.5 rounded-md font-bold transition-colors cursor-pointer ${
+                                        folderDescMode === mode
+                                          ? "bg-white text-[#004ac6] shadow-2xs"
+                                          : "text-on-surface-variant hover:text-on-surface"
+                                      }`}
+                                    >
+                                      {mode === "auto" ? "تلقائي" : mode === "on" ? "تشغيل" : "إيقاف"}
+                                    </button>
+                                  ))}
                                 </div>
                               </div>
-                              
-                              {/* Compact controls row */}
-                              <div className="flex items-center justify-between gap-3 bg-white/60 p-2 rounded-xl border border-slate-200/40 min-h-[40px]">
-                                {/* Checkbox for Auto */}
-                                <label className="flex items-center gap-1.5 select-none cursor-pointer group" dir="rtl">
-                                  <input
-                                    type="checkbox"
-                                    checked={folderDescMode === "auto"}
-                                    onChange={(e) => {
-                                      if (e.target.checked) {
-                                        setFolderDescMode("auto");
-                                      } else {
-                                        setFolderDescMode("on");
-                                      }
-                                    }}
-                                    className="sr-only"
-                                  />
-                                  <div className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all ${
-                                    folderDescMode === "auto"
-                                      ? "bg-amber-500 border-amber-500 text-white shadow-3xs"
-                                      : "border-slate-300 bg-white group-hover:border-slate-400"
-                                  }`}>
-                                    {folderDescMode === "auto" && <Check className="w-3 h-3 stroke-[3]" />}
-                                  </div>
-                                  <span className="text-[11px] font-bold text-slate-600 group-hover:text-slate-800">تلقائي</span>
-                                </label>
-
-                                {/* Manual Switch or Smart Indicator */}
-                                {folderDescMode === "auto" ? (
-                                  <div className="text-[9px] font-extrabold text-amber-600 bg-amber-50/80 px-2 py-0.5 rounded-full border border-amber-100">
-                                    ذكي
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[10px] font-bold text-slate-500">
-                                      {folderDescMode === "on" ? "تشغيل" : "إيقاف"}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => setFolderDescMode(folderDescMode === "on" ? "off" : "on")}
-                                      className={`w-9 h-5 rounded-full p-0.5 relative transition-colors duration-200 outline-none cursor-pointer ${
-                                        folderDescMode === "on" ? "bg-amber-500" : "bg-slate-200"
-                                      }`}
-                                      dir="ltr"
-                                    >
-                                      <div
-                                        className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${
-                                          folderDescMode === "on" ? "translate-x-4" : "translate-x-0"
-                                        }`}
-                                      />
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-
                               {folderDescMode !== "off" && (
-                                <div className="space-y-2 pt-1.5 border-t border-slate-200/40 animate-fadeIn">
+                                <div className="grid grid-cols-2 gap-2">
                                   <input
                                     type="text"
                                     value={customFolderDesc}
                                     onChange={(e) => setCustomFolderDesc(e.target.value)}
-                                    placeholder="الوصف اليدوي للمجلد"
-                                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-semibold focus:outline-none focus:border-[#0056f6] transition-all text-right"
+                                    placeholder="وصف يدوي"
+                                    className="w-full h-9 px-2.5 bg-white border border-[#cdddf5] rounded-xl text-[11px] font-semibold text-on-surface placeholder-[#627289] focus:outline-none focus:border-[#004ac6]"
                                     dir="rtl"
                                   />
                                   <input
                                     type="text"
                                     value={folderDescCondition}
                                     onChange={(e) => setFolderDescCondition(e.target.value)}
-                                    placeholder="شروط صياغة الوصف"
-                                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-semibold focus:outline-none focus:border-[#0056f6] transition-all text-right"
+                                    placeholder="شروط الصياغة"
+                                    className="w-full h-9 px-2.5 bg-white border border-[#cdddf5] rounded-xl text-[11px] font-semibold text-on-surface placeholder-[#627289] focus:outline-none focus:border-[#004ac6]"
                                     dir="rtl"
                                   />
                                 </div>
@@ -3302,192 +3655,91 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                             </div>
                           </div>
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {/* Tab 2: Smart Controls */}
-                    {advancedTab === "smart" && (
-                      <div className="space-y-5 animate-fade-in">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          {/* 1. Description & Translation Hint */}
-                          <div className="p-4 bg-slate-50/50 border border-slate-200/60 rounded-2xl space-y-3 flex flex-col justify-between">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <div className="p-1 bg-blue-50 text-[#0056f6] rounded-lg">
-                                  <FileText className="w-3.5 h-3.5" />
-                                </div>
-                                <span className="text-xs font-bold text-slate-800">الوصف والتلميح</span>
-                              </div>
-                            </div>
-                            
-                            {/* Compact controls row */}
-                            <div className="flex items-center justify-between gap-3 bg-white/60 p-2 rounded-xl border border-slate-200/40 min-h-[40px]">
-                              {/* Checkbox for Auto */}
-                              <label className="flex items-center gap-1.5 select-none cursor-pointer group" dir="rtl">
-                                <input
-                                  type="checkbox"
-                                  checked={descriptionMode === "auto"}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setDescriptionMode("auto");
-                                    } else {
-                                      setDescriptionMode("on");
-                                    }
-                                  }}
-                                  className="sr-only"
-                                />
-                                <div className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all ${
-                                  descriptionMode === "auto"
-                                    ? "bg-[#0056f6] border-[#0056f6] text-white shadow-3xs"
-                                    : "border-slate-300 bg-white group-hover:border-slate-400"
-                                }`}>
-                                  {descriptionMode === "auto" && <Check className="w-3 h-3 stroke-[3]" />}
-                                </div>
-                                <span className="text-[11px] font-bold text-slate-600 group-hover:text-slate-800">تلقائي</span>
-                              </label>
-
-                              {/* Manual Switch or Smart Indicator */}
-                              {descriptionMode === "auto" ? (
-                                <div className="text-[9px] font-extrabold text-[#0056f6] bg-blue-50/80 px-2 py-0.5 rounded-full border border-blue-100">
-                                  ذكي
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[10px] font-bold text-slate-500">
-                                    {descriptionMode === "on" ? "تشغيل" : "إيقاف"}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => setDescriptionMode(descriptionMode === "on" ? "off" : "on")}
-                                    className={`w-9 h-5 rounded-full p-0.5 relative transition-colors duration-200 outline-none cursor-pointer ${
-                                      descriptionMode === "on" ? "bg-[#0056f6]" : "bg-slate-200"
-                                    }`}
-                                    dir="ltr"
-                                  >
-                                    <div
-                                      className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${
-                                        descriptionMode === "on" ? "translate-x-4" : "translate-x-0"
+                      {/* Tab 2: Smart Hints & Images */}
+                      {advancedTab === "smart" && (
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="space-y-2 bg-white p-3 rounded-xl border border-[#dbe7fa]">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-bold text-on-surface">التلميح</span>
+                                <div className="flex bg-[#e3edfc] p-0.5 rounded-lg text-[11px] border border-[#d0dff7]">
+                                  {(["auto", "on", "off"] as const).map((mode) => (
+                                    <button
+                                      key={mode}
+                                      type="button"
+                                      onClick={() => setDescriptionMode(mode)}
+                                      className={`px-2.5 py-0.5 rounded-md font-bold transition-colors cursor-pointer ${
+                                        descriptionMode === mode
+                                          ? "bg-white text-[#004ac6] shadow-2xs"
+                                          : "text-on-surface-variant hover:text-on-surface"
                                       }`}
-                                    />
-                                  </button>
+                                    >
+                                      {mode === "auto" ? "تلقائي" : mode === "on" ? "تشغيل" : "إيقاف"}
+                                    </button>
+                                  ))}
                                 </div>
-                              )}
-                            </div>
-
-                            {descriptionMode !== "off" && (
-                              <div className="space-y-1 pt-1.5 border-t border-slate-200/40 animate-fadeIn">
+                              </div>
+                              {descriptionMode !== "off" && (
                                 <input
                                   type="text"
                                   value={descInstructions}
                                   onChange={(e) => setDescInstructions(e.target.value)}
-                                  placeholder="شروط الوصف (اختياري)"
-                                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-semibold focus:outline-none focus:border-[#0056f6] transition-all text-right"
+                                  placeholder="شروط التلميح (اختياري)"
+                                  className="w-full h-9 px-3 bg-[#f5f9ff] border border-[#cdddf5] rounded-xl text-[11px] font-semibold text-on-surface placeholder-[#627289] focus:outline-none focus:border-[#004ac6] focus:bg-white"
                                 />
-                              </div>
-                            )}
-                          </div>
-
-                          {/* 2. Interactive Images Switch */}
-                          <div className="p-4 bg-slate-50/50 border border-slate-200/60 rounded-2xl space-y-3 flex flex-col justify-between">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <div className="p-1 bg-emerald-50 text-emerald-600 rounded-lg">
-                                  <Image className="w-3.5 h-3.5" />
-                                </div>
-                                <span className="text-xs font-bold text-slate-800">توليد الصور</span>
-                              </div>
-                            </div>
-                            
-                            {/* Compact controls row */}
-                            <div className="flex items-center justify-between gap-3 bg-white/60 p-2 rounded-xl border border-slate-200/40 min-h-[40px]">
-                              {/* Checkbox for Auto */}
-                              <label className="flex items-center gap-1.5 select-none cursor-pointer group" dir="rtl">
-                                <input
-                                  type="checkbox"
-                                  checked={imagesMode === "auto"}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setImagesMode("auto");
-                                    } else {
-                                      setImagesMode("on");
-                                    }
-                                  }}
-                                  className="sr-only"
-                                />
-                                <div className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all ${
-                                  imagesMode === "auto"
-                                    ? "bg-emerald-600 border-emerald-600 text-white shadow-3xs"
-                                    : "border-slate-300 bg-white group-hover:border-slate-400"
-                                }`}>
-                                  {imagesMode === "auto" && <Check className="w-3 h-3 stroke-[3]" />}
-                                </div>
-                                <span className="text-[11px] font-bold text-slate-600 group-hover:text-slate-800">تلقائي</span>
-                              </label>
-
-                              {/* Manual Switch or Smart Indicator */}
-                              {imagesMode === "auto" ? (
-                                <div className="text-[9px] font-extrabold text-emerald-600 bg-emerald-50/80 px-2 py-0.5 rounded-full border border-emerald-100">
-                                  ذكي
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[10px] font-bold text-slate-500">
-                                    {imagesMode === "on" ? "تشغيل" : "إيقاف"}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => setImagesMode(imagesMode === "on" ? "off" : "on")}
-                                    className={`w-9 h-5 rounded-full p-0.5 relative transition-colors duration-200 outline-none cursor-pointer ${
-                                      imagesMode === "on" ? "bg-emerald-500" : "bg-slate-200"
-                                    }`}
-                                    dir="ltr"
-                                  >
-                                    <div
-                                      className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${
-                                        imagesMode === "on" ? "translate-x-4" : "translate-x-0"
-                                      }`}
-                                    />
-                                  </button>
-                                </div>
                               )}
                             </div>
 
-                            {imagesMode !== "off" && (
-                              <div className="space-y-1 pt-1.5 border-t border-slate-200/40 animate-fadeIn">
+                            <div className="space-y-2 bg-white p-3 rounded-xl border border-[#dbe7fa]">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-bold text-on-surface">الصور</span>
+                                <div className="flex bg-[#e3edfc] p-0.5 rounded-lg text-[11px] border border-[#d0dff7]">
+                                  {(["auto", "on", "off"] as const).map((mode) => (
+                                    <button
+                                      key={mode}
+                                      type="button"
+                                      onClick={() => setImagesMode(mode)}
+                                      className={`px-2.5 py-0.5 rounded-md font-bold transition-colors cursor-pointer ${
+                                        imagesMode === mode
+                                          ? "bg-white text-[#004ac6] shadow-2xs"
+                                          : "text-on-surface-variant hover:text-on-surface"
+                                      }`}
+                                    >
+                                      {mode === "auto" ? "تلقائي" : mode === "on" ? "تشغيل" : "إيقاف"}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              {imagesMode !== "off" && (
                                 <input
                                   type="text"
                                   value={imageInstructions}
                                   onChange={(e) => setImageInstructions(e.target.value)}
                                   placeholder="شروط الصور (اختياري)"
-                                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-semibold focus:outline-none focus:border-[#0056f6] transition-all text-right"
+                                  className="w-full h-9 px-3 bg-[#f5f9ff] border border-[#cdddf5] rounded-xl text-[11px] font-semibold text-on-surface placeholder-[#627289] focus:outline-none focus:border-[#004ac6] focus:bg-white"
                                 />
-                              </div>
-                            )}
+                              )}
+                            </div>
                           </div>
 
-                          {/* 3. Image Storage Modes & Timing Configuration */}
-                          <div className="p-4 bg-slate-50/50 border border-slate-200/60 rounded-2xl space-y-3 col-span-1 sm:col-span-2">
-                            <div className="flex items-center justify-between border-b border-slate-200/50 pb-2">
-                              <div className="flex items-center gap-2">
-                                <div className="p-1 bg-blue-50 text-[#0056f6] rounded-lg">
-                                  <DownloadCloud className="w-3.5 h-3.5" />
-                                </div>
-                                <span className="text-xs font-black text-slate-800">إعدادات توقيت وتخزين الصور المفصلة</span>
-                              </div>
+                          <div className="pt-3 border-t border-[#e0ebfb] space-y-2.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-on-surface">خيارات الجلب والتخزين</span>
                               <button
                                 type="button"
                                 onClick={() => setShowImageOptionsModal(true)}
-                                className="text-[10px] font-extrabold text-[#0056f6] hover:underline flex items-center gap-1 cursor-pointer"
+                                className="text-[11px] font-bold text-[#004ac6] hover:underline flex items-center gap-1 cursor-pointer"
                               >
                                 <Sliders className="w-3 h-3" />
-                                <span>فتح نافذة الخيارات المتقدمة ⚙️</span>
+                                <span>نافذة الصور</span>
                               </button>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
-                              {/* Timing */}
-                              <div className="space-y-1 bg-white p-2.5 rounded-xl border border-slate-200/50">
-                                <span className="text-[10px] font-bold text-slate-500 block">توقيت جلب الصورة الأساسية:</span>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-on-surface-variant block">التوقيت</label>
                                 <select
                                   value={primaryImageTiming}
                                   onChange={(e) => {
@@ -3495,16 +3747,15 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                                     setPrimaryImageTiming(val);
                                     localStorage.setItem("settings_primary_image_timing", val);
                                   }}
-                                  className="w-full p-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:outline-none"
+                                  className="w-full h-9 px-2.5 bg-white border border-[#cdddf5] rounded-xl text-[11px] font-bold text-on-surface focus:outline-none focus:border-[#004ac6]"
                                 >
-                                  <option value="auto_after_ai">جلب تلقائي فور رد سيرفر الذكاء ⚡</option>
-                                  <option value="manual_download">تأجيل الجلب للضغط اليدوي 🖐️</option>
+                                  <option value="auto_after_ai">جلب تلقائي بعد التوليد</option>
+                                  <option value="manual_download">جلب يدوي لاحقاً</option>
                                 </select>
                               </div>
 
-                              {/* Primary storage */}
-                              <div className="space-y-1 bg-white p-2.5 rounded-xl border border-slate-200/50">
-                                <span className="text-[10px] font-bold text-slate-500 block">نمط خزن الصورة الأساسية:</span>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-on-surface-variant block">الصورة الأساسية</label>
                                 <select
                                   value={primaryImageStorageMode}
                                   onChange={(e) => {
@@ -3512,16 +3763,15 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                                     setPrimaryImageStorageMode(val);
                                     localStorage.setItem("settings_primary_image_storage", val);
                                   }}
-                                  className="w-full p-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:outline-none"
+                                  className="w-full h-9 px-2.5 bg-white border border-[#cdddf5] rounded-xl text-[11px] font-bold text-on-surface focus:outline-none focus:border-[#004ac6]"
                                 >
-                                  <option value="data_url">تخزين محلي (Data URL / Offline Cache) 💾</option>
-                                  <option value="direct_url">رابط مباشر (Direct URL) 🔗</option>
+                                  <option value="data_url">حفظ محلي (Data URL)</option>
+                                  <option value="direct_url">رابط مباشر</option>
                                 </select>
                               </div>
 
-                              {/* Secondary storage */}
-                              <div className="space-y-1 bg-white p-2.5 rounded-xl border border-slate-200/50">
-                                <span className="text-[10px] font-bold text-slate-500 block">خزن الـ 10 صور الثانوية:</span>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-on-surface-variant block">الصور الإضافية</label>
                                 <select
                                   value={secondaryImagesStorageMode}
                                   onChange={(e) => {
@@ -3529,209 +3779,79 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                                     setSecondaryImagesStorageMode(val);
                                     localStorage.setItem("settings_secondary_images_storage", val);
                                   }}
-                                  className="w-full p-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:outline-none"
+                                  className="w-full h-9 px-2.5 bg-white border border-[#cdddf5] rounded-xl text-[11px] font-bold text-on-surface focus:outline-none focus:border-[#004ac6]"
                                 >
-                                  <option value="data_urls">تنزيل وتخزين مسبق للـ 10 صور 📦</option>
-                                  <option value="direct_urls">روابط مباشرة فقط للـ 10 صور 🌐</option>
+                                  <option value="data_urls">تخزين مسبق (10 صور)</option>
+                                  <option value="direct_urls">روابط فقط</option>
                                 </select>
                               </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {/* Tab 3: German Settings */}
-                    {advancedTab === "german" && (
-                      <div className="space-y-5 animate-fade-in">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          {/* 3. German Articles Switch */}
-                          <div className="p-4 bg-slate-50/50 border border-slate-200/60 rounded-2xl space-y-3 flex flex-col justify-between">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <div className="p-1 bg-purple-50 text-purple-600 rounded-lg">
-                                  <Globe className="w-3.5 h-3.5" />
-                                </div>
-                                <span className="text-xs font-bold text-slate-800">الأدوات الألمانية</span>
-                              </div>
-                            </div>
-                            
-                            {/* Compact controls row */}
-                            <div className="flex items-center justify-between gap-3 bg-white/60 p-2 rounded-xl border border-slate-200/40 min-h-[40px]">
-                              {/* Checkbox for Auto */}
-                              <label className="flex items-center gap-1.5 select-none cursor-pointer group" dir="rtl">
-                                <input
-                                  type="checkbox"
-                                  checked={germanArticlesMode === "auto"}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setGermanArticlesMode("auto");
-                                    } else {
-                                      setGermanArticlesMode("on");
-                                    }
-                                  }}
-                                  className="sr-only"
-                                />
-                                <div className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all ${
-                                  germanArticlesMode === "auto"
-                                    ? "bg-purple-600 border-purple-600 text-white shadow-3xs"
-                                    : "border-slate-300 bg-white group-hover:border-slate-400"
-                                }`}>
-                                  {germanArticlesMode === "auto" && <Check className="w-3 h-3 stroke-[3]" />}
-                                </div>
-                                <span className="text-[11px] font-bold text-slate-600 group-hover:text-slate-800">تلقائي</span>
-                              </label>
-
-                              {/* Manual Switch or Smart Indicator */}
-                              {germanArticlesMode === "auto" ? (
-                                <div className="text-[9px] font-extrabold text-purple-600 bg-purple-50/80 px-2 py-0.5 rounded-full border border-purple-100">
-                                  ذكي
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[10px] font-bold text-slate-500">
-                                    {germanArticlesMode === "on" ? "تشغيل" : "إيقاف"}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => setGermanArticlesMode(germanArticlesMode === "on" ? "off" : "on")}
-                                    className={`w-9 h-5 rounded-full p-0.5 relative transition-colors duration-200 outline-none cursor-pointer ${
-                                      germanArticlesMode === "on" ? "bg-purple-600" : "bg-slate-200"
-                                    }`}
-                                    dir="ltr"
-                                  >
-                                    <div
-                                      className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${
-                                        germanArticlesMode === "on" ? "translate-x-4" : "translate-x-0"
-                                      }`}
-                                    />
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="pt-1.5 border-t border-slate-200/40 text-center">
-                              <span className="text-[9px] font-semibold text-slate-400">خاص باللغة الألمانية</span>
+                      {/* Tab 3: German Settings */}
+                      {advancedTab === "german" && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                          <div className="flex items-center justify-between gap-2 bg-white p-3 rounded-xl border border-[#dbe7fa]">
+                            <span className="text-xs font-bold text-on-surface">أدوات التعريف</span>
+                            <div className="flex bg-[#e3edfc] p-0.5 rounded-lg text-[11px] border border-[#d0dff7]">
+                              {(["auto", "on", "off"] as const).map((mode) => (
+                                <button
+                                  key={mode}
+                                  type="button"
+                                  onClick={() => setGermanArticlesMode(mode)}
+                                  className={`px-2.5 py-0.5 rounded-md font-bold transition-colors cursor-pointer ${
+                                    germanArticlesMode === mode
+                                      ? "bg-white text-[#004ac6] shadow-2xs"
+                                      : "text-on-surface-variant hover:text-on-surface"
+                                  }`}
+                                >
+                                  {mode === "auto" ? "تلقائي" : mode === "on" ? "تشغيل" : "إيقاف"}
+                                </button>
+                              ))}
                             </div>
                           </div>
 
-                          {/* 4. German Plural Switch */}
-                          <div className="p-4 bg-slate-50/50 border border-slate-200/60 rounded-2xl space-y-3 flex flex-col justify-between">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <div className="p-1 bg-fuchsia-50 text-fuchsia-600 rounded-lg">
-                                  <Plus className="w-3.5 h-3.5" />
-                                </div>
-                                <span className="text-xs font-bold text-slate-800">صيغة الجمع (Plural)</span>
-                              </div>
-                            </div>
-                            
-                            {/* Compact controls row */}
-                            <div className="flex items-center justify-between gap-3 bg-white/60 p-2 rounded-xl border border-slate-200/40 min-h-[40px]">
-                              {/* Checkbox for Auto */}
-                              <label className="flex items-center gap-1.5 select-none cursor-pointer group" dir="rtl">
-                                <input
-                                  type="checkbox"
-                                  checked={germanPluralMode === "auto"}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setGermanPluralMode("auto");
-                                    } else {
-                                      setGermanPluralMode("on");
-                                    }
-                                  }}
-                                  className="sr-only"
-                                />
-                                <div className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all ${
-                                  germanPluralMode === "auto"
-                                    ? "bg-fuchsia-600 border-fuchsia-600 text-white shadow-3xs"
-                                    : "border-slate-300 bg-white group-hover:border-slate-400"
-                                }`}>
-                                  {germanPluralMode === "auto" && <Check className="w-3 h-3 stroke-[3]" />}
-                                </div>
-                                <span className="text-[11px] font-bold text-slate-600 group-hover:text-slate-800">تلقائي</span>
-                              </label>
-
-                              {/* Manual Switch or Smart Indicator */}
-                              {germanPluralMode === "auto" ? (
-                                <div className="text-[9px] font-extrabold text-fuchsia-600 bg-fuchsia-50/80 px-2 py-0.5 rounded-full border border-fuchsia-100">
-                                  ذكي
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[10px] font-bold text-slate-500">
-                                    {germanPluralMode === "on" ? "تشغيل" : "إيقاف"}
-                                  </span>
+                          <div className="space-y-2 bg-white p-3 rounded-xl border border-[#dbe7fa]">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-bold text-on-surface">صيغة الجمع</span>
+                              <div className="flex bg-[#e3edfc] p-0.5 rounded-lg text-[11px] border border-[#d0dff7]">
+                                {(["auto", "on", "off"] as const).map((mode) => (
                                   <button
+                                    key={mode}
                                     type="button"
-                                    onClick={() => setGermanPluralMode(germanPluralMode === "on" ? "off" : "on")}
-                                    className={`w-9 h-5 rounded-full p-0.5 relative transition-colors duration-200 outline-none cursor-pointer ${
-                                      germanPluralMode === "on" ? "bg-fuchsia-600" : "bg-slate-200"
+                                    onClick={() => setGermanPluralMode(mode)}
+                                    className={`px-2.5 py-0.5 rounded-md font-bold transition-colors cursor-pointer ${
+                                      germanPluralMode === mode
+                                        ? "bg-white text-[#004ac6] shadow-2xs"
+                                        : "text-on-surface-variant hover:text-on-surface"
                                     }`}
-                                    dir="ltr"
                                   >
-                                    <div
-                                      className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${
-                                        germanPluralMode === "on" ? "translate-x-4" : "translate-x-0"
-                                      }`}
-                                    />
+                                    {mode === "auto" ? "تلقائي" : mode === "on" ? "تشغيل" : "إيقاف"}
                                   </button>
-                                </div>
-                              )}
-                            </div>
-
-                            {germanPluralMode !== "off" && (
-                              <div className="space-y-1 pt-1.5 border-t border-slate-200/40 animate-fadeIn animate-duration-150">
-                                <input
-                                  type="text"
-                                  value={germanPluralInstruction}
-                                  onChange={(e) => setGermanPluralInstruction(e.target.value)}
-                                  placeholder="شروط صيغة الجمع (اختياري)"
-                                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-semibold focus:outline-none focus:border-fuchsia-500 transition-all text-right"
-                                />
+                                ))}
                               </div>
-                            )}
-
-                            <div className="pt-1.5 border-t border-slate-200/40 text-center">
-                              <span className="text-[9px] font-semibold text-slate-400">خاص باللغة الألمانية</span>
                             </div>
+                            {germanPluralMode !== "off" && (
+                              <input
+                                type="text"
+                                value={germanPluralInstruction}
+                                onChange={(e) => setGermanPluralInstruction(e.target.value)}
+                                placeholder="شروط الجمع (اختياري)"
+                                className="w-full h-9 px-3 bg-[#f5f9ff] border border-[#cdddf5] rounded-xl text-[11px] font-semibold text-on-surface placeholder-[#627289] focus:outline-none focus:border-[#004ac6] focus:bg-white"
+                              />
+                            )}
                           </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row justify-end items-stretch sm:items-center gap-3 pt-1">
-                {/* Sleek Segmented Model Selector next to the generation button */}
-                <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200/80 shadow-3xs" dir="rtl">
-                  <button
-                    type="button"
-                    onClick={() => handleProviderChange("gemini")}
-                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                      aiProvider === "gemini"
-                        ? "bg-white text-[#0056f6] shadow-3xs border border-slate-100"
-                        : "text-slate-400 hover:text-slate-700"
-                    }`}
-                  >
-                    <Sparkles className="w-3 h-3" />
-                    <span>Gemini</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleProviderChange("groq")}
-                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                      aiProvider === "groq"
-                        ? "bg-white text-orange-600 shadow-3xs border border-slate-100"
-                        : "text-slate-400 hover:text-slate-700"
-                    }`}
-                  >
-                    <Activity className="w-3 h-3" />
-                    <span>Groq</span>
-                  </button>
-                </div>
-
+              {/* Zone 4: Focused Action Footer */}
+              <div className="flex items-center justify-between gap-3 pt-1">
                 <button
                   type="button"
                   onClick={() => {
@@ -3742,79 +3862,77 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                     setExternalTab("prompt");
                     setShowExternalModal(true);
                   }}
-                  className="px-4 py-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                  title="تصدير البرومبت الخارجي واستيراد البيانات كـ JSON"
+                  className="h-10 px-4 rounded-xl bg-[#f4f8ff] hover:bg-[#e6effe] border border-[#cdddf5] text-on-surface font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                  title="توليد واستيراد خارجي JSON"
                 >
-                  <Globe className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>خارجي 🌐</span>
+                  <Globe className="w-3.5 h-3.5 text-[#004ac6]" />
+                  <span>خارجي</span>
                 </button>
 
                 <button
                   id="generate-button-main"
                   onClick={() => handleGenerate(prompt)}
                   disabled={!prompt.trim()}
-                  className="px-6 py-2 rounded-lg bg-[#0056f6] hover:bg-[#0047cc] text-white font-bold text-xs active:scale-95 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                  className="h-10 px-7 rounded-xl bg-[#004ac6] hover:bg-[#003da6] text-white font-black text-xs active:scale-[0.98] transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-sm shadow-[#004ac6]/20"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span>بدء التوليد الذكي</span>
+                  <span>توليد</span>
                 </button>
               </div>
             </div>
 
             {/* Temporary Folders List Section */}
-            <div className="space-y-3.5">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <h3 className="text-xs font-bold text-slate-500 flex items-center gap-1.5">
-                  <Folder className="w-3.5 h-3.5 text-slate-400" />
-                  <span>المجلدات الذكية المسودة ({aiFolders.length})</span>
-                </h3>
+            <div className="space-y-3 pt-1">
+              <div className="flex items-center justify-between flex-wrap gap-2 px-1">
+                <div className="flex items-center gap-2">
+                  <Folder className="w-4 h-4 text-[#004ac6]" />
+                  <h3 className="text-xs font-black text-on-surface">المجلدات المؤقتة</h3>
+                  <span className="px-2 py-0.5 rounded-full bg-[#dce8fb] text-[#004ac6] text-[11px] font-black tabular-nums">
+                    {aiFolders.length}
+                  </span>
+                </div>
 
                 {aiFolders.length > 0 && (
                   <div className="flex items-center gap-2">
-                    {selectedAiFolderIds.length > 0 && (
-                      <span className="text-[11px] font-extrabold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100/80">
-                        محدد {selectedAiFolderIds.length} من {aiFolders.length}
-                      </span>
-                    )}
-
                     <button
                       type="button"
                       onClick={handleSelectAllAiFolders}
-                      className={`px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-3xs active:scale-95 ${
+                      className={`h-9 px-3 rounded-xl border text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs ${
                         aiFolders.length > 0 && aiFolders.every(f => selectedAiFolderIds.includes(f.id))
-                          ? "bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-700"
-                          : "bg-white hover:bg-slate-50 border-slate-200 text-slate-700"
+                          ? "bg-[#e8f0fe] border-[#8cb4f5] text-[#004ac6]"
+                          : "bg-white hover:bg-[#f4f8ff] border-[#c7daf6] text-on-surface"
                       }`}
-                      title={aiFolders.every(f => selectedAiFolderIds.includes(f.id)) ? "إلغاء تحديد الكل" : "تحديد الكل"}
                     >
                       <CheckSquare className="w-3.5 h-3.5" />
-                      <span>{aiFolders.every(f => selectedAiFolderIds.includes(f.id)) ? "إلغاء تحديد الكل" : "تحديد الكل"}</span>
+                      <span>{aiFolders.every(f => selectedAiFolderIds.includes(f.id)) ? "إلغاء الكل" : "تحديد الكل"}</span>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={handleBulkDeleteAiFolders}
-                      disabled={selectedAiFolderIds.length === 0}
-                      className="px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 font-bold text-xs active:scale-95 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-3xs"
-                      title="حذف المجلدات المحددة"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                      <span>حذف المحدد ({selectedAiFolderIds.length})</span>
-                    </button>
+                    {selectedAiFolderIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleBulkDeleteAiFolders}
+                        className="h-9 px-3 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5 tabular-nums shadow-2xs"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف ({selectedAiFolderIds.length})</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
 
               {aiFolders.length === 0 ? (
-                <div className="text-center py-12 bg-white rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-6">
-                  <BookOpen className="w-10 h-10 text-slate-300 mb-2.5" />
-                  <h4 className="font-bold text-slate-600 text-xs">لا توجد مجلدات مؤقتة مضافة بعد</h4>
-                  <p className="text-[10px] text-slate-400 mt-1 max-w-sm leading-relaxed font-semibold">
-                    عند كتابة برومبت والضغط على "توليد"، سيتم إنشاء مجلد ذكي مؤقت وحفظه في هذا القسم لتجربته وتطويره بالكامل قبل نقله لمكتبتك العامة.
+                <div className="text-center py-10 px-6 bg-white/80 rounded-[24px] border border-dashed border-[#b6cef2] flex flex-col items-center justify-center">
+                  <div className="w-11 h-11 rounded-2xl bg-[#e8f0fe] text-[#004ac6] flex items-center justify-center mb-2.5">
+                    <BookOpen className="w-5 h-5" />
+                  </div>
+                  <p className="font-black text-on-surface text-xs">لا توجد مجلدات مؤقتة</p>
+                  <p className="text-[11px] text-on-surface-variant mt-1">
+                    اكتب الموضوع أعلاه واضغط توليد لإنشاء أول مجلد.
                   </p>
                 </div>
               ) : (
-                <div className="flex flex-col gap-3 animate-fade-in">
+                <div className="flex flex-col gap-2.5">
                   {aiFolders.map((f) => {
                     const cardsInFolder = aiCards.filter(c => c.folderId === f.id);
                     const isSelected = selectedAiFolderIds.includes(f.id);
@@ -3822,99 +3940,84 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                       <div
                         key={f.id}
                         onClick={() => setActiveAiFolderId(f.id)}
-                        className={`flex items-center justify-between p-4 bg-white border rounded-lg hover:shadow-xs transition-all cursor-pointer group hover:bg-slate-50/40 relative ${
-                          isSelected 
-                            ? "border-indigo-400 ring-2 ring-indigo-500/20 bg-indigo-50/30" 
-                            : "border-slate-100"
+                        className={`flex items-center justify-between p-3.5 bg-white border rounded-2xl transition-all cursor-pointer group shadow-elevation-1 ${
+                          isSelected
+                            ? "border-[#004ac6] bg-[#f2f7ff] ring-1 ring-[#004ac6]/20"
+                            : "border-[#cdddf5] hover:border-[#7ca7f5] hover:shadow-elevation-3"
                         }`}
                       >
-                        <div className="flex items-center gap-3.5 text-right">
-                          {/* Selection Checkbox button */}
+                        <div className="flex items-center gap-3 text-right min-w-0">
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleToggleSelectAiFolder(f.id);
                             }}
-                            className={`p-1.5 rounded-lg transition-all cursor-pointer shrink-0 ${
+                            className={`p-1.5 rounded-lg transition-colors cursor-pointer shrink-0 ${
                               isSelected
-                                ? "text-indigo-600 bg-indigo-100/90 hover:bg-indigo-200"
-                                : "text-slate-300 hover:text-slate-500 hover:bg-slate-100"
+                                ? "text-[#004ac6] bg-[#e3edfc]"
+                                : "text-on-surface-variant/60 hover:text-on-surface hover:bg-[#f4f8ff]"
                             }`}
-                            title={isSelected ? "إلغاء تحديد هذا المجلد" : "تحديد هذا المجلد"}
+                            title={isSelected ? "إلغاء التحديد" : "تحديد"}
                           >
                             {isSelected ? (
-                              <CheckSquare className="w-5 h-5 text-indigo-600 fill-indigo-50" />
+                              <CheckSquare className="w-4.5 h-4.5" />
                             ) : (
-                              <Square className="w-5 h-5 text-slate-300" />
+                              <Square className="w-4.5 h-4.5" />
                             )}
                           </button>
 
-                          {/* Book/Binder cover styled spine representing a folder */}
-                          <div className="relative w-14 h-14 shrink-0">
-                            {/* Folder Tab */}
-                            <div 
-                              className="absolute top-0 right-1 w-6 h-2 rounded-t-xs border-t border-x z-0"
-                              style={{ 
-                                backgroundColor: f.color || '#0056f6',
-                                borderColor: `${f.color || '#0056f6'}40`
+                          {/* Binder thumbnail */}
+                          <div className="relative w-12 h-12 shrink-0">
+                            <div
+                              className="absolute top-0 right-1 w-5 h-1.5 rounded-t-xs border-t border-x z-0"
+                              style={{
+                                backgroundColor: f.color || "#0056f6",
+                                borderColor: `${f.color || "#0056f6"}40`
                               }}
                             />
-                            {/* Folder Main Body */}
-                            <div 
-                              className="absolute bottom-0 left-0 right-0 h-[46px] rounded-b-md rounded-tl-md overflow-hidden border shadow-3xs flex items-center justify-center transition-all duration-300 z-10"
+                            <div
+                              className="absolute bottom-0 left-0 right-0 h-[40px] rounded-b-md rounded-tl-md overflow-hidden border shadow-2xs flex items-center justify-center z-10"
                               style={{
-                                backgroundColor: `${f.color || '#0056f6'}15`,
-                                borderColor: f.color ? `${f.color}50` : "#e2e8f0",
+                                backgroundColor: `${f.color || "#0056f6"}15`,
+                                borderColor: f.color ? `${f.color}50` : "#cdddf5",
                                 borderWidth: "1.5px"
                               }}
                             >
-                              <div 
-                                className="absolute inset-0 transition-all duration-300 group-hover:brightness-105"
+                              <div
+                                className="absolute inset-0"
                                 style={{
-                                  background: `linear-gradient(135deg, ${f.color || '#0056f6'}, ${f.color ? f.color + "dd" : "#0047cc"})`
+                                  background: `linear-gradient(135deg, ${f.color || "#0056f6"}, ${f.color ? f.color + "dd" : "#0047cc"})`
                                 }}
                               />
-                              
-                              {/* Notebook Binder Spine (RTL) */}
-                              <div 
-                                className="absolute right-0 top-0 bottom-0 w-2 shadow-sm transition-all flex flex-col justify-around py-1.5 items-center z-10"
+                              <div
+                                className="absolute right-0 top-0 bottom-0 w-1.5 flex flex-col justify-around py-1 items-center z-10"
                                 style={{ backgroundColor: f.color || "#0056f6", filter: "brightness(0.82)" }}
                               >
                                 <div className="w-0.5 h-0.5 bg-black/25 rounded-full" />
                                 <div className="w-0.5 h-0.5 bg-black/25 rounded-full" />
-                                <div className="w-0.5 h-0.5 bg-black/25 rounded-full" />
-                              </div>
-
-                              {/* Folder Indicator Icon badge */}
-                              <div 
-                                className="absolute left-1 bottom-1 bg-white p-0.5 rounded-xs z-10 border shadow-xs flex items-center justify-center"
-                                style={{ borderColor: `${f.color || '#0056f6'}15` }}
-                              >
-                                <Folder className="w-2.5 h-2.5 fill-current" style={{ color: f.color || '#0056f6' }} />
                               </div>
                             </div>
                           </div>
 
-                          {/* Text block */}
-                          <div>
-                            <h4 className="font-bold text-[#202124] text-base group-hover:text-[#0056f6] transition-colors">
+                          <div className="min-w-0">
+                            <h4 className="font-bold text-on-surface text-sm group-hover:text-[#004ac6] transition-colors truncate">
                               {f.name}
                             </h4>
-                            <p className="text-xs text-[#5f6368] font-medium mt-1">
-                              {cardsInFolder.length} بطاقات • {f.frontLang.toUpperCase()} إلى {f.backLang.toUpperCase()}
+                            <p className="text-xs text-on-surface-variant font-medium mt-0.5 tabular-nums">
+                              {cardsInFolder.length} بطاقة · {f.frontLang.toUpperCase()} ← {f.backLang.toUpperCase()}
                             </p>
                           </div>
                         </div>
 
-                        {/* Delete action button */}
                         <button
+                          type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleDeleteAiFolder(f.id);
                           }}
-                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
-                          title="حذف هذا المجلد المؤقت"
+                          className="h-9 w-9 flex items-center justify-center text-on-surface-variant/70 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer shrink-0"
+                          title="حذف المجلد"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -3924,280 +4027,48 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                 </div>
               )}
             </div>
-
-            {/* AI REQUEST LOG & QUOTA INSPECTOR */}
-            <div className="bg-white rounded-[24px] border border-slate-200/50 p-6 space-y-4 shadow-elevation-1" dir="rtl">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-[#0056f6]" />
-                  <h3 className="font-bold text-sm text-slate-800">سجل عمليات وحصص الذكاء الاصطناعي</h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAiRequestHistory([]);
-                    localStorage.removeItem("ai_request_history");
-                  }}
-                  disabled={aiRequestHistory.length === 0}
-                  className="text-[10px] font-bold text-slate-400 hover:text-rose-600 disabled:opacity-40 disabled:hover:text-slate-400 transition-colors"
-                >
-                  مسح السجل
-                </button>
-              </div>
-
-              <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
-                توضح هذه اللوحة سجل طلبات التوليد السابقة وحالة الحصة المستخدمة (Quotas) لمزودي الخدمة لمساعدتك على فهم حدودك اليومية والدقيقة.
-              </p>
-
-              {aiRequestHistory.length === 0 ? (
-                <div className="text-center py-6 bg-slate-50 rounded-xl border border-dashed border-slate-100">
-                  <Activity className="w-6 h-6 text-slate-300 mx-auto mb-1.5" />
-                  <p className="text-[10px] text-slate-400 font-semibold">لا توجد عمليات مسجلة حالياً</p>
-                </div>
-              ) : (
-                <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
-                  {aiRequestHistory.map((log) => {
-                    const isFailed = log.status === "failed";
-                    const hasUsage = !!log.usage && (log.usage.totalTokens > 0);
-                    const parsedLimit = log.rateLimitInfo;
-                    const dateFormatted = new Date(log.timestamp).toLocaleTimeString("ar-EG", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      second: "2-digit"
-                    });
-
-                    return (
-                      <div 
-                        key={log.id} 
-                        className={`p-3.5 rounded-xl border transition-all text-right space-y-2.5 ${
-                          isFailed 
-                            ? "bg-rose-50/40 border-rose-100" 
-                            : "bg-slate-50/30 border-slate-150/80 hover:bg-slate-50/60"
-                        }`}
-                      >
-                        {/* Log Header */}
-                        <div className="flex items-center justify-between text-[11px]">
-                          <div className="flex items-center gap-1.5">
-                            <span className={`w-2 h-2 rounded-full ${isFailed ? "bg-rose-500" : "bg-emerald-500 animate-pulse"}`} />
-                            <span className="font-black text-slate-700">{log.id}</span>
-                            <span className="text-slate-300">•</span>
-                            <span className="text-slate-400 font-semibold">{dateFormatted}</span>
-                          </div>
-                          
-                          <div className="flex items-center gap-1.5">
-                            <span className={`px-2 py-0.5 rounded-md font-bold text-[9px] ${
-                              log.provider === "groq" ? "bg-orange-50 text-orange-600 border border-orange-100" : "bg-blue-50 text-[#0056f6] border border-blue-100"
-                            }`}>
-                              {log.provider === "groq" ? "Groq" : "Gemini"}
-                            </span>
-                            <span className={`px-2 py-0.5 rounded-md font-bold text-[9px] ${
-                              isFailed ? "bg-rose-100/60 text-rose-700" : "bg-emerald-50 text-emerald-700 border border-emerald-100"
-                            }`}>
-                              {isFailed ? "مرفوض / فشل" : "مكتمل بنجاح"}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Prompt Info */}
-                        <div className="text-[10px] bg-white border border-slate-100 p-2 rounded-lg font-medium text-slate-600 truncate">
-                          <strong className="text-slate-800">الطلب المرسل:</strong> {log.prompt}
-                        </div>
-
-                        {/* Usage Stats or Error breakdown */}
-                        {isFailed ? (
-                          <div className="text-[10px] text-rose-800 font-bold bg-rose-50/80 p-2.5 rounded-lg border border-rose-100 leading-relaxed">
-                            <p className="font-black text-right">❌ تفاصيل الخطأ المرتجع من الخادم:</p>
-                            <p className="font-semibold text-[9px] mt-1 font-mono break-words bg-rose-100/30 p-1.5 rounded text-right">{log.error}</p>
-                            
-                            {parsedLimit && (
-                              <div className="mt-2 pt-2 border-t border-rose-100 grid grid-cols-2 gap-2 text-[9px] font-bold text-rose-900 text-right">
-                                {parsedLimit.limitType && (
-                                  <div>
-                                    الحصة المتأثرة: <span className="font-mono bg-rose-100 px-1 rounded">{parsedLimit.limitType === "TPD" ? "اليومية للتوكنات" : parsedLimit.limitType === "RPM" ? "الدقيقة للطلبات" : "الدقيقة للتوكنات"}</span>
-                                  </div>
-                                )}
-                                {parsedLimit.limit && (
-                                  <div>
-                                    الحد الأقصى: <span className="font-mono bg-rose-100 px-1 rounded">{parsedLimit.limit.toLocaleString()}</span>
-                                  </div>
-                                )}
-                                {parsedLimit.used !== undefined && (
-                                  <div>
-                                    المستهلك: <span className="font-mono bg-rose-100 px-1 rounded">{parsedLimit.used.toLocaleString()}</span>
-                                  </div>
-                                )}
-                                {parsedLimit.requested !== undefined && (
-                                  <div>
-                                    المطلوب: <span className="font-mono bg-rose-100 px-1 rounded">{parsedLimit.requested.toLocaleString()}</span>
-                                  </div>
-                                )}
-                                {parsedLimit.resetIn && (
-                                  <div className="col-span-2 text-amber-900 font-black flex items-center gap-1 mt-1">
-                                    <span>⏱️ وقت التجدد المتبقي:</span>
-                                    <span className="font-mono bg-amber-100 px-1.5 py-0.5 rounded text-amber-800">{formatArabicResetTime(parsedLimit.resetIn)}</span>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="flex flex-wrap gap-2.5 items-center justify-between text-[10px] font-semibold text-slate-500 pt-1">
-                            <div>
-                              عدد البطاقات المنجزة: <span className="font-black text-slate-700 font-mono bg-slate-100 px-1.5 py-0.5 rounded">{log.cardsCount === "auto" ? "تلقائي ✨" : `${log.cardsCount} بطاقة`}</span>
-                            </div>
-                            
-                            {hasUsage && (
-                              <div className="flex items-center gap-2">
-                                <span>التوكنات المستهلكة:</span>
-                                <span className="font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-100/50">إجمالي {log.usage?.totalTokens.toLocaleString()}</span>
-                                <span className="text-[9px] text-slate-400 font-mono">(مدخلات: {log.usage?.promptTokens} • مخرجات: {log.usage?.completionTokens})</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Collapsible Detailed Prompt & Response Inspector */}
-                        {(log.rawPrompt || log.response || log.rawRequestBody || log.rawResponseBody) && (
-                          <div className="pt-2 border-t border-slate-100/60 mt-2">
-                            <details className="group">
-                              <summary className="flex items-center gap-1.5 text-[10px] text-[#0056f6] hover:text-[#0047cc] font-black cursor-pointer select-none">
-                                <Code className="w-3.5 h-3.5 text-[#0056f6]" />
-                                <span>عرض تفاصيل هندسة الأوامر والبيانات الخام للطلب والرد (Payload Debugger)</span>
-                                <ChevronDown className="w-3 h-3 transition-transform duration-200 group-open:rotate-180" />
-                              </summary>
-                              
-                              <div className="mt-3 space-y-4 text-right" dir="rtl">
-                                {/* Prompt Engineering & Summary (If present) */}
-                                {(log.rawPrompt || log.response) && (
-                                  <div className="space-y-4 border-b border-slate-100 pb-4">
-                                    <h4 className="text-[10px] font-extrabold text-slate-700">🔍 ملخص هندسة الأوامر والمخرجات المفسرة:</h4>
-                                    
-                                    {log.rawPrompt && (
-                                      <div className="space-y-1">
-                                        <span className="text-[9px] text-slate-400 font-extrabold block">البرومبت التفصيلي النهائي المرسل للموديل (Raw Prompt):</span>
-                                        <CodeViewer
-                                          code={log.rawPrompt}
-                                          title="البرومبت التفصيلي النهائي"
-                                          language="markdown"
-                                          badge="Input Prompt"
-                                          compactHeight="max-h-[150px]"
-                                          tokenCount={log.usage?.promptTokens}
-                                        />
-                                      </div>
-                                    )}
-
-                                    {log.response && (
-                                      <div className="space-y-1">
-                                        <span className="text-[9px] text-slate-400 font-extrabold block">البنية والتفاصيل الراجعة من الموديل (Model Output Summary):</span>
-                                        <CodeViewer
-                                          code={log.response}
-                                          title="ملخص المخرجات المفسرة من الموديل"
-                                          language="markdown"
-                                          badge="Output"
-                                          compactHeight="max-h-[150px]"
-                                          tokenCount={log.usage?.completionTokens}
-                                        />
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-
-                                {/* Raw HTTP Request & Response Body Section */}
-                                {(log.rawRequestBody || log.rawResponseBody) && (
-                                  <div className="space-y-3">
-                                    <h4 className="text-[10px] font-extrabold text-slate-700">🔌 البيانات الخام المنقولة بالشبكة (Raw HTTP Stream):</h4>
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" dir="ltr">
-                                      {/* Raw Request Column */}
-                                      <div className="space-y-1 text-left">
-                                        <span className="text-[9px] text-slate-400 font-extrabold block">الطلب الخام (Raw Request Body):</span>
-                                        <CodeViewer
-                                          code={log.rawRequestBody || "{}"}
-                                          title="محتوى الطلب المرسل"
-                                          language="json"
-                                          badge="Request Body"
-                                          compactHeight="h-[220px]"
-                                          tokenCount={log.usage?.promptTokens}
-                                        />
-                                      </div>
-
-                                      {/* Raw Response Column */}
-                                      <div className="space-y-1 text-left">
-                                        <span className="text-[9px] text-slate-400 font-extrabold block">الرد الخام المباشر (Raw Response Body):</span>
-                                        <CodeViewer
-                                          code={log.rawResponseBody || "(empty)"}
-                                          title="محتوى الرد المستلم"
-                                          language="json"
-                                          badge="Response Body"
-                                          compactHeight="h-[220px]"
-                                          tokenCount={log.usage?.completionTokens}
-                                        />
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </details>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
           </>
         ) : (
           /* =========================================================================
-             2. DETAILED VIEW: Normal folder display styled exactly like Explorer.tsx
+             2. DETAILED VIEW: Organized daytime layout matching Library & Cognitive Flow
              ========================================================================= */
           activeAiFolder && (
             <div className="space-y-4 animate-fade-in">
               
-              {/* Folder Cover Image / Details Banner */}
-              <div 
-                className="bg-white border rounded-2xl p-4 shadow-3xs flex flex-col md:flex-row md:items-center justify-between gap-4 relative overflow-hidden"
-                style={{ borderRight: `6px solid ${activeAiFolder.color || '#0056f6'}` }}
-              >
+              {/* Folder Cover & Summary Card */}
+              <div className="bg-white border border-[#c7daf6] rounded-[24px] p-4 sm:p-5 flex items-center justify-between gap-4 relative overflow-hidden shadow-elevation-3">
                 {activeAiFolder.coverImage && (
                   <div className="absolute inset-0 w-full h-full pointer-events-none z-0">
                     <img
                       src={activeAiFolder.coverImage}
                       alt=""
-                      className="w-full h-full object-cover"
-                      style={{
-                        opacity: 0.08,
-                        filter: "blur(2px)"
-                      }}
+                      className="w-full h-full object-cover opacity-[0.07]"
                       referrerPolicy="no-referrer"
                     />
                   </div>
                 )}
-                {/* Book/Notebook Binder layout representation */}
-                <div className="flex items-center gap-4 text-right z-10 relative">
+
+                <div className="flex items-center gap-3.5 text-right z-10 min-w-0">
                   <div className="relative w-12 h-12 shrink-0">
-                    <div 
-                      className="absolute top-0 right-1 w-6 h-1.5 rounded-t-xs border-t border-x z-0"
-                      style={{ 
-                        backgroundColor: activeAiFolder.color || '#0056f6',
-                        borderColor: `${activeAiFolder.color || '#0056f6'}40`
+                    <div
+                      className="absolute top-0 right-1 w-5 h-1.5 rounded-t-xs border-t border-x z-0"
+                      style={{
+                        backgroundColor: activeAiFolder.color || "#0056f6",
+                        borderColor: `${activeAiFolder.color || "#0056f6"}40`
                       }}
                     />
-                    <div 
-                      className="absolute bottom-0 left-0 right-0 h-[40px] rounded-b-md rounded-tl-md overflow-hidden border shadow-sm flex items-center justify-center z-10"
+                    <div
+                      className="absolute bottom-0 left-0 right-0 h-[40px] rounded-b-md rounded-tl-md overflow-hidden border shadow-2xs flex items-center justify-center z-10"
                       style={{
                         background: activeAiFolder.coverImage
                           ? `url(${activeAiFolder.coverImage}) center/cover no-repeat`
-                          : `linear-gradient(135deg, ${activeAiFolder.color || '#0056f6'}, ${activeAiFolder.color ? activeAiFolder.color + "cc" : "#0047cc"})`,
-                        borderColor: `${activeAiFolder.color}40`,
+                          : `linear-gradient(135deg, ${activeAiFolder.color || "#0056f6"}, ${activeAiFolder.color ? activeAiFolder.color + "cc" : "#0047cc"})`,
+                        borderColor: `${activeAiFolder.color || "#0056f6"}40`,
                         borderWidth: "1.5px"
                       }}
                     >
-                      {activeAiFolder.coverImage && (
-                        <div className="absolute inset-0 bg-black/10" />
-                      )}
-                      {/* Spine */}
-                      <div 
-                        className="absolute right-0 top-0 bottom-0 w-2 shadow-sm flex flex-col justify-around py-1 items-center z-10"
+                      <div
+                        className="absolute right-0 top-0 bottom-0 w-1.5 flex flex-col justify-around py-1 items-center z-10"
                         style={{ backgroundColor: activeAiFolder.color || "#0056f6", filter: "brightness(0.82)" }}
                       >
                         <div className="w-0.5 h-0.5 bg-black/25 rounded-full" />
@@ -4207,297 +4078,256 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                     </div>
                   </div>
 
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[9px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full font-bold border border-indigo-100">
-                        {isRefiningExistingFolder ? "تعديل مجلد المكتبة بالذكاء الاصطناعي 🪄" : "مجلد ذكي مؤقت 🤖"}
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-base font-black text-on-surface tracking-tight truncate">
+                        {activeAiFolder.name}
+                      </h3>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${
+                        isRefiningExistingFolder
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : "bg-[#e8f0fe] text-[#004ac6] border-[#c7daf6]"
+                      }`}>
+                        {isRefiningExistingFolder ? "تعديل من المكتبة" : "مجلد مؤقت"}
                       </span>
-                      <h3 className="text-base font-black text-slate-800 tracking-tight">{activeAiFolder.name}</h3>
                     </div>
                     {activeAiFolder.description && (
-                      <p className="text-[11px] text-slate-500 font-semibold leading-relaxed max-w-xl">{activeAiFolder.description}</p>
+                      <p className="text-xs text-on-surface-variant font-medium truncate max-w-xl">
+                        {activeAiFolder.description}
+                      </p>
                     )}
-                    <div className="flex gap-2 pt-0.5">
-                      <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-bold">
-                        من: {activeAiFolder.frontLang.toUpperCase()}
-                      </span>
-                      <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-bold">
-                        إلى: {activeAiFolder.backLang.toUpperCase()}
-                      </span>
-                      <span className="text-[9px] bg-blue-50 text-primary px-1.5 py-0.5 rounded-full font-bold">
-                        إجمالي: {folderCards.length} بطاقة
-                      </span>
-                    </div>
+                    <p className="text-xs text-on-surface-variant/85 font-semibold tabular-nums">
+                      {folderCards.length} بطاقة · {activeAiFolder.frontLang.toUpperCase()} ← {activeAiFolder.backLang.toUpperCase()}
+                    </p>
                   </div>
                 </div>
               </div>
 
-              {/* Main Action buttons for the AI Folder (Placed below header, compact sizing) */}
-              <div className="flex items-center gap-2 bg-slate-50 border border-slate-100 p-2 rounded-xl overflow-x-auto whitespace-nowrap scrollbar-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden z-10">
-                {reviewMode ? (
-                  <button
-                    onClick={() => setReviewMode(false)}
-                    className="shrink-0 px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-white font-black text-[11px] shadow-xs transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-1"
-                  >
-                    <FileText className="w-3.5 h-3.5 text-slate-200" />
-                    <span>الرجوع لعرض القائمة 📋</span>
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => {
-                      if (folderCards.length === 0) {
-                        alert("لا توجد بطاقات للمراجعة تفاعلياً!");
-                        return;
-                      }
-                      setReviewMode(true);
-                      setCurrentReviewIndex(0);
-                      setReviewFlipped(false);
-                    }}
-                    className="shrink-0 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-black text-[11px] shadow-xs transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-1"
-                  >
-                    <Layers className="w-3.5 h-3.5 text-violet-200" />
-                    <span>تصفح ومراجعة تفاعلية 🎴</span>
-                  </button>
-                )}
-
-                {isRefiningExistingFolder ? (
-                  <button
-                    onClick={() => {
-                      if (onSaveRefinedFolder && activeAiFolder) {
-                        const cardsToSave = folderCards
-                          .filter(c => selectedCardIds.includes(c.id))
-                          .map(c => {
-                            let candidates = c.autoImageCandidates;
-                            if (!candidates && c.id) {
-                              try {
-                                const raw = localStorage.getItem(`auto_images_${c.id}`);
-                                if (raw) candidates = JSON.parse(raw);
-                              } catch (e) {}
-                            }
-                            return {
-                              id: c.id,
-                              frontText: c.frontText,
-                              backText: c.backText,
-                              frontLang: activeAiFolder.frontLang,
-                              backLang: activeAiFolder.backLang,
-                              isArticleMode: c.isArticleMode || false,
-                              correctArticle: c.correctArticle || "",
-                              isPluralMode: c.isPluralMode || false,
-                              pluralText: c.pluralText || "",
-                              pluralLang: c.pluralLang || "de",
-                              translationHint: c.translationHint || "",
-                              difficulty: c.difficulty || "medium",
-                              frontImage: c.frontImage || undefined,
-                              frontImagePosition: c.frontImagePosition || undefined,
-                              autoImageCandidates: candidates,
-                              imageSearchQuery: c.imageSearchQuery || undefined
-                            };
-                          });
-                        onSaveRefinedFolder(activeAiFolder.id, {
-                          name: activeAiFolder.name,
-                          description: activeAiFolder.description,
-                          color: activeAiFolder.color,
-                          coverImage: activeAiFolder.coverImage,
-                          coverImagePosition: activeAiFolder.coverImagePosition
-                        }, cardsToSave);
-                      }
-                    }}
-                    className="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[11px] shadow-xs transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-1"
-                  >
-                    <Save className="w-3.5 h-3.5 text-white" />
-                    <span>حفظ التعديلات في المكتبة 💾</span>
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => setShowImportDialog(true)}
-                    className="shrink-0 px-3 py-1.5 rounded-lg bg-[#0056f6] hover:bg-[#0047cc] text-white font-black text-[11px] shadow-xs transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-1"
-                  >
-                    <Save className="w-3.5 h-3.5 text-white" />
-                    <span>تثبيت وحفظ بالمكتبة العامة 💾</span>
-                  </button>
-                )}
-
-                {!reviewMode && (
-                  <button
-                    onClick={() => setShowRefinePanel(!showRefinePanel)}
-                    className={`shrink-0 px-3 py-1.5 rounded-lg font-black text-[11px] shadow-xs transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-1 ${
-                      showRefinePanel 
-                        ? "bg-amber-600 hover:bg-amber-500 text-white" 
-                        : "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
-                    }`}
-                  >
-                    <Wand2 className="w-3.5 h-3.5 text-amber-500" />
-                    <span>تعديل جماعي ذكي بالذكاء الاصطناعي 🪄</span>
-                  </button>
-                )}
-
-                {!reviewMode && (
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() => setShowImageOptionsModal(true)}
-                      disabled={loading}
-                      className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-black text-[11px] shadow-xs transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-1.5 disabled:opacity-50"
-                      title="فتح خيارات وبدء جلب وتنزيل الصور للبطاقات"
-                    >
-                      <DownloadCloud className="w-3.5 h-3.5 text-blue-100" />
-                      <span>بدء عملية جلب وتنزيل الصور 🖼️</span>
-                    </button>
-
-                    <button
-                      onClick={() => setShowImageOptionsModal(true)}
-                      className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] transition-all cursor-pointer flex items-center justify-center border border-slate-200"
-                      title="تخصيص نمط وتوقيت تخزين الصور الأساسية والثانوية"
-                    >
-                      <Sliders className="w-3.5 h-3.5 text-slate-600" />
-                    </button>
-                  </div>
-                )}
-
-                {!reviewMode && (
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {/* Small themed provider toggle for Next Batch */}
-                    <div className="flex items-center gap-0.5 bg-emerald-50/80 p-0.5 rounded-lg border border-emerald-200 text-[10px] select-none h-[30px]">
+              {/* Organized Action Toolbar */}
+              <div className="bg-white border border-[#c7daf6] p-2.5 rounded-[22px] flex flex-wrap items-center justify-between gap-2 z-10 shadow-elevation-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Primary Actions */}
+                  <div className="flex items-center gap-1.5">
+                    {reviewMode ? (
                       <button
-                        type="button"
-                        onClick={() => {
-                          setNextBatchAiProvider("gemini");
-                          localStorage.setItem("settings_next_batch_ai_provider", "gemini");
-                        }}
-                        className={`px-2.5 py-0.5 rounded-md font-black transition-all h-full flex items-center cursor-pointer ${
-                          nextBatchAiProvider === "gemini"
-                            ? "bg-emerald-600 text-white shadow-3xs"
-                            : "text-emerald-700 hover:bg-emerald-100/50"
-                        }`}
-                        title="توليد الوجبة الإضافية باستخدام Gemini"
+                        onClick={() => setReviewMode(false)}
+                        className="h-9 px-3.5 rounded-xl bg-on-surface hover:bg-[#162b47] text-white font-bold text-xs transition-all cursor-pointer active:scale-[0.98] flex items-center gap-1.5"
                       >
-                        Gemini
+                        <FileText className="w-3.5 h-3.5" />
+                        <span>عرض القائمة</span>
                       </button>
+                    ) : (
                       <button
-                        type="button"
                         onClick={() => {
-                          setNextBatchAiProvider("groq");
-                          localStorage.setItem("settings_next_batch_ai_provider", "groq");
+                          if (folderCards.length === 0) {
+                            alert("لا توجد بطاقات للمراجعة!");
+                            return;
+                          }
+                          setReviewMode(true);
+                          setCurrentReviewIndex(0);
+                          setReviewFlipped(false);
                         }}
-                        className={`px-2.5 py-0.5 rounded-md font-black transition-all h-full flex items-center cursor-pointer ${
-                          nextBatchAiProvider === "groq"
-                            ? "bg-orange-600 text-white shadow-3xs"
-                            : "text-emerald-700 hover:bg-emerald-100/50"
-                        }`}
-                        title="توليد الوجبة الإضافية باستخدام Groq"
+                        className="h-9 px-3.5 rounded-xl bg-[#edf4ff] hover:bg-[#dce8fb] border border-[#c7daf6] text-[#004ac6] font-bold text-xs transition-all cursor-pointer active:scale-[0.98] flex items-center gap-1.5"
                       >
-                        Groq
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>مراجعة تفاعلية</span>
                       </button>
-                    </div>
+                    )}
 
-                    <button
-                      onClick={() => setShowNextBatchDirection(!showNextBatchDirection)}
-                      className={`px-3 py-1.5 rounded-lg font-black text-[11px] shadow-xs transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-1 ${
-                        showNextBatchDirection
-                          ? "bg-emerald-700 text-white"
-                          : "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
-                      }`}
-                      title="توليد وجبة إضافية بموضوع مخصص وموجه"
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-emerald-500 animate-pulse" />
-                      <span>توليد وجبة مخصصة 🔄</span>
-                    </button>
-                    
-                    {!showNextBatchDirection && (
+                    {isRefiningExistingFolder ? (
                       <button
-                        onClick={handleGenerateNextBatch}
-                        disabled={loading}
-                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[11px] shadow-xs transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-1 disabled:opacity-50"
-                        title="توليد سريع لوجبة إضافية تكميلية مباشرة"
+                        onClick={() => {
+                          if (onSaveRefinedFolder && activeAiFolder) {
+                            const cardsToSave = folderCards
+                              .filter(c => selectedCardIds.includes(c.id))
+                              .map(c => {
+                                let candidates = c.autoImageCandidates;
+                                if (!candidates && c.id) {
+                                  try {
+                                    const raw = localStorage.getItem(`auto_images_${c.id}`);
+                                    if (raw) candidates = JSON.parse(raw);
+                                  } catch (e) {}
+                                }
+                                return {
+                                  id: c.id,
+                                  frontText: c.frontText,
+                                  backText: c.backText,
+                                  frontLang: activeAiFolder.frontLang,
+                                  backLang: activeAiFolder.backLang,
+                                  isArticleMode: c.isArticleMode || false,
+                                  correctArticle: c.correctArticle || "",
+                                  isPluralMode: c.isPluralMode || false,
+                                  pluralText: c.pluralText || "",
+                                  pluralLang: c.pluralLang || "de",
+                                  translationHint: c.translationHint || "",
+                                  difficulty: c.difficulty || "medium",
+                                  frontImage: c.frontImage || undefined,
+                                  frontImagePosition: c.frontImagePosition || undefined,
+                                  autoImageCandidates: candidates,
+                                  imageSearchQuery: c.imageSearchQuery || undefined
+                                };
+                              });
+                            onSaveRefinedFolder(activeAiFolder.id, {
+                              name: activeAiFolder.name,
+                              description: activeAiFolder.description,
+                              color: activeAiFolder.color,
+                              coverImage: activeAiFolder.coverImage,
+                              coverImagePosition: activeAiFolder.coverImagePosition
+                            }, cardsToSave);
+                          }
+                        }}
+                        className="h-9 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all cursor-pointer active:scale-[0.98] flex items-center gap-1.5 shadow-2xs"
                       >
-                        <span>توليد سريع ⚡</span>
+                        <Save className="w-3.5 h-3.5" />
+                        <span>حفظ التعديلات</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setShowImportDialog(true)}
+                        className="h-9 px-3.5 rounded-xl bg-[#004ac6] hover:bg-[#003da6] text-white font-bold text-xs transition-all cursor-pointer active:scale-[0.98] flex items-center gap-1.5 shadow-2xs"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        <span>حفظ بالمكتبة</span>
                       </button>
                     )}
                   </div>
-                )}
 
-                <div className="mr-auto shrink-0" />
+                  {!reviewMode && (
+                    <>
+                      <div className="hidden sm:block h-5 w-px bg-[#dbe7fa]" />
+
+                      {/* Editing & Images */}
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => setShowRefinePanel(!showRefinePanel)}
+                          className={`h-9 px-3 rounded-xl font-bold text-xs transition-all cursor-pointer active:scale-[0.98] flex items-center gap-1.5 border ${
+                            showRefinePanel
+                              ? "bg-amber-600 border-amber-600 text-white"
+                              : "bg-[#f5f9ff] border-[#cdddf5] text-on-surface hover:bg-[#e8f0fe]"
+                          }`}
+                        >
+                          <Wand2 className="w-3.5 h-3.5" />
+                          <span>تعديل جماعي</span>
+                        </button>
+
+                        <button
+                          onClick={() => setShowImageOptionsModal(true)}
+                          disabled={loading}
+                          className="h-9 px-3 rounded-xl bg-[#f5f9ff] border border-[#cdddf5] hover:bg-[#e8f0fe] text-on-surface font-bold text-xs transition-all cursor-pointer active:scale-[0.98] flex items-center gap-1.5 disabled:opacity-50"
+                          title="خيارات جلب وتنزيل الصور"
+                        >
+                          <DownloadCloud className="w-3.5 h-3.5 text-[#004ac6]" />
+                          <span>الصور</span>
+                        </button>
+                      </div>
+
+                      <div className="hidden sm:block h-5 w-px bg-[#dbe7fa]" />
+
+                      {/* Next Batch Sub-Toolbar */}
+                      <div className="flex items-center gap-1.5 bg-[#f2f7ff] p-1 rounded-xl border border-[#cdddf5]">
+                        <div className="flex items-center bg-[#e1ebfc] p-0.5 rounded-lg text-[11px] h-7 border border-[#ccdbf6]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNextBatchAiProvider("gemini");
+                              localStorage.setItem("settings_next_batch_ai_provider", "gemini");
+                            }}
+                            className={`px-2 h-full rounded-md font-bold transition-all cursor-pointer ${
+                              nextBatchAiProvider === "gemini"
+                                ? "bg-white text-[#004ac6] shadow-2xs"
+                                : "text-on-surface-variant hover:text-on-surface"
+                            }`}
+                          >
+                            Gemini
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNextBatchAiProvider("groq");
+                              localStorage.setItem("settings_next_batch_ai_provider", "groq");
+                            }}
+                            className={`px-2 h-full rounded-md font-bold transition-all cursor-pointer ${
+                              nextBatchAiProvider === "groq"
+                                ? "bg-white text-orange-600 shadow-2xs"
+                                : "text-on-surface-variant hover:text-on-surface"
+                            }`}
+                          >
+                            Groq
+                          </button>
+                        </div>
+
+                        <button
+                          onClick={() => setShowNextBatchDirection(!showNextBatchDirection)}
+                          className={`h-7 px-2.5 rounded-lg font-bold text-xs transition-all cursor-pointer flex items-center gap-1 ${
+                            showNextBatchDirection
+                              ? "bg-emerald-600 text-white"
+                              : "text-on-surface hover:bg-white"
+                          }`}
+                          title="توليد وجبة بتوجيه مخصص"
+                        >
+                          <Sliders className="w-3 h-3" />
+                          <span>مخصص</span>
+                        </button>
+
+                        {!showNextBatchDirection && (
+                          <button
+                            onClick={handleGenerateNextBatch}
+                            disabled={loading}
+                            className="h-7 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all cursor-pointer active:scale-[0.98] flex items-center gap-1 disabled:opacity-50"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>وجبة إضافية</span>
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
 
                 <button
                   onClick={() => handleDeleteAiFolder(activeAiFolder.id)}
-                  className="shrink-0 p-1.5 rounded-lg border border-rose-200 text-rose-600 bg-rose-50/50 hover:bg-rose-50 text-[11px] font-black transition-all cursor-pointer flex items-center justify-center"
-                  title="حذف المجلد المؤقت"
+                  className="h-9 w-9 rounded-xl bg-[#f5f9ff] border border-[#cdddf5] text-on-surface-variant hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 transition-colors cursor-pointer flex items-center justify-center shrink-0"
+                  title="حذف المجلد"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  <Trash2 className="w-4 h-4" />
                 </button>
               </div>
 
               {/* Next Batch Custom Direction Input Panel */}
               {showNextBatchDirection && (
-                <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-2xl p-5 space-y-4 animate-fade-in text-right shadow-3xs">
+                <div className="bg-white border border-[#c7daf6] rounded-[24px] p-5 space-y-3.5 text-right shadow-elevation-3">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                    <span className="text-xs font-black text-on-surface flex items-center gap-2">
                       <Sparkles className="w-4 h-4 text-emerald-600" />
-                      <span className="text-xs font-black text-slate-800">توجيه موضوعي مخصص للوجبة القادمة</span>
-                    </div>
-                    <button 
+                      <span>توجيه الوجبة الإضافية</span>
+                    </span>
+                    <button
                       onClick={() => {
                         setShowNextBatchDirection(false);
                         setNextBatchDirection("");
                       }}
-                      className="text-slate-400 hover:text-slate-600 font-bold text-xs"
+                      className="text-on-surface-variant hover:text-on-surface font-bold text-xs cursor-pointer"
                     >
-                      إلغاء التخصيص
+                      إلغاء
                     </button>
                   </div>
-                  <p className="text-[10px] text-slate-500 font-semibold leading-relaxed">
-                    سيقوم الذكاء الاصطناعي بتوليد بطاقات جديدة تلتزم بنفس لغتك وتفضيلاتك (مثل الصور المخصصة، أو أدوات التعريف) ولكنها ستتجه لتركيز مخصص من المواضيع الذي تحدده هنا.
-                  </p>
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white/80 p-3 rounded-xl border border-emerald-100">
-                    <div className="flex items-center gap-2 text-right">
-                      <span className="text-[10px] font-bold text-slate-500">مزود الذكاء الاصطناعي للوجبة الإضافية:</span>
-                      <div className="flex items-center gap-0.5 bg-slate-150 p-0.5 rounded-lg border border-slate-200 text-[10px]">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setNextBatchAiProvider("gemini");
-                            localStorage.setItem("settings_next_batch_ai_provider", "gemini");
-                          }}
-                          className={`px-2 py-0.5 rounded-md font-bold transition-all h-[24px] flex items-center cursor-pointer ${
-                            nextBatchAiProvider === "gemini"
-                              ? "bg-emerald-600 text-white shadow-3xs"
-                              : "text-slate-400 hover:text-slate-600"
-                          }`}
-                        >
-                          Gemini
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setNextBatchAiProvider("groq");
-                            localStorage.setItem("settings_next_batch_ai_provider", "groq");
-                          }}
-                          className={`px-2 py-0.5 rounded-md font-bold transition-all h-[24px] flex items-center cursor-pointer ${
-                            nextBatchAiProvider === "groq"
-                              ? "bg-orange-600 text-white shadow-3xs"
-                              : "text-slate-400 hover:text-slate-600"
-                          }`}
-                        >
-                          Groq
-                        </button>
-                      </div>
-                    </div>
-                    <span className="text-[10px] text-slate-400 font-medium">النموذج النشط: {nextBatchAiProvider === "groq" ? "Llama 3.3 (70B)" : "Gemini 3.5 Flash"}</span>
-                  </div>
-                  <div className="flex gap-2.5">
+
+                  <div className="flex flex-col sm:flex-row gap-2.5">
                     <input
                       type="text"
                       value={nextBatchDirection}
                       onChange={(e) => setNextBatchDirection(e.target.value)}
-                      placeholder="مثال: ركز هذه الوجبة على مصطلحات المطعم والمأكولات، أو الأفعال الأكثر استخداماً..."
-                      className="flex-1 text-xs px-3.5 py-2.5 rounded-xl border border-emerald-200 outline-none focus:border-emerald-600 font-bold bg-white text-right shadow-3xs"
+                      placeholder="مثال: مصطلحات المطعم، الأفعال الأكثر استخداماً..."
+                      className="flex-1 h-10 text-xs px-3.5 rounded-xl border border-[#cdddf5] bg-[#f5f9ff] text-on-surface placeholder-[#627289] outline-none focus:border-[#004ac6] focus:bg-white font-semibold text-right"
                       dir="rtl"
                     />
                     <button
                       onClick={handleGenerateNextBatch}
                       disabled={loading}
-                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+                      className="h-10 px-5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-xs rounded-xl transition-all cursor-pointer active:scale-[0.98] flex items-center justify-center gap-1.5 shrink-0"
                     >
-                      <span>توليد الآن 🚀</span>
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>توليد</span>
                     </button>
                   </div>
                 </div>
@@ -4505,347 +4335,251 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
 
               {/* AI BATCH CARD REFINEMENT PANEL */}
               {showRefinePanel && (
-                <div className="bg-gradient-to-br from-amber-50/70 to-orange-50/40 border border-amber-200/80 rounded-2xl p-5 space-y-5 animate-fade-in text-right shadow-3xs">
-                  <div className="flex items-center justify-between border-b border-amber-150 pb-3">
-                    <div className="flex items-center gap-2 text-amber-800">
-                      <Wand2 className="w-5 h-5 text-amber-600 animate-pulse" />
-                      <h4 className="text-sm font-black">التعديل الجماعي الذكي للبطاقات بالذكاء الاصطناعي 🪄</h4>
-                    </div>
-                    <button 
+                <div className="bg-white border border-[#c7daf6] rounded-[24px] p-5 space-y-4 text-right shadow-elevation-3">
+                  <div className="flex items-center justify-between border-b border-[#e5eefb] pb-3">
+                    <h4 className="text-sm font-black text-on-surface flex items-center gap-2">
+                      <Wand2 className="w-4 h-4 text-amber-600" />
+                      <span>تعديل جماعي للبطاقات</span>
+                    </h4>
+                    <button
                       type="button"
                       onClick={() => setShowRefinePanel(false)}
-                      className="text-slate-400 hover:text-slate-600 p-1 bg-white rounded-full border border-slate-100 shadow-3xs cursor-pointer"
+                      className="w-8 h-8 flex items-center justify-center text-on-surface-variant hover:text-on-surface rounded-xl hover:bg-[#edf4ff] cursor-pointer"
                     >
                       <X className="w-4 h-4" />
                     </button>
                   </div>
 
-                  <p className="text-xs text-slate-600 leading-relaxed font-semibold">
-                    هذا القسم يتيح لك إعادة تعديل، صياغة، أو تحديث كافة البطاقات الموجودة في هذا المجلد بالكامل دفعة واحدة باستخدام الذكاء الاصطناعي! يمكنك اختيار جانب واحد أو أكثر لتغييره.
-                  </p>
-
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white/75 border border-amber-200/60 p-3 rounded-xl">
-                    <div className="flex items-center gap-2 text-right">
-                      <span className="text-xs font-black text-slate-700">اختر محرك الذكاء الاصطناعي للتعديل الجماعي:</span>
-                      <div className="flex bg-slate-150 p-0.5 rounded-lg border border-slate-200 text-[10px] h-[28px]">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setRefineAiProvider("gemini");
-                            localStorage.setItem("settings_refine_ai_provider", "gemini");
-                          }}
-                          className={`px-3 py-0.5 rounded-md font-black transition-all h-full flex items-center cursor-pointer ${
-                            refineAiProvider === "gemini"
-                              ? "bg-amber-600 text-white shadow-3xs"
-                              : "text-slate-500 hover:text-slate-800"
-                          }`}
-                        >
-                          Gemini
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setRefineAiProvider("groq");
-                            localStorage.setItem("settings_refine_ai_provider", "groq");
-                          }}
-                          className={`px-3 py-0.5 rounded-md font-black transition-all h-full flex items-center cursor-pointer ${
-                            refineAiProvider === "groq"
-                              ? "bg-orange-600 text-white shadow-3xs"
-                              : "text-slate-500 hover:text-slate-800"
-                          }`}
-                        >
-                          Groq (Llama)
-                        </button>
-                      </div>
+                  <div className="flex items-center justify-between gap-3 bg-[#f4f8ff] border border-[#dbe7fa] px-3.5 py-2.5 rounded-xl">
+                    <span className="text-xs font-bold text-on-surface">المزود:</span>
+                    <div className="flex bg-[#e3edfc] p-0.5 rounded-lg text-xs h-8 border border-[#d0dff7]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRefineAiProvider("gemini");
+                          localStorage.setItem("settings_refine_ai_provider", "gemini");
+                        }}
+                        className={`px-3 rounded-md font-bold transition-all h-full flex items-center cursor-pointer ${
+                          refineAiProvider === "gemini"
+                            ? "bg-white text-[#004ac6] shadow-2xs"
+                            : "text-on-surface-variant hover:text-on-surface"
+                        }`}
+                      >
+                        Gemini
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRefineAiProvider("groq");
+                          localStorage.setItem("settings_refine_ai_provider", "groq");
+                        }}
+                        className={`px-3 rounded-md font-bold transition-all h-full flex items-center cursor-pointer ${
+                          refineAiProvider === "groq"
+                            ? "bg-white text-orange-600 shadow-2xs"
+                            : "text-on-surface-variant hover:text-on-surface"
+                        }`}
+                      >
+                        Groq
+                      </button>
                     </div>
-                    <span className="text-[10px] text-slate-500 font-semibold">
-                      المحرك النشط حالياً: <strong className={refineAiProvider === "groq" ? "text-orange-600" : "text-[#0056f6]"}>{refineAiProvider === "groq" ? "Groq (Llama-3.3-70b)" : "Google Gemini"}</strong>
-                    </span>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                     {/* 1. Description/Hint Modification */}
-                    <div className={`p-4 rounded-xl border transition-all ${refineModifyDescription ? 'bg-white border-amber-300 shadow-3xs' : 'bg-slate-50/50 border-slate-200'}`}>
+                    <div className={`p-3.5 rounded-2xl border transition-colors ${refineModifyDescription ? "bg-amber-50/60 border-amber-300" : "bg-[#f4f8ff] border-[#dbe7fa]"}`}>
                       <label className="flex items-center gap-2.5 cursor-pointer select-none">
                         <input
                           type="checkbox"
                           checked={refineModifyDescription}
                           onChange={(e) => setRefineModifyDescription(e.target.checked)}
-                          className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
+                          className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-[#a9bedb] cursor-pointer"
                         />
-                        <span className="font-extrabold text-xs text-slate-800">تعديل الوصف والتلميحات (translationHint) 📝</span>
+                        <span className="font-bold text-xs text-on-surface">تعديل التلميح والوصف</span>
                       </label>
-                      
+
                       {refineModifyDescription && (
-                        <div className="mt-3.5 space-y-3 animate-fade-in">
-                          <div>
-                            <span className="text-[10px] font-black text-slate-500 block mb-1">ما هي مشكلة الوصف أو التلميحات السابقة؟ (اختياري):</span>
-                            <input
-                              type="text"
-                              value={refineDescriptionIssue}
-                              onChange={(e) => setRefineDescriptionIssue(e.target.value)}
-                              placeholder="مثال: طويلة للغاية، أو معقدة وصعبة الفهم..."
-                              className="w-full px-3 py-2 bg-slate-50 border border-slate-250 rounded-xl text-xs font-bold outline-none focus:bg-white focus:border-amber-400"
-                            />
-                          </div>
-                          <div>
-                            <span className="text-[10px] font-black text-amber-700 block mb-1">التوجيهات وشكل الوصف الجديد (إجباري) * :</span>
-                            <textarea
-                              value={refineDescriptionInstruction}
-                              onChange={(e) => setRefineDescriptionInstruction(e.target.value)}
-                              placeholder="مثال: اجعله قصيراً جداً (كلمتين إلى ثلاث فقط) وبلهجة مبسطة وممتعة."
-                              className="w-full min-h-[60px] px-3 py-2 bg-slate-50 border border-slate-250 rounded-xl text-xs font-bold outline-none resize-none focus:bg-white focus:border-amber-400"
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 2. Image Style Modification */}
-                    <div className={`p-4 rounded-xl border transition-all ${refineModifyImages ? 'bg-white border-amber-300 shadow-3xs' : 'bg-slate-50/50 border-slate-200'}`}>
-                      <label className="flex items-center gap-2.5 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={refineModifyImages}
-                          onChange={(e) => setRefineModifyImages(e.target.checked)}
-                          className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
-                        />
-                        <span className="font-extrabold text-xs text-slate-800">تغيير نمط الصور والوسائط 🖼️</span>
-                      </label>
-                      
-                      {refineModifyImages && (
-                        <div className="mt-3.5 space-y-3 animate-fade-in">
-                          <div>
-                            <span className="text-[10px] font-black text-amber-700 block mb-1">التوجيهات والنمط البصري الجديد للصور (إجباري) * :</span>
-                            <textarea
-                              value={refineImageInstruction}
-                              onChange={(e) => setRefineImageInstruction(e.target.value)}
-                              placeholder="مثال: كرتون ثلاثي الأبعاد، رسومات مسطحة مبسطة، أو clipart باللون الأبيض والأسود..."
-                              className="w-full min-h-[105px] px-3 py-2 bg-slate-50 border border-slate-250 rounded-xl text-xs font-bold outline-none resize-none focus:bg-white focus:border-amber-400"
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 3. Front Text Modification */}
-                    <div className={`p-4 rounded-xl border transition-all ${refineModifyFrontText ? 'bg-white border-amber-300 shadow-3xs' : 'bg-slate-50/50 border-slate-200'}`}>
-                      <label className="flex items-center gap-2.5 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={refineModifyFrontText}
-                          onChange={(e) => setRefineModifyFrontText(e.target.checked)}
-                          className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
-                        />
-                        <span className="font-extrabold text-xs text-slate-800">تعديل النص الأمامي للبطاقات (frontText) 🅰️</span>
-                      </label>
-                      
-                      {refineModifyFrontText && (
-                        <div className="mt-3.5 space-y-3 animate-fade-in">
-                          <div>
-                            <span className="text-[10px] font-black text-amber-700 block mb-1">توجيهات تعديل الكلمة أو العبارة الأمامية (إجباري) * :</span>
-                            <textarea
-                              value={refineFrontTextInstruction}
-                              onChange={(e) => setRefineFrontTextInstruction(e.target.value)}
-                              placeholder="مثال: اجعل الكلمات دائماً بصيغة الجمع، أو أضف الأداة والترجمة الصوتية مدمجة..."
-                              className="w-full min-h-[80px] px-3 py-2 bg-slate-50 border border-slate-250 rounded-xl text-xs font-bold outline-none resize-none focus:bg-white focus:border-amber-400"
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 4. Back Text/Translation Modification */}
-                    <div className={`p-4 rounded-xl border transition-all ${refineModifyBackText ? 'bg-white border-amber-300 shadow-3xs' : 'bg-slate-50/50 border-slate-200'}`}>
-                      <label className="flex items-center gap-2.5 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={refineModifyBackText}
-                          onChange={(e) => setRefineModifyBackText(e.target.checked)}
-                          className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
-                        />
-                        <span className="font-extrabold text-xs text-slate-800">تعديل النص الخلفي والترجمات العربية (backText) 🌐</span>
-                      </label>
-                      
-                      {refineModifyBackText && (
-                        <div className="mt-3.5 space-y-3 animate-fade-in">
-                          <div>
-                            <span className="text-[10px] font-black text-amber-700 block mb-1">توجيهات صياغة الترجمة والوجه الخلفي (إجباري) * :</span>
-                            <textarea
-                              value={refineBackTextInstruction}
-                              onChange={(e) => setRefineBackTextInstruction(e.target.value)}
-                              placeholder="مثال: أضف جملة توضيحية كاملة ومثيرة للاهتمام بالعربية، أو اجعل الترجمة باللغة العربية الفصحى المبسطة..."
-                              className="w-full min-h-[80px] px-3 py-2 bg-slate-50 border border-slate-250 rounded-xl text-xs font-bold outline-none resize-none focus:bg-white focus:border-amber-400"
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 5. German Articles Recommendation */}
-                    <div className={`p-4 rounded-xl border transition-all ${refineGermanArticlesMode !== "keep" ? 'bg-white border-amber-300 shadow-3xs' : 'bg-slate-50/50 border-slate-200'}`}>
-                      <div className="flex items-center gap-2 mb-3">
-                        <div className="p-1 bg-purple-50 text-purple-600 rounded-lg">
-                          <Globe className="w-3.5 h-3.5" />
-                        </div>
-                        <span className="font-extrabold text-xs text-slate-800">توصية أدوات التعريف الألمانية (Article Mode) 🇩🇪</span>
-                      </div>
-                      
-                      <div className="flex bg-slate-200/50 rounded-xl p-0.5 border border-slate-200/60 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => setRefineGermanArticlesMode("keep")}
-                          className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
-                            refineGermanArticlesMode === "keep"
-                              ? "bg-white text-amber-600 shadow-3xs font-black"
-                              : "text-slate-500 hover:text-slate-800"
-                          }`}
-                        >
-                          عدم التغيير
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setRefineGermanArticlesMode("on")}
-                          className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
-                            refineGermanArticlesMode === "on"
-                              ? "bg-white text-purple-600 shadow-3xs font-black"
-                              : "text-slate-500 hover:text-slate-800"
-                          }`}
-                        >
-                          تفعيل ON
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setRefineGermanArticlesMode("off")}
-                          className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
-                            refineGermanArticlesMode === "off"
-                              ? "bg-white text-rose-600 shadow-3xs font-black"
-                              : "text-slate-500 hover:text-slate-800"
-                          }`}
-                        >
-                          تعطيل OFF
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setRefineGermanArticlesMode("auto")}
-                          className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
-                            refineGermanArticlesMode === "auto"
-                              ? "bg-white text-slate-800 shadow-3xs font-black"
-                              : "text-slate-500 hover:text-slate-800"
-                          }`}
-                        >
-                          تلقائي AUTO
-                        </button>
-                      </div>
-
-                      <div className="pt-2 mt-2 border-t border-slate-200/40 text-center">
-                        <span className="text-[9px] font-semibold text-slate-400">توجيه الذكاء الاصطناعي لتفعيل أو تعطيل أو تحديد الأداة (der/die/das)</span>
-                      </div>
-                    </div>
-
-                    {/* 6. German Plural Recommendation */}
-                    <div className={`p-4 rounded-xl border transition-all ${refineGermanPluralMode !== "keep" ? 'bg-white border-amber-300 shadow-3xs' : 'bg-slate-50/50 border-slate-200'}`}>
-                      <div className="flex items-center gap-2 mb-3">
-                        <div className="p-1 bg-fuchsia-50 text-fuchsia-600 rounded-lg">
-                          <Plus className="w-3.5 h-3.5" />
-                        </div>
-                        <span className="font-extrabold text-xs text-slate-800">توصية صيغة الجمع الألمانية (Plural Mode) 🇩🇪</span>
-                      </div>
-                      
-                      <div className="flex bg-slate-200/50 rounded-xl p-0.5 border border-slate-200/60 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => setRefineGermanPluralMode("keep")}
-                          className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
-                            refineGermanPluralMode === "keep"
-                              ? "bg-white text-amber-600 shadow-3xs font-black"
-                              : "text-slate-500 hover:text-slate-800"
-                          }`}
-                        >
-                          عدم التغيير
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setRefineGermanPluralMode("on")}
-                          className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
-                            refineGermanPluralMode === "on"
-                              ? "bg-white text-fuchsia-600 shadow-3xs font-black"
-                              : "text-slate-500 hover:text-slate-800"
-                          }`}
-                        >
-                          تفعيل ON
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setRefineGermanPluralMode("off")}
-                          className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
-                            refineGermanPluralMode === "off"
-                              ? "bg-white text-rose-600 shadow-3xs font-black"
-                              : "text-slate-500 hover:text-slate-800"
-                          }`}
-                        >
-                          تعطيل OFF
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setRefineGermanPluralMode("auto")}
-                          className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
-                            refineGermanPluralMode === "auto"
-                              ? "bg-white text-slate-800 shadow-3xs font-black"
-                              : "text-slate-500 hover:text-slate-800"
-                          }`}
-                        >
-                          تلقائي AUTO
-                        </button>
-                      </div>
-
-                      <div className="pt-2 mt-2 border-t border-slate-200/40 text-center">
-                        <span className="text-[9px] font-semibold text-slate-400">توجيه الذكاء الاصطناعي لتفعيل أو تعطيل أو تحديد صيغة الجمع (Tische)</span>
-                      </div>
-
-                      {refineGermanPluralMode !== "keep" && (
-                        <div className="mt-3.5 space-y-2 animate-fade-in">
-                          <span className="text-[10px] font-black text-fuchsia-700 block mb-1">تعليمات أو شروط صيغة الجمع المخصصة (اختياري):</span>
+                        <div className="mt-3 space-y-2.5">
+                          <input
+                            type="text"
+                            value={refineDescriptionIssue}
+                            onChange={(e) => setRefineDescriptionIssue(e.target.value)}
+                            placeholder="المشكلة السابقة (اختياري)..."
+                            className="w-full h-9 px-3 bg-white border border-[#cdddf5] rounded-xl text-xs font-medium text-on-surface placeholder-[#627289] outline-none focus:border-amber-500"
+                          />
                           <textarea
-                            value={refineGermanPluralInstruction}
-                            onChange={(e) => setRefineGermanPluralInstruction(e.target.value)}
-                            placeholder="مثال: أضف أداة الجمع مع الكلمة، أو ضع صيغة الجمع في جملة كاملة ومفيدة..."
-                            className="w-full min-h-[65px] px-3 py-2 bg-slate-50 border border-slate-250 rounded-xl text-xs font-bold outline-none resize-none focus:bg-white focus:border-fuchsia-400"
+                            value={refineDescriptionInstruction}
+                            onChange={(e) => setRefineDescriptionInstruction(e.target.value)}
+                            placeholder="التوجيه الجديد (إجباري)..."
+                            className="w-full min-h-[60px] px-3 py-2 bg-white border border-[#cdddf5] rounded-xl text-xs font-medium text-on-surface placeholder-[#627289] outline-none resize-none focus:border-amber-500"
                           />
                         </div>
                       )}
                     </div>
 
+                    {/* 2. Image Style Modification */}
+                    <div className={`p-3.5 rounded-2xl border transition-colors ${refineModifyImages ? "bg-amber-50/60 border-amber-300" : "bg-[#f4f8ff] border-[#dbe7fa]"}`}>
+                      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={refineModifyImages}
+                          onChange={(e) => setRefineModifyImages(e.target.checked)}
+                          className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-[#a9bedb] cursor-pointer"
+                        />
+                        <span className="font-bold text-xs text-on-surface">تغيير نمط الصور</span>
+                      </label>
+
+                      {refineModifyImages && (
+                        <div className="mt-3">
+                          <textarea
+                            value={refineImageInstruction}
+                            onChange={(e) => setRefineImageInstruction(e.target.value)}
+                            placeholder="مثال: رسومات مسطحة، صور واقعية، كرتون 3D..."
+                            className="w-full min-h-[92px] px-3 py-2 bg-white border border-[#cdddf5] rounded-xl text-xs font-medium text-on-surface placeholder-[#627289] outline-none resize-none focus:border-amber-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 3. Front Text Modification */}
+                    <div className={`p-3.5 rounded-2xl border transition-colors ${refineModifyFrontText ? "bg-amber-50/60 border-amber-300" : "bg-[#f4f8ff] border-[#dbe7fa]"}`}>
+                      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={refineModifyFrontText}
+                          onChange={(e) => setRefineModifyFrontText(e.target.checked)}
+                          className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-[#a9bedb] cursor-pointer"
+                        />
+                        <span className="font-bold text-xs text-on-surface">تعديل النص الأمامي</span>
+                      </label>
+
+                      {refineModifyFrontText && (
+                        <div className="mt-3">
+                          <textarea
+                            value={refineFrontTextInstruction}
+                            onChange={(e) => setRefineFrontTextInstruction(e.target.value)}
+                            placeholder="توجيهات تعديل الوجه الأمامي..."
+                            className="w-full min-h-[72px] px-3 py-2 bg-white border border-[#cdddf5] rounded-xl text-xs font-medium text-on-surface placeholder-[#627289] outline-none resize-none focus:border-amber-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 4. Back Text/Translation Modification */}
+                    <div className={`p-3.5 rounded-2xl border transition-colors ${refineModifyBackText ? "bg-amber-50/60 border-amber-300" : "bg-[#f4f8ff] border-[#dbe7fa]"}`}>
+                      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={refineModifyBackText}
+                          onChange={(e) => setRefineModifyBackText(e.target.checked)}
+                          className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-[#a9bedb] cursor-pointer"
+                        />
+                        <span className="font-bold text-xs text-on-surface">تعديل الترجمة (الظهر)</span>
+                      </label>
+
+                      {refineModifyBackText && (
+                        <div className="mt-3">
+                          <textarea
+                            value={refineBackTextInstruction}
+                            onChange={(e) => setRefineBackTextInstruction(e.target.value)}
+                            placeholder="توجيهات صياغة الترجمة..."
+                            className="w-full min-h-[72px] px-3 py-2 bg-white border border-[#cdddf5] rounded-xl text-xs font-medium text-on-surface placeholder-[#627289] outline-none resize-none focus:border-amber-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 5. German Articles Recommendation */}
+                    <div className={`p-3.5 rounded-2xl border transition-colors ${refineGermanArticlesMode !== "keep" ? "bg-amber-50/60 border-amber-300" : "bg-[#f4f8ff] border-[#dbe7fa]"}`}>
+                      <span className="font-bold text-xs text-on-surface block mb-2.5">أدوات التعريف الألمانية</span>
+                      <div className="flex bg-[#e3edfc] rounded-xl p-0.5 text-[11px] border border-[#d0dff7]">
+                        {[
+                          { val: "keep", label: "إبقاء" },
+                          { val: "on", label: "تشغيل" },
+                          { val: "off", label: "إيقاف" },
+                          { val: "auto", label: "تلقائي" },
+                        ].map((opt) => (
+                          <button
+                            key={opt.val}
+                            type="button"
+                            onClick={() => setRefineGermanArticlesMode(opt.val as any)}
+                            className={`flex-1 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                              refineGermanArticlesMode === opt.val
+                                ? "bg-white text-[#004ac6] shadow-2xs"
+                                : "text-on-surface-variant hover:text-on-surface"
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 6. German Plural Recommendation */}
+                    <div className={`p-3.5 rounded-2xl border transition-colors ${refineGermanPluralMode !== "keep" ? "bg-amber-50/60 border-amber-300" : "bg-[#f4f8ff] border-[#dbe7fa]"}`}>
+                      <span className="font-bold text-xs text-on-surface block mb-2.5">صيغة الجمع الألمانية</span>
+                      <div className="flex bg-[#e3edfc] rounded-xl p-0.5 text-[11px] border border-[#d0dff7]">
+                        {[
+                          { val: "keep", label: "إبقاء" },
+                          { val: "on", label: "تشغيل" },
+                          { val: "off", label: "إيقاف" },
+                          { val: "auto", label: "تلقائي" },
+                        ].map((opt) => (
+                          <button
+                            key={opt.val}
+                            type="button"
+                            onClick={() => setRefineGermanPluralMode(opt.val as any)}
+                            className={`flex-1 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                              refineGermanPluralMode === opt.val
+                                ? "bg-white text-[#004ac6] shadow-2xs"
+                                : "text-on-surface-variant hover:text-on-surface"
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {refineGermanPluralMode !== "keep" && (
+                        <textarea
+                          value={refineGermanPluralInstruction}
+                          onChange={(e) => setRefineGermanPluralInstruction(e.target.value)}
+                          placeholder="تعليمات صيغة الجمع (اختياري)..."
+                          className="w-full min-h-[60px] mt-2.5 px-3 py-2 bg-white border border-[#cdddf5] rounded-xl text-xs font-medium text-on-surface placeholder-[#627289] outline-none resize-none focus:border-amber-500"
+                        />
+                      )}
+                    </div>
                   </div>
 
-                  <div className="flex justify-end gap-3 pt-2 border-t border-amber-150">
+                  <div className="flex justify-end gap-2.5 pt-3 border-t border-[#e5eefb]">
                     <button
                       type="button"
                       onClick={() => setShowRefinePanel(false)}
-                      className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 text-xs font-extrabold transition-all cursor-pointer"
+                      className="h-9 px-4 rounded-xl border border-[#cdddf5] text-on-surface bg-[#f4f8ff] hover:bg-[#e6effe] text-xs font-bold transition-colors cursor-pointer"
                     >
-                      إلغاء ❌
+                      إلغاء
                     </button>
                     <button
                       type="button"
                       onClick={handleRefineCards}
                       disabled={loading}
-                      className="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-black transition-all cursor-pointer shadow-xs active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
+                      className="h-9 px-5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-black transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 flex items-center gap-1.5"
                     >
                       <Sparkles className="w-3.5 h-3.5" />
-                      <span>تحديث وتعديل جميع البطاقات بالذكاء الاصطناعي ⚡</span>
+                      <span>تطبيق التعديل</span>
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* Saved Prompt Info Box representing the source prompt with Reuse capability */}
-              <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-3xs space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-slate-700">
-                    <FileText className="w-4 h-4 text-[#0056f6]" />
-                    <h5 className="text-xs font-black text-slate-800">برومبت التوليد والتعليمات المستخدمة لهذا المجلد:</h5>
+              {/* Compact Saved Prompt Bar */}
+              <div className="bg-white/95 border border-[#c7daf6] rounded-2xl p-3.5 space-y-2.5 shadow-elevation-1">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileText className="w-3.5 h-3.5 text-[#004ac6] shrink-0" />
+                    <span className="text-xs font-bold text-on-surface-variant shrink-0">البرومبت:</span>
+                    <p className="text-xs font-bold text-on-surface truncate">
+                      {activeAiFolder.prompt}
+                    </p>
                   </div>
                   <button
                     onClick={() => {
@@ -4866,134 +4600,136 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                       } else {
                         setShowAdvancedOptions(false);
                       }
-                      setActiveAiFolderId(""); // Go back to home where the prompt input is
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                      setActiveAiFolderId("");
+                      window.scrollTo({ top: 0, behavior: "smooth" });
                     }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0056f6]/10 hover:bg-[#0056f6]/20 text-[#0056f6] rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 text-right self-start sm:self-auto"
+                    className="shrink-0 h-8 px-3 bg-[#e8f0fe] hover:bg-[#d7e6fd] text-[#004ac6] rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
                   >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>تعديل وإعادة استخدام البرومبت</span>
+                    <RefreshCw className="w-3 h-3" />
+                    <span>إعادة استخدام</span>
                   </button>
                 </div>
 
-                <div className="bg-slate-50/70 rounded-xl p-3 border border-slate-100 text-xs font-bold text-slate-600 leading-relaxed">
-                  {activeAiFolder.prompt}
-                </div>
-
                 {(activeAiFolder.frontInstructions || activeAiFolder.backInstructions || activeAiFolder.descInstructions || activeAiFolder.imageInstructions || activeAiFolder.germanPluralInstruction) && (
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-3 pt-1">
-                    {activeAiFolder.frontInstructions && (
-                      <div className="bg-slate-50/40 border border-slate-100 p-2.5 rounded-xl text-right">
-                        <span className="text-[9px] font-bold text-slate-400 block mb-1">تعليمات الوجه الأمامي:</span>
-                        <p className="text-[10px] text-slate-600 font-semibold">{activeAiFolder.frontInstructions}</p>
-                      </div>
-                    )}
-                    {activeAiFolder.backInstructions && (
-                      <div className="bg-slate-50/40 border border-slate-100 p-2.5 rounded-xl text-right">
-                        <span className="text-[9px] font-bold text-slate-400 block mb-1">تعليمات الوجه الخلفي:</span>
-                        <p className="text-[10px] text-slate-600 font-semibold">{activeAiFolder.backInstructions}</p>
-                      </div>
-                    )}
-                    {activeAiFolder.descInstructions && (
-                      <div className="bg-slate-50/40 border border-slate-100 p-2.5 rounded-xl text-right">
-                        <span className="text-[9px] font-bold text-slate-400 block mb-1">تعليمات الوصف والتبسيط:</span>
-                        <p className="text-[10px] text-slate-600 font-semibold">{activeAiFolder.descInstructions}</p>
-                      </div>
-                    )}
-                    {activeAiFolder.imageInstructions && (
-                      <div className="bg-slate-50/40 border border-slate-100 p-2.5 rounded-xl text-right">
-                        <span className="text-[9px] font-bold text-slate-400 block mb-1">شروط ووصف بحث الصور:</span>
-                        <p className="text-[10px] text-slate-600 font-semibold">{activeAiFolder.imageInstructions}</p>
-                      </div>
-                    )}
-                    {activeAiFolder.germanPluralInstruction && (
-                      <div className="bg-slate-50/40 border border-slate-100 p-2.5 rounded-xl text-right">
-                        <span className="text-[9px] font-bold text-[#d946ef] block mb-1">تعليمات صيغة الجمع الألمانية:</span>
-                        <p className="text-[10px] text-slate-600 font-semibold">{activeAiFolder.germanPluralInstruction}</p>
-                      </div>
-                    )}
-                  </div>
+                  <details className="group pt-2 border-t border-[#e5eefb]">
+                    <summary className="text-[11px] font-bold text-on-surface-variant hover:text-on-surface cursor-pointer flex items-center justify-between select-none">
+                      <span>عرض التعليمات المرفقة</span>
+                      <ChevronDown className="w-3.5 h-3.5 group-open:rotate-180 transition-transform" />
+                    </summary>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-2.5">
+                      {activeAiFolder.frontInstructions && (
+                        <div className="bg-[#f4f8ff] border border-[#dbe7fa] p-2.5 rounded-xl text-right">
+                          <span className="text-[10px] font-bold text-on-surface-variant block mb-0.5">الوجه الأمامي</span>
+                          <p className="text-[11px] text-on-surface font-medium">{activeAiFolder.frontInstructions}</p>
+                        </div>
+                      )}
+                      {activeAiFolder.backInstructions && (
+                        <div className="bg-[#f4f8ff] border border-[#dbe7fa] p-2.5 rounded-xl text-right">
+                          <span className="text-[10px] font-bold text-on-surface-variant block mb-0.5">الوجه الخلفي</span>
+                          <p className="text-[11px] text-on-surface font-medium">{activeAiFolder.backInstructions}</p>
+                        </div>
+                      )}
+                      {activeAiFolder.descInstructions && (
+                        <div className="bg-[#f4f8ff] border border-[#dbe7fa] p-2.5 rounded-xl text-right">
+                          <span className="text-[10px] font-bold text-on-surface-variant block mb-0.5">التلميح والوصف</span>
+                          <p className="text-[11px] text-on-surface font-medium">{activeAiFolder.descInstructions}</p>
+                        </div>
+                      )}
+                      {activeAiFolder.imageInstructions && (
+                        <div className="bg-[#f4f8ff] border border-[#dbe7fa] p-2.5 rounded-xl text-right">
+                          <span className="text-[10px] font-bold text-on-surface-variant block mb-0.5">بحث الصور</span>
+                          <p className="text-[11px] text-on-surface font-medium">{activeAiFolder.imageInstructions}</p>
+                        </div>
+                      )}
+                      {activeAiFolder.germanPluralInstruction && (
+                        <div className="bg-[#f4f8ff] border border-[#dbe7fa] p-2.5 rounded-xl text-right">
+                          <span className="text-[10px] font-bold text-fuchsia-700 block mb-0.5">صيغة الجمع</span>
+                          <p className="text-[11px] text-on-surface font-medium">{activeAiFolder.germanPluralInstruction}</p>
+                        </div>
+                      )}
+                    </div>
+                  </details>
                 )}
               </div>
 
-              {/* Import Configuration Panel (Collapsible Overlay Block) */}
+              {/* Import Configuration Panel */}
               {showImportDialog && (
-                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-5 space-y-4 animate-fade-in text-right">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-black text-[#0056f6] flex items-center gap-2">
-                      <Save className="w-4 h-4" />
-                      <span>إعدادات النقل والحفظ النهائي بالمكتبة</span>
+                <div className="bg-white border border-[#8cb4f5] rounded-[24px] p-5 space-y-4 text-right shadow-elevation-3">
+                  <div className="flex items-center justify-between border-b border-[#e5eefb] pb-3">
+                    <h4 className="text-sm font-black text-on-surface flex items-center gap-2">
+                      <Save className="w-4 h-4 text-[#004ac6]" />
+                      <span>الحفظ في المكتبة</span>
                     </h4>
-                    <button 
+                    <button
                       onClick={() => setShowImportDialog(false)}
-                      className="text-slate-400 hover:text-slate-600 p-1 bg-white/60 rounded-full"
+                      className="w-8 h-8 flex items-center justify-center text-on-surface-variant hover:text-on-surface rounded-xl hover:bg-[#edf4ff] cursor-pointer"
                     >
                       <X className="w-4 h-4" />
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <span className="text-[10px] font-extrabold uppercase text-slate-500">طريقة النقل والحفظ:</span>
-                      <div className="flex gap-2 bg-white/50 p-1 rounded-xl">
+                      <span className="text-xs font-bold text-on-surface-variant block">الوجهة</span>
+                      <div className="flex gap-1 bg-[#e3edfc] p-1 rounded-xl border border-[#d0dff7]">
                         <button
                           onClick={() => setImportTargetMode("new")}
-                          className={`flex-1 py-2 px-3 rounded-lg text-xs font-black transition-all ${
+                          className={`flex-1 h-9 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                             importTargetMode === "new"
-                              ? "bg-white border shadow-3xs text-[#0056f6]"
-                              : "text-slate-600 hover:text-slate-800"
+                              ? "bg-white text-[#004ac6] shadow-2xs"
+                              : "text-on-surface-variant hover:text-on-surface"
                           }`}
                         >
-                          إنشاء مجلد جديد بالمكتبة
+                          مجلد جديد
                         </button>
                         <button
                           onClick={() => setImportTargetMode("existing")}
-                          className={`flex-1 py-2 px-3 rounded-lg text-xs font-black transition-all ${
+                          className={`flex-1 h-9 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                             importTargetMode === "existing"
-                              ? "bg-white border shadow-3xs text-[#0056f6]"
-                              : "text-slate-600 hover:text-slate-800"
+                              ? "bg-white text-[#004ac6] shadow-2xs"
+                              : "text-on-surface-variant hover:text-on-surface"
                           }`}
                         >
-                          إضافة لمجلد موجود
+                          مجلد موجود
                         </button>
                       </div>
                     </div>
 
-                    <div className="flex items-end">
+                    <div className="space-y-2.5">
                       {importTargetMode === "new" ? (
-                        <div className="w-full space-y-2">
+                        <>
                           <div className="space-y-1">
-                            <span className="text-[10px] font-extrabold text-slate-500 block">اسم المجلد الجديد في المكتبة:</span>
+                            <span className="text-xs font-bold text-on-surface-variant block">اسم المجلد</span>
                             <input
                               type="text"
                               value={customImportName}
                               onChange={(e) => setCustomImportName(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-[#0056f6]"
-                              placeholder="أدخل اسماً للمجلد..."
+                              className="w-full h-9 px-3 bg-[#f5f9ff] border border-[#cdddf5] rounded-xl text-xs font-bold text-on-surface placeholder-[#627289] outline-none focus:border-[#004ac6] focus:bg-white"
+                              placeholder="اسم المجلد..."
                             />
                           </div>
-                          
+
                           <div className="space-y-1">
-                            <span className="text-[10px] font-extrabold text-slate-500 block">المجلد الرئيسي (اختياري):</span>
+                            <span className="text-xs font-bold text-on-surface-variant block">المجلد الأب (اختياري)</span>
                             <select
                               value={parentFolderIdForNew}
                               onChange={(e) => setParentFolderIdForNew(e.target.value)}
-                              className="w-full py-2 px-2 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:outline-none"
+                              className="w-full h-9 px-3 bg-[#f5f9ff] border border-[#cdddf5] rounded-xl text-xs font-bold text-on-surface focus:outline-none focus:border-[#004ac6] focus:bg-white"
                             >
-                              <option value="">مجلد رئيسي في الجذور</option>
+                              <option value="">الجذر الرئيسي</option>
                               {folders.map((f) => (
                                 <option key={f.id} value={f.id}>{f.name}</option>
                               ))}
                             </select>
                           </div>
-                        </div>
+                        </>
                       ) : (
-                        <div className="w-full space-y-1">
-                          <span className="text-[10px] font-extrabold text-slate-500 block">اختر المجلد المستهدف من مكتبتك:</span>
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold text-on-surface-variant block">المجلد المستهدف</span>
                           <select
                             value={selectedExistingFolderId}
                             onChange={(e) => setSelectedExistingFolderId(e.target.value)}
-                            className="w-full py-2 px-2 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:outline-none"
+                            className="w-full h-9 px-3 bg-[#f5f9ff] border border-[#cdddf5] rounded-xl text-xs font-bold text-on-surface focus:outline-none focus:border-[#004ac6] focus:bg-white"
                           >
                             {folders.map((f) => (
                               <option key={f.id} value={f.id}>{f.name}</option>
@@ -5004,13 +4740,13 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                     </div>
                   </div>
 
-                  <div className="border-t border-blue-100 pt-4 flex justify-end">
+                  <div className="border-t border-[#e5eefb] pt-3 flex justify-end">
                     <button
                       onClick={handleImport}
-                      className="px-6 py-2.5 rounded-xl bg-[#0056f6] hover:bg-[#0047cc] text-white font-black text-xs shadow-md transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-2"
+                      className="h-10 px-5 rounded-xl bg-[#004ac6] hover:bg-[#003da6] text-white font-black text-xs transition-all cursor-pointer active:scale-[0.98] flex items-center gap-2 tabular-nums shadow-xs"
                     >
-                      <Check className="w-4 h-4 text-white" />
-                      <span>تأكيد الاستيراد ونقل البطاقات المحددة ({selectedCardIds.length}) ⚡</span>
+                      <Check className="w-4 h-4" />
+                      <span>حفظ المحدد ({selectedCardIds.length})</span>
                     </button>
                   </div>
                 </div>
@@ -5018,37 +4754,33 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
 
               {reviewMode && folderCards.length > 0 ? (
                 /* Interactive Review Mode */
-                <div className="bg-slate-50/50 rounded-2xl border border-slate-200/60 p-6 space-y-6 animate-fade-in text-right">
-                  {/* Header / Info bar */}
-                  <div className="flex items-center justify-between border-b border-slate-200/50 pb-4">
-                    <div className="flex items-center gap-2 text-violet-700">
-                      <Layers className="w-5 h-5 text-violet-600 animate-pulse" />
-                      <h4 className="font-extrabold text-sm text-slate-800">مراجعة وتصفية البطاقات تفاعلياً</h4>
-                    </div>
-                    <span className="text-xs bg-white border border-slate-200 text-slate-700 px-3 py-1 rounded-full font-black shadow-3xs">
-                      البطاقة {currentReviewIndex + 1} من {folderCards.length}
+                <div className="bg-white rounded-[24px] border border-[#c7daf6] p-5 sm:p-6 space-y-5 text-right shadow-elevation-3">
+                  <div className="flex items-center justify-between border-b border-[#e5eefb] pb-3.5">
+                    <h4 className="font-bold text-xs text-on-surface flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-[#004ac6]" />
+                      <span>مراجعة البطاقات</span>
+                    </h4>
+                    <span className="text-xs font-mono font-bold text-on-surface-variant tabular-nums">
+                      {currentReviewIndex + 1} / {folderCards.length}
                     </span>
                   </div>
 
-                  {/* Progress bar */}
-                  <div className="w-full bg-slate-200/70 h-1.5 rounded-full overflow-hidden">
-                    <div 
+                  <div className="w-full bg-[#e3edfc] h-1.5 rounded-full overflow-hidden">
+                    <div
                       className="h-full transition-all duration-300"
-                      style={{ 
+                      style={{
                         width: `${((currentReviewIndex + 1) / folderCards.length) * 100}%`,
-                        backgroundColor: activeAiFolder.color || '#0056f6'
+                        backgroundColor: activeAiFolder.color || "#004ac6"
                       }}
                     />
                   </div>
 
-                  {/* The Flashcard itself */}
                   {(() => {
                     const card = folderCards[currentReviewIndex];
                     if (!card) return null;
                     return (
-                      <div className="space-y-6">
-                        {/* Stable Deck Container with static size and overflow-hidden */}
-                        <div className="relative w-full max-w-[356px] h-[466px] mx-auto select-none mb-4 overflow-hidden rounded-[24px]">
+                      <div className="space-y-4">
+                        <div className="relative w-full max-w-[356px] h-[466px] mx-auto select-none overflow-hidden rounded-[24px]">
                           <AnimatePresence initial={false} custom={reviewDirection} mode="popLayout">
                             <motion.div
                               key={card.id}
@@ -5106,169 +4838,292 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                                   if (currentReviewIndex < folderCards.length - 1) {
                                     handleReviewNext();
                                   } else {
-                                    alert("لقد وصلت إلى نهاية المراجعة بنجاح! تم حفظ البطاقة في الوجبة المؤقتة.");
+                                    alert("اكتملت مراجعة جميع البطاقات.");
                                     setReviewMode(false);
                                   }
                                 }}
                                 onEdit={() => {
                                   setEditingCard(card);
                                 }}
+                                onImageError={(failedUrl) => handleHealAiCardImage(card.id, failedUrl)}
                               />
                             </motion.div>
                           </AnimatePresence>
                         </div>
 
-                        {/* Interactive Navigation and Action Controls */}
-                        <div className="space-y-4">
-                          {/* Unified Navigation Dock */}
-                          <div className="w-full max-w-[356px] mx-auto mt-1">
-                            <div className="flex items-center justify-between bg-white dark:bg-slate-850 border border-slate-200/90 dark:border-slate-750/90 rounded-2xl p-1.5 shadow-2xs">
-                              <button
-                                type="button"
-                                onClick={handleReviewPrev}
-                                disabled={currentReviewIndex === 0}
-                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-25 disabled:pointer-events-none transition-all cursor-pointer active:scale-95 group"
-                                title="البطاقة السابقة"
-                              >
-                                <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200 transition-colors" />
-                                <span>السابقة</span>
-                              </button>
+                        <div className="w-full max-w-[356px] mx-auto">
+                          <div className="flex items-center justify-between bg-[#f4f8ff] border border-[#cdddf5] rounded-2xl p-1.5">
+                            <button
+                              type="button"
+                              onClick={handleReviewPrev}
+                              disabled={currentReviewIndex === 0}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-on-surface hover:bg-white disabled:opacity-25 disabled:pointer-events-none transition-all cursor-pointer"
+                            >
+                              <ChevronRight className="w-4 h-4" />
+                              <span>السابقة</span>
+                            </button>
 
-                              <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-100 dark:border-slate-700/60 font-mono text-xs font-bold text-slate-700 dark:text-slate-300 select-none">
-                                <span className="text-primary dark:text-blue-400 font-extrabold">{currentReviewIndex + 1}</span>
-                                <span className="text-slate-400 dark:text-slate-500 font-normal">/</span>
-                                <span>{folderCards.length}</span>
-                              </div>
+                            <span className="font-mono text-xs font-bold text-on-surface tabular-nums select-none">
+                              {currentReviewIndex + 1} / {folderCards.length}
+                            </span>
 
-                              <button
-                                type="button"
-                                onClick={handleReviewNext}
-                                disabled={currentReviewIndex === folderCards.length - 1}
-                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-25 disabled:pointer-events-none transition-all cursor-pointer active:scale-95 group"
-                                title="البطاقة التالية"
-                              >
-                                <span>التالية</span>
-                                <ChevronLeft className="w-4 h-4 text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200 transition-colors" />
-                              </button>
-                            </div>
+                            <button
+                              type="button"
+                              onClick={handleReviewNext}
+                              disabled={currentReviewIndex === folderCards.length - 1}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-on-surface hover:bg-white disabled:opacity-25 disabled:pointer-events-none transition-all cursor-pointer"
+                            >
+                              <span>التالية</span>
+                              <ChevronLeft className="w-4 h-4" />
+                            </button>
                           </div>
                         </div>
-
-                        {/* Tips */}
-                        <p className="text-center text-[10px] text-slate-400 font-bold max-w-xs mx-auto leading-relaxed">
-                          💡 البطاقات التي تختار "احتفاظ" لها ستبقى في وجبتك المؤقتة وسيتم تحديدها تلقائياً لتثبيتها في مكتبتك العامة لاحقاً.
-                        </p>
                       </div>
                     );
                   })()}
                 </div>
               ) : (
-                /* Cards Listing Section (Header & Actions) */
-                <div className="space-y-3.5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                /* Cards Listing Section */
+                <div className="space-y-3 pt-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-1">
                     <div className="flex items-center gap-2">
-                      <CheckSquare className="w-4 h-4 text-[#0056f6]" />
-                      <span className="text-xs font-black text-slate-700">البطاقات الدراسية المؤقتة ({folderCards.length} بطاقة):</span>
+                      <CheckSquare className="w-4 h-4 text-[#004ac6]" />
+                      <span className="text-xs font-black text-on-surface">البطاقات</span>
+                      <span className="px-2 py-0.5 rounded-full bg-[#dce8fb] text-[#004ac6] text-[11px] font-black tabular-nums">
+                        {folderCards.length}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-3">
-                      {selectedCardIds.length > 0 ? (
-                        <button
-                          onClick={handleDeleteSelectedCards}
-                          className="text-[11px] font-black text-rose-600 hover:text-rose-800 flex items-center gap-1 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>حذف المحدد ({selectedCardIds.length})</span>
-                        </button>
-                      ) : (
-                        <button
-                          onClick={handleDeleteAllFolderCards}
-                          className="text-[11px] font-black text-slate-400 hover:text-rose-600 flex items-center gap-1 cursor-pointer transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>حذف جميع البطاقات</span>
-                        </button>
-                      )}
-                      
-                      <div className="w-[1px] h-3 bg-slate-200" />
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowQuickAddCard(!showQuickAddCard);
+                          setQuickAddError(null);
+                        }}
+                        className={`h-8 px-3 border rounded-xl text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs ${
+                          showQuickAddCard
+                            ? "bg-[#e8f0fe] border-[#8bb1f5] text-[#004ac6]"
+                            : "bg-white hover:bg-[#f4f8ff] text-on-surface-variant hover:text-[#004ac6] border-[#c7daf6]"
+                        }`}
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>بطاقة سريعة</span>
+                      </button>
 
                       <button
                         onClick={handleFetchImagesForFolderCards}
                         disabled={loading || folderCards.length === 0}
-                        className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/80 rounded-xl text-[11px] font-black flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40"
-                        title="جلب وتنزيل الصور التلقائية لجميع بطاقات المجلد"
+                        className="h-8 px-3 bg-white hover:bg-[#f4f8ff] text-emerald-700 border border-[#c7daf6] rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 shadow-2xs"
                       >
-                        <DownloadCloud className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>جلب وتنزيل الصور ({folderCards.length})</span>
+                        <DownloadCloud className="w-3.5 h-3.5" />
+                        <span>جلب الصور ({folderCards.length})</span>
                       </button>
-
-                      <div className="w-[1px] h-3 bg-slate-200" />
 
                       <button
                         onClick={handleSelectAll}
-                        className="text-[11px] font-black text-[#0056f6] hover:underline cursor-pointer"
+                        className="h-8 px-3 bg-white hover:bg-[#f4f8ff] text-[#004ac6] border border-[#c7daf6] rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-2xs"
                       >
-                        {selectedCardIds.length === folderCards.length ? "إلغاء تحديد الكل" : "تحديد الكل"}
+                        {selectedCardIds.length === folderCards.length ? "إلغاء الكل" : "تحديد الكل"}
                       </button>
+
+                      {selectedCardIds.length > 0 ? (
+                        <button
+                          onClick={handleDeleteSelectedCards}
+                          className="h-8 px-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700 hover:bg-rose-100 flex items-center gap-1 cursor-pointer tabular-nums shadow-2xs"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>حذف ({selectedCardIds.length})</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handleDeleteAllFolderCards}
+                          className="h-8 px-3 rounded-xl bg-white border border-[#c7daf6] text-xs font-bold text-on-surface-variant hover:text-rose-600 hover:border-rose-200 flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>حذف الكل</span>
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  {/* Cards Grid List - Styled exactly like Explorer card items */}
-                  <div className="flex flex-col gap-3">
-                    {folderCards.map((card) => {
+                  {/* Quick Single-Card Add Inline Bar (Secondary) */}
+                  {showQuickAddCard && (
+                    <div className="bg-white border border-[#c7daf6] rounded-2xl p-2.5 shadow-elevation-1 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={quickAddInput}
+                          onChange={(e) => {
+                            setQuickAddInput(e.target.value);
+                            if (quickAddError) setQuickAddError(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleQuickAddSingleCard();
+                            }
+                          }}
+                          placeholder="اكتب كلمة أو مفهوماً لإضافة بطاقة واحدة..."
+                          disabled={quickAddLoading}
+                          dir="auto"
+                          className="flex-1 h-9 px-3 bg-[#f4f8ff] border border-[#cdddf5] rounded-xl text-xs font-semibold text-on-surface placeholder-[#627289] focus:outline-none focus:border-[#004ac6] disabled:opacity-60"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleQuickAddSingleCard}
+                          disabled={quickAddLoading || !quickAddInput.trim()}
+                          className="h-9 px-3.5 bg-[#004ac6] hover:bg-[#003ea8] disabled:opacity-40 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                        >
+                          {quickAddLoading ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>جاري الإضافة</span>
+                            </>
+                          ) : (
+                            <>
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>إضافة</span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowQuickAddCard(false);
+                            setQuickAddError(null);
+                          }}
+                          className="h-9 w-9 flex items-center justify-center rounded-xl border border-[#cdddf5] text-on-surface-variant hover:text-on-surface hover:bg-[#f4f8ff] transition-colors cursor-pointer shrink-0"
+                          title="إغلاق"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      {quickAddError && (
+                        <p className="text-[11px] font-bold text-rose-600 px-1">{quickAddError}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Secondary Filter & Search Strip for Open Folder */}
+                  {folderCards.length > 0 && (
+                    <div className="bg-white/85 border border-[#cdddf5] rounded-xl p-1.5 flex flex-wrap items-center justify-between gap-2">
+                      <div className="relative flex-1 min-w-[160px]">
+                        <Search className="w-3.5 h-3.5 text-on-surface-variant absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="text"
+                          value={cardSearchQuery}
+                          onChange={(e) => setCardSearchQuery(e.target.value)}
+                          placeholder="بحث في البطاقات..."
+                          dir="auto"
+                          className="w-full h-8 pr-8 pl-7 bg-[#f4f8ff] border border-[#dbe7fa] rounded-lg text-xs font-semibold text-on-surface placeholder-[#627289] focus:outline-none focus:border-[#004ac6]"
+                        />
+                        {cardSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setCardSearchQuery("")}
+                            className="absolute left-2 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface cursor-pointer"
+                            title="مسح البحث"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        {(
+                          [
+                            { id: "all", label: "الكل" },
+                            { id: "no_image", label: "بدون صورة" },
+                            { id: "has_article", label: "بأداة" }
+                          ] as const
+                        ).map((tab) => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setCardFilterMode(tab.id)}
+                            className={`h-7 px-2.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                              cardFilterMode === tab.id
+                                ? "bg-[#e8f0fe] text-[#004ac6]"
+                                : "text-on-surface-variant hover:bg-[#f4f8ff] hover:text-on-surface"
+                            }`}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Cards List */}
+                  <div className="flex flex-col gap-2.5">
+                    {filteredFolderCards.length === 0 && folderCards.length > 0 ? (
+                      <div className="bg-white border border-[#cdddf5] rounded-2xl p-6 text-center space-y-2">
+                        <p className="text-xs font-bold text-on-surface-variant">
+                          لا توجد بطاقات مطابقة للتصفية الحالية
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCardFilterMode("all");
+                            setCardSearchQuery("");
+                          }}
+                          className="h-8 px-3 bg-[#e8f0fe] hover:bg-[#dce8fb] text-[#004ac6] rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                        >
+                          عرض جميع البطاقات
+                        </button>
+                      </div>
+                    ) : (
+                    filteredFolderCards.map((card) => {
                       const isSelected = selectedCardIds.includes(card.id);
-                      const cardColor = activeAiFolder.color || '#0056f6';
+                      const cardColor = activeAiFolder.color || "#0056f6";
                       return (
                         <div
                           key={card.id}
                           onClick={() => toggleCardSelection(card.id)}
-                          className={`flex items-center justify-between p-4 bg-white border rounded-lg hover:shadow-xs transition-all group cursor-pointer ${
+                          className={`flex items-center justify-between p-3.5 bg-white border rounded-2xl transition-all group cursor-pointer shadow-elevation-1 ${
                             isSelected
-                              ? "border-[#0056f6] bg-blue-50/25 shadow-2xs"
-                              : "border-slate-100 hover:bg-slate-50/40"
+                              ? "border-[#004ac6] bg-[#f2f7ff] ring-1 ring-[#004ac6]/20"
+                              : "border-[#cdddf5] hover:border-[#7ca7f5] hover:shadow-elevation-3"
                           }`}
                         >
                           {/* Right side: Checkbox + Card Stack Icon + Details */}
-                          <div className="flex items-center gap-4 text-right">
-                            
-                            {/* Selection Checkbox */}
-                            <div 
+                          <div className="flex items-center gap-3.5 text-right min-w-0">
+                            <div
                               onClick={(e) => {
                                 e.stopPropagation();
                                 toggleCardSelection(card.id);
                               }}
                               className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all shrink-0 cursor-pointer ${
                                 isSelected
-                                  ? "bg-[#0056f6] border-[#0056f6] text-white"
-                                  : "border-slate-300 hover:border-slate-400 bg-white"
+                                  ? "bg-[#004ac6] border-[#004ac6] text-white"
+                                  : "border-[#a9bedb] hover:border-[#004ac6] bg-white"
                               }`}
                             >
                               {isSelected && <Check className="w-3.5 h-3.5 stroke-[3px]" />}
                             </div>
 
-                            {/* Beautiful Unified Card Icon styled exactly like Explorer.tsx */}
-                            <div className="relative w-14 h-14 shrink-0">
-                              {/* Back Card 2 (Bottom) */}
-                              <div 
-                                className="absolute top-1 right-1 w-[44px] h-[44px] rounded-xs border bg-white/80 shadow-3xs"
-                                style={{ 
+                            {/* Card Thumbnail Stack */}
+                            <div className="relative w-13 h-13 shrink-0">
+                              <div
+                                className="absolute top-1 right-1 w-[42px] h-[42px] rounded-xs border bg-white/80 shadow-2xs"
+                                style={{
                                   borderColor: `${cardColor}20`,
-                                  transform: "rotate(-6deg)" 
+                                  transform: "rotate(-6deg)"
                                 }}
                               />
-                              {/* Back Card 1 (Middle) */}
-                              <div 
-                                className="absolute top-1 right-1 w-[44px] h-[44px] rounded-xs border bg-white/95 shadow-3xs"
-                                style={{ 
+                              <div
+                                className="absolute top-1 right-1 w-[42px] h-[42px] rounded-xs border bg-white/95 shadow-2xs"
+                                style={{
                                   borderColor: `${cardColor}25`,
-                                  transform: "rotate(4deg)" 
+                                  transform: "rotate(4deg)"
                                 }}
                               />
-                              {/* Main Front Card */}
-                              <div 
-                                className="absolute bottom-0.5 left-0.5 w-[46px] h-[46px] rounded-sm overflow-hidden border shadow-2xs flex items-center justify-center z-10"
+                              <div
+                                className="absolute bottom-0.5 left-0.5 w-[44px] h-[44px] rounded-sm overflow-hidden border shadow-2xs flex items-center justify-center z-10"
                                 style={{
                                   backgroundColor: card.frontImage ? "#ffffff" : `${cardColor}10`,
-                                  borderColor: card.frontImage ? "rgba(192, 132, 252, 0.4)" : `${cardColor}30`, // Soft high-contrast purple border
+                                  borderColor: card.frontImage ? "rgba(192, 132, 252, 0.4)" : `${cardColor}30`,
                                   borderWidth: "1.5px"
                                 }}
                               >
@@ -5280,14 +5135,12 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                                       className="absolute inset-0 w-full h-full object-cover opacity-95 transition-all"
                                       style={getSafeImageStyle(card.frontImagePosition)}
                                       referrerPolicy="no-referrer"
+                                      onError={(failedUrl) => handleHealAiCardImage(card.id, failedUrl)}
                                     />
-                                    {/* Soft faded black gradient covering the bottom 30% */}
                                     <div className="absolute bottom-0 left-0 right-0 h-1/3 bg-gradient-to-t from-black/10 via-black/5 to-transparent pointer-events-none z-10" />
-
-                                    {/* Ultra-light, high-contrast Card Indicator Badge */}
-                                    <div 
+                                    <div
                                       className="absolute left-1 bottom-1 bg-white/95 p-0.5 rounded-xs z-20 border border-slate-100 flex items-center justify-center"
-                                      style={{ 
+                                      style={{
                                         borderColor: "#c084fc30",
                                         boxShadow: "0 2px 5px rgba(0,0,0,0.18), 0 0 3px rgba(255,255,255,0.7)"
                                       }}
@@ -5297,16 +5150,13 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                                   </>
                                 ) : (
                                   <>
-                                    {/* Lined Index Card design to signify a Flashcard */}
                                     <div className="absolute inset-0 bg-white flex flex-col justify-center gap-1 p-1 px-1.5 overflow-hidden">
                                       <div className="h-0.5 w-[85%] bg-slate-100 rounded-full" />
                                       <div className="h-0.5 w-[70%] bg-slate-100 rounded-full" />
                                       <div className="h-0.5 w-[80%] bg-slate-100 rounded-full" />
                                       <div className="absolute right-2 top-0 bottom-0 w-[1px] bg-rose-200" />
                                     </div>
-
-                                    {/* Small Card Indicator Badge in Solid White with a Vivid Purple Icon */}
-                                    <div 
+                                    <div
                                       className="absolute left-1 bottom-1 bg-white p-0.5 rounded-xs z-10 border shadow-xs flex items-center justify-center"
                                       style={{ borderColor: "#c084fc30" }}
                                     >
@@ -5317,29 +5167,29 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                               </div>
                             </div>
 
-                            {/* Card text and definitions */}
+                            {/* Card text */}
                             {(() => {
                               const sanitized = sanitizeCardArticleAndSentence(card);
                               const isSentence = isGermanSentence(card.frontText || "");
                               return (
-                                <div>
+                                <div className="min-w-0">
                                   <div className="flex items-center gap-1.5">
                                     {!isSentence && sanitized.correctArticle && (
-                                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100 uppercase">
+                                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200/70 uppercase shrink-0">
                                         {sanitized.correctArticle === "die-plural" ? "die" : sanitized.correctArticle}
                                       </span>
                                     )}
-                                    <h4 className="font-bold text-[#202124] text-base group-hover:text-[#0056f6] transition-colors whitespace-pre-wrap" dir="ltr">
+                                    <h4 className="font-bold text-on-surface text-sm sm:text-base group-hover:text-[#004ac6] transition-colors whitespace-pre-wrap" dir="ltr">
                                       {sanitized.frontText}
                                     </h4>
                                   </div>
                                   {cardPluralToggle[card.id] && card.pluralText ? (
-                                    <p className="text-xs text-fuchsia-600 font-bold mt-1 whitespace-pre-wrap" dir="ltr">
-                                      صيغة الجمع: {card.pluralText}
+                                    <p className="text-xs text-fuchsia-700 font-bold mt-1 whitespace-pre-wrap" dir="ltr">
+                                      {card.pluralText}
                                     </p>
                                   ) : (
-                                    <p className="text-xs text-[#5f6368] font-medium mt-1 whitespace-pre-wrap">
-                                      {card.backText} {card.translationHint ? `• (${card.translationHint})` : ""}
+                                    <p className="text-xs text-on-surface-variant font-medium mt-1 whitespace-pre-wrap">
+                                      {card.backText} {card.translationHint ? `· ${card.translationHint}` : ""}
                                     </p>
                                   )}
                                 </div>
@@ -5347,8 +5197,8 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                             })()}
                           </div>
 
-                          {/* Left Side: Pronounce, Edit and Delete Actions */}
-                          <div className="flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
+                          {/* Actions */}
+                          <div className="flex items-center gap-1 z-10 shrink-0" onClick={(e) => e.stopPropagation()}>
                             {card.isPluralMode && card.pluralText && (
                               <button
                                 onClick={() => {
@@ -5363,12 +5213,12 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                                     speakClient(card.frontText, activeAiFolder.frontLang);
                                   }
                                 }}
-                                className={`p-2 rounded-xl transition-all cursor-pointer border border-transparent ${
+                                className={`h-8 w-8 flex items-center justify-center rounded-xl transition-colors cursor-pointer ${
                                   cardPluralToggle[card.id]
-                                    ? "text-fuchsia-600 bg-fuchsia-50 hover:bg-fuchsia-100"
-                                    : "text-slate-400 hover:text-fuchsia-600 hover:bg-fuchsia-50/50"
+                                    ? "text-fuchsia-700 bg-fuchsia-50"
+                                    : "text-on-surface-variant hover:text-fuchsia-700 hover:bg-[#edf4ff]"
                                 }`}
-                                title={cardPluralToggle[card.id] ? "عرض الترجمة الأصلية" : "عرض واستماع صيغة الجمع (+)"}
+                                title={cardPluralToggle[card.id] ? "الترجمة الأصلية" : "صيغة الجمع"}
                               >
                                 <Plus className="w-4 h-4" />
                               </button>
@@ -5380,40 +5230,39 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                                 handleFetchImageForSingleCard(card.id);
                               }}
                               disabled={loading}
-                              className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all cursor-pointer border border-transparent disabled:opacity-40"
-                              title="جلب وتنزيل صورة جديدة لهذه البطاقة"
+                              className="h-8 w-8 flex items-center justify-center text-on-surface-variant hover:text-emerald-700 hover:bg-emerald-50 rounded-xl transition-colors cursor-pointer disabled:opacity-40"
+                              title="جلب صورة للبطاقة"
                             >
                               <Image className="w-4 h-4" />
                             </button>
 
                             <button
                               onClick={() => speakClient(cardPluralToggle[card.id] && card.pluralText ? card.pluralText : card.frontText, activeAiFolder.frontLang)}
-                              className="p-2 text-slate-400 hover:text-[#0056f6] hover:bg-slate-100/60 rounded-xl transition-all cursor-pointer border border-transparent"
-                              title="استمع للنطق"
+                              className="h-8 w-8 flex items-center justify-center text-on-surface-variant hover:text-[#004ac6] hover:bg-[#edf4ff] rounded-xl transition-colors cursor-pointer"
+                              title="استماع"
                             >
                               <Volume2 className="w-4 h-4" />
                             </button>
-                            
+
                             <button
                               onClick={() => setEditingCard(card)}
-                              className="p-2 text-slate-400 hover:text-[#0056f6] hover:bg-slate-100/60 rounded-xl transition-all cursor-pointer border border-transparent"
-                              title="تعديل البطاقة"
+                              className="h-8 w-8 flex items-center justify-center text-on-surface-variant hover:text-[#004ac6] hover:bg-[#edf4ff] rounded-xl transition-colors cursor-pointer"
+                              title="تعديل"
                             >
                               <Pencil className="w-4 h-4" />
                             </button>
 
                             <button
                               onClick={() => handleDeleteAiCard(card.id)}
-                              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer border border-transparent"
-                              title="حذف من الوجبة المؤقتة"
+                              className="h-8 w-8 flex items-center justify-center text-on-surface-variant hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
+                              title="حذف"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
-
                         </div>
                       );
-                    })}
+                    }))}
                   </div>
                 </div>
               )}
@@ -5421,300 +5270,269 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
             </div>
           )
         )}
-               {/* =========================================================================
-           AI Telemetry & Quotas Hub (مراقب حصص المساعدين الأذكياء) - تصميم مبسط وأنيق
+        {/* =========================================================================
+            Collapsed Telemetry & Quotas Drawer (السجل والحصص)
            ========================================================================= */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-6 space-y-6 text-right" dir="rtl">
-          {/* Main Hub Header */}
-          <div className="flex items-center justify-between pb-3 border-b border-slate-50">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600 shadow-3xs shrink-0">
-                <Cpu className="w-4.5 h-4.5 animate-pulse" />
+        <div className="bg-white/95 rounded-2xl border border-[#c7daf6] overflow-hidden text-right shadow-elevation-1" dir="rtl">
+          <button
+            type="button"
+            onClick={() => setShowTelemetryDrawer(!showTelemetryDrawer)}
+            className="w-full h-12 px-4 flex items-center justify-between gap-3 hover:bg-[#f4f8ff] transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Cpu className="w-4 h-4 text-[#004ac6] shrink-0" />
+              <span className="text-xs font-bold text-on-surface shrink-0">السجل والحصص</span>
+              <span className="text-[11px] font-medium text-on-surface-variant truncate tabular-nums">
+                {totalRequests} طلب · {(lastAiUsage ? lastAiUsage.totalTokens : accumulatedTotalTokens).toLocaleString()} توكن
+                {aiRequestHistory.length > 0 ? ` · ${aiRequestHistory.length} محفوظ` : ""}
+              </span>
+            </div>
+            <ChevronDown className={`w-4 h-4 text-on-surface-variant transition-transform duration-200 shrink-0 ${showTelemetryDrawer ? "rotate-180" : ""}`} />
+          </button>
+
+          {showTelemetryDrawer && (
+            <div className="border-t border-[#e5eefb] p-4 space-y-4">
+              {/* Tabs + Refresh */}
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex bg-[#e3edfc] p-0.5 rounded-xl text-xs border border-[#d0dff7]">
+                  <button
+                    type="button"
+                    onClick={() => setTelemetryTab("logs")}
+                    className={`h-8 px-3 rounded-lg font-bold transition-all cursor-pointer tabular-nums ${
+                      telemetryTab === "logs"
+                        ? "bg-white text-[#004ac6] shadow-2xs"
+                        : "text-on-surface-variant hover:text-on-surface"
+                    }`}
+                  >
+                    السجل ({aiRequestHistory.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTelemetryTab("quotas")}
+                    className={`h-8 px-3 rounded-lg font-bold transition-all cursor-pointer ${
+                      telemetryTab === "quotas"
+                        ? "bg-white text-[#004ac6] shadow-2xs"
+                        : "text-on-surface-variant hover:text-on-surface"
+                    }`}
+                  >
+                    الحصص
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {telemetryTab === "logs" && aiRequestHistory.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAiRequestHistory([]);
+                        localStorage.removeItem("ai_request_history");
+                      }}
+                      className="h-8 px-2.5 rounded-lg border border-[#cdddf5] bg-[#f4f8ff] text-[11px] font-bold text-on-surface-variant hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 transition-colors cursor-pointer"
+                    >
+                      مسح السجل
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => fetchServerQuotas(true)}
+                    disabled={quotaLoading}
+                    className="h-8 px-2.5 rounded-lg border border-[#cdddf5] bg-[#f4f8ff] text-[11px] font-bold text-on-surface hover:bg-[#e6effe] transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                  >
+                    {quotaLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3 text-[#004ac6]" />}
+                    <span>تحديث</span>
+                  </button>
+                </div>
               </div>
-              <div>
-                <h3 className="font-black text-xs text-slate-800">مراقب حصص المساعدين</h3>
-              </div>
-            </div>
 
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="السيرفر متصل" />
-              <button
-                onClick={() => fetchServerQuotas(true)}
-                disabled={quotaLoading}
-                className="flex items-center gap-1 py-1 px-2.5 rounded-lg border border-slate-200 hover:border-slate-300 bg-white text-[10px] font-bold text-slate-600 hover:bg-slate-50 transition-all cursor-pointer disabled:opacity-50"
-                title="تحديث الحصص"
-              >
-                {quotaLoading ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                ) : (
-                  <RefreshCw className="w-3 h-3" />
-                )}
-                <span>تحديث</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Compact Session Stats row */}
-          <div className="bg-slate-50/60 rounded-xl p-3 border border-slate-100/50 flex flex-wrap items-center justify-between gap-4 text-xs font-bold text-slate-600">
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-400">الطلبات بالجلسة:</span>
-              <span className="font-mono text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-100">{totalRequests}</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-400">التوكنات المستهلكة:</span>
-              <span className="font-mono text-indigo-600 bg-white px-2 py-0.5 rounded border border-slate-100">{accumulatedTotalTokens.toLocaleString()}</span>
-            </div>
-            <div className="flex items-center gap-4 text-[10px] text-slate-400">
-              <span>(المدخلات: {accumulatedPromptTokens.toLocaleString()} • المخرجات: {accumulatedCompletionTokens.toLocaleString()})</span>
-            </div>
-          </div>
-
-          {/* Historical 24-Hour Sliding Window Log Stats */}
-          {serverQuotas?.usageStats && (
-            <div className="bg-[#0056f6]/5 rounded-xl p-4 border border-[#0056f6]/10 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-black text-slate-800 flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5 text-[#0056f6]" />
-                  مراقب الاستهلاك الفعلي للمنصة (Sliding Window 24h)
-                </span>
-                <span className="text-[10px] text-slate-500 font-bold">المعدل اليومي الأقصى: 100,000 توكن</span>
-              </div>
-
-              {/* Progress Bar of actual 24h sliding usage */}
-              {(() => {
-                const total24h = serverQuotas.usageStats.totalTokens24h || 0;
-                const limit24h = 100000;
-                const percent = Math.min(100, Math.round((total24h / limit24h) * 100));
-                
-                return (
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between items-center text-[10px] font-bold">
-                      <span className="text-slate-500">الاستهلاك الإجمالي الفعلي (آخر 24 ساعة):</span>
-                      <span className={`font-mono ${percent > 80 ? "text-rose-600 font-black animate-pulse" : "text-slate-800"}`}>
-                        {total24h.toLocaleString()} / {limit24h.toLocaleString()} توكن ({percent}%)
-                      </span>
-                    </div>
-                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden border border-slate-200/40">
-                      <div 
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          percent > 90 ? "bg-rose-600" : percent > 60 ? "bg-amber-500" : "bg-[#0056f6]"
-                        }`}
-                        style={{ width: `${percent}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Collapsible details of previous requests log */}
-              <details className="group pt-1 border-t border-[#0056f6]/10">
-                <summary className="flex items-center justify-between text-[10px] font-bold text-slate-500 hover:text-slate-700 cursor-pointer select-none">
-                  <span>سجل المعاملات والطلبات المفصل (آخر 24 ساعة)</span>
-                  <ChevronDown className="w-3.5 h-3.5 transition-transform duration-200 group-open:rotate-180" />
-                </summary>
-
-                <div className="mt-2.5 space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
-                  {serverQuotas.usageStats.logs && serverQuotas.usageStats.logs.length > 0 ? (
-                    serverQuotas.usageStats.logs.map((log: any, idx: number) => {
-                      const isFailed = log.status === "failed";
-                      const dateStr = new Date(log.timestamp).toLocaleTimeString("ar-EG", { hour: '2-digit', minute: '2-digit' });
-                      
-                      return (
-                        <div key={idx} className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-100 text-[10px] font-bold">
-                          <div className="flex items-center gap-2">
-                            <span className={`w-2 h-2 rounded-full ${isFailed ? "bg-rose-500" : "bg-emerald-500"}`} />
-                            <span className="text-slate-700 font-extrabold max-w-[200px] truncate" title={log.prompt}>
-                              {log.prompt || "تعديل بطاقات"}
+              {telemetryTab === "logs" ? (
+                <div className="space-y-2 max-h-[340px] overflow-y-auto">
+                  {aiRequestHistory.length === 0 ? (
+                    <p className="text-xs text-on-surface-variant text-center py-6 font-medium bg-[#f4f8ff] rounded-xl border border-[#dbe7fa]">
+                      لا توجد طلبات مسجلة بعد.
+                    </p>
+                  ) : (
+                    aiRequestHistory.map((log) => (
+                      <details
+                        key={log.id}
+                        className="group bg-[#f4f8ff] border border-[#dbe7fa] rounded-xl p-3"
+                      >
+                        <summary className="flex items-center justify-between gap-2 cursor-pointer select-none list-none">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`w-2 h-2 rounded-full shrink-0 ${log.status === "failed" ? "bg-rose-500" : "bg-emerald-500"}`} />
+                            <span className="text-xs font-bold text-on-surface truncate">
+                              {log.prompt}
                             </span>
                           </div>
-                          
-                          <div className="flex items-center gap-3 font-mono">
-                            <span className="text-slate-400 font-semibold">{dateStr}</span>
-                            {!isFailed ? (
-                              <span className="text-[#0056f6] font-black">{log.tokens.toLocaleString()} توكن</span>
-                            ) : (
-                              <span className="text-rose-500 font-extrabold">مرفوض (حد)</span>
+                          <div className="flex items-center gap-2 text-[11px] font-mono text-on-surface-variant shrink-0 tabular-nums">
+                            <span>{log.provider}</span>
+                            {log.usage?.totalTokens ? <span>{log.usage.totalTokens.toLocaleString()} ت</span> : null}
+                            <ChevronDown className="w-3.5 h-3.5 group-open:rotate-180 transition-transform" />
+                          </div>
+                        </summary>
+
+                        <div className="mt-3 pt-2.5 border-t border-[#dbe7fa] space-y-2 text-xs">
+                          <div className="flex flex-wrap items-center gap-3 text-[11px] text-on-surface-variant font-mono">
+                            <span>{new Date(log.timestamp).toLocaleString("ar-EG")}</span>
+                            <span>{log.model}</span>
+                            {log.usage && (
+                              <span>
+                                in: {log.usage.promptTokens} / out: {log.usage.completionTokens}
+                              </span>
                             )}
                           </div>
+                          {log.error && (
+                            <p className="text-xs text-rose-700 font-semibold">{log.error}</p>
+                          )}
+                          {(log.rawRequestBody || log.rawPrompt) && (
+                            <CodeViewer
+                              code={log.rawRequestBody || log.rawPrompt || ""}
+                              title="الطلب المرسل"
+                            />
+                          )}
+                          {(log.rawResponseBody || log.response) && (
+                            <CodeViewer
+                              code={log.rawResponseBody || log.response || ""}
+                              title="رد المزود"
+                            />
+                          )}
                         </div>
-                      );
-                    })
-                  ) : (
-                    <p className="text-[10px] text-slate-400 text-center py-2">لا توجد طلبات مسجلة في الـ 24 ساعة الماضية.</p>
+                      </details>
+                    ))
                   )}
                 </div>
-              </details>
-            </div>
-          )}
+              ) : (
+                <div className="space-y-4">
+                  {/* Session Summary */}
+                  <div className="bg-[#f4f8ff] rounded-xl p-3 border border-[#dbe7fa] flex flex-wrap items-center justify-between gap-3 text-xs font-bold text-on-surface tabular-nums">
+                    <span>الطلبات بالجلسة: <strong className="font-mono text-on-surface">{totalRequests}</strong></span>
+                    <span>التوكنات: <strong className="font-mono text-[#004ac6]">{accumulatedTotalTokens.toLocaleString()}</strong></span>
+                    <span className="text-[11px] text-on-surface-variant font-normal">
+                      مدخلات {accumulatedPromptTokens.toLocaleString()} · مخرجات {accumulatedCompletionTokens.toLocaleString()}
+                    </span>
+                  </div>
 
-          {/* Two Assistant Cards - Styled identically to the Review settings structure */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            
-            {/* 1. Google Gemini */}
-            <div className="bg-white border border-slate-100 rounded-xl p-4.5 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-blue-500" />
-                  <span className="font-black text-xs text-slate-800">مساعد Google Gemini</span>
-                </div>
-                <span className="text-[9px] bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded">نشط</span>
-              </div>
-
-              <div className="space-y-2.5 pt-1.5 border-t border-slate-50">
-                <div className="flex items-center justify-between text-[11px] font-bold">
-                  <span className="text-slate-400">حصة الطلبات اليومية (RPD):</span>
-                  <span className="font-mono text-slate-700 bg-slate-50 px-2 py-0.5 rounded border border-slate-100/60">1,500 طلب</span>
-                </div>
-                <div className="flex items-center justify-between text-[11px] font-bold">
-                  <span className="text-slate-400">حصة الطلبات بالدقيقة (RPM):</span>
-                  <span className="font-mono text-slate-700 bg-slate-50 px-2 py-0.5 rounded border border-slate-100/60">15 طلب</span>
-                </div>
-                <div className="flex items-center justify-between text-[11px] font-bold">
-                  <span className="text-slate-400">حصة التوكنات بالدقيقة (TPM):</span>
-                  <span className="font-mono text-slate-700 bg-slate-50 px-2 py-0.5 rounded border border-slate-100/60">1,000,000</span>
-                </div>
-              </div>
-
-              <p className="text-[9px] text-slate-400 font-semibold leading-relaxed pt-1 border-t border-slate-50">
-                * يتم مراقبة حصة Gemini تلقائياً عبر السحابة.
-              </p>
-            </div>
-
-            {/* 2. Groq Cloud */}
-            <div className="bg-white border border-slate-100 rounded-xl p-4.5 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-orange-500" />
-                  <span className="font-black text-xs text-slate-800">مساعد Groq Cloud</span>
-                </div>
-                <span className="text-[9px] bg-orange-50 text-orange-700 font-bold px-2 py-0.5 rounded">نشط</span>
-              </div>
-
-              <div className="space-y-3 pt-1.5 border-t border-slate-50">
-                {serverQuotas && serverQuotas.groq && serverQuotas.groq.rateLimits && serverQuotas.groq.rateLimits.limitRequests ? (() => {
-                  const reqLimit = parseInt(serverQuotas.groq.rateLimits.limitRequests) || 1;
-                  const reqRemain = parseInt(serverQuotas.groq.rateLimits.remainingRequests) || 0;
-                  const reqPercent = Math.min(100, Math.max(0, Math.round((reqRemain / reqLimit) * 100)));
-
-                  const tokLimit = parseInt(serverQuotas.groq.rateLimits.limitTokens) || 1;
-                  const tokRemain = parseInt(serverQuotas.groq.rateLimits.remainingTokens) || 0;
-                  const tokPercent = Math.min(100, Math.max(0, Math.round((tokRemain / tokLimit) * 100)));
-
-                  const getBarColorClass = (pct: number) => {
-                    if (pct > 50) return "bg-emerald-500";
-                    if (pct > 20) return "bg-amber-500";
-                    return "bg-rose-500";
-                  };
-
-                  const getTextColorClass = (pct: number) => {
-                    if (pct > 50) return "text-emerald-600";
-                    if (pct > 20) return "text-amber-600";
-                    return "text-rose-600 font-black";
-                  };
-
-                  return (
-                    <div className="space-y-3">
-                      {/* Remaining Requests bar */}
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[11px] font-bold">
-                          <span className="text-slate-400">الطلبات المتبقية:</span>
-                          <span className={`font-mono ${getTextColorClass(reqPercent)}`}>
-                            {serverQuotas.groq.rateLimits.remainingRequests} / {serverQuotas.groq.rateLimits.limitRequests} ({reqPercent}%)
+                  {/* 24-Hour Sliding Window Usage */}
+                  {serverQuotas?.usageStats && (() => {
+                    const total24h = serverQuotas.usageStats.totalTokens24h || 0;
+                    const limit24h = 100000;
+                    const percent = Math.min(100, Math.round((total24h / limit24h) * 100));
+                    return (
+                      <div className="bg-[#f4f8ff] rounded-xl p-3.5 border border-[#dbe7fa] space-y-2">
+                        <div className="flex items-center justify-between text-xs font-bold">
+                          <span className="text-on-surface flex items-center gap-1.5">
+                            <Activity className="w-3.5 h-3.5 text-[#004ac6]" />
+                            <span>الاستهلاك (آخر 24 ساعة)</span>
+                          </span>
+                          <span className={`font-mono tabular-nums ${percent > 80 ? "text-rose-700" : "text-on-surface"}`}>
+                            {total24h.toLocaleString()} / {limit24h.toLocaleString()} ({percent}%)
                           </span>
                         </div>
-                        <div className="w-full h-1.5 bg-slate-50 border border-slate-100 rounded-full overflow-hidden">
-                          <div 
-                            className={`h-full rounded-full transition-all duration-500 ${getBarColorClass(reqPercent)}`}
-                            style={{ width: `${reqPercent}%` }}
+                        <div className="w-full h-1.5 bg-[#dce8fb] rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-500 ${
+                              percent > 90 ? "bg-rose-600" : percent > 60 ? "bg-amber-500" : "bg-[#004ac6]"
+                            }`}
+                            style={{ width: `${percent}%` }}
                           />
                         </div>
                       </div>
+                    );
+                  })()}
 
-                      {/* Remaining Tokens bar */}
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[11px] font-bold">
-                          <span className="text-slate-400">التوكنات المتبقية:</span>
-                          <span className={`font-mono ${getTextColorClass(tokPercent)}`}>
-                            {parseInt(serverQuotas.groq.rateLimits.remainingTokens).toLocaleString()} / {parseInt(serverQuotas.groq.rateLimits.limitTokens).toLocaleString()} ({tokPercent}%)
-                          </span>
-                        </div>
-                        <div className="w-full h-1.5 bg-slate-50 border border-slate-100 rounded-full overflow-hidden">
-                          <div 
-                            className={`h-full rounded-full transition-all duration-500 ${getBarColorClass(tokPercent)}`}
-                            style={{ width: `${tokPercent}%` }}
-                          />
-                        </div>
+                  {/* Provider Quota Cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    <div className="bg-[#f4f8ff] border border-[#dbe7fa] rounded-xl p-3.5 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-on-surface flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-[#004ac6]" />
+                          <span>Google Gemini</span>
+                        </span>
+                        <span className="text-[11px] font-bold text-emerald-700">متاح</span>
                       </div>
-
-                      {/* Compact Reset Timers */}
-                      <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 pt-1.5 border-t border-slate-50">
-                        {serverQuotas.groq.rateLimits.resetRequests && (
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-3 h-3 text-slate-300" />
-                            تجديد الطلبات: <strong className="font-semibold text-slate-700">{formatArabicResetTime(serverQuotas.groq.rateLimits.resetRequests)}</strong>
-                          </span>
-                        )}
-                        {serverQuotas.groq.rateLimits.resetTokens && (
-                          <span className="flex items-center gap-1">
-                            <Coins className="w-3 h-3 text-slate-300" />
-                            تجديد التوكنات: <strong className="font-semibold text-slate-700">{formatArabicResetTime(serverQuotas.groq.rateLimits.resetTokens)}</strong>
-                          </span>
-                        )}
+                      <div className="space-y-1.5 text-[11px] font-semibold text-on-surface-variant tabular-nums">
+                        <div className="flex justify-between">
+                          <span>الطلبات اليومية (RPD)</span>
+                          <span className="font-mono text-on-surface">1,500</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>بالدقيقة (RPM)</span>
+                          <span className="font-mono text-on-surface">15</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>التوكنات (TPM)</span>
+                          <span className="font-mono text-on-surface">1,000,000</span>
+                        </div>
                       </div>
                     </div>
-                  );
-                })() : (
-                  <div className="text-[11px] text-slate-400 text-center py-5 space-y-2">
-                    <p className="font-bold text-slate-500">لا تتوفر قراءات حية لـ Groq حتى الآن.</p>
-                    <button
-                      onClick={() => fetchServerQuotas(true)}
-                      className="px-2.5 py-1 rounded bg-slate-50 border border-slate-200 text-[10px] text-slate-600 hover:bg-slate-100 font-bold cursor-pointer"
-                    >
-                      فحص الاتصال الفوري ⚡
-                    </button>
+
+                    <div className="bg-[#f4f8ff] border border-[#dbe7fa] rounded-xl p-3.5 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-on-surface flex items-center gap-1.5">
+                          <Activity className="w-3.5 h-3.5 text-orange-600" />
+                          <span>Groq Cloud</span>
+                        </span>
+                        <span className="text-[11px] font-bold text-emerald-700">متاح</span>
+                      </div>
+                      {serverQuotas?.groq?.rateLimits?.limitRequests ? (() => {
+                        const reqLimit = parseInt(serverQuotas.groq.rateLimits.limitRequests) || 1;
+                        const reqRemain = parseInt(serverQuotas.groq.rateLimits.remainingRequests) || 0;
+                        const reqPercent = Math.min(100, Math.max(0, Math.round((reqRemain / reqLimit) * 100)));
+                        const tokLimit = parseInt(serverQuotas.groq.rateLimits.limitTokens) || 1;
+                        const tokRemain = parseInt(serverQuotas.groq.rateLimits.remainingTokens) || 0;
+                        const tokPercent = Math.min(100, Math.max(0, Math.round((tokRemain / tokLimit) * 100)));
+                        return (
+                          <div className="space-y-2 text-[11px] font-semibold tabular-nums">
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-on-surface-variant">
+                                <span>الطلبات المتبقية</span>
+                                <span className="font-mono text-on-surface">
+                                  {reqRemain} / {reqLimit} ({reqPercent}%)
+                                </span>
+                              </div>
+                              <div className="w-full h-1.5 bg-[#dce8fb] rounded-full overflow-hidden">
+                                <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${reqPercent}%` }} />
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-on-surface-variant">
+                                <span>التوكنات المتبقية</span>
+                                <span className="font-mono text-on-surface">
+                                  {tokRemain.toLocaleString()} / {tokLimit.toLocaleString()} ({tokPercent}%)
+                                </span>
+                              </div>
+                              <div className="w-full h-1.5 bg-[#dce8fb] rounded-full overflow-hidden">
+                                <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${tokPercent}%` }} />
+                              </div>
+                            </div>
+                            {(serverQuotas.groq.rateLimits.resetRequests || serverQuotas.groq.rateLimits.resetTokens) && (
+                              <div className="flex items-center justify-between text-[10px] text-on-surface-variant pt-1">
+                                {serverQuotas.groq.rateLimits.resetRequests && (
+                                  <span>تجدد: {formatArabicResetTime(serverQuotas.groq.rateLimits.resetRequests)}</span>
+                                )}
+                                {serverQuotas.groq.rateLimits.resetTokens && (
+                                  <span>توكنات: {formatArabicResetTime(serverQuotas.groq.rateLimits.resetTokens)}</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })() : (
+                        <div className="text-xs text-on-surface-variant py-3 flex items-center justify-between">
+                          <span>لم تُجلب القراءات بعد</span>
+                          <button
+                            type="button"
+                            onClick={() => fetchServerQuotas(true)}
+                            className="px-2.5 py-1 rounded-lg bg-white border border-[#cdddf5] text-[11px] font-bold text-on-surface hover:bg-[#edf4ff] cursor-pointer"
+                          >
+                            فحص
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                )}
-              </div>
-            </div>
-
-          </div>
-
-          {/* Simple, clean Raw headers link */}
-          {serverQuotas && ((serverQuotas.groq && serverQuotas.groq.rawHeaders) || (serverQuotas.gemini && serverQuotas.gemini.rawHeaders)) && (
-            <details className="group">
-              <summary className="flex items-center justify-between pt-1 text-right font-bold text-[10px] text-slate-400 hover:text-slate-500 cursor-pointer select-none">
-                <div className="flex items-center gap-1">
-                  <Sliders className="w-3 h-3 text-slate-300" />
-                  <span>عرض البيانات الفنية الخام (Raw API Headers)</span>
                 </div>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-300 transition-transform duration-200 group-open:rotate-180" />
-              </summary>
-              
-              <div className="p-3 bg-slate-900 text-slate-300 rounded-xl font-mono text-[9px] text-left mt-2 overflow-auto max-h-[140px] space-y-2 border border-slate-800" dir="ltr">
-                {serverQuotas.groq && serverQuotas.groq.rawHeaders && (
-                  <div>
-                    <div className="text-orange-400 font-bold border-b border-slate-800 pb-0.5 mb-1">--- Groq Cloud Headers ---</div>
-                    {Object.entries(serverQuotas.groq.rawHeaders).map(([key, val]) => (
-                      <div key={key} className="flex justify-between gap-4 border-b border-slate-800/40 pb-0.5">
-                        <span className="text-slate-400 shrink-0">{key}:</span>
-                        <span className="text-emerald-400 font-bold break-all text-right">{String(val)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {serverQuotas.gemini && serverQuotas.gemini.rawHeaders && Object.keys(serverQuotas.gemini.rawHeaders).length > 0 && (
-                  <div className="mt-3">
-                    <div className="text-blue-400 font-bold border-b border-slate-800 pb-0.5 mb-1">--- Google Gemini Headers ---</div>
-                    {Object.entries(serverQuotas.gemini.rawHeaders).map(([key, val]) => (
-                      <div key={key} className="flex justify-between gap-4 border-b border-slate-800/40 pb-0.5">
-                        <span className="text-slate-400 shrink-0">{key}:</span>
-                        <span className="text-emerald-400 font-bold break-all text-right">{String(val)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </details>
+              )}
+            </div>
           )}
         </div>
 
@@ -5758,31 +5576,31 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
         />
       )}
 
-      {/* Custom IFrame-safe Delete Confirmation Modal */}
+      {/* Delete Confirmation Modal */}
       {deleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fade-in" dir="rtl">
-          <div className="bg-white border border-slate-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4 text-center animate-scale-up">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#081628]/45 backdrop-blur-xs" dir="rtl">
+          <div className="bg-white border border-[#c7daf6] rounded-[24px] max-w-sm w-full p-6 shadow-2xl space-y-4 text-center">
             <div className="flex flex-col items-center justify-center space-y-2">
-              <div className="w-12 h-12 rounded-full bg-rose-50 flex items-center justify-center text-rose-600 animate-pulse">
-                <Trash2 className="w-6 h-6" />
+              <div className="w-11 h-11 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600">
+                <Trash2 className="w-5 h-5" />
               </div>
-              <h4 className="text-sm font-black text-slate-800">تأكيد عملية الحذف</h4>
+              <h4 className="text-sm font-black text-on-surface">تأكيد الحذف</h4>
             </div>
-            
-            <p className="text-xs text-slate-500 font-bold leading-relaxed">
+
+            <p className="text-xs text-on-surface-variant font-medium leading-relaxed">
               {deleteConfirm.message}
             </p>
 
-            <div className="flex gap-2.5 pt-2">
+            <div className="flex gap-2.5 pt-1">
               <button
                 onClick={executeConfirmedDelete}
-                className="flex-1 py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded-xl shadow-sm active:scale-95 transition-all cursor-pointer"
+                className="flex-1 h-10 px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer"
               >
-                نعم، احذف
+                حذف
               </button>
               <button
                 onClick={() => setDeleteConfirm(null)}
-                className="flex-1 py-2.5 px-4 bg-slate-100 text-slate-700 font-black text-xs rounded-xl border border-slate-200 hover:bg-slate-200 active:scale-95 transition-all cursor-pointer"
+                className="flex-1 h-10 px-4 bg-[#f4f8ff] border border-[#cdddf5] text-on-surface font-bold text-xs rounded-xl hover:bg-[#e6effe] transition-colors cursor-pointer"
               >
                 إلغاء
               </button>
@@ -5791,170 +5609,149 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
         </div>
       )}
 
-      {/* Custom External Mode Modal (نسخ البرومبت وإدخال البيانات المجلوبة) */}
+      {/* External Mode Modal */}
       {showExternalModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-fade-in" dir="rtl">
-          <div className="bg-white border border-slate-200 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-5 text-right animate-scale-up max-h-[90vh] flex flex-col overflow-hidden">
-            
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#081628]/45 backdrop-blur-xs" dir="rtl">
+          <div className="bg-white border border-[#c7daf6] rounded-[24px] max-w-2xl w-full p-5 sm:p-6 shadow-2xl space-y-4 text-right max-h-[90vh] flex flex-col overflow-hidden">
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4 shrink-0">
+            <div className="flex items-center justify-between border-b border-[#e5eefb] pb-3.5 shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
-                  <Globe className="w-5 h-5" />
+                <div className="w-9 h-9 rounded-xl bg-[#e8f0fe] border border-[#c7daf6] flex items-center justify-center text-[#004ac6]">
+                  <Globe className="w-4.5 h-4.5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-slate-800">التوليد والاستيراد الخارجي (External Mode)</h3>
-                  <p className="text-[11px] text-slate-400 font-bold mt-0.5">
-                    انسخ الطلب المنظم لأي ذكاء اصطناعي خارجي (ChatGPT, Claude, Gemini Web) ثم ألصق النتيجة لاستيرادها فوراً
+                  <h3 className="text-sm font-black text-on-surface">الاستيراد الخارجي (JSON)</h3>
+                  <p className="text-[11px] text-on-surface-variant font-medium">
+                    انسخ البرومبت لأي نموذج خارجي ثم ألصق الرد هنا
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setShowExternalModal(false)}
-                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+                className="w-8 h-8 flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-[#edf4ff] rounded-xl transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Navigation Tabs */}
-            <div className="flex bg-slate-100/80 p-1 rounded-xl shrink-0">
+            <div className="flex bg-[#e3edfc] p-1 rounded-xl border border-[#d0dff7] shrink-0">
               <button
                 type="button"
                 onClick={() => setExternalTab("prompt")}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                className={`flex-1 h-9 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                   externalTab === "prompt"
-                    ? "bg-white text-indigo-600 shadow-xs font-black"
-                    : "text-slate-500 hover:text-slate-800"
+                    ? "bg-white text-[#004ac6] shadow-2xs"
+                    : "text-on-surface-variant hover:text-on-surface"
                 }`}
               >
                 <Code className="w-3.5 h-3.5" />
-                <span>1. نسخ البرومبت المصمم</span>
+                <span>1. نسخ البرومبت</span>
               </button>
               <button
                 type="button"
                 onClick={() => setExternalTab("import")}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                className={`flex-1 h-9 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                   externalTab === "import"
-                    ? "bg-white text-indigo-600 shadow-xs font-black"
-                    : "text-slate-500 hover:text-slate-800"
+                    ? "bg-white text-[#004ac6] shadow-2xs"
+                    : "text-on-surface-variant hover:text-on-surface"
                 }`}
               >
                 <Upload className="w-3.5 h-3.5" />
-                <span>2. إدخال البيانات المجلوبة (JSON)</span>
+                <span>2. لصق النتيجة</span>
               </button>
             </div>
 
             {/* Content Area */}
-            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+            <div className="flex-1 overflow-y-auto space-y-3 pr-0.5">
               {externalTab === "prompt" ? (
-                <div className="space-y-3">
-                  <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl text-xs text-indigo-900 font-semibold space-y-1">
-                    <p className="font-bold">💡 كيف تستخدم هذا الخيار؟</p>
-                    <p className="text-[11px] text-indigo-800/80 leading-relaxed">
-                      1. اضغط على زر "نسخ البرومبت وانتقال للاستيراد" بالأسفل.<br />
-                      2. ألصق النص في ChatGPT أو Claude أو Gemini أو DeepSeek.<br />
-                      3. انسخ رد النموذج كـ JSON ثم ألصقه في الخطوة التالية لتأكيد الاستيراد فوراً.
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between flex-wrap gap-2">
-                      <label className="text-xs font-bold text-slate-700">البرومبت المولد تلقائياً مع كافة القواعد:</label>
-                      <div className="flex items-center gap-2">
-                        {externalCopySuccess && (
-                          <span className="text-[11px] font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-200 animate-pulse flex items-center gap-1">
-                            <Check className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>تم النسخ بنجاح!</span>
-                          </span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleCopyExternalPrompt(false)}
-                          className="px-2.5 py-1 text-[11px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-all cursor-pointer flex items-center gap-1 active:scale-95"
-                          title="نسخ النص فقط دون الانتقال"
-                        >
-                          <Copy className="w-3 h-3" />
-                          <span>نسخ فقط</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setExternalTab("import");
-                            setTimeout(() => {
-                              if (jsonTextareaRef.current) {
-                                jsonTextareaRef.current.focus();
-                                jsonTextareaRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
-                              }
-                            }, 120);
-                          }}
-                          className="px-2.5 py-1 text-[11px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-all cursor-pointer flex items-center gap-1 active:scale-95"
-                          title="الانتقال لخانة اللصق"
-                        >
-                          <span>الانتقال للصق ⬅️</span>
-                        </button>
-                      </div>
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <label className="text-xs font-bold text-on-surface">البرومبت المولد</label>
+                    <div className="flex items-center gap-2">
+                      {externalCopySuccess && (
+                        <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-200 flex items-center gap-1">
+                          <Check className="w-3 h-3" />
+                          <span>تم النسخ</span>
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleCopyExternalPrompt(false)}
+                        className="h-8 px-2.5 text-[11px] font-bold text-on-surface bg-[#f4f8ff] border border-[#cdddf5] hover:bg-[#e6effe] rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                      >
+                        <Copy className="w-3 h-3 text-[#004ac6]" />
+                        <span>نسخ</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExternalTab("import");
+                          setTimeout(() => {
+                            if (jsonTextareaRef.current) {
+                              jsonTextareaRef.current.focus();
+                              jsonTextareaRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+                            }
+                          }, 120);
+                        }}
+                        className="h-8 px-2.5 text-[11px] font-bold text-[#004ac6] bg-[#e8f0fe] hover:bg-[#d7e6fd] rounded-lg transition-colors cursor-pointer"
+                      >
+                        اللصق الآن
+                      </button>
                     </div>
-
-                    <textarea
-                      readOnly
-                      onClick={(e) => (e.target as HTMLTextAreaElement).select()}
-                      value={constructFullExternalPrompt(prompt)}
-                      className="w-full h-56 p-3.5 bg-slate-900 text-slate-200 font-mono text-xs sm:text-[13px] rounded-xl border border-slate-800 focus:outline-none resize-none leading-relaxed select-all"
-                      dir="rtl"
-                    />
                   </div>
+
+                  <textarea
+                    readOnly
+                    onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+                    value={constructFullExternalPrompt(prompt)}
+                    className="w-full h-56 p-3.5 bg-[#f5f9ff] text-on-surface font-mono text-xs sm:text-[13px] rounded-xl border border-[#cdddf5] focus:border-[#004ac6] focus:bg-white focus:outline-none resize-none leading-relaxed select-all"
+                    dir="rtl"
+                  />
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <div className="p-3 bg-amber-50/60 border border-amber-200/70 rounded-xl text-xs text-amber-900 font-semibold">
-                    <p className="font-bold">📥 إدخال النتيجة المنسوخة (JSON):</p>
-                    <p className="text-[11px] text-amber-800/80 mt-0.5 leading-relaxed">
-                      يدعم التطبيق كود JSON المباشر أو الملتف داخل كتل الماركداون (```json ... ```). استخدم زر «📋 لصق الرد من الحافظة» أدناه أو ألصق يدوياً.
-                    </p>
-                  </div>
-
                   {externalCopySuccess && (
-                    <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl flex items-center gap-2 animate-fade-in">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>✅ تم نسخ البرومبت إلى الحافظة بنجاح! انتقلت تلقائياً لخانة الاستيراد.</span>
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>تم نسخ البرومبت للحافظة.</span>
                     </div>
                   )}
 
                   {externalPasteSuccess && (
-                    <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl flex items-center gap-2 animate-fade-in">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>✅ تم لصق كود JSON من الحافظة بنجاح! جاهز للاستيراد.</span>
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>تم لصق JSON من الحافظة.</span>
                     </div>
                   )}
 
                   {externalPasteHint && (
                     <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold rounded-xl flex items-center gap-2">
-                      <Info className="w-4 h-4 text-amber-600 shrink-0" />
+                      <Info className="w-4 h-4 shrink-0" />
                       <span>{externalPasteHint}</span>
                     </div>
                   )}
 
                   {externalError && (
                     <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold rounded-xl flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                      <AlertCircle className="w-4 h-4 shrink-0" />
                       <span>{externalError}</span>
                     </div>
                   )}
 
                   {externalImporting && (
-                    <div className="p-3 bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs font-bold rounded-xl flex items-center gap-2.5 animate-pulse">
-                      <Loader2 className="w-4 h-4 animate-spin shrink-0 text-indigo-600" />
-                      <span>{externalImportProgress || "جاري جلب الصور وتوليد البطاقات..."}</span>
+                    <div className="p-3 bg-[#e8f0fe] border border-[#c7daf6] text-[#004ac6] text-xs font-bold rounded-xl flex items-center gap-2.5">
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                      <span>{externalImportProgress || "جاري الاستيراد..."}</span>
                     </div>
                   )}
 
                   <div className="space-y-2">
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <div className="flex items-center gap-2">
-                        <label className="text-xs font-black text-slate-700">كود JSON المجلوب:</label>
+                        <label className="text-xs font-bold text-on-surface">كود JSON</label>
                         {externalJsonInput.trim() && (
-                          <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono font-bold">
+                          <span className="text-[11px] bg-[#e3edfc] text-[#004ac6] px-2 py-0.5 rounded font-mono tabular-nums font-bold">
                             {externalJsonInput.length} حرف
                           </span>
                         )}
@@ -5969,22 +5766,20 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                               setExternalError(null);
                               setExternalPasteHint(null);
                             }}
-                            className="px-2.5 py-1 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-all cursor-pointer flex items-center gap-1 active:scale-95 disabled:opacity-50"
-                            title="مسح محتوى المربع"
+                            className="h-8 px-2.5 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors cursor-pointer flex items-center gap-1 disabled:opacity-50"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
-                            <span>تفريغ</span>
+                            <span>مسح</span>
                           </button>
                         )}
                         <button
                           type="button"
                           disabled={externalImporting}
                           onClick={handlePasteExternalJson}
-                          className="px-3.5 py-1.5 text-xs font-black text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-xs active:scale-95 disabled:opacity-50"
-                          title="لصق الرد من الحافظة مباشرة بضغطة واحدة"
+                          className="h-8 px-3 text-xs font-bold text-[#004ac6] bg-[#e8f0fe] hover:bg-[#d7e6fd] rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
                         >
-                          <Clipboard className="w-4 h-4 text-indigo-600" />
-                          <span>📋 لصق الرد من الحافظة</span>
+                          <Clipboard className="w-3.5 h-3.5" />
+                          <span>لصق من الحافظة</span>
                         </button>
                       </div>
                     </div>
@@ -5997,8 +5792,8 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                         setExternalJsonInput(e.target.value);
                         if (externalError) setExternalError(null);
                       }}
-                      placeholder={`ألصق النتيجة هنا أو اضغط زر «📋 لصق الرد من الحافظة» أعلاه...\n\nمثال:\n{\n  "folder": { "name": "مفردات السفر", "color": "#0056f6" },\n  "cards": [\n    { "frontText": "Handy", "backText": "هاتف", "correctArticle": "das" }\n  ]\n}`}
-                      className="w-full h-52 p-3.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs sm:text-[13px] text-slate-800 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:outline-none transition-all resize-none disabled:opacity-60 leading-relaxed"
+                      placeholder={`ألصق كود JSON هنا...\n\n{\n  "folder": { "name": "مفردات السفر", "color": "#0056f6" },\n  "cards": [\n    { "frontText": "Handy", "backText": "هاتف", "correctArticle": "das" }\n  ]\n}`}
+                      className="w-full h-52 p-3.5 bg-[#f5f9ff] border border-[#cdddf5] rounded-xl font-mono text-xs sm:text-[13px] text-on-surface placeholder-[#627289] focus:bg-white focus:border-[#004ac6] focus:outline-none transition-colors resize-none disabled:opacity-60 leading-relaxed"
                       dir="ltr"
                     />
                   </div>
@@ -6007,13 +5802,13 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
             </div>
 
             {/* Footer Actions */}
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 sm:gap-3 shrink-0 flex-wrap sm:flex-nowrap">
+            <div className="pt-3 border-t border-[#e5eefb] flex items-center justify-between gap-2 shrink-0 flex-wrap">
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   disabled={externalImporting}
                   onClick={() => setShowExternalModal(false)}
-                  className="px-3.5 py-2 text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-all cursor-pointer disabled:opacity-40"
+                  className="h-9 px-3.5 text-xs font-bold text-on-surface-variant hover:text-on-surface hover:bg-[#f4f8ff] rounded-xl transition-colors cursor-pointer disabled:opacity-40"
                 >
                   إغلاق
                 </button>
@@ -6022,10 +5817,10 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                     type="button"
                     disabled={externalImporting}
                     onClick={() => setExternalTab("prompt")}
-                    className="px-3 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                    className="h-9 px-3 text-xs font-bold text-on-surface bg-[#f4f8ff] border border-[#cdddf5] hover:bg-[#e6effe] rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
                   >
-                    <Code className="w-3.5 h-3.5 text-slate-500" />
-                    <span>العودة للبرومبت</span>
+                    <Code className="w-3.5 h-3.5 text-[#004ac6]" />
+                    <span>البرومبت</span>
                   </button>
                 )}
               </div>
@@ -6043,17 +5838,17 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                         }
                       }, 120);
                     }}
-                    className="px-3 py-2.5 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all cursor-pointer"
+                    className="h-9 px-3 text-xs font-bold text-on-surface bg-[#f4f8ff] border border-[#cdddf5] hover:bg-[#e6effe] rounded-xl transition-colors cursor-pointer"
                   >
-                    الانتقال للاستيراد ⬅️
+                    الانتقال للصق
                   </button>
                   <button
                     type="button"
                     onClick={() => handleCopyExternalPrompt(true)}
-                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl shadow-sm active:scale-95 transition-all cursor-pointer flex items-center gap-2"
+                    className="h-9 px-4 bg-[#004ac6] hover:bg-[#003da6] text-white font-bold text-xs rounded-xl active:scale-[0.98] transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
                   >
-                    <Copy className="w-4 h-4" />
-                    <span>نسخ البرومبت وانتقال للاستيراد</span>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>نسخ وانتقال</span>
                   </button>
                 </div>
               ) : (
@@ -6061,81 +5856,76 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                   type="button"
                   onClick={handleImportExternalJson}
                   disabled={!externalJsonInput.trim() || externalImporting}
-                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-sm active:scale-95 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                  className="h-9 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl active:scale-[0.98] transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-xs"
                 >
                   {externalImporting ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>جاري الاستيراد وجلب الصور...</span>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>جاري الاستيراد...</span>
                     </>
                   ) : (
                     <>
-                      <CheckSquare className="w-4 h-4" />
-                      <span>استيراد وتوليد البطاقات الآن</span>
+                      <CheckSquare className="w-3.5 h-3.5" />
+                      <span>استيراد البطاقات</span>
                     </>
                   )}
                 </button>
               )}
             </div>
-
           </div>
         </div>
       )}
 
-      {/* Image Fetching & Storage Options Modal (Matching Library / Explorer.tsx) */}
+      {/* Image Fetching & Storage Options Modal */}
       {showImageOptionsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fade-in" dir="rtl">
-          <div className="bg-white border border-slate-100 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 text-right relative overflow-hidden max-h-[90vh] overflow-y-auto">
-            {/* Top Close Button */}
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#081628]/45 backdrop-blur-xs" dir="rtl">
+          <div className="bg-white border border-[#c7daf6] rounded-[24px] max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-4 text-right relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => {
                 if (!isFetchingImages) setShowImageOptionsModal(false);
               }}
               disabled={isFetchingImages}
-              className="absolute top-4 left-4 w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-all cursor-pointer disabled:opacity-40"
+              className="absolute top-4 left-4 w-8 h-8 rounded-xl bg-[#f4f8ff] border border-[#cdddf5] hover:bg-[#e6effe] flex items-center justify-center text-on-surface-variant transition-colors cursor-pointer disabled:opacity-40"
             >
               <X className="w-4 h-4" />
             </button>
 
-            {/* Header Title */}
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-sm shrink-0 bg-emerald-600">
-                <ImageIcon className="w-6 h-6" />
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0 bg-emerald-600">
+                <ImageIcon className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-lg font-black text-slate-800 leading-tight">
-                  تنزيل وتخزين الصور مسبقاً
+                <h3 className="text-base font-black text-on-surface leading-tight">
+                  تنزيل الصور مسبقاً
                 </h3>
-                <p className="text-xs text-slate-500 font-semibold mt-0.5">
-                  تخزين الصور التوضيحية للأغلفة والبطاقات في الذاكرة لتصفحها بدون إنترنت
+                <p className="text-xs text-on-surface-variant font-medium mt-0.5">
+                  حفظ الصور في الذاكرة للعمل بدون إنترنت
                 </p>
               </div>
             </div>
 
-            {/* Target Scope & Auto Images Options */}
-            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100/80 space-y-3">
+            <div className="bg-[#f4f8ff] p-3.5 rounded-2xl border border-[#dbe7fa] space-y-3">
               <div className="flex justify-between items-center text-xs">
-                <span className="font-bold text-slate-500">نطاق التنزيل:</span>
-                <span className="font-black text-slate-800 bg-white px-2.5 py-1 rounded-lg border border-slate-200/60 shadow-3xs">
-                  {activeAiFolder ? activeAiFolder.name : "المساعد الذكي كامل"}
+                <span className="font-bold text-on-surface-variant">النطاق</span>
+                <span className="font-bold text-on-surface">
+                  {activeAiFolder ? activeAiFolder.name : "المساعد الذكي"}
                 </span>
               </div>
 
-              {/* Checkbox for 10 Auto Images Option */}
-              <label className="flex items-start gap-2.5 p-2.5 bg-white rounded-xl border border-emerald-100 cursor-pointer hover:bg-emerald-50/40 transition-all select-none">
+              <label className="flex items-start gap-2.5 p-2.5 bg-white rounded-xl border border-[#cdddf5] cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={includeAuto10Images}
                   onChange={(e) => setIncludeAuto10Images(e.target.checked)}
                   disabled={isFetchingImages}
-                  className="mt-0.5 w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                  className="mt-0.5 w-4 h-4 text-emerald-600 rounded border-[#a9bedb] focus:ring-emerald-500 cursor-pointer"
                 />
                 <div className="space-y-0.5 text-right">
-                  <span className="text-xs font-black text-slate-800 block">
-                    تنزيل وتخزين الـ 10 صور التلقائية لكل بطاقة (اختياري) 🖼️
+                  <span className="text-xs font-bold text-on-surface block">
+                    تنزيل 10 صور بديلة لكل بطاقة
                   </span>
-                  <p className="text-[10px] font-semibold text-slate-500 leading-normal">
-                    يجلب أول 10 صور نتائج مقترحة من محرك البحث تلقائياً بعد الصورة الأساسية لكل بطاقة، لتصبح جميع خيارات الصور متاحة أوفلاين.
+                  <p className="text-[11px] font-medium text-on-surface-variant">
+                    يتيح تبديل الصورة لاحقاً بدون اتصال.
                   </p>
                 </div>
               </label>
@@ -6144,137 +5934,110 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                 const targetCards = activeAiFolder ? folderCards : aiCards;
                 let primaryImages = 0;
                 if (activeAiFolder?.coverImage) primaryImages++;
-
                 targetCards.forEach((c) => {
                   if (c.frontImage?.trim()) primaryImages++;
                   if (c.backImage?.trim()) primaryImages++;
                 });
-
                 const autoImagesEst = includeAuto10Images ? targetCards.length * 10 : 0;
                 const totalCombinedEst = primaryImages + autoImagesEst;
 
                 return (
-                  <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-200/50">
-                    <span className="font-bold text-slate-500">إجمالي الصور المتوقع تخزينها:</span>
-                    <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                      <span className="font-extrabold text-[#0056f6] bg-blue-50 px-2 py-0.5 rounded-md">
-                        {primaryImages} أساسية
-                      </span>
-                      {includeAuto10Images && (
-                        <span className="font-extrabold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md">
-                          +{autoImagesEst} تلقائية
-                        </span>
-                      )}
-                      <span className="font-black text-emerald-800 bg-emerald-100/80 px-2.5 py-0.5 rounded-md">
-                        المجموع ~{totalCombinedEst} صورة
-                      </span>
-                    </div>
+                  <div className="flex justify-between items-center text-xs pt-2 border-t border-[#dbe7fa] tabular-nums">
+                    <span className="font-bold text-on-surface-variant">المتوقع</span>
+                    <span className="font-bold text-on-surface">
+                      {primaryImages} أساسية{includeAuto10Images ? ` + ${autoImagesEst} تلقائية` : ""} ({totalCombinedEst})
+                    </span>
                   </div>
                 );
               })()}
             </div>
 
-            {/* Progress Section */}
             {isFetchingImages && (
-              <div className="space-y-2 bg-emerald-50/60 p-4 rounded-2xl border border-emerald-100">
-                <div className="flex justify-between items-center text-xs font-bold text-slate-700">
-                  <span className="flex items-center gap-1.5 text-emerald-600">
-                    <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
-                    جاري تنزيل وتخزين الصور...
+              <div className="space-y-2 bg-emerald-50/70 p-3.5 rounded-2xl border border-emerald-200">
+                <div className="flex justify-between items-center text-xs font-bold text-on-surface tabular-nums">
+                  <span className="flex items-center gap-1.5 text-emerald-700">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>جاري التنزيل...</span>
                   </span>
-                  <span>{imageFetchProgress.current} من {imageFetchProgress.total}</span>
+                  <span>{imageFetchProgress.current} / {imageFetchProgress.total}</span>
                 </div>
-
-                <div className="w-full bg-slate-200/70 h-2.5 rounded-full overflow-hidden">
-                  <div 
-                    className="bg-gradient-to-r from-emerald-500 to-teal-600 h-full transition-all duration-300 rounded-full"
-                    style={{ 
-                      width: imageFetchProgress.total > 0 
-                        ? `${Math.round((imageFetchProgress.current / imageFetchProgress.total) * 100)}%` 
-                        : "0%" 
+                <div className="w-full bg-[#dce8fb] h-2 rounded-full overflow-hidden">
+                  <div
+                    className="bg-emerald-600 h-full transition-all duration-300 rounded-full"
+                    style={{
+                      width: imageFetchProgress.total > 0
+                        ? `${Math.round((imageFetchProgress.current / imageFetchProgress.total) * 100)}%`
+                        : "0%"
                     }}
                   />
                 </div>
-
                 {imageFetchProgress.currentItem && (
                   <div className="flex items-center gap-2 pt-1">
                     {imageFetchProgress.currentPreview && (
-                      <img 
-                        src={imageFetchProgress.currentPreview} 
-                        alt="preview" 
-                        className="w-8 h-8 rounded-lg object-cover border border-emerald-200 shrink-0" 
+                      <img
+                        src={imageFetchProgress.currentPreview}
+                        alt="preview"
+                        className="w-7 h-7 rounded-lg object-cover border border-emerald-200 shrink-0"
                       />
                     )}
-                    <p className="text-[11px] font-semibold text-slate-500 truncate">
-                      الآن: <span className="text-slate-800 font-bold">{imageFetchProgress.currentItem}</span>
+                    <p className="text-[11px] font-medium text-on-surface-variant truncate">
+                      {imageFetchProgress.currentItem}
                     </p>
                   </div>
                 )}
               </div>
             )}
 
-            {/* Success Message */}
             {imageFetchSuccess && (
-              <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl flex items-start gap-3">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <h4 className="text-xs font-bold text-emerald-900">
-                    تم تنزيل وتخزين كافة الصور بنجاح! 🖼️
-                  </h4>
-                  <p className="text-[11px] font-semibold text-emerald-700 leading-relaxed">
-                    جميع الصور محفوظة الآن في ذاكرة التخزين المحلية. يمكنك تصفح ومراجعة البطاقات بدون استهلاك الإنترنت!
-                  </p>
-                </div>
+              <div className="bg-emerald-50 border border-emerald-200 p-3.5 rounded-2xl flex items-center gap-2.5 text-xs font-bold text-emerald-800">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>تم حفظ جميع الصور في الذاكرة المحلية.</span>
               </div>
             )}
 
-            {/* Main Action Button */}
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={() => handleUnifiedImageFetchAndDownload()}
-                disabled={isFetchingImages}
-                className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm rounded-2xl transition-all shadow-md active:scale-98 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isFetchingImages ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    <span>جاري التخزين ({imageFetchProgress.current}/{imageFetchProgress.total})...</span>
-                  </>
-                ) : (
-                  <>
-                    <DownloadCloud className="w-5 h-5" />
-                    <span>تنزيل وتخزين كافة الصور فوراً 🖼️</span>
-                  </>
-                )}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => handleUnifiedImageFetchAndDownload()}
+              disabled={isFetchingImages}
+              className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-xs"
+            >
+              {isFetchingImages ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>جاري التخزين ({imageFetchProgress.current}/{imageFetchProgress.total})</span>
+                </>
+              ) : (
+                <>
+                  <DownloadCloud className="w-4 h-4" />
+                  <span>بدء التنزيل</span>
+                </>
+              )}
+            </button>
 
-            {/* Individual Card Images Download Section */}
             {(() => {
               const cardsWithImages = (activeAiFolder ? folderCards : aiCards).filter(c => c.frontImage || c.backImage);
               if (cardsWithImages.length === 0) return null;
 
               return (
-                <div className="space-y-2 pt-3 border-t border-slate-100">
-                  <h4 className="text-xs font-black text-slate-800 flex items-center gap-1.5">
-                    <Download className="w-3.5 h-3.5 text-blue-600" />
-                    <span>تنزيل فردي للصور إلى جهازك:</span>
+                <div className="space-y-2 pt-3 border-t border-[#e5eefb]">
+                  <h4 className="text-xs font-bold text-on-surface flex items-center gap-1.5">
+                    <Download className="w-3.5 h-3.5 text-[#004ac6]" />
+                    <span>تنزيل فردي للجهاز</span>
                   </h4>
-                  <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1 text-xs">
+                  <div className="max-h-36 overflow-y-auto space-y-1.5 pr-0.5 text-xs">
                     {cardsWithImages.map((card) => (
-                      <div key={card.id} className="p-2 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-2">
-                        <span className="font-bold text-slate-700 truncate max-w-[200px]">
-                          {card.frontText || "بطاقة بدون عنوان"}
+                      <div key={card.id} className="p-2 bg-[#f4f8ff] rounded-xl border border-[#dbe7fa] flex items-center justify-between gap-2">
+                        <span className="font-bold text-on-surface truncate max-w-[200px]">
+                          {card.frontText || "بطاقة"}
                         </span>
                         <div className="flex items-center gap-1.5 shrink-0">
                           {card.frontImage && (
                             <button
                               type="button"
                               onClick={() => handleDownloadSingleImageFile(card.frontImage!, `${card.frontText || "card"}_front`)}
-                              className="px-2 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer"
+                              className="h-7 px-2 bg-white hover:bg-[#edf4ff] text-on-surface border border-[#cdddf5] rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer"
                             >
-                              <Download className="w-3 h-3 text-blue-600" />
+                              <Download className="w-3 h-3 text-[#004ac6]" />
                               <span>الوجه</span>
                             </button>
                           )}
@@ -6282,7 +6045,7 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                             <button
                               type="button"
                               onClick={() => handleDownloadSingleImageFile(card.backImage!, `${card.backText || "card"}_back`)}
-                              className="px-2 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer"
+                              className="h-7 px-2 bg-white hover:bg-[#edf4ff] text-on-surface border border-[#cdddf5] rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer"
                             >
                               <Download className="w-3 h-3 text-purple-600" />
                               <span>الظهر</span>
@@ -6297,22 +6060,18 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
             })()}
 
             {/* Collapsible Advanced Storage Settings */}
-            <details className="group border-t border-slate-100 pt-3 text-xs">
-              <summary className="font-bold text-slate-600 cursor-pointer flex items-center justify-between select-none py-1">
-                <span className="flex items-center gap-1.5 text-slate-700">
-                  <Sliders className="w-3.5 h-3.5 text-slate-500" />
-                  <span>إعدادات خيارات التخزين المتقدمة</span>
+            <details className="group border-t border-[#e5eefb] pt-3 text-xs">
+              <summary className="font-bold text-on-surface cursor-pointer flex items-center justify-between select-none py-1">
+                <span className="flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5 text-[#004ac6]" />
+                  <span>خيارات التخزين والبحث</span>
                 </span>
-                <ChevronDown className="w-4 h-4 text-slate-400 group-open:rotate-180 transition-transform" />
+                <ChevronDown className="w-4 h-4 text-on-surface-variant group-open:rotate-180 transition-transform" />
               </summary>
 
               <div className="space-y-3 pt-3">
-                {/* Primary Image Storage Mode */}
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-black text-slate-800 flex items-center gap-1">
-                    <Save className="w-3 h-3 text-emerald-600" />
-                    <span>حفظ الصورة الأساسية:</span>
-                  </label>
+                  <span className="text-[11px] font-bold text-on-surface block">الصورة الأساسية</span>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
@@ -6320,13 +6079,13 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                         setPrimaryImageStorageMode("data_url");
                         localStorage.setItem("settings_primary_image_storage", "data_url");
                       }}
-                      className={`p-2 rounded-xl border text-right transition-all cursor-pointer ${
+                      className={`h-9 px-3 rounded-xl border text-xs font-bold transition-colors cursor-pointer ${
                         primaryImageStorageMode === "data_url"
-                          ? "bg-emerald-50 border-emerald-500 text-emerald-800 font-bold"
-                          : "bg-slate-50 border-slate-200 text-slate-600"
+                          ? "bg-emerald-50 border-emerald-500 text-emerald-700"
+                          : "bg-[#f4f8ff] border-[#cdddf5] text-on-surface-variant hover:bg-[#e6effe]"
                       }`}
                     >
-                      <span className="text-[10px] block">تشفير local (Data URL)</span>
+                      تخزين محلي
                     </button>
                     <button
                       type="button"
@@ -6334,23 +6093,19 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                         setPrimaryImageStorageMode("direct_url");
                         localStorage.setItem("settings_primary_image_storage", "direct_url");
                       }}
-                      className={`p-2 rounded-xl border text-right transition-all cursor-pointer ${
+                      className={`h-9 px-3 rounded-xl border text-xs font-bold transition-colors cursor-pointer ${
                         primaryImageStorageMode === "direct_url"
-                          ? "bg-emerald-50 border-emerald-500 text-emerald-800 font-bold"
-                          : "bg-slate-50 border-slate-200 text-slate-600"
+                          ? "bg-emerald-50 border-emerald-500 text-emerald-700"
+                          : "bg-[#f4f8ff] border-[#cdddf5] text-on-surface-variant hover:bg-[#e6effe]"
                       }`}
                     >
-                      <span className="text-[10px] block">رابط مباشر (Direct URL)</span>
+                      رابط مباشر
                     </button>
                   </div>
                 </div>
 
-                {/* Secondary Images Storage Mode */}
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-black text-slate-800 flex items-center gap-1">
-                    <Layers className="w-3 h-3 text-purple-600" />
-                    <span>حفظ الصور الـ 10 الثانوية:</span>
-                  </label>
+                  <span className="text-[11px] font-bold text-on-surface block">الصور الـ 10 الثانوية</span>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
@@ -6358,13 +6113,13 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                         setSecondaryImagesStorageMode("data_urls");
                         localStorage.setItem("settings_secondary_images_storage", "data_urls");
                       }}
-                      className={`p-2 rounded-xl border text-right transition-all cursor-pointer ${
+                      className={`h-9 px-3 rounded-xl border text-xs font-bold transition-colors cursor-pointer ${
                         secondaryImagesStorageMode === "data_urls"
-                          ? "bg-purple-50 border-purple-500 text-purple-800 font-bold"
-                          : "bg-slate-50 border-slate-200 text-slate-600"
+                          ? "bg-purple-50 border-purple-500 text-purple-700"
+                          : "bg-[#f4f8ff] border-[#cdddf5] text-on-surface-variant hover:bg-[#e6effe]"
                       }`}
                     >
-                      <span className="text-[10px] block">تخزين في الذاكرة 📦</span>
+                      تخزين في الذاكرة
                     </button>
                     <button
                       type="button"
@@ -6372,134 +6127,55 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                         setSecondaryImagesStorageMode("direct_urls");
                         localStorage.setItem("settings_secondary_images_storage", "direct_urls");
                       }}
-                      className={`p-2 rounded-xl border text-right transition-all cursor-pointer ${
+                      className={`h-9 px-3 rounded-xl border text-xs font-bold transition-colors cursor-pointer ${
                         secondaryImagesStorageMode === "direct_urls"
-                          ? "bg-purple-50 border-purple-500 text-purple-800 font-bold"
-                          : "bg-slate-50 border-slate-200 text-slate-600"
+                          ? "bg-purple-50 border-purple-500 text-purple-700"
+                          : "bg-[#f4f8ff] border-[#cdddf5] text-on-surface-variant hover:bg-[#e6effe]"
                       }`}
                     >
-                      <span className="text-[10px] block">روابط فقط 🌐</span>
+                      روابط فقط
                     </button>
                   </div>
                 </div>
 
-                {/* Image Search Query Source Selector */}
-                <div className="space-y-2 pt-2 border-t border-slate-100">
-                  <label className="text-[11px] font-black text-slate-800 flex items-center justify-between">
-                    <span className="flex items-center gap-1">
-                      <Search className="w-3.5 h-3.5 text-blue-600" />
-                      <span>مصدر الكلمة الممررة للبحث الصوري (Query Source):</span>
-                    </span>
-                    <span className="text-[10px] text-blue-600 font-bold">تحديد التمرير</span>
-                  </label>
+                <div className="space-y-1.5 pt-2 border-t border-[#e5eefb]">
+                  <span className="text-[11px] font-bold text-on-surface flex items-center gap-1.5">
+                    <Search className="w-3.5 h-3.5 text-[#004ac6]" />
+                    <span>مصدر كلمة البحث عن الصور</span>
+                  </span>
                   <div className="space-y-1.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setImageSearchQuerySource("smart_auto");
-                        localStorage.setItem("settings_image_search_query_source", "smart_auto");
-                      }}
-                      className={`w-full p-2.5 rounded-xl border text-right transition-all cursor-pointer flex items-center justify-between ${
-                        imageSearchQuerySource === "smart_auto"
-                          ? "bg-blue-50/90 border-blue-500 text-blue-950 font-bold shadow-2xs"
-                          : "bg-slate-50 border-slate-200/80 text-slate-700 hover:bg-slate-100/60"
-                      }`}
-                    >
-                      <div className="space-y-0.5">
-                        <span className="text-[11px] block font-black text-slate-900">تحديد تلقائي ذكي (مستحسن) ✨</span>
-                        <span className="text-[9.5px] block text-slate-500 font-medium">بحث مخصص (imageSearchQuery) ← الوجه (frontText) ← الظهر (backText)</span>
-                      </div>
-                      {imageSearchQuerySource === "smart_auto" && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setImageSearchQuerySource("front_text_only");
-                        localStorage.setItem("settings_image_search_query_source", "front_text_only");
-                      }}
-                      className={`w-full p-2.5 rounded-xl border text-right transition-all cursor-pointer flex items-center justify-between ${
-                        imageSearchQuerySource === "front_text_only"
-                          ? "bg-blue-50/90 border-blue-500 text-blue-950 font-bold shadow-2xs"
-                          : "bg-slate-50 border-slate-200/80 text-slate-700 hover:bg-slate-100/60"
-                      }`}
-                    >
-                      <div className="space-y-0.5">
-                        <span className="text-[11px] block font-black text-slate-900">النص الأمامي فقط (وجه البطاقة) 🔤</span>
-                        <span className="text-[9.5px] block text-slate-500 font-medium">تمرير الكلمة الرئيسية المكتوبة في وجه البطاقة فقط (frontText)</span>
-                      </div>
-                      {imageSearchQuerySource === "front_text_only" && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setImageSearchQuerySource("back_text_only");
-                        localStorage.setItem("settings_image_search_query_source", "back_text_only");
-                      }}
-                      className={`w-full p-2.5 rounded-xl border text-right transition-all cursor-pointer flex items-center justify-between ${
-                        imageSearchQuerySource === "back_text_only"
-                          ? "bg-blue-50/90 border-blue-500 text-blue-950 font-bold shadow-2xs"
-                          : "bg-slate-50 border-slate-200/80 text-slate-700 hover:bg-slate-100/60"
-                      }`}
-                    >
-                      <div className="space-y-0.5">
-                        <span className="text-[11px] block font-black text-slate-900">النص الخلفي فقط (الترجمة / ظهر البطاقة) 🌐</span>
-                        <span className="text-[9.5px] block text-slate-500 font-medium">تمرير الترجمة أو المعنى المكتوب خلف البطاقة فقط (backText)</span>
-                      </div>
-                      {imageSearchQuerySource === "back_text_only" && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setImageSearchQuerySource("combined_front_back");
-                        localStorage.setItem("settings_image_search_query_source", "combined_front_back");
-                      }}
-                      className={`w-full p-2.5 rounded-xl border text-right transition-all cursor-pointer flex items-center justify-between ${
-                        imageSearchQuerySource === "combined_front_back"
-                          ? "bg-blue-50/90 border-blue-500 text-blue-950 font-bold shadow-2xs"
-                          : "bg-slate-50 border-slate-200/80 text-slate-700 hover:bg-slate-100/60"
-                      }`}
-                    >
-                      <div className="space-y-0.5">
-                        <span className="text-[11px] block font-black text-slate-900">دمج الوجه والظهر معاً 🔗</span>
-                        <span className="text-[9.5px] block text-slate-500 font-medium">مثال: تمرير "Der Apfel تفاحة" معاً لنتائج دقيقة</span>
-                      </div>
-                      {imageSearchQuerySource === "combined_front_back" && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setImageSearchQuerySource("custom_query_only");
-                        localStorage.setItem("settings_image_search_query_source", "custom_query_only");
-                      }}
-                      className={`w-full p-2.5 rounded-xl border text-right transition-all cursor-pointer flex items-center justify-between ${
-                        imageSearchQuerySource === "custom_query_only"
-                          ? "bg-blue-50/90 border-blue-500 text-blue-950 font-bold shadow-2xs"
-                          : "bg-slate-50 border-slate-200/80 text-slate-700 hover:bg-slate-100/60"
-                      }`}
-                    >
-                      <div className="space-y-0.5">
-                        <span className="text-[11px] block font-black text-slate-900">الكلمة المخصصة فقط (imageSearchQuery) 🎯</span>
-                        <span className="text-[9.5px] block text-slate-500 font-medium">تمرير كلمة البحث المخصصة فقط المحددة في بيانات البطاقة</span>
-                      </div>
-                      {imageSearchQuerySource === "custom_query_only" && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
-                    </button>
+                    {[
+                      { val: "smart_auto", title: "تلقائي ذكي", sub: "بحث مخصص ثم الوجه ثم الظهر" },
+                      { val: "front_text_only", title: "النص الأمامي فقط", sub: "الكلمة في وجه البطاقة" },
+                      { val: "back_text_only", title: "النص الخلفي فقط", sub: "الترجمة في ظهر البطاقة" },
+                      { val: "combined_front_back", title: "دمج الوجه والظهر", sub: "الوجه مع الترجمة معاً" },
+                      { val: "custom_query_only", title: "الكلمة المخصصة فقط", sub: "حقل imageSearchQuery" }
+                    ].map((item) => (
+                      <button
+                        key={item.val}
+                        type="button"
+                        onClick={() => {
+                          setImageSearchQuerySource(item.val as any);
+                          localStorage.setItem("settings_image_search_query_source", item.val);
+                        }}
+                        className={`w-full p-2.5 rounded-xl border text-right transition-colors cursor-pointer flex items-center justify-between ${
+                          imageSearchQuerySource === item.val
+                            ? "bg-[#e8f0fe] border-[#004ac6] text-on-surface"
+                            : "bg-[#f4f8ff] border-[#dbe7fa] text-on-surface hover:bg-[#e6effe]"
+                        }`}
+                      >
+                        <div>
+                          <span className="text-xs font-bold block">{item.title}</span>
+                          <span className="text-[10px] text-on-surface-variant">{item.sub}</span>
+                        </div>
+                        {imageSearchQuerySource === item.val && <Check className="w-4 h-4 text-[#004ac6] shrink-0" />}
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
             </details>
           </div>
-        </div>
-      )}
-
-      {/* Subtle, beautiful floating success stats badge at bottom */}
-      {lastAiUsage && (
-        <div className="fixed bottom-4 left-4 z-50 bg-slate-900/90 backdrop-blur-md border border-slate-800 text-slate-300 py-2 px-3.5 rounded-full text-[10px] font-bold shadow-lg flex items-center gap-2 animate-fade-in" dir="rtl">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-          <span>استهلاك الطلب الأخير: {lastAiUsage.totalTokens.toLocaleString()} رمزاً</span>
         </div>
       )}
 
@@ -6513,19 +6189,18 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
         return (
           <div
             dir="rtl"
-            className="fixed bottom-6 left-6 z-[200] animate-bounce-in cursor-pointer group select-none"
+            className="fixed bottom-6 left-6 z-[200] cursor-pointer group select-none"
             onClick={() => setShowImageOptionsModal(true)}
-            title="انقر لإعادة فتح نافذة تنزيل الصور"
+            title="فتح نافذة تنزيل الصور"
           >
-            <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-2 border-emerald-500/40 hover:border-emerald-500 shadow-2xl rounded-2xl p-3 pr-4 flex items-center gap-3.5 transition-all duration-300 hover:scale-105 active:scale-95 group-hover:shadow-emerald-500/25">
-              {/* Animated Circular Progress Ring */}
-              <div className="relative w-13 h-13 flex items-center justify-center shrink-0">
-                <svg className="w-13 h-13 -rotate-90 transform" viewBox="0 0 52 52">
+            <div className="bg-white/95 backdrop-blur-md border border-emerald-500/50 hover:border-emerald-600 shadow-xl rounded-2xl p-3 pr-3.5 flex items-center gap-3 transition-all duration-200">
+              <div className="relative w-12 h-12 flex items-center justify-center shrink-0">
+                <svg className="w-12 h-12 -rotate-90 transform" viewBox="0 0 52 52">
                   <circle
                     cx="26"
                     cy="26"
                     r="22"
-                    className="text-slate-200 dark:text-slate-800"
+                    className="text-[#dce8fb]"
                     strokeWidth="4"
                     stroke="currentColor"
                     fill="transparent"
@@ -6543,31 +6218,26 @@ export const AIWorkspace: React.FC<AIWorkspaceProps> = React.memo(({
                     fill="transparent"
                   />
                 </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-emerald-600 dark:text-emerald-400 font-black text-[11px] leading-none">
-                  <ImageIcon className="w-3.5 h-3.5 animate-bounce mb-0.5 text-emerald-500" />
-                  <span>{progressPercent}%</span>
-                </div>
+                <span className="absolute inset-0 flex items-center justify-center text-emerald-700 font-black text-[11px] tabular-nums">
+                  {progressPercent}%
+                </span>
               </div>
 
-              {/* Details & Reopen Badge */}
-              <div className="flex flex-col text-right min-w-[150px] max-w-[220px]">
+              <div className="flex flex-col text-right min-w-[140px] max-w-[200px]">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-black text-slate-800 dark:text-slate-100 truncate">
-                    تنزيل وتخزين الصور
+                  <span className="text-xs font-bold text-on-surface truncate">
+                    تنزيل الصور
                   </span>
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 shrink-0 flex items-center gap-1">
-                    <DownloadCloud className="w-3 h-3" />
-                    <span>{imageFetchProgress.current}/{imageFetchProgress.total}</span>
+                  <span className="text-[10px] font-bold text-emerald-700 tabular-nums shrink-0">
+                    {imageFetchProgress.current}/{imageFetchProgress.total}
                   </span>
                 </div>
-
-                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                <p className="text-[11px] font-medium text-on-surface-variant truncate mt-0.5">
                   {imageFetchProgress.currentItem || "جاري المعالجة..."}
                 </p>
-
-                <div className="flex items-center gap-1 mt-1 text-[10.5px] font-extrabold text-emerald-600 dark:text-emerald-400 group-hover:underline">
-                  <Maximize2 className="w-3 h-3 text-emerald-600 group-hover:scale-125 transition-transform" />
-                  <span>انقر للرجوع للنافذة ↗</span>
+                <div className="flex items-center gap-1 mt-1 text-[10px] font-bold text-emerald-700 group-hover:underline">
+                  <Maximize2 className="w-3 h-3" />
+                  <span>فتح النافذة</span>
                 </div>
               </div>
             </div>

@@ -31,7 +31,7 @@ import {
   ChevronRight,
   Image as ImageIcon
 } from "lucide-react";
-import { Flashcard, getSafeImageStyle, getCardSearchQuery, sanitizeCardArticleAndSentence, isGermanSentence } from "../types";
+import { Flashcard, getSafeImageStyle, getCardSearchQuery, sanitizeCardArticleAndSentence, isGermanSentence, isImageUrlBroken, markImageUrlBroken, healBrokenCardImage, promoteCandidateListToCard } from "../types";
 import { preloadTTS, preloadImage, playPiperLocalWasm, fetchGradioAudioBlob, ttsCache, speakClient } from "./Modals";
 import { getSharedAudioContext, ImageWithSkeleton, brokenImagesSet, ddgImagesCache } from "./ReviewSession";
 import { ReviewChatModal } from "./ReviewChatModal";
@@ -48,6 +48,7 @@ interface RepetitionSessionViewProps {
   reviewVoiceTarget?: "primary" | "secondary";
   onToggleVoiceTarget?: () => void;
   onOpenChat?: () => void;
+  onUpdateCard?: (card: Flashcard) => void;
   previousCards?: Flashcard[];
   nextCards?: Flashcard[];
   folderInfo?: {
@@ -70,10 +71,15 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
   reviewVoiceTarget = "primary",
   onToggleVoiceTarget,
   onOpenChat,
+  onUpdateCard,
   previousCards = [],
   nextCards = [],
   folderInfo
 }) => {
+  const cardRef = useRef(card);
+  cardRef.current = card;
+  const needsFrontPromotionRef = useRef(false);
+  const extraImagesRef = useRef<string[]>([]);
   // Audio state
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -116,21 +122,31 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
   const imgMouseStartX = useRef<number | null>(null);
   const isImgMouseDown = useRef<boolean>(false);
 
+  extraImagesRef.current = extraImages;
+
   // Image fetch & error handling
   const fetchDdgImages = useCallback(async (query: string, pageNum: number, isInitial: boolean) => {
     if (!query) return;
 
     if (isInitial && ddgImagesCache[query]) {
-      const cachedUrls = ddgImagesCache[query].filter(url => !brokenImagesSet.has(url));
+      const cachedUrls = ddgImagesCache[query].filter(url => !brokenImagesSet.has(url) && !isImageUrlBroken(url));
       setExtraImages(prev => {
         const combined = [...prev];
         cachedUrls.forEach((url: string) => {
-          if (url && !combined.includes(url) && !brokenImagesSet.has(url)) {
+          if (url && !combined.includes(url) && !brokenImagesSet.has(url) && !isImageUrlBroken(url)) {
             combined.push(url);
           }
         });
         return combined;
       });
+      if (needsFrontPromotionRef.current && cachedUrls.length > 0) {
+        const { updatedCard, promotedUrl } = promoteCandidateListToCard(cardRef.current, cachedUrls);
+        if (promotedUrl) {
+          needsFrontPromotionRef.current = false;
+          cardRef.current = updatedCard;
+          if (onUpdateCard) onUpdateCard(updatedCard);
+        }
+      }
       return;
     }
 
@@ -142,23 +158,33 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
         if (data && data.hits && data.hits.length > 0) {
           const newImageUrls = data.hits.slice(0, 10)
             .map((h: any) => h.largeImageURL || h.webformatURL || h.image || h.url)
-            .filter((url: string) => typeof url === "string" && url.startsWith("http") && !brokenImagesSet.has(url));
+            .filter((url: string) => typeof url === "string" && url.startsWith("http") && !brokenImagesSet.has(url) && !isImageUrlBroken(url));
 
           if (isInitial) {
             ddgImagesCache[query] = newImageUrls;
+          }
+
+          if (needsFrontPromotionRef.current && newImageUrls.length > 0) {
+            const { updatedCard, promotedUrl } = promoteCandidateListToCard(cardRef.current, newImageUrls);
+            if (promotedUrl) {
+              needsFrontPromotionRef.current = false;
+              cardRef.current = updatedCard;
+              if (onUpdateCard) onUpdateCard(updatedCard);
+            }
           }
 
           // Preload in background
           newImageUrls.forEach((url: string) => {
             preloadImage(url).catch(() => {
               brokenImagesSet.add(url);
+              markImageUrlBroken(url);
             });
           });
 
           setExtraImages(prev => {
             const combined = [...prev];
             newImageUrls.forEach((url: string) => {
-              if (url && !combined.includes(url) && !brokenImagesSet.has(url)) {
+              if (url && !combined.includes(url) && !brokenImagesSet.has(url) && !isImageUrlBroken(url)) {
                 combined.push(url);
               }
             });
@@ -171,37 +197,60 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
     } finally {
       setIsLoadingImages(false);
     }
-  }, []);
+  }, [onUpdateCard]);
 
   const handleImageError = useCallback((failedUrl: string) => {
     if (!failedUrl) return;
     brokenImagesSet.add(failedUrl);
+    markImageUrlBroken(failedUrl);
 
-    setExtraImages(prev => {
-      const filtered = prev.filter(url => url !== failedUrl && !brokenImagesSet.has(url));
+    const currentCardObj = cardRef.current;
+    const wasPrimaryBroken =
+      failedUrl === currentCardObj.frontImage ||
+      !currentCardObj.frontImage ||
+      brokenImagesSet.has(currentCardObj.frontImage) ||
+      isImageUrlBroken(currentCardObj.frontImage);
 
-      // If remaining images are low, fetch next batch seamlessly in background
-      if (filtered.length < 3) {
-        const nextPage = imagePage + 1;
-        setImagePage(nextPage);
-        const qTerm = getCardSearchQuery(card);
-        if (qTerm) fetchDdgImages(qTerm, nextPage, false);
-      }
+    const { updatedCard, remainingCandidates, changed } = healBrokenCardImage(
+      currentCardObj,
+      failedUrl,
+      extraImagesRef.current
+    );
 
+    cardRef.current = updatedCard;
+    setExtraImages(remainingCandidates);
+
+    if (wasPrimaryBroken) {
+      setCurrentImageIndex(0);
+    } else {
       setCurrentImageIndex(prevIndex => {
-        if (prevIndex >= filtered.length) {
-          return Math.max(0, filtered.length - 1);
+        if (prevIndex >= remainingCandidates.length) {
+          return Math.max(0, remainingCandidates.length - 1);
         }
         return prevIndex;
       });
+    }
 
-      return filtered;
-    });
-  }, [card, imagePage, fetchDdgImages]);
+    if (changed && onUpdateCard) {
+      onUpdateCard(updatedCard);
+    }
+
+    if (wasPrimaryBroken && !updatedCard.frontImage) {
+      needsFrontPromotionRef.current = true;
+    }
+
+    if (remainingCandidates.length < 3) {
+      const nextPage = imagePage + 1;
+      setImagePage(nextPage);
+      const qTerm = getCardSearchQuery(updatedCard);
+      if (qTerm) fetchDdgImages(qTerm, nextPage, false);
+    }
+  }, [imagePage, fetchDdgImages, onUpdateCard]);
 
   // Synchronize image candidates on card change
   useEffect(() => {
-    const initialList: string[] = (card.frontImage && !brokenImagesSet.has(card.frontImage)) ? [card.frontImage] : [];
+    needsFrontPromotionRef.current = false;
+    const initialList: string[] = (card.frontImage && !brokenImagesSet.has(card.frontImage) && !isImageUrlBroken(card.frontImage)) ? [card.frontImage] : [];
 
     try {
       const rawAuto = localStorage.getItem(`auto_images_${card.id}`);
@@ -209,7 +258,7 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
         const parsedAuto = JSON.parse(rawAuto);
         if (Array.isArray(parsedAuto)) {
           parsedAuto.forEach((url: string) => {
-            if (url && typeof url === "string" && !initialList.includes(url) && !brokenImagesSet.has(url)) {
+            if (url && typeof url === "string" && !initialList.includes(url) && !brokenImagesSet.has(url) && !isImageUrlBroken(url)) {
               initialList.push(url);
             }
           });
@@ -219,10 +268,15 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
 
     if (Array.isArray(card.autoImageCandidates)) {
       card.autoImageCandidates.forEach((url: string) => {
-        if (url && typeof url === "string" && !initialList.includes(url) && !brokenImagesSet.has(url)) {
+        if (url && typeof url === "string" && !initialList.includes(url) && !brokenImagesSet.has(url) && !isImageUrlBroken(url)) {
           initialList.push(url);
         }
       });
+    }
+
+    if (card.frontImage && (brokenImagesSet.has(card.frontImage) || isImageUrlBroken(card.frontImage))) {
+      handleImageError(card.frontImage);
+      return;
     }
 
     setExtraImages(initialList);
@@ -233,7 +287,7 @@ export const RepetitionSessionView: React.FC<RepetitionSessionViewProps> = ({
       const qTerm = getCardSearchQuery(card);
       if (qTerm) fetchDdgImages(qTerm, 1, true);
     }
-  }, [card.id, card.frontImage, card.frontText, fetchDdgImages]);
+  }, [card.id, card.frontImage, card.frontText, fetchDdgImages, handleImageError]);
 
   const handlePrevImage = useCallback((e?: React.MouseEvent) => {
     if (e) e.stopPropagation();

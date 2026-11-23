@@ -357,7 +357,8 @@ export const CardThumbnail: React.FC<{
   card: Flashcard;
   cardColor: string;
   styleId?: string;
-}> = ({ card, cardColor, styleId = "S18" }) => {
+  onImageError?: (card: Flashcard, failedUrl: string) => void;
+}> = ({ card, cardColor, styleId = "S18", onImageError }) => {
   const color = cardColor || "#0056f6";
 
   const renderContent = () => {
@@ -370,6 +371,7 @@ export const CardThumbnail: React.FC<{
             className="absolute inset-0 w-full h-full object-cover"
             style={getSafeImageStyle(card.frontImagePosition)}
             referrerPolicy="no-referrer"
+            onError={(failedUrl) => onImageError?.(card, failedUrl)}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent pointer-events-none" />
         </>
