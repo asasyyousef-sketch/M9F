@@ -84,6 +84,69 @@ const globalRateLimitsCache = {
   lastUpdated: null as string | null
 };
 
+function formatStrictModelError(err: any, modelName: string): { status: number; message: string } {
+  const raw = err?.message || (typeof err === "string" ? err : JSON.stringify(err || {})) || "";
+  const lower = raw.toLowerCase();
+  const label = modelName || "الموديل المحدد";
+
+  if (
+    lower.includes("503") ||
+    lower.includes("unavailable") ||
+    lower.includes("high demand") ||
+    lower.includes("overloaded") ||
+    lower.includes("try again later")
+  ) {
+    return {
+      status: 503,
+      message: `يوجد ضغط عالٍ حالياً على الموديل (${label}) من خوادم المزوّد. جرّب موديلاً آخر أو أعد المحاولة بعد قليل.`
+    };
+  }
+
+  if (
+    lower.includes("429") ||
+    lower.includes("resource_exhausted") ||
+    lower.includes("quota") ||
+    lower.includes("rate limit") ||
+    lower.includes("too many requests")
+  ) {
+    return {
+      status: 429,
+      message: `تم تجاوز الحد المسموح للطلبات على الموديل (${label}) حالياً. جرّب موديلاً آخر أو انتظر قليلاً.`
+    };
+  }
+
+  if (
+    lower.includes("404") ||
+    lower.includes("not_found") ||
+    lower.includes("not found") ||
+    lower.includes("is not supported") ||
+    lower.includes("deprecated")
+  ) {
+    return {
+      status: 400,
+      message: `الموديل (${label}) غير متوفر أو غير مدعوم حالياً. يرجى اختيار موديل آخر.`
+    };
+  }
+
+  if (
+    lower.includes("401") ||
+    lower.includes("403") ||
+    lower.includes("api_key_invalid") ||
+    lower.includes("invalid api key") ||
+    lower.includes("permission_denied")
+  ) {
+    return {
+      status: 401,
+      message: `مفتاح API غير صالح أو لا يملك صلاحية استخدام الموديل (${label}). يرجى مراجعة الإعدادات.`
+    };
+  }
+
+  return {
+    status: 500,
+    message: `تعذر إتمام الطلب عبر الموديل (${label}): ${raw || "خطأ غير متوقع"}. يرجى تجربة موديل آخر.`
+  };
+}
+
 
 // Detect base directory path safely for both ESM (development) and CommonJS (bundled production) environments
 let resolvedDirname = process.cwd();
@@ -2615,8 +2678,11 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
       let rawJson = "";
       let modelUsed = primaryModel;
 
-      // 1. Try Groq if selected
-      if (isGroq && effectiveGroqKey) {
+      // Strict single-model execution (no hidden fallback switching)
+      if (isGroq) {
+        if (!effectiveGroqKey) {
+          return res.status(400).json({ error: "مفتاح Groq API غير مكوّن. يرجى إضافته في الإعدادات أو اختيار موديل آخر." });
+        }
         try {
           const resGroq = await fetch("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
@@ -2634,54 +2700,36 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
               temperature: 0.1
             })
           });
-          if (resGroq.ok) {
-            const dataGroq = await resGroq.json();
-            rawJson = dataGroq?.choices?.[0]?.message?.content || "";
-            if (rawJson) modelUsed = "groq-llama-3.3-70b";
+          if (!resGroq.ok) {
+            const errData = await resGroq.json().catch(() => ({}));
+            const errInfo = formatStrictModelError(errData?.error?.message || `HTTP ${resGroq.status}`, "Groq Llama 3.3");
+            return res.status(errInfo.status).json({ error: errInfo.message });
           }
-        } catch (groqErr) {
-          console.warn("[Verbs Conjugate] Groq failed, falling back to Gemini:", groqErr);
+          const dataGroq = await resGroq.json();
+          rawJson = dataGroq?.choices?.[0]?.message?.content || "";
+          modelUsed = "groq-llama-3.3-70b";
+        } catch (groqErr: any) {
+          const errInfo = formatStrictModelError(groqErr, "Groq Llama 3.3");
+          return res.status(errInfo.status).json({ error: errInfo.message });
         }
-      }
-
-      // 2. Gemini execution with multi-model fallback
-      if (!rawJson && effectiveGeminiKey) {
-        let geminiTargetModel = primaryModel;
-        if (geminiTargetModel.includes("groq") || geminiTargetModel.includes("grok")) {
-          geminiTargetModel = "gemini-3.6-flash";
+      } else {
+        if (!effectiveGeminiKey) {
+          return res.status(400).json({ error: "مفتاح Gemini API غير مكوّن. يرجى إضافته في الإعدادات." });
         }
-
-        const candidateModels = Array.from(new Set([
-          geminiTargetModel,
-          "gemini-3.6-flash",
-          "gemini-3.5-flash-lite",
-          "gemini-3.1-flash-lite",
-          "gemini-3.5-flash",
-          "gemini-3.7-flash",
-          "gemini-2.5-flash",
-          "gemini-2.5-pro",
-          "gemini-1.5-pro",
-          "gemini-1.5-flash"
-        ]));
-
-        for (const candidate of candidateModels) {
-          try {
-            const response = await aiClient.models.generateContent({
-              model: candidate,
-              contents: prompt,
-              config: {
-                responseMimeType: "application/json"
-              }
-            });
-            const text = response.text || "";
-            if (text) {
-              rawJson = text;
-              modelUsed = candidate;
-              break;
+        const geminiTargetModel = primaryModel.includes("grok") ? "gemini-3.6-flash" : primaryModel;
+        try {
+          const response = await aiClient.models.generateContent({
+            model: geminiTargetModel,
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json"
             }
-          } catch (gemErr: any) {
-            console.warn(`[Verbs Conjugate] Model '${candidate}' failed (${gemErr?.message}). Trying next...`);
-          }
+          });
+          rawJson = response.text || "";
+          modelUsed = geminiTargetModel;
+        } catch (gemErr: any) {
+          const errInfo = formatStrictModelError(gemErr, geminiTargetModel);
+          return res.status(errInfo.status).json({ error: errInfo.message });
         }
       }
 
@@ -2834,7 +2882,8 @@ ${JSON.stringify(sourceTrack.cues.map(c => ({ id: c.id, startTime: c.startTime, 
       });
     } catch (e: any) {
       console.error("Test AI error:", e);
-      res.status(500).json({ error: e.message || "فشل الاتصال بالذكاء الاصطناعي. تأكد من صحة المفتاح والنموذج." });
+      const errInfo = formatStrictModelError(e, req.body?.selectedModel || "gemini-3.6-flash");
+      res.status(errInfo.status).json({ error: errInfo.message });
     }
   });
 
@@ -2955,7 +3004,8 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
       });
     } catch (e: any) {
       console.error("Translate shadowing sentences error:", e);
-      res.status(500).json({ error: e.message || "حدث خطأ أثناء ترجمة جمل الشادوينج" });
+      const errInfo = formatStrictModelError(e, req.body?.selectedModel || "gemini-3.8-flash");
+      res.status(errInfo.status).json({ error: errInfo.message });
     }
   });
 
@@ -4257,8 +4307,11 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
 
       let outputText = "";
 
-      // 1. If Groq model is selected and Groq key exists
-      if (isGroq && effectiveGroqKey) {
+      // Strict single-model execution (no hidden fallback switching)
+      if (isGroq) {
+        if (!effectiveGroqKey) {
+          return res.status(400).json({ error: "مفتاح Groq API غير مكوّن. يرجى إضافته في الإعدادات أو اختيار موديل آخر." });
+        }
         try {
           const resGroq = await fetch("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
@@ -4277,56 +4330,44 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
             })
           });
 
-          if (resGroq.ok) {
-            const dataGroq = await resGroq.json();
-            outputText = dataGroq?.choices?.[0]?.message?.content || "";
+          if (!resGroq.ok) {
+            const errData = await resGroq.json().catch(() => ({}));
+            const errInfo = formatStrictModelError(errData?.error?.message || `HTTP ${resGroq.status}`, "Groq Llama 3.3");
+            return res.status(errInfo.status).json({ error: errInfo.message });
           }
-        } catch (groqErr) {
-          console.warn("Groq attempt for spoken challenges failed, falling back to Gemini:", groqErr);
+
+          const dataGroq = await resGroq.json();
+          outputText = dataGroq?.choices?.[0]?.message?.content || "";
+        } catch (groqErr: any) {
+          const errInfo = formatStrictModelError(groqErr, "Groq Llama 3.3");
+          return res.status(errInfo.status).json({ error: errInfo.message });
         }
-      }
-
-      // 2. If Gemini or fallback
-      if (!outputText && effectiveGeminiKey) {
-        const modelCandidates = [
-          isGroq ? "gemini-3.6-flash" : targetModel,
-          "gemini-3.6-flash",
-          "gemini-3.5-flash",
-          "gemini-2.5-flash",
-          "gemini-1.5-flash"
-        ];
-        const validCandidates = Array.from(new Set(modelCandidates.filter(Boolean)));
-        let lastErr: any = null;
-
-        for (const modelToTry of validCandidates) {
-          try {
-            const ai = new GoogleGenAI({
-              apiKey: effectiveGeminiKey,
-              httpOptions: {
-                headers: {
-                  'User-Agent': 'aistudio-build'
-                }
-              }
-            });
-
-            const response = await ai.models.generateContent({
-              model: modelToTry,
-              contents: `${systemInstruction}\n\n${userPromptText}`,
-              config: {
-                responseMimeType: "application/json"
-              }
-            });
-
-            outputText = response.text || "";
-            if (outputText && outputText.trim()) break;
-          } catch (modelErr: any) {
-            lastErr = modelErr;
-            console.warn(`[Spoken Challenge] Model ${modelToTry} attempt failed: ${modelErr?.message || modelErr}. Trying next available fallback model...`);
-          }
+      } else {
+        if (!effectiveGeminiKey) {
+          return res.status(400).json({ error: "مفتاح Gemini API غير مكوّن. يرجى إضافته في الإعدادات." });
         }
+        try {
+          const ai = new GoogleGenAI({
+            apiKey: effectiveGeminiKey,
+            httpOptions: {
+              headers: {
+                'User-Agent': 'aistudio-build'
+              }
+            }
+          });
 
-        if (!outputText && lastErr) {
-          throw lastErr;
+          const response = await ai.models.generateContent({
+            model: targetModel,
+            contents: `${systemInstruction}\n\n${userPromptText}`,
+            config: {
+              responseMimeType: "application/json"
+            }
+          });
+
+          outputText = response.text || "";
+        } catch (modelErr: any) {
+          const errInfo = formatStrictModelError(modelErr, targetModel);
+          return res.status(errInfo.status).json({ error: errInfo.message });
         }
       }
 
@@ -4347,18 +4388,10 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         }
       }
 
-      // If AI parsing was completely empty or failed, synthesize fallback items directly from the deck cards
       if (parsedChallenges.length === 0) {
-        parsedChallenges = simplifiedCards.slice(0, countNum).map((c, i) => ({
-          id: i + 1,
-          arabic_prompt: c.arabic ? `قل بالألمانية: "${c.arabic}"` : `تحدث عن: "${c.german}"`,
-          target_german: c.article ? `${c.article} ${c.german}` : c.german,
-          estimated_seconds: Math.max(Math.min(c.german.split(" ").length * 2 + 3, 10), 4),
-          image_prompt: `${c.german} educational illustration`,
-          cefr_level: "A1",
-          grammar_focus: c.article ? `أداة التعريف ${c.article}` : "مفردات وسياق",
-          vocab_focus: [c.german]
-        }));
+        return res.status(502).json({
+          error: `لم يُرجع الموديل (${isGroq ? "Groq Llama 3.3" : targetModel}) تحديات صالحة. يرجى اختيار موديل آخر أو إعادة المحاولة.`
+        });
       }
 
       // Helper to strip verbose filler/art-style terms (common in Lite model outputs) into crisp search keywords
@@ -8201,7 +8234,8 @@ ${transcriptText.trim()}
       res.end();
     } catch (err) {
       console.error("Gemini AI Generation failed:", err);
-      sendProgress("error", { error: (err as Error).message || "AI Generation failed" });
+      const errInfo = formatStrictModelError(err, provider === "groq" ? "Groq Llama 3.3" : chosenGeminiModel);
+      sendProgress("error", { error: errInfo.message });
       res.end();
     }
   });
@@ -8563,7 +8597,8 @@ ${transcriptText.trim()}
       res.end();
     } catch (err) {
       console.error("Gemini AI Refine failed:", err);
-      sendProgress("error", { error: (err as Error).message || "AI Refine failed" });
+      const errInfo = formatStrictModelError(err, provider === "groq" ? "Groq Llama 3.3" : chosenGeminiModel);
+      sendProgress("error", { error: errInfo.message });
       res.end();
     }
   });
@@ -8793,45 +8828,19 @@ function sanitizeCardArticleAndPlural(card: any): any {
         return res.status(400).json({ error: "مفتاح Gemini API Key غير مكوّن على الخادم حالياً. يرجى إضافته في الإعدادات." });
       }
 
-      // Helper function to call Gemini safely with automatic fallback on unavailable/high demand/404 errors
+      // Strict single-model call (no automatic fallback switching)
       const callGeminiSafe = async (targetModel: string, configObj: any) => {
         if (!ai) throw new Error("مفتاح Gemini API غير مكوّن.");
-
-        const candidateModels = [
-          targetModel,
-          "gemini-3.6-flash",
-          "gemini-3.5-flash",
-          "gemini-2.5-flash",
-          "gemini-1.5-flash",
-          "gemini-2.5-pro"
-        ];
-
-        const validCandidates = Array.from(
-          new Set(candidateModels.filter(Boolean))
-        );
-
-        let lastErr: any = null;
-        for (const candidate of validCandidates) {
-          try {
-            const result = await ai.models.generateContent({
-              model: candidate,
-              contents: promptText,
-              config: configObj
-            });
-
-            // Update friendly model name if a fallback model was used
-            if (candidate === "gemini-3.6-flash") aiModelName = "Gemini 3.6 Flash ⚡";
-            else if (candidate === "gemini-3.5-flash") aiModelName = "Gemini 3.5 Flash ⚡";
-            else if (candidate === "gemini-2.5-flash") aiModelName = "Gemini 2.5 Flash ⚡";
-            else if (candidate === "gemini-1.5-flash") aiModelName = "Gemini 1.5 Flash ⚡";
-
-            return result;
-          } catch (err: any) {
-            lastErr = err;
-            console.warn(`[Gemini Safe Call Warning] Model '${candidate}' failed: ${err?.message || err}. Trying next fallback candidate...`);
-          }
+        try {
+          return await ai.models.generateContent({
+            model: targetModel,
+            contents: promptText,
+            config: configObj
+          });
+        } catch (err: any) {
+          const errInfo = formatStrictModelError(err, targetModel);
+          throw new Error(errInfo.message);
         }
-        throw lastErr;
       };
 
       // Helper function to call Groq API with system instructions and user prompt
@@ -9350,7 +9359,8 @@ ${
       return res.json({ success: true, sendMode: "correct", analysis, aiModelName: usedModelDisplay });
     } catch (err: any) {
       console.error("AI Corrector failed:", err);
-      return res.status(500).json({ error: err.message || "فشل تصحيح النص بالذكاء الاصطناعي" });
+      const errInfo = formatStrictModelError(err, req.body?.selectedModel || "gemini-3.6-flash");
+      return res.status(errInfo.status).json({ error: errInfo.message });
     }
   });
 
@@ -9416,8 +9426,11 @@ Do NOT flag text that is already grammatically and orthographically correct.`;
       let responseText = "";
       let modelActuallyUsed = reqModel;
 
-      // 1. If Groq model is selected and Groq key is present, try Groq first
-      if (isGroq && effectiveGroqKey) {
+      // Strict single-model execution (no fallback switching)
+      if (isGroq) {
+        if (!effectiveGroqKey) {
+          return res.status(400).json({ error: "مفتاح Groq API غير مكوّن. يرجى إضافته في إعدادات التطبيق أو اختيار موديل آخر." });
+        }
         try {
           const resGroq = await fetch("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
@@ -9442,99 +9455,72 @@ Do NOT flag text that is already grammatically and orthographically correct.`;
             })
           });
 
-          if (resGroq.ok) {
-            const dataGroq = await resGroq.json();
-            const output = dataGroq?.choices?.[0]?.message?.content || "";
-            if (output.trim()) {
-              responseText = output.trim();
-              modelActuallyUsed = "groq-llama-3.3-70b";
-            }
-          } else {
-            console.warn(`[Proofread Groq Warning] Status: ${resGroq.status}. Falling back to Gemini...`);
+          if (!resGroq.ok) {
+            const errBody = await resGroq.json().catch(() => ({}));
+            const errInfo = formatStrictModelError(errBody?.error?.message || `HTTP ${resGroq.status}`, "Groq Llama 3.3");
+            return res.status(errInfo.status).json({ error: errInfo.message });
           }
-        } catch (groqErr) {
-          console.warn("[Proofread Groq Error] Falling back to Gemini:", groqErr);
-        }
-      }
 
-      // 2. Gemini execution (if Groq was not used or failed)
-      if (!responseText) {
+          const dataGroq = await resGroq.json();
+          responseText = (dataGroq?.choices?.[0]?.message?.content || "").trim();
+          modelActuallyUsed = "groq-llama-3.3-70b";
+        } catch (groqErr: any) {
+          const errInfo = formatStrictModelError(groqErr, "Groq Llama 3.3");
+          return res.status(errInfo.status).json({ error: errInfo.message });
+        }
+      } else {
         if (!effectiveGeminiKey) {
           return res.status(400).json({ error: "مفتاح Gemini API غير مكوّن. يرجى إضافته في إعدادات التطبيق." });
         }
 
         const ai = new GoogleGenAI({ apiKey: effectiveGeminiKey });
+        const targetGeminiModel = reqModel === "grok-2" ? "gemini-3.6-flash" : reqModel;
 
-        // Map grok-2 to gemini if Groq key isn't used
-        let targetGeminiModel = reqModel;
-        if (targetGeminiModel === "grok-2" || targetGeminiModel.includes("groq")) {
-          targetGeminiModel = "gemini-3.6-flash";
-        }
-
-        const candidateModels = [
-          targetGeminiModel,
-          "gemini-3.6-flash",
-          "gemini-3.5-flash-lite",
-          "gemini-3.1-flash-lite",
-          "gemini-3.5-flash",
-          "gemini-2.5-flash",
-          "gemini-2.5-flash-lite",
-          "gemini-1.5-flash"
-        ];
-        const validCandidates = Array.from(new Set(candidateModels.filter(Boolean)));
-
-        let lastErr: any = null;
-
-        for (const candidate of validCandidates) {
-          try {
-            const result = await ai.models.generateContent({
-              model: candidate,
-              contents: `Please proofread this ${targetLanguage} text and return structured JSON:\n\n${text}`,
-              config: {
-                systemInstruction,
-                responseMimeType: "application/json",
-                responseSchema: {
-                  type: Type.OBJECT,
-                  properties: {
-                    hasErrors: { type: Type.BOOLEAN },
-                    corrections: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          original: { type: Type.STRING },
-                          replacement: { type: Type.STRING },
-                          explanation: { type: Type.STRING },
-                          type: { type: Type.STRING },
-                          beforeWord: { type: Type.STRING },
-                          afterWord: { type: Type.STRING },
-                          context: { type: Type.STRING }
-                        },
-                        required: ["original", "replacement", "explanation", "type"]
-                      }
-                    },
-                    overallScore: { type: Type.NUMBER },
-                    summary: { type: Type.STRING }
+        try {
+          const result = await ai.models.generateContent({
+            model: targetGeminiModel,
+            contents: `Please proofread this ${targetLanguage} text and return structured JSON:\n\n${text}`,
+            config: {
+              systemInstruction,
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  hasErrors: { type: Type.BOOLEAN },
+                  corrections: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        original: { type: Type.STRING },
+                        replacement: { type: Type.STRING },
+                        explanation: { type: Type.STRING },
+                        type: { type: Type.STRING },
+                        beforeWord: { type: Type.STRING },
+                        afterWord: { type: Type.STRING },
+                        context: { type: Type.STRING }
+                      },
+                      required: ["original", "replacement", "explanation", "type"]
+                    }
                   },
-                  required: ["hasErrors", "corrections", "overallScore", "summary"]
-                }
+                  overallScore: { type: Type.NUMBER },
+                  summary: { type: Type.STRING }
+                },
+                required: ["hasErrors", "corrections", "overallScore", "summary"]
               }
-            });
-
-            if (result.text) {
-              responseText = result.text;
-              modelActuallyUsed = candidate;
-              break;
             }
-          } catch (err: any) {
-            lastErr = err;
-            console.warn(`[Proofread Warning] Candidate '${candidate}' failed:`, err?.message || err);
-          }
-        }
+          });
 
-        if (!responseText) {
-          throw lastErr || new Error("فشل تدقيق النص بالذكاء الاصطناعي");
+          responseText = result.text || "";
+          modelActuallyUsed = targetGeminiModel;
+        } catch (err: any) {
+          const errInfo = formatStrictModelError(err, targetGeminiModel);
+          return res.status(errInfo.status).json({ error: errInfo.message });
         }
+      }
+
+      if (!responseText) {
+        return res.status(502).json({ error: `لم يُرجع الموديل (${modelActuallyUsed}) نتيجة تدقيق صالحة. يرجى اختيار موديل آخر.` });
       }
 
       const parsed = safeExtractAndParseJSON(responseText, {
@@ -9781,19 +9767,14 @@ Do NOT flag text that is already grammatically and orthographically correct.`;
       let generatedCardData: any = null;
 
       const reqModel = model || "gemini-2.5-flash";
-      let geminiModel = reqModel;
-      let isGroqPrimary = false;
+      const isGroqPrimary = reqModel === "groq-llama-3.3-70b" || reqModel === "groq";
+      const geminiModel = reqModel.includes("grok") ? "gemini-3.6-flash" : reqModel;
 
-      if (reqModel === "groq-llama-3.3-70b" || reqModel === "groq") {
-        isGroqPrimary = true;
-      } else if (reqModel === "gemini-3.6-flash" || reqModel === "gemini-3.5-flash" || reqModel === "gemini-3.5-flash-lite" || reqModel === "gemini-3.1-flash-lite" || reqModel === "gemini-2.5-flash-lite" || reqModel === "gemini-1.5-pro") {
-        geminiModel = reqModel;
-      } else {
-        geminiModel = "gemini-2.5-flash";
-      }
-
-      // If Groq requested primary
-      if (isGroqPrimary && effectiveGroqKey) {
+      // Strict single-model execution (no hidden fallbacks)
+      if (isGroqPrimary) {
+        if (!effectiveGroqKey) {
+          return res.status(400).json({ error: "مفتاح Groq API غير مكوّن. يرجى إضافته في الإعدادات أو اختيار موديل آخر." });
+        }
         try {
           const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
@@ -9812,20 +9793,25 @@ Do NOT flag text that is already grammatically and orthographically correct.`;
             })
           });
 
-          if (response.ok) {
-            const chatResult = await response.json();
-            const responseText = chatResult?.choices?.[0]?.message?.content || "";
-            if (responseText.trim()) {
-              generatedCardData = safeExtractAndParseJSON(responseText, null);
-            }
+          if (!response.ok) {
+            const errBody = await response.json().catch(() => ({}));
+            const errInfo = formatStrictModelError(errBody?.error?.message || `HTTP ${response.status}`, "Groq Llama 3.3");
+            return res.status(errInfo.status).json({ error: errInfo.message });
           }
-        } catch (groqErr) {
-          console.warn("Groq card generation failed:", groqErr);
-        }
-      }
 
-      // Try Gemini API if not generated yet
-      if (!generatedCardData && effectiveGeminiKey) {
+          const chatResult = await response.json();
+          const responseText = chatResult?.choices?.[0]?.message?.content || "";
+          if (responseText.trim()) {
+            generatedCardData = safeExtractAndParseJSON(responseText, null);
+          }
+        } catch (groqErr: any) {
+          const errInfo = formatStrictModelError(groqErr, "Groq Llama 3.3");
+          return res.status(errInfo.status).json({ error: errInfo.message });
+        }
+      } else {
+        if (!effectiveGeminiKey) {
+          return res.status(400).json({ error: "مفتاح Gemini API غير مكوّن. يرجى إضافته في الإعدادات." });
+        }
         try {
           const ai = new GoogleGenAI({ apiKey: effectiveGeminiKey });
           const response = await ai.models.generateContent({
@@ -9854,55 +9840,16 @@ Do NOT flag text that is already grammatically and orthographically correct.`;
           if (response.text) {
             generatedCardData = safeExtractAndParseJSON(response.text, null);
           }
-        } catch (gemErr) {
-          console.warn("Gemini card generation failed, trying fallback:", gemErr);
+        } catch (gemErr: any) {
+          const errInfo = formatStrictModelError(gemErr, geminiModel);
+          return res.status(errInfo.status).json({ error: errInfo.message });
         }
       }
 
-      // Try Groq API fallback if Gemini failed or no Gemini key
-      if (!generatedCardData && effectiveGroqKey) {
-        try {
-          const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${effectiveGroqKey}`
-            },
-            body: JSON.stringify({
-              model: "llama-3.3-70b-versatile",
-              response_format: { type: "json_object" },
-              messages: [
-                { role: "system", content: systemInstruction + "\n\nأرجع كائن JSON فقط بدون أي نص إضافي." },
-                { role: "user", content: `أنشئ بطاقة تعليمية للنص: "${cleanQuote}"` }
-              ],
-              temperature: 0.2
-            })
-          });
-
-          if (response.ok) {
-            const chatResult = await response.json();
-            const responseText = chatResult?.choices?.[0]?.message?.content || "";
-            if (responseText.trim()) {
-              generatedCardData = safeExtractAndParseJSON(responseText, null);
-            }
-          }
-        } catch (groqErr) {
-          console.warn("Groq card generation failed:", groqErr);
-        }
-      }
-
-      // If both AI options failed or gave empty output, create safe fallback structure
       if (!generatedCardData) {
-        generatedCardData = {
-          frontText: cleanQuote,
-          backText: cleanQuote,
-          translationHint: "بطاقة مضافة تلقائياً من النص المنصص",
-          isArticleMode: false,
-          correctArticle: "",
-          isPluralMode: false,
-          pluralText: "",
-          imageSearchQuery: cleanQuote
-        };
+        return res.status(502).json({
+          error: `تعذر إنشاء البطاقة عبر الموديل (${isGroqPrimary ? "Groq Llama 3.3" : geminiModel}). يرجى اختيار موديل آخر أو إعادة المحاولة.`
+        });
       }
 
       generatedCardData = sanitizeCardArticleAndPlural(generatedCardData);
@@ -10041,139 +9988,79 @@ Do NOT flag text that is already grammatically and orthographically correct.`;
             if (responseText) usedModelName = "groq-llama-3.3-70b";
           } else {
             const errTxt = await resGroq.text();
-            modelWarnings.push(`Groq Llama 3.3 فشل: ${resGroq.status} ${errTxt}`);
+            const errInfo = formatStrictModelError(errTxt || `HTTP ${resGroq.status}`, "Groq Llama 3.3");
+            return res.status(errInfo.status).json({ error: errInfo.message });
           }
         } catch (groqErr: any) {
-          console.warn("Groq primary attempt for personas generation failed, falling back to Gemini:", groqErr);
-          modelWarnings.push(`Groq Llama 3.3 فشل: ${groqErr?.message || groqErr}`);
+          const errInfo = formatStrictModelError(groqErr, "Groq Llama 3.3");
+          return res.status(errInfo.status).json({ error: errInfo.message });
         }
-      }
-
-      if (!responseText && aiClient) {
-        let targetGeminiModel = usedModelName;
-        if (targetGeminiModel.includes("groq") || targetGeminiModel === "grok-2") {
-          targetGeminiModel = "gemini-3.6-flash";
+      } else {
+        if (!aiClient) {
+          return res.status(400).json({ error: "مفتاح Gemini API غير مكوّن. يرجى إضافته في إعدادات التطبيق." });
         }
-        const personaModels = Array.from(new Set([targetGeminiModel, "gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-pro"]));
-        for (const pModel of personaModels) {
-          try {
-            const response = await aiClient.models.generateContent({
-              model: pModel,
-              contents: systemPrompt,
-              config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                  type: Type.OBJECT,
-                  properties: {
-                    exerciseTitle: { type: Type.STRING, description: "عنوان التمرين باللغة العربية" },
-                    userRole: { type: Type.STRING, description: "وصف دور المستخدم في السيناريو" },
-                    personas: {
-                      type: Type.ARRAY,
-                      description: "الشخصيات التفاعلية المولدّة للسيناريو",
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          id: { type: Type.STRING },
-                          name: { type: Type.STRING, description: "اسم الشخصية" },
-                          job: { type: Type.STRING, description: "وظيفة الشخصية" },
-                          avatar: { type: Type.STRING, description: "الإيموجي الرمز التعبيري للشخصية" },
-                          imageSearchQuery: { type: Type.STRING, description: "عبارة البحث بالإنجليزية لجلب صورة البورتريه للشخصية" },
-                          origin: { type: Type.STRING },
-                          toneStyle: { type: Type.STRING },
-                          backgroundTopics: { type: Type.STRING },
-                          relationship: { type: Type.STRING },
-                          roleDescriptionAr: { type: Type.STRING, description: "شرح دور الشخصية بالعربية" }
-                        },
-                        required: ["id", "name", "job", "avatar", "toneStyle", "roleDescriptionAr"]
-                      }
-                    },
-                    checklist: {
-                      type: Type.ARRAY,
-                      description: "لائحة تتبع خطوات وأهداف التمرين المتسلسلة",
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          id: { type: Type.STRING },
-                          speakerName: { type: Type.STRING, description: "اسم المتحدث لهذه الخطوة" },
-                          objective: { type: Type.STRING, description: "الهدف/الجملة المعيارية للخطوة" },
-                          isCompleted: { type: Type.BOOLEAN }
-                        },
-                        required: ["id", "speakerName", "objective", "isCompleted"]
-                      }
+        const targetGeminiModel = usedModelName === "grok-2" ? "gemini-3.6-flash" : usedModelName;
+        try {
+          const response = await aiClient.models.generateContent({
+            model: targetGeminiModel,
+            contents: systemPrompt,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  exerciseTitle: { type: Type.STRING, description: "عنوان التمرين باللغة العربية" },
+                  userRole: { type: Type.STRING, description: "وصف دور المستخدم في السيناريو" },
+                  personas: {
+                    type: Type.ARRAY,
+                    description: "الشخصيات التفاعلية المولدّة للسيناريو",
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        id: { type: Type.STRING },
+                        name: { type: Type.STRING, description: "اسم الشخصية" },
+                        job: { type: Type.STRING, description: "وظيفة الشخصية" },
+                        avatar: { type: Type.STRING, description: "الإيموجي الرمز التعبيري للشخصية" },
+                        imageSearchQuery: { type: Type.STRING, description: "عبارة البحث بالإنجليزية لجلب صورة البورتريه للشخصية" },
+                        origin: { type: Type.STRING },
+                        toneStyle: { type: Type.STRING },
+                        backgroundTopics: { type: Type.STRING },
+                        relationship: { type: Type.STRING },
+                        roleDescriptionAr: { type: Type.STRING, description: "شرح دور الشخصية بالعربية" }
+                      },
+                      required: ["id", "name", "job", "avatar", "toneStyle", "roleDescriptionAr"]
                     }
                   },
-                  required: ["exerciseTitle", "userRole", "personas", "checklist"]
-                }
+                  checklist: {
+                    type: Type.ARRAY,
+                    description: "لائحة تتبع خطوات وأهداف التمرين المتسلسلة",
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        id: { type: Type.STRING },
+                        speakerName: { type: Type.STRING, description: "اسم المتحدث لهذه الخطوة" },
+                        objective: { type: Type.STRING, description: "الهدف/الجملة المعيارية للخطوة" },
+                        isCompleted: { type: Type.BOOLEAN }
+                      },
+                      required: ["id", "speakerName", "objective", "isCompleted"]
+                    }
+                  }
+                },
+                required: ["exerciseTitle", "userRole", "personas", "checklist"]
               }
-            });
-            responseText = response.text || "";
-            if (responseText) {
-              usedModelName = pModel;
-              break;
             }
-          } catch (geminiErr: any) {
-            const errMsg = geminiErr?.message || String(geminiErr);
-            console.warn(`[Persona Generation Warning] Model '${pModel}' failed (${errMsg}). Trying next candidate...`);
-            modelWarnings.push(`النموذج '${pModel}' فشل (${errMsg.includes("503") ? "الضغط عالي على الخادم 503" : errMsg.includes("429") ? "تجاوز حد الطلبات 429" : errMsg})`);
-          }
-        }
-      }
-
-      if (!responseText && effectiveGroqKey && !usedModelName.includes("groq")) {
-        try {
-          const resGroq = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${effectiveGroqKey}`
-            },
-            body: JSON.stringify({
-              model: "llama-3.3-70b-versatile",
-              response_format: { type: "json_object" },
-              messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: "قم بتوليد الشخصيات واللائحة وتنسيقها بصيغة JSON حصراً بحسب النمط المحدد في التعليمات." }
-              ],
-              temperature: 0.3
-            })
           });
-          if (resGroq.ok) {
-            const dataGroq = await resGroq.json();
-            responseText = dataGroq?.choices?.[0]?.message?.content || "";
-            if (responseText) usedModelName = "groq-llama-3.3-70b";
-          }
-        } catch (groqErr: any) {
-          console.warn("Groq fallback for personas also failed:", groqErr);
-          modelWarnings.push(`Groq Llama 3.3 فشل أيضاً: ${groqErr?.message || groqErr}`);
+          responseText = response.text || "";
+          usedModelName = targetGeminiModel;
+        } catch (geminiErr: any) {
+          const errInfo = formatStrictModelError(geminiErr, targetGeminiModel);
+          return res.status(errInfo.status).json({ error: errInfo.message });
         }
       }
 
       if (!responseText) {
-        // Fallback default persona generation if AI call fails
-        return res.json({
-          success: true,
-          usedModel: "fallback-default",
-          warnings: modelWarnings.length > 0 ? modelWarnings : ["تعذر الوصول للنماذج المحددة بسبب الضغط العالي، تم إنشاء شخصية افتراضية للتمرين."],
-          exerciseTitle: `تمرين: ${exerciseContext.slice(0, 30)}...`,
-          userRole: "المتحدث الرئيسي والمشارك في تمرين المحاكاة",
-          personas: [
-            {
-              id: `ex-persona-${Date.now()}`,
-              name: "المحاكي الذكي (Smart Roleplay AI)",
-              job: "المشرف والشخصية الرئيسية في التمرين",
-              avatar: "🎭",
-              origin: "الذكاء الاصطناعي",
-              toneStyle: "تفاعلي، مشجع وموجه للسيناريو",
-              backgroundTopics: exerciseContext,
-              relationship: "طرف الحوار في السيناريو",
-              roleDescriptionAr: "يتولى التفاعل معك وتوجيه الأسئلة لمساعدتك في تحقيق أهداف التمرين"
-            }
-          ],
-          checklist: [
-            { id: "step-1", speakerName: "الشخصية الرئيسية (الافتتاح)", objective: "افتتاح سيناريو التمرين بالتحية وطرح السؤال الأول الموجه للمستخدم", isCompleted: false },
-            { id: "step-2", speakerName: "المستخدم (أنت)", objective: "الرد بأسلوب مناسب وتلبية المطلوب في السؤال الأول", isCompleted: false },
-            { id: "step-3", speakerName: "الشخصية الرئيسية", objective: "متابعة الحوار بأسلوب الشخصية واستكمال متطلبات التمرين", isCompleted: false }
-          ]
+        return res.status(502).json({
+          error: `تعذر توليد شخصيات التمرين من الموديل (${usedModelName}). يرجى اختيار موديل آخر أو إعادة المحاولة.`
         });
       }
 
@@ -10478,117 +10365,58 @@ ${structureDirective}
             if (responseText) usedModelName = "groq-llama-3.3-70b";
           } else {
             const errTxt = await resGroq.text();
-            modelWarnings.push(`Groq Llama 3.3: ${resGroq.status} ${errTxt}`);
+            const errInfo = formatStrictModelError(errTxt || `HTTP ${resGroq.status}`, "Groq Llama 3.3");
+            return res.status(errInfo.status).json({ error: errInfo.message });
           }
         } catch (groqErr: any) {
-          console.warn("Groq attempt failed, falling back to Gemini:", groqErr);
-          modelWarnings.push(`Groq failed: ${groqErr?.message || groqErr}`);
+          const errInfo = formatStrictModelError(groqErr, "Groq Llama 3.3");
+          return res.status(errInfo.status).json({ error: errInfo.message });
         }
-      }
-
-      // Gemini execution with multi-model fallback
-      if (!responseText) {
+      } else {
         let aiClient: GoogleGenAI | null = null;
         if (effectiveGeminiKey) {
           aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
         }
 
         if (!aiClient) {
-          if (effectiveGroqKey && !isGroq) {
-            // Groq fallback if gemini key is missing
-            try {
-              const groqMessages = [
-                { role: "system", content: systemInstruction },
-                ...limitedHistory.map((m: any) => ({
-                  role: m.role === "assistant" || m.role === "ai" ? "assistant" : "user",
-                  content: m.content || m.text || ""
-                })),
-                { role: "user", content: currentTurnPrompt }
-              ];
-              const resGroq = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "Authorization": `Bearer ${effectiveGroqKey}`
-                },
-                body: JSON.stringify({
-                  model: "llama-3.3-70b-versatile",
-                  messages: groqMessages,
-                  temperature: responseLength === "concise" ? 0.3 : 0.5
-                })
-              });
-              if (resGroq.ok) {
-                const dataGroq = await resGroq.json();
-                responseText = dataGroq?.choices?.[0]?.message?.content || "";
-                if (responseText) usedModelName = "groq-llama-3.3-70b";
-              }
-            } catch (e) {}
-          }
-
-          if (!responseText) {
-            return res.status(400).json({ error: "مفتاح Gemini API غير مكوّن. يرجى إضافته في إعدادات التطبيق." });
-          }
+          return res.status(400).json({ error: "مفتاح Gemini API غير مكوّن. يرجى إضافته في إعدادات التطبيق." });
         }
 
-        if (!responseText && aiClient) {
-          let primaryModel = selectedModel;
-          if (primaryModel.includes("groq")) primaryModel = "gemini-3.6-flash";
-          if (primaryModel.includes("grok")) primaryModel = "gemini-3.6-flash";
+        const primaryModel = selectedModel.includes("grok") ? "gemini-3.6-flash" : selectedModel;
 
-          const candidateModels = Array.from(new Set([
-            primaryModel,
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-1.5-pro",
-            "gemini-2.5-pro"
-          ]));
-
-          // Build contents with history
-          const contents: any[] = [];
-          for (const item of limitedHistory) {
-            contents.push({
-              role: item.role === "assistant" || item.role === "ai" ? "model" : "user",
-              parts: [{ text: item.content || item.text || "" }]
-            });
-          }
+        const contents: any[] = [];
+        for (const item of limitedHistory) {
           contents.push({
-            role: "user",
-            parts: [{ text: currentTurnPrompt }]
+            role: item.role === "assistant" || item.role === "ai" ? "model" : "user",
+            parts: [{ text: item.content || item.text || "" }]
+          });
+        }
+        contents.push({
+          role: "user",
+          parts: [{ text: currentTurnPrompt }]
+        });
+
+        try {
+          const geminiRes = await aiClient.models.generateContent({
+            model: primaryModel,
+            contents: contents,
+            config: {
+              systemInstruction: systemInstruction,
+              temperature: responseLength === "concise" ? 0.3 : 0.6
+            }
           });
 
-          for (const modelToTry of candidateModels) {
-            try {
-              const geminiRes = await aiClient.models.generateContent({
-                model: modelToTry,
-                contents: contents,
-                config: {
-                  systemInstruction: systemInstruction,
-                  temperature: responseLength === "concise" ? 0.3 : 0.6
-                }
-              });
-
-              responseText = geminiRes.text || "";
-              if (responseText) {
-                usedModelName = modelToTry;
-                break;
-              }
-            } catch (err: any) {
-              const errMsg = err?.message || String(err);
-              console.warn(`[Review Chat] Model '${modelToTry}' failed (${errMsg}). Trying next candidate...`);
-              modelWarnings.push(`الموديل '${modelToTry}' واجه خطأ: ${errMsg}`);
-            }
-          }
+          responseText = geminiRes.text || "";
+          usedModelName = primaryModel;
+        } catch (err: any) {
+          const errInfo = formatStrictModelError(err, primaryModel);
+          return res.status(errInfo.status).json({ error: errInfo.message });
         }
       }
 
       if (!responseText) {
-        return res.status(500).json({
-          error: "تعذر توليد رد من نماذج الذكاء الاصطناعي بسبب الضغط العالي على الخوادم. يرجى المحاولة بعد لحظات.",
-          warnings: modelWarnings
+        return res.status(502).json({
+          error: `لم يُرجع الموديل (${usedModelName}) رداً. يرجى اختيار موديل آخر أو إعادة المحاولة.`
         });
       }
 
@@ -10790,116 +10618,58 @@ ${structureDirective}
             if (responseText) usedModelName = "groq-llama-3.3-70b";
           } else {
             const errTxt = await resGroq.text();
-            modelWarnings.push(`Groq Llama 3.3: ${resGroq.status} ${errTxt}`);
+            const errInfo = formatStrictModelError(errTxt || `HTTP ${resGroq.status}`, "Groq Llama 3.3");
+            return res.status(errInfo.status).json({ error: errInfo.message });
           }
         } catch (groqErr: any) {
-          console.warn("Groq attempt failed, falling back to Gemini:", groqErr);
-          modelWarnings.push(`Groq failed: ${groqErr?.message || groqErr}`);
+          const errInfo = formatStrictModelError(groqErr, "Groq Llama 3.3");
+          return res.status(errInfo.status).json({ error: errInfo.message });
         }
-      }
-
-      // Gemini execution with multi-model fallback
-      if (!responseText) {
+      } else {
         let aiClient: GoogleGenAI | null = null;
         if (effectiveGeminiKey) {
           aiClient = new GoogleGenAI({ apiKey: effectiveGeminiKey });
         }
 
         if (!aiClient) {
-          if (effectiveGroqKey && !isGroq) {
-            try {
-              const groqMessages = [
-                { role: "system", content: systemInstruction },
-                ...limitedHistory.map((m: any) => ({
-                  role: m.role === "assistant" || m.role === "ai" ? "assistant" : "user",
-                  content: m.content || m.text || ""
-                })),
-                { role: "user", content: currentTurnPrompt }
-              ];
-              const resGroq = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "Authorization": `Bearer ${effectiveGroqKey}`
-                },
-                body: JSON.stringify({
-                  model: "llama-3.3-70b-versatile",
-                  messages: groqMessages,
-                  temperature: responseLength === "concise" ? 0.3 : 0.5
-                })
-              });
-              if (resGroq.ok) {
-                const dataGroq = await resGroq.json();
-                responseText = dataGroq?.choices?.[0]?.message?.content || "";
-                if (responseText) usedModelName = "groq-llama-3.3-70b";
-              }
-            } catch (e) {}
-          }
-
-          if (!responseText) {
-            return res.status(400).json({ error: "مفتاح Gemini API غير مكوّن. يرجى إضافته في إعدادات التطبيق." });
-          }
+          return res.status(400).json({ error: "مفتاح Gemini API غير مكوّن. يرجى إضافته في إعدادات التطبيق." });
         }
 
-        if (!responseText && aiClient) {
-          let primaryModel = selectedModel;
-          if (primaryModel.includes("groq")) primaryModel = "gemini-3.7-flash";
-          if (primaryModel.includes("grok")) primaryModel = "gemini-3.7-flash";
+        const primaryModel = selectedModel.includes("grok") ? "gemini-3.7-flash" : selectedModel;
 
-          const candidateModels = Array.from(new Set([
-            primaryModel,
-            "gemini-3.7-flash",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-1.5-pro",
-            "gemini-2.5-pro"
-          ]));
-
-          const contents: any[] = [];
-          for (const item of limitedHistory) {
-            contents.push({
-              role: item.role === "assistant" || item.role === "ai" ? "model" : "user",
-              parts: [{ text: item.content || item.text || "" }]
-            });
-          }
+        const contents: any[] = [];
+        for (const item of limitedHistory) {
           contents.push({
-            role: "user",
-            parts: [{ text: currentTurnPrompt }]
+            role: item.role === "assistant" || item.role === "ai" ? "model" : "user",
+            parts: [{ text: item.content || item.text || "" }]
+          });
+        }
+        contents.push({
+          role: "user",
+          parts: [{ text: currentTurnPrompt }]
+        });
+
+        try {
+          const geminiRes = await aiClient.models.generateContent({
+            model: primaryModel,
+            contents: contents,
+            config: {
+              systemInstruction: systemInstruction,
+              temperature: responseLength === "concise" ? 0.3 : 0.6
+            }
           });
 
-          for (const modelToTry of candidateModels) {
-            try {
-              const geminiRes = await aiClient.models.generateContent({
-                model: modelToTry,
-                contents: contents,
-                config: {
-                  systemInstruction: systemInstruction,
-                  temperature: responseLength === "concise" ? 0.3 : 0.6
-                }
-              });
-
-              responseText = geminiRes.text || "";
-              if (responseText) {
-                usedModelName = modelToTry;
-                break;
-              }
-            } catch (err: any) {
-              const errMsg = err?.message || String(err);
-              console.warn(`[Sentence Chat] Model '${modelToTry}' failed (${errMsg}). Trying next candidate...`);
-              modelWarnings.push(`الموديل '${modelToTry}' واجه خطأ: ${errMsg}`);
-            }
-          }
+          responseText = geminiRes.text || "";
+          usedModelName = primaryModel;
+        } catch (err: any) {
+          const errInfo = formatStrictModelError(err, primaryModel);
+          return res.status(errInfo.status).json({ error: errInfo.message });
         }
       }
 
       if (!responseText) {
-        return res.status(500).json({
-          error: "تعذر توليد رد من نماذج الذكاء الاصطناعي. يرجى المحاولة بعد لحظات.",
-          warnings: modelWarnings
+        return res.status(502).json({
+          error: `لم يُرجع الموديل (${usedModelName}) رداً. يرجى اختيار موديل آخر أو إعادة المحاولة.`
         });
       }
 

@@ -1,14 +1,7 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { Explorer } from "./components/Explorer";
-import { AIWorkspace, AIFolder, AICard } from "./components/AIWorkspace";
-import { AICorrectorWorkspace } from "./components/AICorrectorWorkspace";
-import { RecycleBin } from "./components/RecycleBin";
-import { MediaPlayerWorkspace } from "./components/MediaPlayerWorkspace";
-import { BookReaderWorkspace } from "./components/BookReaderWorkspace";
-import { NotesWorkspace } from "./components/NotesWorkspace";
-import { ShadowingWorkspace } from "./components/ShadowingWorkspace";
-import { VerbsWorkspace } from "./components/VerbsWorkspace";
+import type { AIFolder, AICard } from "./components/AIWorkspace";
 import {
   CreateFolderModal,
   AddCardModal,
@@ -20,11 +13,29 @@ import {
 } from "./components/Modals";
 import { ShareFolderModal, ImportSharedDeckModal } from "./components/ShareModals";
 import { ReviewSession } from "./components/ReviewSession";
+import { MobileBottomNav } from "./components/MobileBottomNav";
+import { OfflineIndicator } from "./components/PWAInstallBanner";
 import { Folder, Flashcard, ReviewMethod, DbStatus, TranscriptDocument, SharedDeckData, DirectShareItem, MediaFile, MediaBookContext, isImageUrlBroken } from "./types";
 import { loadSecondarySectionsVisibility, SecondarySectionKey } from "./utils/sidebarSections";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { AuthScreen } from "./components/AuthScreen";
 import { CheckCircle2 } from "lucide-react";
+
+const AIWorkspace = lazy(() => import("./components/AIWorkspace").then((m) => ({ default: m.AIWorkspace })));
+const AICorrectorWorkspace = lazy(() => import("./components/AICorrectorWorkspace").then((m) => ({ default: m.AICorrectorWorkspace })));
+const RecycleBin = lazy(() => import("./components/RecycleBin").then((m) => ({ default: m.RecycleBin })));
+const MediaPlayerWorkspace = lazy(() => import("./components/MediaPlayerWorkspace").then((m) => ({ default: m.MediaPlayerWorkspace })));
+const BookReaderWorkspace = lazy(() => import("./components/BookReaderWorkspace").then((m) => ({ default: m.BookReaderWorkspace })));
+const NotesWorkspace = lazy(() => import("./components/NotesWorkspace").then((m) => ({ default: m.NotesWorkspace })));
+const ShadowingWorkspace = lazy(() => import("./components/ShadowingWorkspace").then((m) => ({ default: m.ShadowingWorkspace })));
+const VerbsWorkspace = lazy(() => import("./components/VerbsWorkspace").then((m) => ({ default: m.VerbsWorkspace })));
+
+const WorkspaceFallback = () => (
+  <div className="flex-1 flex flex-col items-center justify-center gap-3 bg-surface text-on-surface p-6" dir="rtl">
+    <div className="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin" />
+    <span className="text-xs font-bold text-on-surface-variant">جاري تحميل القسم...</span>
+  </div>
+);
 
 function MainStudyApp() {
   const { currentUser, isLoading: isAuthLoading, authFetch } = useAuth();
@@ -1453,9 +1464,9 @@ function MainStudyApp() {
   }
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-surface text-on-surface" dir="rtl">
+    <div className="h-dvh w-screen flex flex-col overflow-hidden bg-surface text-on-surface" dir="rtl">
       {/* 1. Main Body Split Workspace */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Left Drawer (Arabic Right-aligned Sidebar) */}
         <Sidebar
           folders={folders}
@@ -1480,92 +1491,7 @@ function MainStudyApp() {
         />
 
         {/* Center Canvas Workspace */}
-        {viewMode === "verbs" ? (
-          <VerbsWorkspace
-            onToggleSidebar={handleToggleSidebar}
-            onBackToLibrary={handleHomeClick}
-          />
-        ) : viewMode === "books" ? (
-          <BookReaderWorkspace
-            onToggleSidebar={handleToggleSidebar}
-            initialBookId={bookReturnContext?.bookId}
-            initialPageIndex={bookReturnContext?.pageIndex}
-            onPlayMediaInStudio={(mediaInfo) => {
-              setPendingBookMedia(mediaInfo);
-              setViewMode("media");
-            }}
-            onBackToMediaExplorer={handleHomeClick}
-          />
-        ) : viewMode === "shadowing" ? (
-          <ShadowingWorkspace
-            folders={folders}
-            cards={cards}
-            onToggleSidebar={handleToggleSidebar}
-            onBackToLibrary={handleHomeClick}
-            onImportCard={handleImportGenerated ? (newCards) => handleImportGenerated(null, newCards, activeFolderId || null) : undefined}
-          />
-        ) : viewMode === "notes" ? (
-          <NotesWorkspace
-            onToggleSidebar={handleToggleSidebar}
-            onBackToLibrary={handleHomeClick}
-          />
-        ) : viewMode === "media" ? (
-          <MediaPlayerWorkspace
-            onToggleSidebar={handleToggleSidebar}
-            onBackToLibrary={handleHomeClick}
-            pendingBookMedia={pendingBookMedia}
-            onClearPendingBookMedia={() => setPendingBookMedia(null)}
-            onBackToBooksSection={(ctx) => {
-              setBookReturnContext(ctx);
-              setViewMode("books");
-            }}
-          />
-        ) : viewMode === "corrector" ? (
-          <AICorrectorWorkspace
-            onToggleSidebar={handleToggleSidebar}
-            onBackToLibrary={handleHomeClick}
-            onImportCards={handleImportGenerated}
-            folders={folders}
-          />
-        ) : viewMode === "trash" ? (
-          <RecycleBin
-            folders={folders}
-            trashFolders={trashFolders}
-            trashCards={trashCards}
-            trashAiFolders={trashAiFolders}
-            trashAiCards={trashAiCards}
-            onRestoreFolder={handleRestoreFolder}
-            onRestoreCard={handleRestoreCard}
-            onRestoreAiFolder={handleRestoreAiFolder}
-            onRestoreAiCard={handleRestoreAiCard}
-            onDeletePermanentlyFolder={handleDeletePermanentlyFolder}
-            onDeletePermanentlyCard={handleDeletePermanentlyCard}
-            onDeletePermanentlyAiFolder={handleDeletePermanentlyAiFolder}
-            onDeletePermanentlyAiCard={handleDeletePermanentlyAiCard}
-            onEmptyTrash={handleEmptyTrash}
-            onBackToLibrary={handleHomeClick}
-            onToggleSidebar={handleToggleSidebar}
-          />
-        ) : viewMode === "ai" ? (
-          <AIWorkspace
-            folders={folders}
-            cards={cards}
-            activeFolderId={activeFolderId}
-            onSelectFolder={handleSelectFolder}
-            onImportGenerated={handleImportGenerated}
-            onBackToLibrary={handleAiBackToLibrary}
-            aiRefineFolderId={aiRefineFolderId}
-            onClearAiRefineFolderId={handleClearAiRefineFolderId}
-            onSaveRefinedFolder={handleSaveRefinedFolder}
-            onTrashAiFolder={handleTrashAiFolder}
-            onTrashAiCard={handleTrashAiCard}
-            onTrashAiCards={handleTrashAiCards}
-            onToggleSidebar={handleToggleSidebar}
-            transcripts={transcripts}
-            initialSelectedTranscriptId={initialSelectedTranscriptId}
-            onClearInitialSelectedTranscriptId={handleClearInitialSelectedTranscriptId}
-          />
-        ) : (
+        {viewMode === "library" ? (
           <Explorer
             folders={folders}
             cards={cards}
@@ -1598,8 +1524,109 @@ function MainStudyApp() {
             onTryReviewDirectShare={handleTryReviewDirectShare}
             onUpdateCard={(updatedCard) => handleEditCard(updatedCard.id, updatedCard)}
           />
+        ) : (
+          <Suspense fallback={<WorkspaceFallback />}>
+            {viewMode === "verbs" ? (
+              <VerbsWorkspace
+                onToggleSidebar={handleToggleSidebar}
+                onBackToLibrary={handleHomeClick}
+              />
+            ) : viewMode === "books" ? (
+              <BookReaderWorkspace
+                onToggleSidebar={handleToggleSidebar}
+                initialBookId={bookReturnContext?.bookId}
+                initialPageIndex={bookReturnContext?.pageIndex}
+                onPlayMediaInStudio={(mediaInfo) => {
+                  setPendingBookMedia(mediaInfo);
+                  setViewMode("media");
+                }}
+                onBackToMediaExplorer={handleHomeClick}
+              />
+            ) : viewMode === "shadowing" ? (
+              <ShadowingWorkspace
+                folders={folders}
+                cards={cards}
+                onToggleSidebar={handleToggleSidebar}
+                onBackToLibrary={handleHomeClick}
+                onImportCard={handleImportGenerated ? (newCards) => handleImportGenerated(null, newCards, activeFolderId || null) : undefined}
+              />
+            ) : viewMode === "notes" ? (
+              <NotesWorkspace
+                onToggleSidebar={handleToggleSidebar}
+                onBackToLibrary={handleHomeClick}
+              />
+            ) : viewMode === "media" ? (
+              <MediaPlayerWorkspace
+                onToggleSidebar={handleToggleSidebar}
+                onBackToLibrary={handleHomeClick}
+                pendingBookMedia={pendingBookMedia}
+                onClearPendingBookMedia={() => setPendingBookMedia(null)}
+                onBackToBooksSection={(ctx) => {
+                  setBookReturnContext(ctx);
+                  setViewMode("books");
+                }}
+              />
+            ) : viewMode === "corrector" ? (
+              <AICorrectorWorkspace
+                onToggleSidebar={handleToggleSidebar}
+                onBackToLibrary={handleHomeClick}
+                onImportCards={handleImportGenerated}
+                folders={folders}
+              />
+            ) : viewMode === "trash" ? (
+              <RecycleBin
+                folders={folders}
+                trashFolders={trashFolders}
+                trashCards={trashCards}
+                trashAiFolders={trashAiFolders}
+                trashAiCards={trashAiCards}
+                onRestoreFolder={handleRestoreFolder}
+                onRestoreCard={handleRestoreCard}
+                onRestoreAiFolder={handleRestoreAiFolder}
+                onRestoreAiCard={handleRestoreAiCard}
+                onDeletePermanentlyFolder={handleDeletePermanentlyFolder}
+                onDeletePermanentlyCard={handleDeletePermanentlyCard}
+                onDeletePermanentlyAiFolder={handleDeletePermanentlyAiFolder}
+                onDeletePermanentlyAiCard={handleDeletePermanentlyAiCard}
+                onEmptyTrash={handleEmptyTrash}
+                onBackToLibrary={handleHomeClick}
+                onToggleSidebar={handleToggleSidebar}
+              />
+            ) : (
+              <AIWorkspace
+                folders={folders}
+                cards={cards}
+                activeFolderId={activeFolderId}
+                onSelectFolder={handleSelectFolder}
+                onImportGenerated={handleImportGenerated}
+                onBackToLibrary={handleAiBackToLibrary}
+                aiRefineFolderId={aiRefineFolderId}
+                onClearAiRefineFolderId={handleClearAiRefineFolderId}
+                onSaveRefinedFolder={handleSaveRefinedFolder}
+                onTrashAiFolder={handleTrashAiFolder}
+                onTrashAiCard={handleTrashAiCard}
+                onTrashAiCards={handleTrashAiCards}
+                onToggleSidebar={handleToggleSidebar}
+                transcripts={transcripts}
+                initialSelectedTranscriptId={initialSelectedTranscriptId}
+                onClearInitialSelectedTranscriptId={handleClearInitialSelectedTranscriptId}
+              />
+            )}
+          </Suspense>
         )}
       </div>
+
+      {/* Mobile Bottom Navigation Bar */}
+      {!activeReview && (
+        <MobileBottomNav
+          activeTab={viewMode}
+          onSelectLibrary={handleHomeClick}
+          onSelectVerbs={handleSelectVerbs}
+          onSelectBooks={handleSelectBooks}
+          onSelectAI={handleSelectAI}
+          onOpenMenu={handleToggleSidebar}
+        />
+      )}
 
       {/* 3. MODALS AND STUDY INTERACTIVE OVERLAYS */}
       <CreateFolderModal
@@ -1751,6 +1778,8 @@ function MainStudyApp() {
           </div>
         </div>
       )}
+      {/* Offline Connectivity Indicator */}
+      <OfflineIndicator />
     </div>
   );
 }

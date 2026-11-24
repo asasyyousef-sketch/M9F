@@ -8,6 +8,7 @@ import { SharedFolderPreview } from "./SharedFolderPreview";
 import { useAuth } from "../context/AuthContext";
 import { motion } from "motion/react";
 import JSZip from "jszip";
+import { PWAInstallButton } from "./PWAInstallBanner";
 
 let memoCanvas: HTMLCanvasElement | null = null;
 let memoContext: CanvasRenderingContext2D | null = null;
@@ -1325,7 +1326,7 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
   };
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-y-auto px-4 md:px-8 py-4 md:py-6 space-y-4 md:space-y-6 font-sans bg-white" dir="rtl">
+    <div ref={containerRef} className="flex-1 overflow-y-auto px-4 md:px-8 pt-4 pb-16 md:py-6 space-y-4 md:space-y-6 font-sans bg-white" dir="rtl">
       
       {/* 1. Global Navigation Top Header within Explorer */}
       <div className="flex justify-between items-center pb-4 border-b border-outline-variant/10 gap-3">
@@ -1427,8 +1428,9 @@ export const Explorer: React.FC<ExplorerProps> = React.memo(({
           </div>
         </div>
 
-        {/* User profile & Notifications Bell */}
+        {/* User profile, PWA Install & Notifications Bell */}
         <div className="flex items-center gap-1.5 relative">
+          <PWAInstallButton variant="compact" />
           {/* Bell Notification Button */}
           <div className="relative" ref={bellMenuRef}>
             <button

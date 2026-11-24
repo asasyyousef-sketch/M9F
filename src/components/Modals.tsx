@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { X, Search, Image as ImageIcon, Volume2, Link as LinkIcon, Plus, Check, ChevronLeft, ChevronRight, ChevronDown, FolderOpen, HelpCircle, Trash2, Settings, AlertCircle, Play, Folder as LucideFolder, FileText, Eye, Pencil, Headphones, BookOpen, Layers, Copy, Shuffle, Move, Key, Timer, History, Download, RefreshCw, DownloadCloud, HardDrive, Sparkles, Cpu, Star, Square, VolumeX, Radio, Activity, Laptop, Server, Zap, CheckCircle2, Minimize2, Maximize2, Loader2, ExternalLink, Link2, Users, Share2, Send, PenTool, Film, NotebookPen, LayoutGrid } from "lucide-react";
+import { X, Search, Image as ImageIcon, Volume2, Link as LinkIcon, Plus, Check, ChevronLeft, ChevronRight, ChevronDown, FolderOpen, HelpCircle, Trash2, Settings, AlertCircle, Play, Folder as LucideFolder, FileText, Eye, Pencil, Headphones, BookOpen, Layers, Copy, Shuffle, Move, Key, Timer, History, Download, RefreshCw, DownloadCloud, HardDrive, Sparkles, Cpu, Star, Square, VolumeX, Radio, Activity, Laptop, Server, Zap, CheckCircle2, Minimize2, Maximize2, Loader2, ExternalLink, Link2, Users, Share2, Send, PenTool, Film, NotebookPen, LayoutGrid, Smartphone } from "lucide-react";
 import { Folder, Flashcard, ReviewMethod, getSafeImageStyle, DEFAULT_GRADIO_VOICES, GRADIO_LANGUAGES, GradioVoice, sanitizeCardArticleAndSentence } from "../types";
 import { LivePiperSandboxModal } from "./LivePiperSandboxModal";
 import { AccountsSettingsTab } from "./AccountsSettingsTab";
@@ -11,6 +11,7 @@ import {
   SecondarySectionsVisibility,
   SecondarySectionKey
 } from "../utils/sidebarSections";
+import { PWAInstallButton } from "./PWAInstallBanner";
 
 export { LivePiperSandboxModal };
 
@@ -8835,9 +8836,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
             </div>
           )}
 
-          {/* TAB 4: UI SCALING & CACHE MANAGER */}
+          {/* TAB 4: UI SCALING, PWA INSTALL & CACHE MANAGER */}
           {activeTab === "storage" && (
             <div className="space-y-5 animate-fade-in">
+              {/* PWA App Install Card */}
+              <div className="p-5 rounded-2xl border border-blue-200/70 bg-blue-50/40 space-y-3">
+                <h3 className="font-bold text-base text-blue-700 flex items-center gap-2">
+                  <Smartphone className="w-5 h-5" />
+                  <span>تثبيت التطبيق على الجوال والكمبيوتر (PWA)</span>
+                </h3>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  ثبّت المنصة كتطبيق مستقل لفتح أسرع بشاشة كاملة بدون شريط المتصفح، مع الاحتفاظ بملفات الواجهة والبيانات المحلية لسرعة فائقة على الجوال.
+                </p>
+                <div className="pt-1">
+                  <PWAInstallButton variant="settings" />
+                </div>
+              </div>
+
               {/* Site Scaling Settings */}
               <div className="p-5 rounded-2xl border border-outline-variant/40 bg-surface-container-low/50 space-y-4">
                 <h3 className="font-bold text-base text-primary flex items-center gap-2">

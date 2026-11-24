@@ -42,6 +42,7 @@ html {
   font-size: 14px;
   -webkit-touch-callout: default;
   color-scheme: light;
+  overscroll-behavior-y: contain;
 }
 
 @media (min-width: 1024px) {
@@ -55,6 +56,17 @@ body {
   background-color: var(--color-surface);
   color: var(--color-on-surface);
   -webkit-touch-callout: default;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: contain;
+}
+
+button,
+a,
+[role="button"],
+input,
+select,
+textarea {
+  touch-action: manipulation;
 }
 
 .shadow-elevation-1 {

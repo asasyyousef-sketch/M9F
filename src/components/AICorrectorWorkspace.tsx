@@ -2631,7 +2631,8 @@ ${personaInstruction}
       });
 
       if (!res.ok) {
-        throw new Error("Failed to start exercise scenario greeting");
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "فشل بدء محادثة التمرين بالذكاء الاصطناعي");
       }
 
       const data = await res.json();

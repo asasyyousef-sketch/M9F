@@ -25,6 +25,7 @@ import {
   loadSecondarySectionsVisibility,
   SecondarySectionsVisibility
 } from "../utils/sidebarSections";
+import { PWAInstallButton } from "./PWAInstallBanner";
 
 interface SidebarProps {
   folders: FolderType[];
@@ -627,6 +628,9 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
               </button>
             )
           ) : null}
+
+          {/* PWA Install Action (hidden automatically when already installed or unsupported) */}
+          <PWAInstallButton variant="sidebar" collapsed={isCollapsed} />
 
           {/* Settings Button */}
           <button
