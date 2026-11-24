@@ -7,10 +7,10 @@ import {
   AddCardModal,
   ImagePickerModal,
   ReviewSetupModal,
-  SettingsModal,
   EditFolderModal,
   EditCardModal
 } from "./components/Modals";
+import { SettingsModal } from "./components/SettingsModal";
 import { ShareFolderModal, ImportSharedDeckModal } from "./components/ShareModals";
 import { ReviewSession } from "./components/ReviewSession";
 import { MobileBottomNav } from "./components/MobileBottomNav";
@@ -1305,7 +1305,7 @@ function MainStudyApp() {
         };
       });
 
-      const updatedFolders = [...folders, newFolder, ...newSubfolders];
+      const updatedFolders = [newFolder, ...newSubfolders, ...folders];
       const updatedCards = [...cards, ...newCards];
 
       setFolders(updatedFolders);
@@ -1393,7 +1393,7 @@ function MainStudyApp() {
         };
       });
 
-      const updatedFolders = [...folders, newFolder, ...newSubfolders];
+      const updatedFolders = [newFolder, ...newSubfolders, ...folders];
       const updatedCards = [...cards, ...newCards];
 
       setFolders(updatedFolders);

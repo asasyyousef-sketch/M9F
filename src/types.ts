@@ -768,13 +768,21 @@ export interface NoteCategory {
 }
 
 export type UserRole = "admin" | "user";
+export type UserStatus = "active" | "suspended";
 
 export interface AppUser {
   id: string;
   username: string;
   name: string;
   role: UserRole;
+  status?: UserStatus;
+  notes?: string;
+  lastLoginAt?: string | null;
+  passwordUpdatedAt?: string | null;
   createdAt?: string;
+  foldersCount?: number;
+  cardsCount?: number;
+  activeSessionsCount?: number;
 }
 
 export interface AIModelOption {

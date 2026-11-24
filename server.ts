@@ -5248,7 +5248,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
 
       const currentUserId = req.user.userId || req.user.id;
       const recipients = users
-        .filter((u) => u.id !== currentUserId)
+        .filter((u) => u.id !== currentUserId && u.status !== "suspended")
         .map((u) => ({
           id: u.id,
           username: u.username,
@@ -5634,8 +5634,16 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
         }
       }
 
-      // Also push user accounts to Supabase app_users table
-      const usersToPush = parsed.users || [];
+      // Also push user accounts to Supabase app_users table (projecting core schema columns)
+      const usersToPush = (parsed.users || []).map((u: any) => ({
+        id: u.id,
+        username: u.username,
+        name: u.name,
+        role: u.role,
+        salt: u.salt,
+        passwordHash: u.passwordHash,
+        createdAt: u.createdAt || new Date().toISOString()
+      }));
       if (usersToPush.length > 0) {
         try {
           const { error: uErr } = await supabase.from('app_users').upsert(usersToPush);
