@@ -122,6 +122,7 @@ export default defineConfig(() => {
         devOptions: {
           enabled: true,
           type: 'module',
+          suppressWarnings: true,
         },
       }),
     ],
@@ -159,7 +160,8 @@ export default defineConfig(() => {
           '**/voice_profiles.json',
           '**/uploads/**',
           '**/piper/**',
-          '**/runtime_voices/**'
+          '**/runtime_voices/**',
+          '**/dev-dist/**'
         ]
       },
     },
