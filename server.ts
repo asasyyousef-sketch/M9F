@@ -11229,29 +11229,40 @@ ${structureDirective}
     }
   });
 
+  const httpServer = http.createServer(app);
+  const disableHmr =
+    process.env.DISABLE_HMR === "true" ||
+    Boolean(process.env.K_SERVICE || process.env.APP_URL);
+  if (disableHmr && !process.env.DISABLE_HMR) {
+    process.env.DISABLE_HMR = "true";
+  }
+
   // Setup Vite development middleware
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
-        watch: {
-          ignored: [
-            '**/*.json',
-            '**/media_files.json',
-            '**/media_folders.json',
-            '**/active_sessions.json',
-            '**/db.json',
-            '**/shared_decks.json',
-            '**/direct_shares.json',
-            '**/token_usage_log.json',
-            '**/users.json',
-            '**/voice_profiles.json',
-            '**/uploads/**',
-            '**/piper/**',
-            '**/runtime_voices/**',
-            '**/dev-dist/**'
-          ]
-        }
+        hmr: { server: httpServer },
+        watch: disableHmr
+          ? null
+          : {
+              ignored: [
+                '**/*.json',
+                '**/media_files.json',
+                '**/media_folders.json',
+                '**/active_sessions.json',
+                '**/db.json',
+                '**/shared_decks.json',
+                '**/direct_shares.json',
+                '**/token_usage_log.json',
+                '**/users.json',
+                '**/voice_profiles.json',
+                '**/uploads/**',
+                '**/piper/**',
+                '**/runtime_voices/**',
+                '**/dev-dist/**'
+              ]
+            }
       },
       appType: "spa"
     });
@@ -11421,7 +11432,6 @@ ${structureDirective}
     }
   };
 
-  const httpServer = http.createServer(app);
   const tlsCreds = await getOrCreateLocalTlsCredentials();
   const httpsServer = tlsCreds ? https.createServer({ key: tlsCreds.private, cert: tlsCreds.cert }, app) : null;
 
