@@ -3,6 +3,7 @@ import {
   Volume2,
   VolumeX,
   RotateCcw,
+  RefreshCw,
   Bot,
   Play,
   Square,
@@ -202,6 +203,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
   const failedImageUrlsRef = useRef<Set<string>>(new Set());
   const challengesRef = useRef<SpeakingChallengeItem[]>(challenges);
   challengesRef.current = challenges;
+  const allChallengesRef = useRef<SpeakingChallengeItem[]>([]);
   const [isInternalChatOpen, setIsInternalChatOpen] = useState(false);
 
   const currentChallenge = challenges[currentIndex] || null;
@@ -765,6 +767,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
       }
 
       if (runId !== generationRunIdRef.current) return;
+      allChallengesRef.current = generatedList;
       setChallenges(generatedList);
       setCurrentIndex(0);
       setIsRevealed(false);
@@ -825,6 +828,67 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
     }
   };
 
+  const handleRetryMistakes = useCallback(() => {
+    const activeList = challengesRef.current;
+    const mistakeList = activeList.filter((ch) => {
+      const entry = completedItems.find((i) => i.id === ch.id);
+      return entry ? !entry.isCorrect : true;
+    });
+    if (mistakeList.length === 0) return;
+
+    // Preserve any loaded images back onto the master list
+    const imgById = new Map(activeList.filter((c) => c.imageUrl).map((c) => [c.id, c.imageUrl]));
+    allChallengesRef.current = allChallengesRef.current.map((c) =>
+      !c.imageUrl && imgById.has(c.id) ? { ...c, imageUrl: imgById.get(c.id) } : c
+    );
+
+    generationRunIdRef.current++;
+    cancelAllAudio();
+    if (timerRef.current) clearInterval(timerRef.current);
+    spokenChallengesSetRef.current.clear();
+    fetchingIndicesRef.current.clear();
+    loadedImageIndicesRef.current.clear();
+    imageCandidatesRef.current.clear();
+
+    setChallenges(mistakeList);
+    setCurrentIndex(0);
+    setIsSessionCompleted(false);
+    setCompletedItems([]);
+    setIsRevealed(false);
+    setUserSpokenText("");
+    setMatchScore(null);
+    setSpeechError(null);
+    setTimeLeft(getTargetSeconds(mistakeList[0] || null));
+    setIsTimerRunning(useCountdown);
+  }, [completedItems, cancelAllAudio, getTargetSeconds, useCountdown]);
+
+  const handleRestartFullSession = useCallback(() => {
+    const imgById = new Map(challengesRef.current.filter((c) => c.imageUrl).map((c) => [c.id, c.imageUrl]));
+    const fullList = (allChallengesRef.current.length > 0 ? allChallengesRef.current : challengesRef.current).map((c) =>
+      !c.imageUrl && imgById.has(c.id) ? { ...c, imageUrl: imgById.get(c.id) } : c
+    );
+    allChallengesRef.current = fullList;
+
+    generationRunIdRef.current++;
+    cancelAllAudio();
+    if (timerRef.current) clearInterval(timerRef.current);
+    spokenChallengesSetRef.current.clear();
+    fetchingIndicesRef.current.clear();
+    loadedImageIndicesRef.current.clear();
+    imageCandidatesRef.current.clear();
+
+    setChallenges(fullList);
+    setCurrentIndex(0);
+    setIsSessionCompleted(false);
+    setCompletedItems([]);
+    setIsRevealed(false);
+    setUserSpokenText("");
+    setMatchScore(null);
+    setSpeechError(null);
+    setTimeLeft(getTargetSeconds(fullList[0] || null));
+    setIsTimerRunning(useCountdown);
+  }, [cancelAllAudio, getTargetSeconds, useCountdown]);
+
   const handleReturnToSetup = useCallback(() => {
     generationRunIdRef.current++;
     cancelAllAudio();
@@ -833,6 +897,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
     fetchingIndicesRef.current.clear();
     loadedImageIndicesRef.current.clear();
     imageCandidatesRef.current.clear();
+    allChallengesRef.current = [];
     setChallenges([]);
     setCurrentIndex(0);
     setIsRevealed(false);
@@ -1127,8 +1192,12 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
   // 2. CLEAN COMPLETION SUMMARY SCREEN
   // =========================================================================
   if (isSessionCompleted) {
-    const totalCorrect = completedItems.filter((i) => i.isCorrect).length;
-    const totalIncorrect = challenges.length - totalCorrect;
+    const incorrectItems = challenges.filter((ch) => {
+      const entry = completedItems.find((i) => i.id === ch.id);
+      return entry ? !entry.isCorrect : true;
+    });
+    const totalIncorrect = incorrectItems.length;
+    const totalCorrect = challenges.length - totalIncorrect;
     const accuracy = Math.round((totalCorrect / challenges.length) * 100) || 0;
 
     return (
@@ -1159,30 +1228,36 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
           </div>
         </div>
 
-        <div className="flex items-center gap-3 pt-1">
+        <div className="flex items-center gap-2.5 pt-1">
+          {totalIncorrect > 0 && (
+            <button
+              type="button"
+              onClick={handleRetryMistakes}
+              title={`إعادة الأخطاء فقط (${totalIncorrect})`}
+              aria-label={`إعادة الأخطاء فقط (${totalIncorrect})`}
+              className="flex-1 h-13 bg-amber-500 hover:bg-amber-600 text-white font-black rounded-2xl shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.98]"
+            >
+              <RotateCcw className="w-5 h-5 stroke-[2.5]" />
+              <span className="font-mono text-sm tabular-nums">{totalIncorrect}</span>
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => {
-              spokenChallengesSetRef.current.clear();
-              setCurrentIndex(0);
-              setIsSessionCompleted(false);
-              setCompletedItems([]);
-              setIsRevealed(false);
-              setTimeLeft(getTargetSeconds(challenges[0] || null));
-              setIsTimerRunning(useCountdown);
-            }}
-            className="flex-1 h-12 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-sm rounded-2xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
+            onClick={handleRestartFullSession}
+            title="إعادة جميع الجمل"
+            aria-label="إعادة جميع الجمل"
+            className="flex-1 h-13 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-2xl transition-all flex items-center justify-center cursor-pointer active:scale-[0.98]"
           >
-            <RotateCcw className="w-4 h-4" />
-            <span>إعادة</span>
+            <RefreshCw className="w-5 h-5" />
           </button>
           <button
             type="button"
             onClick={handleSafeClose}
-            className="flex-1 h-12 bg-primary hover:opacity-95 text-white font-bold text-sm rounded-2xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+            title="إنهاء"
+            aria-label="إنهاء"
+            className="flex-1 h-13 bg-primary hover:opacity-95 text-white font-bold rounded-2xl shadow-sm transition-all flex items-center justify-center cursor-pointer active:scale-[0.98]"
           >
-            <Check className="w-4 h-4" />
-            <span>إنهاء</span>
+            <Check className="w-5 h-5 stroke-[2.75]" />
           </button>
         </div>
 
