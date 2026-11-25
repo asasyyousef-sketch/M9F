@@ -4255,64 +4255,45 @@ ${JSON.stringify(sentences.map((s: any, idx: number) => ({ id: s.id || `sent-${i
         return res.status(400).json({ error: "مفتاح Gemini API غير متوفر. يرجى توفير مفتاح في الإعدادات." });
       }
 
-      // Prepare simplified deck cards representation for prompt
-      const simplifiedCards = cards.slice(0, 150).map((c: any) => ({
-        german: c.frontText || c.german || "",
-        arabic: c.backText || c.translationHint || c.arabic || "",
-        article: c.correctArticle || "",
-        plural: c.pluralText || ""
-      }));
+      // Shuffle a copy of deck cards so large folders cover all vocabulary instead of only the first few cards
+      const allSimplifiedCards = cards
+        .map((c: any) => ({
+          german: String(c.frontText || c.german || "").trim(),
+          arabic: String(c.backText || c.translationHint || c.arabic || "").trim(),
+          article: String(c.correctArticle || "").trim(),
+          plural: String(c.pluralText || "").trim()
+        }))
+        .filter((c: any) => c.german || c.arabic);
+
+      for (let i = allSimplifiedCards.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [allSimplifiedCards[i], allSimplifiedCards[j]] = [allSimplifiedCards[j], allSimplifiedCards[i]];
+      }
 
       const countNum = Math.min(Math.max(parseInt(String(requested_count), 10) || 5, 1), 100);
-
       const hasCustomInstructions = typeof custom_instructions === "string" && custom_instructions.trim().length > 0;
       const customDirectivesBlock = hasCustomInstructions
-        ? `\n\n### MANDATORY USER CONDITIONS & DIRECTIVES:\nThe user has specified the following strict custom conditions for sentence generation:\n"${custom_instructions.trim()}"\nYou MUST strictly follow and adhere to these directives when creating the scenarios and German sentences while utilizing the vocabulary from the deck!`
+        ? `\n\n### MANDATORY USER CONDITIONS & DIRECTIVES:\n"${custom_instructions.trim()}"\nYou MUST strictly obey these conditions for every sentence.`
         : "";
 
-      const systemInstruction = `You are an expert German Language Pedagogy & AI Tutor.
-Your task is to analyze a deck of language learning flashcards, evaluate the vocabulary, grammar patterns, and CEFR level (A1/A2/B1/B2), and generate an interactive "Spoken Recall & Repetition Challenge" for the user.
+      const geminiClient = !isGroq
+        ? new GoogleGenAI({
+            apiKey: effectiveGeminiKey,
+            httpOptions: {
+              headers: {
+                "User-Agent": "aistudio-build"
+              }
+            }
+          })
+        : null;
 
-### GOAL:
-Generate exactly ${countNum} speaking challenges derived directly from the provided flashcard deck content. Each challenge prompts the user in Arabic to formulate or say a specific sentence in German before the timer expires.${customDirectivesBlock}
-
-### INSTRUCTIONS & RULES:
-1. Content Analysis: Formulate sentences that naturally combine words and grammar rules present in the deck.
-2. Arabic Directive (arabic_prompt): Provide a clear instruction in Arabic specifying what the user needs to say or answer in German (e.g., "قل: أنا أشرب الماء الآن", "أجب بالنفي: هل تريد قهوة؟", "قل أنك ذاهب إلى الطبيب غداً").
-3. Target German Sentence (target_german): The exact grammatically correct German sentence.
-4. Speaking Time Estimate (estimated_seconds): Realistic speaking time in seconds (4 to 12 seconds).
-5. Visual Image Prompt (image_prompt): Strictly 2 to 3 concrete, photographic English keywords representing the scene or main noun (NO full sentences, NO filler words like "a person", NO art-style words like "flat vector" or "illustration" — e.g., "glass water", "coffee cup", "doctor hospital", "train station").
-6. Grammar & Vocab Metadata: Highlight grammar rule (grammar_focus) and key words (vocab_focus).
-
-### OUTPUT FORMAT:
-Respond ONLY with a valid JSON array of objects following this schema (No markdown fences, no explanatory text outside the JSON):
-[
-  {
-    "id": 1,
-    "arabic_prompt": "قل: أنا أشرب الماء الآن",
-    "target_german": "Ich trinke jetzt Wasser",
-    "estimated_seconds": 6,
-    "image_prompt": "drinking glass water",
-    "cefr_level": "A1",
-    "grammar_focus": "Präsens - Regelmäßige Verben",
-    "vocab_focus": ["trinken", "das Wasser", "jetzt"]
-  }
-]`;
-
-      const userPromptText = `Deck Title: "${deck_title}"
-Cards count: ${simplifiedCards.length}
-Requested challenges count: ${countNum}${hasCustomInstructions ? `\nUser Custom Conditions: "${custom_instructions.trim()}"` : ""}
-Flashcards:
-${JSON.stringify(simplifiedCards, null, 2)}`;
-
-      let outputText = "";
-
-      // Strict single-model execution (no hidden fallback switching)
-      if (isGroq) {
-        if (!effectiveGroqKey) {
-          return res.status(400).json({ error: "مفتاح Groq API غير مكوّن. يرجى إضافته في الإعدادات أو اختيار موديل آخر." });
-        }
-        try {
+      // Strict single-model executor (no hidden fallback to other models)
+      const executeStrictModelJSON = async (
+        systemInst: string,
+        userContent: string,
+        responseSchema?: any
+      ): Promise<string> => {
+        if (isGroq) {
           const resGroq = await fetch("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
             headers: {
@@ -4322,76 +4303,255 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
             body: JSON.stringify({
               model: "llama-3.3-70b-versatile",
               messages: [
-                { role: "system", content: systemInstruction },
-                { role: "user", content: userPromptText }
+                { role: "system", content: systemInst },
+                { role: "user", content: userContent }
               ],
               response_format: { type: "json_object" },
-              temperature: 0.3
+              temperature: 0.2
             })
           });
 
           if (!resGroq.ok) {
             const errData = await resGroq.json().catch(() => ({}));
-            const errInfo = formatStrictModelError(errData?.error?.message || `HTTP ${resGroq.status}`, "Groq Llama 3.3");
-            return res.status(errInfo.status).json({ error: errInfo.message });
+            throw errData?.error?.message || `HTTP ${resGroq.status}`;
           }
 
           const dataGroq = await resGroq.json();
-          outputText = dataGroq?.choices?.[0]?.message?.content || "";
-        } catch (groqErr: any) {
-          const errInfo = formatStrictModelError(groqErr, "Groq Llama 3.3");
-          return res.status(errInfo.status).json({ error: errInfo.message });
+          return dataGroq?.choices?.[0]?.message?.content || "";
         }
-      } else {
-        if (!effectiveGeminiKey) {
-          return res.status(400).json({ error: "مفتاح Gemini API غير مكوّن. يرجى إضافته في الإعدادات." });
-        }
-        try {
-          const ai = new GoogleGenAI({
-            apiKey: effectiveGeminiKey,
-            httpOptions: {
-              headers: {
-                'User-Agent': 'aistudio-build'
-              }
-            }
-          });
 
-          const response = await ai.models.generateContent({
-            model: targetModel,
-            contents: `${systemInstruction}\n\n${userPromptText}`,
-            config: {
-              responseMimeType: "application/json"
-            }
-          });
-
-          outputText = response.text || "";
-        } catch (modelErr: any) {
-          const errInfo = formatStrictModelError(modelErr, targetModel);
-          return res.status(errInfo.status).json({ error: errInfo.message });
-        }
-      }
-
-      // Safe multi-tier JSON Extraction
-      let parsedChallenges: any[] = safeExtractAndParseJSON<any[]>(outputText, []);
-
-      if (!Array.isArray(parsedChallenges)) {
-        if (parsedChallenges && typeof parsedChallenges === "object") {
-          if (Array.isArray((parsedChallenges as any).challenges)) {
-            parsedChallenges = (parsedChallenges as any).challenges;
-          } else if (Array.isArray((parsedChallenges as any).items)) {
-            parsedChallenges = (parsedChallenges as any).items;
-          } else {
-            parsedChallenges = [parsedChallenges];
+        const response = await geminiClient!.models.generateContent({
+          model: targetModel,
+          contents: userContent,
+          config: {
+            systemInstruction: systemInst,
+            responseMimeType: "application/json",
+            ...(responseSchema ? { responseSchema } : {})
           }
-        } else {
-          parsedChallenges = [];
+        });
+
+        return response.text || "";
+      };
+
+      const challengeBatchSchema = {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            id: { type: Type.INTEGER },
+            target_german: {
+              type: Type.STRING,
+              description: "Step 1: Write the complete, natural, grammatically 100% accurate German sentence FIRST."
+            },
+            arabic_prompt: {
+              type: Type.STRING,
+              description: "Step 2: Translate target_german into Arabic with 100% exact 1-to-1 meaning, prefixed with 'قل: '. Every noun, adjective, preposition, tense, and detail must match target_german exactly—no extra words, no omitted words."
+            },
+            estimated_seconds: { type: Type.INTEGER },
+            image_prompt: { type: Type.STRING },
+            cefr_level: { type: Type.STRING },
+            grammar_focus: { type: Type.STRING },
+            vocab_focus: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING }
+            }
+          },
+          required: [
+            "id",
+            "target_german",
+            "arabic_prompt",
+            "estimated_seconds",
+            "image_prompt",
+            "cefr_level",
+            "grammar_focus",
+            "vocab_focus"
+          ],
+          propertyOrdering: [
+            "id",
+            "target_german",
+            "arabic_prompt",
+            "estimated_seconds",
+            "image_prompt",
+            "cefr_level",
+            "grammar_focus",
+            "vocab_focus"
+          ]
+        }
+      };
+
+      const generationSystemInstruction = `You are an expert German Language Pedagogy & AI Tutor generating a "Spoken Recall Challenge".
+
+### CRITICAL TWO-STEP GENERATION PROTOCOL (MUST OBEY):
+For EACH item:
+1. FIRST, formulate "target_german": a complete, natural, 100% grammatically accurate German sentence using vocabulary from the provided flashcards.${customDirectivesBlock}
+2. SECOND, look ONLY at your exact "target_german" string and write "arabic_prompt" as "قل: <exact, complete Arabic translation of target_german>".
+
+### ZERO-MISMATCH FIDELITY RULES (NON-NEGOTIABLE):
+- "arabic_prompt" and "target_german" MUST carry the EXACT SAME meaning word-for-word in semantic scope.
+- NEVER drop adjectives, nouns, locations, or prepositional phrases in "target_german" while keeping them in "arabic_prompt" (e.g. NEVER pair "قل: شكراً على المساعدة الكبيرة" with "Danke für die Hilfe" missing "große"; NEVER pair "قل: الانتقال إلى سكن جديد صعب" with "Der Umzug ist schwierig" missing "in eine neue Wohnung" / "in ein neues Haus").
+- NEVER add extra words or details in "arabic_prompt" that do not exist in "target_german".
+- NEVER use vague indirect prompts like "أجب بالنفي..." that do not state the exact sentence to say. Always state the exact sentence prefixed with "قل: ".
+- Use precise Arabic nouns matching German meaning (e.g., Wohnung -> شقة, Haus -> منزل/بيت, Unterkunft -> سكن) so the learner knows the exact target.
+- "estimated_seconds": realistic speaking time between 4 and 12.
+- "image_prompt": strictly 2 to 3 concrete English photographic keywords (no style words, no full sentences).
+
+### OUTPUT FORMAT:
+Respond ONLY with a valid JSON array (for Groq, wrap as {"challenges": [...]} or a JSON array) matching the exact key order: id, target_german, arabic_prompt, estimated_seconds, image_prompt, cefr_level, grammar_focus, vocab_focus.`;
+
+      // Generate in crisp chunks of up to 15 items so models never rush, truncate, or drop adjectives/clauses on large requests (e.g. 50)
+      const CHUNK_SIZE = 15;
+      const generatedRaw: any[] = [];
+      const seenGermanSet = new Set<string>();
+      const totalChunks = Math.ceil(countNum / CHUNK_SIZE);
+
+      for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+        const remaining = countNum - generatedRaw.length;
+        if (remaining <= 0) break;
+        const batchTargetCount = Math.min(CHUNK_SIZE, remaining);
+
+        // Rotate a slice of up to 75 cards per chunk to cover the full deck cleanly
+        const cardPoolSize = Math.min(allSimplifiedCards.length, 75);
+        const startOffset = allSimplifiedCards.length > cardPoolSize
+          ? (chunkIdx * 25) % allSimplifiedCards.length
+          : 0;
+        const chunkCards: any[] = [];
+        for (let k = 0; k < cardPoolSize; k++) {
+          chunkCards.push(allSimplifiedCards[(startOffset + k) % allSimplifiedCards.length]);
+        }
+
+        const recentAvoidList = Array.from(seenGermanSet).slice(-40);
+        const avoidBlock = recentAvoidList.length > 0
+          ? `\nDo NOT repeat these already-generated German sentences:\n${recentAvoidList.map((s) => `- ${s}`).join("\n")}`
+          : "";
+
+        const userPromptText = `Deck Title: "${deck_title}"
+Generate EXACTLY ${batchTargetCount} unique spoken challenges (batch ${chunkIdx + 1} of ${totalChunks}).${hasCustomInstructions ? `\nUser Custom Conditions: "${custom_instructions.trim()}"` : ""}${avoidBlock}
+Flashcards (${chunkCards.length} items):
+${JSON.stringify(chunkCards)}`;
+
+        let outputText = "";
+        try {
+          outputText = await executeStrictModelJSON(generationSystemInstruction, userPromptText, challengeBatchSchema);
+        } catch (modelErr: any) {
+          // If first chunk fails, fail immediately with strict model error; if later chunk fails after we already have items, propagate error cleanly
+          const errInfo = formatStrictModelError(modelErr, isGroq ? "Groq Llama 3.3" : targetModel);
+          return res.status(errInfo.status).json({ error: errInfo.message });
+        }
+
+        let parsedBatch: any[] = safeExtractAndParseJSON<any[]>(outputText, []);
+        if (!Array.isArray(parsedBatch)) {
+          if (parsedBatch && typeof parsedBatch === "object") {
+            if (Array.isArray((parsedBatch as any).challenges)) {
+              parsedBatch = (parsedBatch as any).challenges;
+            } else if (Array.isArray((parsedBatch as any).items)) {
+              parsedBatch = (parsedBatch as any).items;
+            } else {
+              parsedBatch = [parsedBatch];
+            }
+          } else {
+            parsedBatch = [];
+          }
+        }
+
+        for (const item of parsedBatch) {
+          const tg = String(item?.target_german || "").trim();
+          const ap = String(item?.arabic_prompt || "").trim();
+          if (!tg || !ap) continue;
+          const normKey = tg.toLowerCase().replace(/\s+/g, " ");
+          if (seenGermanSet.has(normKey) && generatedRaw.length + 1 < countNum) continue;
+          seenGermanSet.add(normKey);
+          generatedRaw.push({
+            ...item,
+            id: generatedRaw.length + 1,
+            target_german: tg,
+            arabic_prompt: ap
+          });
+          if (generatedRaw.length >= countNum) break;
         }
       }
 
-      if (parsedChallenges.length === 0) {
+      if (generatedRaw.length === 0) {
         return res.status(502).json({
           error: `لم يُرجع الموديل (${isGroq ? "Groq Llama 3.3" : targetModel}) تحديات صالحة. يرجى اختيار موديل آخر أو إعادة المحاولة.`
         });
+      }
+
+      // MANDATORY SEMANTIC EQUIVALENCE AUDIT & AUTO-REPAIR PASS
+      // Audits every generated (target_german, arabic_prompt) pair to guarantee 0% omitted adjectives, nouns, or clauses.
+      const auditSystemInstruction = `You are a strict bilingual German-Arabic quality auditor.
+Check every pair of { id, target_german, arabic_prompt } for 100% semantic equivalence and German grammar accuracy.
+
+Flag and FIX an item ONLY if ANY of these defects exist:
+1. Omitted adjective/adverb/noun/prepositional phrase (e.g., arabic_prompt mentions "الكبيرة" or "إلى سكن جديد" or "غداً" that is missing in target_german, OR vice versa).
+2. Meaning mismatch or extra/missing words between target_german and arabic_prompt.
+3. German grammar/spelling/case error in target_german (e.g., wrong article/case/word order).
+4. Ambiguous or non-literal arabic_prompt (must clearly start with "قل: " and express the exact meaning of target_german).
+
+When fixing an item:
+- If arabic_prompt had a richer phrase (like "المساعدة الكبيرة" or "إلى سكن جديد") that was dropped from target_german, restore the full accurate German sentence in target_german AND ensure arabic_prompt matches it 100% accurately (e.g., "قل: شكراً على المساعدة الكبيرة." <-> "Danke für die große Hilfe.", "قل: الانتقال إلى شقة جديدة صعب." <-> "Der Umzug in eine neue Wohnung ist schwierig.").
+- If all items are already 100% aligned and grammatically correct, return {"fixes": []}.`;
+
+      const auditSchema = {
+        type: Type.OBJECT,
+        properties: {
+          fixes: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.INTEGER },
+                target_german: { type: Type.STRING },
+                arabic_prompt: { type: Type.STRING }
+              },
+              required: ["id", "target_german", "arabic_prompt"],
+              propertyOrdering: ["id", "target_german", "arabic_prompt"]
+            }
+          }
+        },
+        required: ["fixes"]
+      };
+
+      const AUDIT_BATCH_SIZE = 25;
+      for (let start = 0; start < generatedRaw.length; start += AUDIT_BATCH_SIZE) {
+        const auditSlice = generatedRaw.slice(start, start + AUDIT_BATCH_SIZE).map((it) => ({
+          id: it.id,
+          target_german: it.target_german,
+          arabic_prompt: it.arabic_prompt
+        }));
+
+        const auditPrompt = `Audit these ${auditSlice.length} German-Arabic speaking pairs and return JSON {"fixes": [...]} for any pair with omitted details, meaning mismatch, or German grammar error:\n${JSON.stringify(auditSlice)}`;
+
+        try {
+          let auditRawText = "";
+          try {
+            auditRawText = await executeStrictModelJSON(auditSystemInstruction, auditPrompt, auditSchema);
+          } catch (firstAuditErr: any) {
+            // Brief single retry on transient rate-limit before continuing
+            await new Promise((r) => setTimeout(r, 700));
+            auditRawText = await executeStrictModelJSON(auditSystemInstruction, auditPrompt, auditSchema);
+          }
+
+          const auditParsed = safeExtractAndParseJSON<any>(auditRawText, { fixes: [] });
+          const fixesList: any[] = Array.isArray(auditParsed)
+            ? auditParsed
+            : Array.isArray(auditParsed?.fixes)
+              ? auditParsed.fixes
+              : [];
+
+          for (const fix of fixesList) {
+            const fixId = Number(fix?.id);
+            const fixedGerman = String(fix?.target_german || "").trim();
+            const fixedArabic = String(fix?.arabic_prompt || "").trim();
+            if (!fixId || !fixedGerman || !fixedArabic) continue;
+            const targetItem = generatedRaw.find((g) => Number(g.id) === fixId);
+            if (targetItem) {
+              targetItem.target_german = fixedGerman;
+              targetItem.arabic_prompt = fixedArabic;
+            }
+          }
+        } catch (auditErr) {
+          console.warn("[Spoken Challenge Audit] Non-fatal audit notice:", auditErr);
+        }
       }
 
       // Helper to strip verbose filler/art-style terms (common in Lite model outputs) into crisp search keywords
@@ -4407,7 +4567,7 @@ ${JSON.stringify(simplifiedCards, null, 2)}`;
       };
 
       // Return challenges immediately without parallel image fetching (Lazy loaded per card by client)
-      const enrichedChallenges = parsedChallenges.slice(0, countNum).map((item: any, idx: number) => {
+      const enrichedChallenges = generatedRaw.slice(0, countNum).map((item: any, idx: number) => {
         const rawPrompt = String(item.image_prompt || "").trim();
         const sanitizedPrompt = sanitizeChallengeImageQuery(rawPrompt);
         const vocabArr = Array.isArray(item.vocab_focus) ? item.vocab_focus.map(String) : [];

@@ -204,6 +204,8 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
   const [isInternalChatOpen, setIsInternalChatOpen] = useState(false);
 
   const currentChallenge = challenges[currentIndex] || null;
+  const currentChallengeRef = useRef<SpeakingChallengeItem | null>(currentChallenge);
+  currentChallengeRef.current = currentChallenge;
 
   // Find a matching existing card image from the deck as instant/reliable fallback
   const getDeckFallbackImageForChallenge = useCallback((item: SpeakingChallengeItem): string => {
@@ -328,6 +330,10 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
   const cleanForMatch = (str: string): string => {
     return str
       .toLowerCase()
+      .replace(/ä/g, "ae")
+      .replace(/ö/g, "oe")
+      .replace(/ü/g, "ue")
+      .replace(/ß/g, "ss")
       .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'«»]/g, "")
       .replace(/\s+/g, " ")
       .trim();
@@ -339,17 +345,29 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
     if (!s || !t) return 0;
     if (s === t) return 100;
 
-    const sWords = s.split(" ");
-    const tWords = t.split(" ");
-    let matchingWords = 0;
-    for (const w of sWords) {
-      if (tWords.includes(w)) matchingWords++;
+    const sWords = s.split(" ").filter(Boolean);
+    const tWords = t.split(" ").filter(Boolean);
+    if (sWords.length === 0 || tWords.length === 0) return 0;
+
+    // Bag-of-words multiset overlap for accurate F1 score
+    const tCounts = new Map<string, number>();
+    for (const w of tWords) {
+      tCounts.set(w, (tCounts.get(w) || 0) + 1);
     }
-    const wordScore = (matchingWords / Math.max(tWords.length, 1)) * 100;
-    return Math.min(Math.round(wordScore), 100);
+    let matches = 0;
+    for (const w of sWords) {
+      const rem = tCounts.get(w) || 0;
+      if (rem > 0) {
+        matches++;
+        tCounts.set(w, rem - 1);
+      }
+    }
+
+    const f1Score = ((2 * matches) / (sWords.length + tWords.length)) * 100;
+    return Math.min(Math.round(f1Score), 100);
   }, []);
 
-  // Initialize Speech Recognition
+  // Initialize Speech Recognition once (uses currentChallengeRef so lazy image updates never abort active mic)
   useEffect(() => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -372,8 +390,9 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
         }
         setUserSpokenText(transcript);
 
-        if (currentChallenge) {
-          const score = calculateSimilarity(transcript, currentChallenge.target_german);
+        const activeCh = currentChallengeRef.current;
+        if (activeCh) {
+          const score = calculateSimilarity(transcript, activeCh.target_german);
           setMatchScore(score);
         }
       };
@@ -401,7 +420,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
         } catch {}
       }
     };
-  }, [currentChallenge, calculateSimilarity]);
+  }, [calculateSimilarity]);
 
   const onUpdateContextRef = useRef(onUpdateContext);
   onUpdateContextRef.current = onUpdateContext;
@@ -998,7 +1017,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
           {isGenerating ? (
             <>
               <Loader2 className="w-5 h-5 animate-spin" />
-              <span>جاري التجهيز...</span>
+              <span>{challengeCount > 15 ? "جاري توليد ومطابقة الجمل..." : "جاري التجهيز..."}</span>
             </>
           ) : (
             <>
