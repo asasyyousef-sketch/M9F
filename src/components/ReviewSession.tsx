@@ -4939,7 +4939,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
   // Add Keyboard listeners for fluent learning
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isCompleted || method === "match" || isReviewChatOpen) return;
+      if (isCompleted || method === "match" || method === "spoken_challenge" || isReviewChatOpen) return;
 
       const activeEl = document.activeElement;
       const isTyping = activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA");
@@ -6841,8 +6841,35 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
 
                 return (
                   <div className="w-full flex flex-col items-center gap-5">
-                    {/* Master 1:1 Square Card - Identical structure to Writing & Listening Modes */}
-                    <div className="relative w-full aspect-square select-none overflow-hidden rounded-[26px] shadow-sm border border-outline-variant/30 bg-surface-container-lowest dark:bg-slate-900 flex flex-col justify-between p-4 sm:p-5">
+                    {/* Master 1:1 Square Card - Solid-body swipe transition */}
+                    <div className="relative w-full aspect-square select-none overflow-hidden rounded-[26px] shadow-sm">
+                      <AnimatePresence initial={false} custom={direction} mode="popLayout">
+                        <motion.div
+                          key={currentCard.id}
+                          custom={direction}
+                          variants={{
+                            enter: (dir: number) => ({
+                              x: dir >= 0 ? -300 : 300,
+                              opacity: 0
+                            }),
+                            center: {
+                              x: 0,
+                              opacity: 1,
+                              zIndex: 10,
+                              transition: { duration: 0.24, ease: [0.16, 1, 0.3, 1] }
+                            },
+                            exit: (dir: number) => ({
+                              x: dir >= 0 ? 300 : -300,
+                              opacity: 0,
+                              zIndex: 0,
+                              transition: { duration: 0.2, ease: [0.16, 1, 0.3, 1] }
+                            })
+                          }}
+                          initial="enter"
+                          animate="center"
+                          exit="exit"
+                          className="absolute inset-0 w-full h-full select-none overflow-hidden rounded-[26px] border border-outline-variant/30 bg-surface-container-lowest dark:bg-slate-900 flex flex-col justify-between p-4 sm:p-5 will-change-transform"
+                        >
 
                       {/* Edge-to-edge ambient photo background if image exists */}
                       {hasImage && (
@@ -6944,7 +6971,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                               />
                             )}
                             <h2
-                              className={`font-black break-words whitespace-pre-wrap leading-snug transition-all ${
+                              className={`font-black break-words whitespace-pre-wrap leading-snug ${
                                 challengeRevealed
                                   ? hasImage
                                     ? "text-lg sm:text-xl text-white/75"
@@ -6964,7 +6991,7 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           <button
                             type="button"
                             onClick={() => targetSpeechText && playPronunciation(targetSpeechText, targetLang, true)}
-                            className="inline-flex items-center justify-center gap-2.5 max-w-full px-3 py-1.5 rounded-2xl transition-transform active:scale-95 cursor-pointer animate-scaleUp"
+                            className="inline-flex items-center justify-center gap-2.5 max-w-full px-3 py-1.5 rounded-2xl transition-opacity duration-150 active:scale-95 cursor-pointer"
                             dir={isTargetBack ? "rtl" : "ltr"}
                             title="استمع للإجابة"
                           >
@@ -6998,6 +7025,8 @@ export const ReviewSession: React.FC<ReviewSessionProps> = React.memo(({
                           </div>
                         )}
                       </div>
+                        </motion.div>
+                      </AnimatePresence>
                     </div>
 
                     {/* Clean Tactile Action Bar directly below the Square Card (Matches Writing / Listening / Article height) */}

@@ -195,6 +195,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recognitionRef = useRef<any>(null);
+  const generationRunIdRef = useRef<number>(0);
   const fetchingIndicesRef = useRef<Set<number>>(new Set());
   const loadedImageIndicesRef = useRef<Set<number>>(new Set());
   const imageCandidatesRef = useRef<Map<number, string[]>>(new Map());
@@ -228,37 +229,94 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
     return "";
   }, [cards]);
 
-  const advanceChallengeImageCandidate = useCallback((index: number, brokenUrl?: string) => {
+  // Pre-fetch into Cache Storage / blob URL and decode offscreen so display is instant
+  const warmImageForDisplay = useCallback(async (rawUrl: string): Promise<string> => {
+    if (!rawUrl || !rawUrl.trim()) return "";
+    let resolvedUrl = rawUrl.trim();
+    try {
+      const preloaded = await preloadImage(resolvedUrl);
+      if (preloaded) resolvedUrl = preloaded;
+    } catch {}
+
+    const decodedOk = await new Promise<boolean>((resolve) => {
+      if (!resolvedUrl) {
+        resolve(false);
+        return;
+      }
+      const img = new Image();
+      img.referrerPolicy = "no-referrer";
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(ok);
+      };
+      const timer = setTimeout(() => finish(false), 6000);
+      img.onload = async () => {
+        try {
+          if (typeof img.decode === "function") {
+            await img.decode().catch(() => {});
+          }
+        } catch {}
+        finish(true);
+      };
+      img.onerror = () => finish(false);
+      img.src = resolvedUrl;
+    });
+
+    return decodedOk ? resolvedUrl : "";
+  }, []);
+
+  const advanceChallengeImageCandidate = useCallback(async (index: number, brokenUrl?: string) => {
+    const runId = generationRunIdRef.current;
     if (brokenUrl) {
       failedImageUrlsRef.current.add(brokenUrl);
       markImageUrlBroken(brokenUrl);
     }
+
     const candidates = imageCandidatesRef.current.get(index) || [];
-    let nextUrl = candidates.find((u) => u && !failedImageUrlsRef.current.has(u) && !isImageUrlBroken(u)) || "";
-    if (!nextUrl && challengesRef.current[index]) {
-      nextUrl = getDeckFallbackImageForChallenge(challengesRef.current[index]);
+    const fallbackItem = challengesRef.current[index];
+    const pool = [...candidates];
+    if (fallbackItem) {
+      const deckFallback = getDeckFallbackImageForChallenge(fallbackItem);
+      if (deckFallback && !pool.includes(deckFallback)) pool.push(deckFallback);
     }
+
+    let nextReadyUrl = "";
+    for (const candidate of pool) {
+      if (runId !== generationRunIdRef.current) return;
+      if (!candidate || failedImageUrlsRef.current.has(candidate) || isImageUrlBroken(candidate)) continue;
+      const warmed = await warmImageForDisplay(candidate);
+      if (warmed) {
+        nextReadyUrl = warmed;
+        break;
+      }
+      failedImageUrlsRef.current.add(candidate);
+      markImageUrlBroken(candidate);
+    }
+
+    if (runId !== generationRunIdRef.current) return;
     setChallenges((prev) => {
       if (!prev[index]) return prev;
-      if (prev[index].imageUrl === nextUrl) return prev;
+      if (prev[index].imageUrl === nextReadyUrl) return prev;
       const updated = [...prev];
-      updated[index] = { ...updated[index], imageUrl: nextUrl };
+      updated[index] = { ...updated[index], imageUrl: nextReadyUrl };
       return updated;
     });
-    if (nextUrl) {
-      preloadImage(nextUrl).catch(() => {
-        advanceChallengeImageCandidate(index, nextUrl);
-      });
-    }
-  }, [getDeckFallbackImageForChallenge]);
+  }, [getDeckFallbackImageForChallenge, warmImageForDisplay]);
 
-  // Lazy load image for a single card index sequentially
-  const fetchChallengeImage = useCallback(async (index: number) => {
-    const list = challengesRef.current;
-    if (index < 0 || index >= list.length) return;
-    const item = list[index];
-    if (!item || item.imageUrl || loadedImageIndicesRef.current.has(index) || fetchingIndicesRef.current.has(index)) {
-      return;
+  // Fetch + pre-decode image for a challenge index cleanly before assigning imageUrl
+  const fetchChallengeImage = useCallback(async (
+    index: number,
+    overrideItem?: SpeakingChallengeItem,
+    expectedRunId?: number
+  ): Promise<string> => {
+    const runId = expectedRunId ?? generationRunIdRef.current;
+    const item = overrideItem || challengesRef.current[index];
+    if (!item || item.imageUrl) return item?.imageUrl || "";
+    if (loadedImageIndicesRef.current.has(index) || fetchingIndicesRef.current.has(index)) {
+      return "";
     }
 
     fetchingIndicesRef.current.add(index);
@@ -269,55 +327,72 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
         `/api/spoken-challenges/image?q=${encodeURIComponent(q)}&fallback=${encodeURIComponent(fallback)}`
       );
 
-      let chosenUrl = "";
+      if (runId !== generationRunIdRef.current) return "";
+
+      let candidateList: string[] = [];
       if (res.ok) {
         const data = await res.json();
-        const candidateList: string[] = Array.isArray(data.candidateUrls) && data.candidateUrls.length > 0
+        candidateList = Array.isArray(data.candidateUrls) && data.candidateUrls.length > 0
           ? data.candidateUrls
           : (data.imageUrl ? [data.imageUrl] : []);
 
         if (candidateList.length > 0) {
           imageCandidatesRef.current.set(index, candidateList);
-          chosenUrl = candidateList.find((u) => !failedImageUrlsRef.current.has(u)) || "";
         }
       }
 
-      if (!chosenUrl) {
-        chosenUrl = getDeckFallbackImageForChallenge(item);
+      const deckFallback = getDeckFallbackImageForChallenge(item);
+      if (deckFallback && !candidateList.includes(deckFallback)) {
+        candidateList.push(deckFallback);
       }
 
-      if (chosenUrl) {
+      let readyUrl = "";
+      for (const candidate of candidateList.slice(0, 4)) {
+        if (runId !== generationRunIdRef.current) return "";
+        if (!candidate || failedImageUrlsRef.current.has(candidate) || isImageUrlBroken(candidate)) continue;
+        const warmed = await warmImageForDisplay(candidate);
+        if (warmed) {
+          readyUrl = warmed;
+          break;
+        }
+        failedImageUrlsRef.current.add(candidate);
+        markImageUrlBroken(candidate);
+      }
+
+      if (runId !== generationRunIdRef.current) return "";
+
+      if (readyUrl) {
         loadedImageIndicesRef.current.add(index);
         setChallenges((prev) => {
           if (!prev[index] || prev[index].imageUrl) return prev;
           const updated = [...prev];
-          updated[index] = { ...updated[index], imageUrl: chosenUrl };
+          updated[index] = { ...updated[index], imageUrl: readyUrl };
           return updated;
         });
-        preloadImage(chosenUrl).catch(() => {
-          advanceChallengeImageCandidate(index, chosenUrl);
-        });
       }
+      return readyUrl;
     } catch (e) {
       console.warn(`Failed lazy loading image for challenge ${index}:`, e);
+      return "";
     } finally {
       fetchingIndicesRef.current.delete(index);
     }
-  }, [advanceChallengeImageCandidate, getDeckFallbackImageForChallenge]);
+  }, [getDeckFallbackImageForChallenge, warmImageForDisplay]);
 
   useEffect(() => {
     if (challenges.length === 0) return;
+    const runId = generationRunIdRef.current;
     let cancelled = false;
 
     const loadSequential = async () => {
-      await fetchChallengeImage(currentIndex);
-      if (cancelled) return;
+      await fetchChallengeImage(currentIndex, undefined, runId);
+      if (cancelled || runId !== generationRunIdRef.current) return;
       if (currentIndex + 1 < challenges.length) {
-        await fetchChallengeImage(currentIndex + 1);
+        await fetchChallengeImage(currentIndex + 1, undefined, runId);
       }
-      if (cancelled) return;
+      if (cancelled || runId !== generationRunIdRef.current) return;
       if (currentIndex + 2 < challenges.length) {
-        await fetchChallengeImage(currentIndex + 2);
+        await fetchChallengeImage(currentIndex + 2, undefined, runId);
       }
     };
 
@@ -669,14 +744,31 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
         throw new Error("لم يتم استخراج تحديات من المجلد.");
       }
 
+      const runId = ++generationRunIdRef.current;
       fetchingIndicesRef.current.clear();
       loadedImageIndicesRef.current.clear();
       imageCandidatesRef.current.clear();
       spokenChallengesSetRef.current.clear();
-      setChallenges(data.challenges);
+
+      const generatedList: SpeakingChallengeItem[] = data.challenges;
+
+      // Pre-prepare first challenge image before entering so Q1 appears with its image ready
+      // and Q2 immediately starts pre-warming in background as soon as Q1 opens
+      if (generatedList[0]) {
+        const firstReadyUrl = await Promise.race([
+          fetchChallengeImage(0, generatedList[0], runId),
+          new Promise<string>((resolve) => setTimeout(() => resolve(""), 3000))
+        ]);
+        if (firstReadyUrl && runId === generationRunIdRef.current) {
+          generatedList[0] = { ...generatedList[0], imageUrl: firstReadyUrl };
+        }
+      }
+
+      if (runId !== generationRunIdRef.current) return;
+      setChallenges(generatedList);
       setCurrentIndex(0);
       setIsRevealed(false);
-      setTimeLeft(getTargetSeconds(data.challenges[0] || null));
+      setTimeLeft(getTargetSeconds(generatedList[0] || null));
       setIsTimerRunning(useCountdown);
       setCompletedItems([]);
       setIsSessionCompleted(false);
@@ -734,6 +826,7 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
   };
 
   const handleReturnToSetup = useCallback(() => {
+    generationRunIdRef.current++;
     cancelAllAudio();
     if (timerRef.current) clearInterval(timerRef.current);
     spokenChallengesSetRef.current.clear();
@@ -1182,10 +1275,14 @@ export const SpokenChallengeSessionView: React.FC<SpokenChallengeSessionViewProp
 
       {/* Master 1:1 Square Card (Identical Structure to Challenge / Write / Article / Classic) */}
       <div className="relative w-full aspect-square select-none overflow-hidden rounded-[26px] shadow-sm border border-outline-variant/30 dark:border-slate-800 bg-surface-container-lowest dark:bg-slate-900 flex flex-col justify-between p-4 sm:p-5">
-        {/* Full-bleed background illustration when loaded */}
+        {/* Full-bleed background illustration when loaded (keyed per challenge so old image never lingers) */}
         {hasImage && (
-          <div className="absolute inset-0 w-full h-full pointer-events-none select-none overflow-hidden">
+          <div
+            key={`bg-${currentChallenge.id ?? currentIndex}`}
+            className="absolute inset-0 w-full h-full pointer-events-none select-none overflow-hidden"
+          >
             <img
+              key={`${currentChallenge.id ?? currentIndex}-${currentChallenge.imageUrl}`}
               src={currentChallenge.imageUrl}
               alt={currentChallenge.arabic_prompt || "Challenge illustration"}
               className="w-full h-full object-cover"
