@@ -37,7 +37,9 @@ import {
   Film,
   NotebookPen,
   LayoutGrid,
-  Smartphone
+  Smartphone,
+  Upload,
+  FileJson
 } from "lucide-react";
 import { DEFAULT_GRADIO_VOICES, GRADIO_LANGUAGES } from "../types";
 import { AccountsSettingsTab } from "./AccountsSettingsTab";
@@ -66,6 +68,11 @@ import {
   playGradioClientAudio
 } from "./Modals";
 import { LivePiperSandboxModal } from "./LivePiperSandboxModal";
+import {
+  collectLocalSettingsSnapshot,
+  countStoredSettings,
+  importLocalSettingsSnapshot
+} from "../utils/settingsBackup";
 
 type SettingsRoute =
   | "home"
@@ -77,6 +84,7 @@ type SettingsRoute =
   | "appearance"
   | "images"
   | "storage"
+  | "backup"
   | "diagnostics"
   | "accounts";
 
@@ -227,6 +235,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   const [ttsCacheCount, setTtsCacheCount] = useState<number | null>(null);
   const [ttsCacheSize, setTtsCacheSize] = useState<string | null>(null);
   const [isCalculatingCache, setIsCalculatingCache] = useState(false);
+
+  // Settings JSON Export / Import states
+  const [backupIncludeApiKeys, setBackupIncludeApiKeys] = useState(false);
+  const [backupCopiedNotice, setBackupCopiedNotice] = useState(false);
+  const [backupImportText, setBackupImportText] = useState("");
+  const [backupFeedback, setBackupFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [storedSettingsCount, setStoredSettingsCount] = useState<number>(() => countStoredSettings(false));
+  const backupFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Secondary Sidebar Sections Visibility
   const [secondarySections, setSecondarySections] = useState<SecondarySectionsVisibility>(
@@ -1144,41 +1160,52 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     }
   };
 
+  const syncModalStatesFromLocalStorage = () => {
+    setAudioApi(localStorage.getItem("settings_audio_api") || "google_proxy");
+    setCustomTtsUrl(localStorage.getItem("settings_custom_tts_url") || "");
+    setImageApi(localStorage.getItem("settings_image_api") || "duckduckgo");
+    setPixabayKey(localStorage.getItem("settings_pixabay_key") || "");
+    setGeminiApiKey(localStorage.getItem("settings_gemini_api_key") || "");
+    setGroqApiKey(localStorage.getItem("settings_groq_api_key") || "");
+    setAiProvider(localStorage.getItem("settings_ai_provider") || "gemini");
+    setEnableInlinePersonaCorrection(localStorage.getItem("settings_enable_persona_correction") !== "false");
+    setTtsExecutionMode((localStorage.getItem("settings_tts_execution_mode") as "local" | "server") || "server");
+
+    setPrimaryModelDe(localStorage.getItem("settings_primary_piper_model_de") || "de_DE-thorsten-medium");
+    setPrimaryModelAr(localStorage.getItem("settings_primary_piper_model_ar") || "ar_JO-kareem-medium");
+    setPrimaryModelEn(localStorage.getItem("settings_primary_piper_model_en") || "en_US-lessac-medium");
+
+    setReviewVoiceTarget((localStorage.getItem("settings_review_voice_target") as "primary" | "secondary") || "primary");
+    setEnableSecondaryAudioReview(localStorage.getItem("settings_enable_secondary_audio_review") === "true");
+    setEnableAudioPreloadReview(localStorage.getItem("settings_preload_audio_review") === "true");
+    setSecondaryModelDe(localStorage.getItem("settings_secondary_piper_model_de") || "google");
+    setSecondaryModelAr(localStorage.getItem("settings_secondary_piper_model_ar") || "google");
+    setSecondaryModelEn(localStorage.getItem("settings_secondary_piper_model_en") || "google");
+
+    setPrimaryGradioLangDe(localStorage.getItem("settings_primary_gradio_lang_de") || "german");
+    setPrimaryGradioLangAr(localStorage.getItem("settings_primary_gradio_lang_ar") || "arabic");
+    setPrimaryGradioLangEn(localStorage.getItem("settings_primary_gradio_lang_en") || "english");
+    setSecondaryGradioLangDe(localStorage.getItem("settings_secondary_gradio_lang_de") || "german");
+    setSecondaryGradioLangAr(localStorage.getItem("settings_secondary_gradio_lang_ar") || "arabic");
+    setSecondaryGradioLangEn(localStorage.getItem("settings_secondary_gradio_lang_en") || "english");
+    setGradioTtsUrl(localStorage.getItem("settings_gradio_tts_url") || "http://192.168.0.159:7860");
+    setEnableChatAnimations(localStorage.getItem("settings_ai_chat_animations") !== "false");
+    setEnableGeneralAnimations(localStorage.getItem("settings_general_animations") !== "false");
+    setPiperStandbyMode((localStorage.getItem("settings_piper_standby_mode") as "idle_60s" | "always_ready") || "idle_60s");
+
+    const savedScale = localStorage.getItem("settings_site_scale");
+    const initialScale = savedScale ? parseInt(savedScale, 10) : 100;
+    setSiteScale(initialScale);
+    initialScaleRef.current = initialScale;
+    setSecondarySections(loadSecondarySectionsVisibility());
+    setStoredSettingsCount(countStoredSettings(backupIncludeApiKeys));
+  };
+
   useEffect(() => {
     if (isOpen) {
-      setAudioApi(localStorage.getItem("settings_audio_api") || "google_proxy");
-      setCustomTtsUrl(localStorage.getItem("settings_custom_tts_url") || "");
-      setImageApi(localStorage.getItem("settings_image_api") || "duckduckgo");
-      setPixabayKey(localStorage.getItem("settings_pixabay_key") || "");
-      setGeminiApiKey(localStorage.getItem("settings_gemini_api_key") || "");
-      setGroqApiKey(localStorage.getItem("settings_groq_api_key") || "");
-      setAiProvider(localStorage.getItem("settings_ai_provider") || "gemini");
-      setEnableInlinePersonaCorrection(localStorage.getItem("settings_enable_persona_correction") !== "false");
-      setTtsExecutionMode((localStorage.getItem("settings_tts_execution_mode") as "local" | "server") || "server");
-
-      setPrimaryModelDe(localStorage.getItem("settings_primary_piper_model_de") || "de_DE-thorsten-medium");
-      setPrimaryModelAr(localStorage.getItem("settings_primary_piper_model_ar") || "ar_JO-kareem-medium");
-      setPrimaryModelEn(localStorage.getItem("settings_primary_piper_model_en") || "en_US-lessac-medium");
-
-      setReviewVoiceTarget((localStorage.getItem("settings_review_voice_target") as "primary" | "secondary") || "primary");
-      setEnableSecondaryAudioReview(localStorage.getItem("settings_enable_secondary_audio_review") === "true");
-      setEnableAudioPreloadReview(localStorage.getItem("settings_preload_audio_review") === "true");
-      setSecondaryModelDe(localStorage.getItem("settings_secondary_piper_model_de") || "google");
-      setSecondaryModelAr(localStorage.getItem("settings_secondary_piper_model_ar") || "google");
-      setSecondaryModelEn(localStorage.getItem("settings_secondary_piper_model_en") || "google");
-
-      setPrimaryGradioLangDe(localStorage.getItem("settings_primary_gradio_lang_de") || "german");
-      setPrimaryGradioLangAr(localStorage.getItem("settings_primary_gradio_lang_ar") || "arabic");
-      setPrimaryGradioLangEn(localStorage.getItem("settings_primary_gradio_lang_en") || "english");
-      setSecondaryGradioLangDe(localStorage.getItem("settings_secondary_gradio_lang_de") || "german");
-      setSecondaryGradioLangAr(localStorage.getItem("settings_secondary_gradio_lang_ar") || "arabic");
-      setSecondaryGradioLangEn(localStorage.getItem("settings_secondary_gradio_lang_en") || "english");
-
-      const savedScale = localStorage.getItem("settings_site_scale");
-      const initialScale = savedScale ? parseInt(savedScale, 10) : 100;
-      setSiteScale(initialScale);
-      initialScaleRef.current = initialScale;
-      setSecondarySections(loadSecondarySectionsVisibility());
+      syncModalStatesFromLocalStorage();
+      setBackupFeedback(null);
+      setBackupCopiedNotice(false);
 
       setTestImages([]);
       setImgSearchStatus(null);
@@ -1201,6 +1228,136 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       fetchPiperEngineStatus();
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    setStoredSettingsCount(countStoredSettings(backupIncludeApiKeys));
+  }, [backupIncludeApiKeys]);
+
+  const buildCurrentSettingsOverrides = (): Record<string, string> => ({
+    settings_audio_api: audioApi,
+    settings_custom_tts_url: customTtsUrl,
+    settings_image_api: imageApi,
+    settings_pixabay_key: pixabayKey,
+    settings_gemini_api_key: geminiApiKey,
+    settings_groq_api_key: groqApiKey,
+    settings_ai_provider: aiProvider,
+    settings_enable_persona_correction: String(enableInlinePersonaCorrection),
+    settings_tts_execution_mode: ttsExecutionMode,
+    settings_site_scale: String(siteScale),
+    settings_primary_piper_model_de: primaryModelDe,
+    settings_primary_piper_model_ar: primaryModelAr,
+    settings_primary_piper_model_en: primaryModelEn,
+    settings_review_voice_target: reviewVoiceTarget,
+    settings_enable_secondary_audio_review: String(enableSecondaryAudioReview),
+    settings_preload_audio_review: String(enableAudioPreloadReview),
+    settings_secondary_piper_model_de: secondaryModelDe,
+    settings_secondary_piper_model_ar: secondaryModelAr,
+    settings_secondary_piper_model_en: secondaryModelEn,
+    settings_primary_gradio_lang_de: primaryGradioLangDe,
+    settings_primary_gradio_lang_ar: primaryGradioLangAr,
+    settings_primary_gradio_lang_en: primaryGradioLangEn,
+    settings_secondary_gradio_lang_de: secondaryGradioLangDe,
+    settings_secondary_gradio_lang_ar: secondaryGradioLangAr,
+    settings_secondary_gradio_lang_en: secondaryGradioLangEn,
+    settings_gradio_tts_url: gradioTtsUrl,
+    settings_ai_chat_animations: String(enableChatAnimations),
+    settings_general_animations: String(enableGeneralAnimations),
+    settings_piper_standby_mode: piperStandbyMode,
+  });
+
+  const handleDownloadSettingsJson = () => {
+    try {
+      const snapshot = collectLocalSettingsSnapshot({
+        includeApiKeys: backupIncludeApiKeys,
+        overrides: buildCurrentSettingsOverrides(),
+      });
+      const jsonText = JSON.stringify(snapshot, null, 2);
+      const blob = new Blob([jsonText], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const dateStr = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `settings-backup-${dateStr}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setBackupFeedback({
+        type: "success",
+        text: `تم تصدير ${snapshot.settingsCount} إعداداً في ملف JSON بنجاح.`
+      });
+    } catch (err: any) {
+      setBackupFeedback({
+        type: "error",
+        text: err?.message || "تعذر تصدير الإعدادات."
+      });
+    }
+  };
+
+  const handleCopySettingsJson = async () => {
+    try {
+      const snapshot = collectLocalSettingsSnapshot({
+        includeApiKeys: backupIncludeApiKeys,
+        overrides: buildCurrentSettingsOverrides(),
+      });
+      const jsonText = JSON.stringify(snapshot, null, 2);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(jsonText);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = jsonText;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setBackupCopiedNotice(true);
+      setBackupFeedback({
+        type: "success",
+        text: `تم نسخ ${snapshot.settingsCount} إعداداً بصيغة JSON — يمكنك حفظها في أي مكان.`
+      });
+      setTimeout(() => setBackupCopiedNotice(false), 2500);
+    } catch (err: any) {
+      setBackupFeedback({
+        type: "error",
+        text: err?.message || "تعذر نسخ نص JSON."
+      });
+    }
+  };
+
+  const applyImportedSettingsJson = (rawText: string) => {
+    try {
+      const result = importLocalSettingsSnapshot(rawText, { allowApiKeys: true });
+      syncModalStatesFromLocalStorage();
+      setBackupImportText("");
+      setBackupFeedback({
+        type: "success",
+        text: `تم استيراد وتطبيق ${result.importedCount} إعداداً بنجاح.${
+          result.includesApiKeys ? " (تم تضمين مفاتيح API)" : ""
+        }`
+      });
+    } catch (err: any) {
+      setBackupFeedback({
+        type: "error",
+        text: err?.message || "ملف أو نص JSON غير صالح."
+      });
+    }
+  };
+
+  const handleUploadSettingsJsonFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = typeof reader.result === "string" ? reader.result : "";
+      applyImportedSettingsJson(text);
+    };
+    reader.onerror = () => {
+      setBackupFeedback({ type: "error", text: "تعذر قراءة الملف المحدد." });
+    };
+    reader.readAsText(file, "utf-8");
+    e.target.value = "";
+  };
 
   useEffect(() => {
     const unsub = subscribeDiagnosticLogs(() => {
@@ -1543,6 +1700,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       { title: "محرك البحث عن الصور", sectionLabel: "البحث عن الصور", keywords: "صور duckduckgo pixabay بحث", target: "images" },
       { title: "تثبيت التطبيق على الجوال (PWA)", sectionLabel: "التطبيق والتخزين", keywords: "تثبيت تطبيق جوال pwa اندرويد ايفون", target: "storage" },
       { title: "مسح الذاكرة المؤقتة للصور والصوت", sectionLabel: "التطبيق والتخزين", keywords: "ذاكرة مؤقتة كاش cache مسح مساحة", target: "storage" },
+      { title: "تصدير واستيراد الإعدادات (JSON)", sectionLabel: "النسخ الاحتياطي للإعدادات", keywords: "تصدير استيراد نسخ احتياطي جيسون json اعدادات مراجعة نقل حساب", target: "backup" },
       { title: "فحص الأنظمة وسجل الأخطاء", sectionLabel: "الفحص والتشخيص", keywords: "تشخيص اعطال اخطاء سجل فحص", target: "diagnostics" }
     ];
     if (isAdminUser) {
@@ -1639,6 +1797,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     appearance: "المظهر والواجهة",
     images: "البحث عن الصور",
     storage: "التطبيق والتخزين",
+    backup: "تصدير واستيراد الإعدادات",
     diagnostics: "الفحص والتشخيص",
     accounts: "الحسابات والمستخدمون"
   };
@@ -1871,6 +2030,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                           : `صور: ${imageCacheSize || "0.00 MB"} · صوتيات: ${ttsCacheSize || "0.00 MB"}`
                       }
                       onClick={() => setRoute("storage")}
+                    />
+                    <AndroidNavRow
+                      icon={<FileJson className="w-5 h-5" />}
+                      iconBg="bg-violet-50 text-violet-600"
+                      title="تصدير واستيراد الإعدادات"
+                      value={`نسخ احتياطي بصيغة JSON (${storedSettingsCount} إعداد محلي)`}
+                      onClick={() => setRoute("backup")}
                     />
                   </SettingsGroup>
 
@@ -3314,6 +3480,126 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                   >
                     مسح
                   </button>
+                </div>
+              </SettingsGroup>
+            </div>
+          )}
+
+          {/* ================= SECTION: SETTINGS BACKUP (JSON EXPORT / IMPORT) ================= */}
+          {route === "backup" && (
+            <div className="space-y-5">
+              {backupFeedback && (
+                <div
+                  className={`p-3.5 rounded-2xl border text-xs font-bold flex items-center gap-2 ${
+                    backupFeedback.type === "success"
+                      ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                      : "bg-rose-50 border-rose-200 text-rose-800"
+                  }`}
+                >
+                  {backupFeedback.type === "success" ? (
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                  )}
+                  <span>{backupFeedback.text}</span>
+                </div>
+              )}
+
+              <SettingsGroup title="تصدير الإعدادات المحلية (JSON)">
+                <div className="p-4 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
+                      <FileJson className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-1 min-w-0">
+                      <div className="text-sm font-bold text-slate-900">
+                        تصدير جميع إعدادات المراجعات والتطبيق
+                      </div>
+                      <p className="text-xs text-slate-500 leading-relaxed">
+                        يشمل إعدادات جميع أنماط المراجعة (تحدي النطق، الكتابة، الاستماع، التكرار وخططه المخصصة)، الأصوات، المظهر، وأقسام الشريط الجانبي ({storedSettingsCount} إعداد محلي)، دون تصدير بيانات الجلسة أو البطاقات.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200/70">
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-slate-800">تضمين مفاتيح API الخاصة</div>
+                      <div className="text-[11px] text-slate-500">فعّله إذا أردت نقل مفاتيح Gemini / Groq / Pixabay لحسابك الآخر</div>
+                    </div>
+                    <AndroidSwitch
+                      checked={backupIncludeApiKeys}
+                      onChange={setBackupIncludeApiKeys}
+                      ariaLabel="تضمين مفاتيح API في ملف التصدير"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleDownloadSettingsJson}
+                      className="h-11 px-4 rounded-xl bg-[#004ac6] hover:bg-[#003ea8] text-white text-xs font-bold flex items-center justify-center gap-2 shadow-2xs transition-all cursor-pointer active:scale-[0.98]"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>تنزيل كملف JSON</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCopySettingsJson}
+                      className="h-11 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.98]"
+                    >
+                      {backupCopiedNotice ? (
+                        <Check className="w-4 h-4 text-emerald-600" />
+                      ) : (
+                        <Copy className="w-4 h-4" />
+                      )}
+                      <span>{backupCopiedNotice ? "تم نسخ JSON" : "نسخ نص JSON"}</span>
+                    </button>
+                  </div>
+                </div>
+              </SettingsGroup>
+
+              <SettingsGroup title="استيراد الإعدادات من JSON">
+                <div className="p-4 space-y-3">
+                  <input
+                    ref={backupFileInputRef}
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={handleUploadSettingsJsonFile}
+                    className="hidden"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => backupFileInputRef.current?.click()}
+                    className="w-full h-11 px-4 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.99]"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>رفع ملف إعدادات (.json) وتطبيقه فوراً</span>
+                  </button>
+
+                  <div className="space-y-2 pt-1">
+                    <label className="block text-xs font-bold text-slate-700">
+                      أو الصق نص JSON هنا:
+                    </label>
+                    <textarea
+                      rows={5}
+                      dir="ltr"
+                      value={backupImportText}
+                      onChange={(e) => setBackupImportText(e.target.value)}
+                      placeholder='{"app": "M9F-Settings", "settings": { ... }}'
+                      className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-[#004ac6] font-mono text-[11px] text-slate-800 placeholder-slate-400 outline-none resize-y"
+                    />
+                    <button
+                      type="button"
+                      disabled={!backupImportText.trim()}
+                      onClick={() => applyImportedSettingsJson(backupImportText)}
+                      className="w-full h-10 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>استيراد وتطبيق النص</span>
+                    </button>
+                  </div>
                 </div>
               </SettingsGroup>
             </div>
