@@ -4,7 +4,6 @@ import {
   Swords,
   Sparkles,
   Send,
-  Lock,
   Plus,
   RefreshCw,
   LogOut,
@@ -112,6 +111,25 @@ const AI_CORRECTION_MODELS = [
   { key: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen" },
 ];
 
+function readLocalSavedKeys(): { geminiApiKey: string; groqApiKey: string } {
+  try {
+    const geminiApiKey = (
+      localStorage.getItem("settings_gemini_api_key") ||
+      localStorage.getItem("gemini_api_key") ||
+      localStorage.getItem("GEMINI_API_KEY") ||
+      ""
+    ).trim();
+    const groqApiKey = (
+      localStorage.getItem("settings_groq_api_key") ||
+      localStorage.getItem("groq_api_key") ||
+      ""
+    ).trim();
+    return { geminiApiKey, groqApiKey };
+  } catch {
+    return { geminiApiKey: "", groqApiKey: "" };
+  }
+}
+
 function playGameChime(kind: "submit" | "ai_done" | "round", muted: boolean) {
   if (muted) return;
   try {
@@ -196,6 +214,72 @@ const CartoonAvatar: React.FC<{
         </motion.span>
       )}
     </motion.div>
+  );
+};
+
+const BlurredOpponentSheet: React.FC<{
+  isTyping: boolean;
+  hasDraft: boolean;
+  wordCount: number;
+}> = ({ isTyping, hasDraft, wordCount }) => {
+  // Deterministic simulated blurred word-blocks proportional to wordCount (no real characters ever transmitted!)
+  const blockCount = Math.min(36, Math.max(wordCount > 0 ? wordCount : 0, isTyping ? 6 : 0));
+  const widths = [46, 68, 38, 82, 54, 62, 40, 74, 50, 64];
+
+  return (
+    <div className="flex-1 min-h-[220px] rounded-xl border-2 border-slate-900 bg-white relative overflow-hidden flex flex-col">
+      {/* Underlying simulated notebook writing surface (blurred) */}
+      <div
+        className="flex-1 p-4 flex flex-wrap content-start gap-2.5 select-none pointer-events-none"
+        style={{ filter: "blur(7px)" }}
+        dir="ltr"
+        aria-hidden="true"
+      >
+        {blockCount > 0 ? (
+          <>
+            {Array.from({ length: blockCount }).map((_, idx) => (
+              <span
+                key={idx}
+                className={`h-3.5 rounded-full ${
+                  idx % 5 === 0 ? "bg-slate-800/75" : "bg-slate-600/70"
+                } ${isTyping && idx === blockCount - 1 ? "animate-pulse" : ""}`}
+                style={{ width: `${widths[idx % widths.length]}px` }}
+              />
+            ))}
+            {isTyping && (
+              <span className="inline-block w-1.5 h-4 bg-sky-600 animate-pulse rounded-xs" />
+            )}
+          </>
+        ) : (
+          <div className="w-full space-y-3 opacity-35 pt-2">
+            <div className="h-3 w-3/4 rounded-full bg-slate-300" />
+            <div className="h-3 w-1/2 rounded-full bg-slate-200" />
+            <div className="h-3 w-2/3 rounded-full bg-slate-200" />
+          </div>
+        )}
+      </div>
+
+      {/* Frosted Blur Overlay */}
+      <div className="absolute inset-0 backdrop-blur-[6px] bg-white/35 flex flex-col items-center justify-center p-4 gap-2.5 pointer-events-none">
+        {isTyping ? (
+          <motion.div
+            animate={{ scale: [1, 1.04, 1] }}
+            transition={{ repeat: Infinity, duration: 1 }}
+            className="px-4 py-1.5 rounded-xl bg-amber-300/95 border-2 border-slate-900 shadow-[0_3px_0_#0f172a] text-xs font-black text-slate-950"
+          >
+            يكتب الآن... ✍️
+          </motion.div>
+        ) : hasDraft ? (
+          <div className="px-4 py-1.5 rounded-xl bg-white/95 border-2 border-slate-900 shadow-[0_3px_0_#0f172a] text-xs font-black text-slate-900">
+            مسودة قيد الإعداد
+          </div>
+        ) : null}
+
+        <div className="px-3.5 py-1 rounded-xl bg-slate-900/90 text-white text-xs font-black tabular-nums shadow-xs">
+          عدد الكلمات: {wordCount}
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -398,6 +482,20 @@ export const WritingDuelWorkspace: React.FC<WritingDuelWorkspaceProps> = ({
     return () => window.clearTimeout(t);
   }, [errorToast]);
 
+  // Sync user's API keys cleanly if updated in Settings while connected
+  useEffect(() => {
+    const syncKeys = () => {
+      const { geminiApiKey, groqApiKey } = readLocalSavedKeys();
+      sendWs({ type: "user:sync_keys", geminiApiKey, groqApiKey });
+    };
+    window.addEventListener("app_settings_changed", syncKeys);
+    window.addEventListener("storage", syncKeys);
+    return () => {
+      window.removeEventListener("app_settings_changed", syncKeys);
+      window.removeEventListener("storage", syncKeys);
+    };
+  }, [sendWs]);
+
   useEffect(() => {
     let closedByCleanup = false;
     let attempt = 0;
@@ -415,7 +513,8 @@ export const WritingDuelWorkspace: React.FC<WritingDuelWorkspaceProps> = ({
 
       ws.onopen = () => {
         attempt = 0;
-        ws.send(JSON.stringify({ type: "auth", token: activeToken }));
+        const { geminiApiKey, groqApiKey } = readLocalSavedKeys();
+        ws.send(JSON.stringify({ type: "auth", token: activeToken, geminiApiKey, groqApiKey }));
       };
 
       ws.onmessage = (event) => {
@@ -524,14 +623,13 @@ export const WritingDuelWorkspace: React.FC<WritingDuelWorkspaceProps> = ({
   };
 
   const handleTriggerAICorrection = (targetType: "p1" | "p2") => {
-    const savedGeminiKey = localStorage.getItem("settings_gemini_api_key") || "";
-    const savedGroqKey = localStorage.getItem("settings_groq_api_key") || "";
+    const { geminiApiKey, groqApiKey } = readLocalSavedKeys();
     sendWs({
       type: "duel:correct_ai",
       targetType,
       selectedModel,
-      geminiApiKey: savedGeminiKey,
-      groqApiKey: savedGroqKey,
+      geminiApiKey,
+      groqApiKey,
     });
   };
 
@@ -581,9 +679,9 @@ export const WritingDuelWorkspace: React.FC<WritingDuelWorkspaceProps> = ({
     if (!player) {
       return (
         <div
-          className={`rounded-2xl border-2 border-dashed border-slate-400 ${theme.bg} p-5 flex flex-col items-center justify-center text-center min-h-[290px]`}
+          className={`flex-1 h-full rounded-2xl border-2 border-dashed border-slate-400 ${theme.bg} p-5 flex flex-col items-center justify-center text-center min-h-[280px]`}
         >
-          <CartoonAvatar avatar={theme.avatar} name="؟" sizeClass="w-20 h-20 opacity-65 grayscale-[20%]" />
+          <CartoonAvatar avatar={theme.avatar} name="؟" sizeClass="w-24 h-24 opacity-65 grayscale-[20%]" />
           <p className="mt-3 text-sm font-black text-slate-800">بانتظار {theme.label}...</p>
         </div>
       );
@@ -591,9 +689,9 @@ export const WritingDuelWorkspace: React.FC<WritingDuelWorkspaceProps> = ({
 
     return (
       <div
-        className={`rounded-2xl border-2 border-slate-900 ${theme.bg} shadow-[0_5px_0_#0f172a] flex flex-col overflow-hidden min-h-[300px]`}
+        className={`flex-1 h-full min-h-0 rounded-2xl border-2 border-slate-900 ${theme.bg} shadow-[0_5px_0_#0f172a] flex flex-col overflow-hidden`}
       >
-        <div className={`${theme.header} px-3.5 py-2.5 border-b-2 border-slate-900 flex items-center justify-between gap-2`}>
+        <div className={`${theme.header} px-3.5 py-2.5 border-b-2 border-slate-900 flex items-center justify-between gap-2 shrink-0`}>
           <div className="flex items-center gap-2 min-w-0">
             <span className={`px-2 py-0.5 rounded-lg border border-slate-900 text-[11px] font-black shrink-0 ${theme.badge}`}>
               {isMe ? "أنت" : theme.label}
@@ -613,8 +711,8 @@ export const WritingDuelWorkspace: React.FC<WritingDuelWorkspaceProps> = ({
           </div>
         </div>
 
-        <div className="p-3.5 flex-1 flex flex-col gap-3">
-          <div className="flex items-center gap-3">
+        <div className="p-3.5 flex-1 min-h-0 flex flex-col gap-3">
+          <div className="flex items-center gap-3 shrink-0">
             <CartoonAvatar
               avatar={player.avatar}
               isTyping={isMe ? draftInput.trim().length > 0 && myWordCount > 0 : player.isTyping}
@@ -631,10 +729,6 @@ export const WritingDuelWorkspace: React.FC<WritingDuelWorkspaceProps> = ({
                   >
                     يكتب الآن... ✍️
                   </motion.span>
-                ) : player.hasDraft ? (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border-2 border-slate-900 text-xs font-black text-slate-800">
-                    مسودة جاهزة ({player.draftWordCount})
-                  </span>
                 ) : player.submittedText ? (
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-200 border border-slate-900 text-xs font-black text-slate-900">
                     تم الإرسال ✅
@@ -645,7 +739,7 @@ export const WritingDuelWorkspace: React.FC<WritingDuelWorkspaceProps> = ({
           </div>
 
           {isMe ? (
-            <div className="flex-1 flex flex-col gap-2.5">
+            <div className="flex-1 min-h-0 flex flex-col gap-2.5">
               <textarea
                 value={draftInput}
                 onChange={(e) => handleDraftChange(e.target.value)}
@@ -657,10 +751,10 @@ export const WritingDuelWorkspace: React.FC<WritingDuelWorkspaceProps> = ({
                 }}
                 dir="ltr"
                 placeholder="Schreibe hier..."
-                className="w-full flex-1 min-h-[130px] rounded-xl border-2 border-slate-900 bg-white p-3 text-sm font-bold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none shadow-inner"
+                className="w-full flex-1 min-h-[220px] rounded-xl border-2 border-slate-900 bg-white p-3.5 text-sm font-bold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none shadow-inner"
               />
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-extrabold text-slate-600">{myWordCount} كلمة</span>
+              <div className="flex items-center justify-between gap-2 shrink-0">
+                <span className="text-xs font-extrabold text-slate-700">عدد الكلمات: {myWordCount}</span>
                 <button
                   type="button"
                   onClick={handleSubmitDraft}
@@ -673,16 +767,11 @@ export const WritingDuelWorkspace: React.FC<WritingDuelWorkspaceProps> = ({
               </div>
             </div>
           ) : (
-            <div className="flex-1 rounded-xl border-2 border-dashed border-slate-800/70 bg-white/80 p-4 flex flex-col items-center justify-center text-center min-h-[145px]">
-              <div className="w-11 h-11 rounded-2xl bg-slate-900 text-amber-300 flex items-center justify-center mb-2 shadow-sm">
-                <Lock className="w-5 h-5" />
-              </div>
-              <p className="text-xs font-black text-slate-900">مخفي حتى الإرسال</p>
-              <div className="mt-3 w-full max-w-[180px] space-y-1.5 opacity-40">
-                <div className={`h-2 rounded-full bg-slate-400 ${player.isTyping ? "animate-pulse w-full" : "w-3/4 mx-auto"}`} />
-                <div className={`h-2 rounded-full bg-slate-300 ${player.isTyping ? "animate-pulse w-5/6" : "w-1/2 mx-auto"}`} />
-              </div>
-            </div>
+            <BlurredOpponentSheet
+              isTyping={player.isTyping}
+              hasDraft={player.hasDraft}
+              wordCount={player.draftWordCount}
+            />
           )}
         </div>
       </div>
@@ -732,7 +821,7 @@ export const WritingDuelWorkspace: React.FC<WritingDuelWorkspaceProps> = ({
             </p>
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-slate-300 bg-white/60 py-4 px-3 text-center text-[11px] font-bold text-slate-400">
+          <div className="rounded-lg border border-dashed border-slate-300 bg-white/60 py-5 px-3 text-center text-[11px] font-bold text-slate-400">
             بانتظار الإرسال...
           </div>
         )}
@@ -743,9 +832,14 @@ export const WritingDuelWorkspace: React.FC<WritingDuelWorkspaceProps> = ({
   };
 
   return (
-    <div className="flex-1 h-full overflow-y-auto bg-[#FAF6ED] text-slate-900 flex flex-col" dir="rtl">
+    <div
+      className={`flex-1 h-full bg-[#FAF6ED] text-slate-900 flex flex-col ${
+        room ? "overflow-y-auto lg:overflow-hidden" : "overflow-y-auto"
+      }`}
+      dir="rtl"
+    >
       {/* Simple Top Bar */}
-      <header className="sticky top-0 z-20 bg-[#FFFDF8]/95 backdrop-blur-sm border-b-2 border-slate-900 px-3 sm:px-5 py-2.5 flex flex-wrap items-center justify-between gap-2.5">
+      <header className="shrink-0 z-20 bg-[#FFFDF8]/95 backdrop-blur-sm border-b-2 border-slate-900 px-3 sm:px-5 py-2.5 flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5 min-w-0">
           <button
             type="button"
@@ -817,7 +911,7 @@ export const WritingDuelWorkspace: React.FC<WritingDuelWorkspaceProps> = ({
             initial={{ opacity: 0, y: -12 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -12 }}
-            className="mx-auto mt-3 px-4 py-2 rounded-xl border-2 border-slate-900 bg-rose-500 text-white text-xs font-black shadow-[0_3px_0_#0f172a] flex items-center gap-2"
+            className="mx-auto mt-2 shrink-0 px-4 py-2 rounded-xl border-2 border-slate-900 bg-rose-500 text-white text-xs font-black shadow-[0_3px_0_#0f172a] flex items-center gap-2"
           >
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{errorToast}</span>
@@ -951,11 +1045,11 @@ export const WritingDuelWorkspace: React.FC<WritingDuelWorkspaceProps> = ({
         </div>
       ) : (
         /* ========================================================================= */
-        /* ACTIVE SPLIT-SCREEN CARTOON DUEL ARENA                                    */
+        /* FULL-HEIGHT SPLIT-SCREEN CARTOON DUEL ARENA                               */
         /* ========================================================================= */
-        <div className="flex-1 p-3 sm:p-5 max-w-[1440px] w-full mx-auto space-y-4">
-          {/* Clean Match Bar: Round + AI Model Picker + Next Round */}
-          <div className="rounded-2xl border-2 border-slate-900 bg-white p-3 shadow-[0_4px_0_#0f172a] flex flex-wrap items-center justify-between gap-3">
+        <div className="flex-1 min-h-0 p-3 sm:p-4 max-w-[1480px] w-full mx-auto flex flex-col gap-3">
+          {/* Clean Match Bar */}
+          <div className="shrink-0 rounded-2xl border-2 border-slate-900 bg-white p-2.5 sm:px-3.5 shadow-[0_4px_0_#0f172a] flex flex-wrap items-center justify-between gap-2.5">
             <span className="px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-black tabular-nums">
               الجولة {room.round}
             </span>
@@ -989,11 +1083,11 @@ export const WritingDuelWorkspace: React.FC<WritingDuelWorkspaceProps> = ({
             </div>
           </div>
 
-          {/* SPLIT SCREEN: PLAYER 1 + CENTRAL DISPLAY + PLAYER 2 */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
-            <div className="lg:col-span-4 flex flex-col">{renderPlayerHalf(1)}</div>
+          {/* FULL-HEIGHT 3-WINDOW SPLIT SCREEN */}
+          <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-stretch">
+            <div className="lg:col-span-4 h-full min-h-0 flex flex-col">{renderPlayerHalf(1)}</div>
 
-            <div className="lg:col-span-4 rounded-2xl border-2 border-slate-900 shadow-[0_5px_0_#0f172a] overflow-hidden relative flex flex-col bg-[#F7EEDB]">
+            <div className="lg:col-span-4 h-full min-h-0 rounded-2xl border-2 border-slate-900 shadow-[0_5px_0_#0f172a] overflow-hidden relative flex flex-col bg-[#F7EEDB]">
               {!stageBgError && (
                 <img
                   src={duelArenaStageImg}
@@ -1003,18 +1097,18 @@ export const WritingDuelWorkspace: React.FC<WritingDuelWorkspaceProps> = ({
                 />
               )}
 
-              <div className="relative z-10 bg-amber-400/95 px-3.5 py-2.5 border-b-2 border-slate-900 flex items-center gap-2">
+              <div className="relative z-10 shrink-0 bg-amber-400/95 px-3.5 py-2.5 border-b-2 border-slate-900 flex items-center gap-2">
                 <Swords className="w-4 h-4 text-slate-950" />
                 <h2 className="text-sm font-black text-slate-950">المساحة المتوسطة</h2>
               </div>
 
-              <div className="relative z-10 p-3.5 space-y-3 flex-1 flex flex-col justify-start">
+              <div className="relative z-10 flex-1 min-h-0 overflow-y-auto p-3.5 space-y-3">
                 {renderCenterSubmissionCard(1)}
                 {renderCenterSubmissionCard(2)}
               </div>
             </div>
 
-            <div className="lg:col-span-4 flex flex-col">{renderPlayerHalf(2)}</div>
+            <div className="lg:col-span-4 h-full min-h-0 flex flex-col">{renderPlayerHalf(2)}</div>
           </div>
         </div>
       )}

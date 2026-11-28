@@ -105,6 +105,8 @@ interface AuthedSocket {
 const rooms = new Map<string, InternalWritingDuelRoom>();
 const socketsByWs = new Map<WebSocket, AuthedSocket>();
 const typingTimers = new Map<string, NodeJS.Timeout>();
+// Strictly server-only per-user API keys (never serialized or broadcast to any client)
+const userApiKeys = new Map<string, { geminiApiKey: string; groqApiKey: string }>();
 
 function generateRoomCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -427,6 +429,32 @@ async function handleRoomAICorrection(
   const textToCorrect = player.submittedText.trim();
   const modelToUse = (selectedModel || "gemini-3.6-flash").trim();
 
+  // Resolve key priority:
+  // 1) Clicking requester's key (sent live or registered)
+  // 2) Target text author's registered key
+  // 3) Other player's registered key in this room
+  // 4) Server env key (resolved inside runAICorrection)
+  const otherSlotKey = targetType === "p1" ? "p2" : "p1";
+  const otherPlayer = room.players[otherSlotKey];
+
+  const requesterStored = userApiKeys.get(requester.userId);
+  const authorStored = userApiKeys.get(player.userId);
+  const otherStored = otherPlayer ? userApiKeys.get(otherPlayer.userId) : undefined;
+
+  const effectiveGeminiKey =
+    (clientGeminiKey || "").trim() ||
+    requesterStored?.geminiApiKey ||
+    authorStored?.geminiApiKey ||
+    otherStored?.geminiApiKey ||
+    "";
+
+  const effectiveGroqKey =
+    (clientGroqKey || "").trim() ||
+    requesterStored?.groqApiKey ||
+    authorStored?.groqApiKey ||
+    otherStored?.groqApiKey ||
+    "";
+
   room.centerCorrections[targetType] = {
     status: "loading",
     targetType,
@@ -439,7 +467,7 @@ async function handleRoomAICorrection(
   broadcastRoom(room);
 
   try {
-    const result = await runAICorrection(textToCorrect, modelToUse, clientGeminiKey, clientGroqKey);
+    const result = await runAICorrection(textToCorrect, modelToUse, effectiveGeminiKey, effectiveGroqKey);
     room.centerCorrections[targetType] = {
       status: "done",
       targetType,
@@ -552,6 +580,15 @@ export function attachWritingDuelWebSocket(
           return;
         }
         clientState.user = session;
+        const gKey = typeof msg.geminiApiKey === "string" ? msg.geminiApiKey.trim() : "";
+        const qKey = typeof msg.groqApiKey === "string" ? msg.groqApiKey.trim() : "";
+        if (gKey || qKey) {
+          const prev = userApiKeys.get(session.userId) || { geminiApiKey: "", groqApiKey: "" };
+          userApiKeys.set(session.userId, {
+            geminiApiKey: gKey || prev.geminiApiKey,
+            groqApiKey: qKey || prev.groqApiKey,
+          });
+        }
         sendJson(ws, {
           type: "auth:ok",
           user: { id: session.userId, name: session.name, username: session.username },
@@ -566,6 +603,13 @@ export function attachWritingDuelWebSocket(
       }
 
       const user = clientState.user;
+
+      if (msg.type === "user:sync_keys") {
+        const gKey = typeof msg.geminiApiKey === "string" ? msg.geminiApiKey.trim() : "";
+        const qKey = typeof msg.groqApiKey === "string" ? msg.groqApiKey.trim() : "";
+        userApiKeys.set(user.userId, { geminiApiKey: gKey, groqApiKey: qKey });
+        return;
+      }
 
       if (msg.type === "lobby:list") {
         sendJson(ws, { type: "lobby:rooms", rooms: listOpenRooms() });
@@ -762,8 +806,15 @@ export function attachWritingDuelWebSocket(
         const targetType = msg.targetType;
         if (targetType === "p1" || targetType === "p2") {
           const selectedModel = typeof msg.selectedModel === "string" ? msg.selectedModel : "gemini-3.6-flash";
-          const clientGeminiKey = typeof msg.geminiApiKey === "string" ? msg.geminiApiKey : "";
-          const clientGroqKey = typeof msg.groqApiKey === "string" ? msg.groqApiKey : "";
+          const clientGeminiKey = typeof msg.geminiApiKey === "string" ? msg.geminiApiKey.trim() : "";
+          const clientGroqKey = typeof msg.groqApiKey === "string" ? msg.groqApiKey.trim() : "";
+          if (clientGeminiKey || clientGroqKey) {
+            const prev = userApiKeys.get(user.userId) || { geminiApiKey: "", groqApiKey: "" };
+            userApiKeys.set(user.userId, {
+              geminiApiKey: clientGeminiKey || prev.geminiApiKey,
+              groqApiKey: clientGroqKey || prev.groqApiKey,
+            });
+          }
           void handleRoomAICorrection(room, user, targetType, selectedModel, clientGeminiKey, clientGroqKey);
         }
         return;
