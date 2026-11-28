@@ -1,7 +1,7 @@
 import React from "react";
 import { FolderOpen, BookMarked, Languages, Sparkles, Menu } from "lucide-react";
 
-type TabType = "library" | "books" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs";
+type TabType = "library" | "books" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs" | "writing-duel";
 
 interface MobileBottomNavProps {
   activeTab: TabType;
@@ -60,6 +60,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = React.memo(({
     activeTab === "media" ||
     activeTab === "notes" ||
     activeTab === "shadowing" ||
+    activeTab === "writing-duel" ||
     activeTab === "trash";
 
   return (

@@ -17,7 +17,8 @@ import {
   NotebookPen,
   Headphones,
   Languages,
-  LogOut
+  LogOut,
+  Swords
 } from "lucide-react";
 import { Folder as FolderType, Flashcard, DbStatus } from "../types";
 import { useAuth } from "../context/AuthContext";
@@ -37,7 +38,7 @@ interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
   dbStatus?: DbStatus;
-  activeTab?: "library" | "books" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs";
+  activeTab?: "library" | "books" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs" | "writing-duel";
   onSelectBooks?: () => void;
   onSelectAI?: () => void;
   onSelectTrash?: () => void;
@@ -46,6 +47,7 @@ interface SidebarProps {
   onSelectNotes?: () => void;
   onSelectShadowing?: () => void;
   onSelectVerbs?: () => void;
+  onSelectWritingDuel?: () => void;
   onDataReloaded?: (folders: any[], cards: any[]) => void;
 }
 
@@ -68,6 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
   onSelectNotes,
   onSelectShadowing,
   onSelectVerbs,
+  onSelectWritingDuel,
   onDataReloaded
 }) => {
   // Collapsible Mini-Rail state (Slim Icon Bar)
@@ -349,6 +352,36 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
               </div>
               {!isCollapsed && (
                 <span className="truncate whitespace-nowrap">تصريف الأفعال</span>
+              )}
+            </button>
+
+            {/* تحدي الكتابة (Game Duel Mode) */}
+            <button
+              type="button"
+              onClick={() => {
+                onSelectWritingDuel?.();
+                onClose?.();
+              }}
+              title="تحدي الكتابة"
+              className={`w-full relative flex items-center gap-2.5 rounded-xl text-right transition-all duration-150 font-bold text-[12.5px] cursor-pointer group border ${
+                isCollapsed ? "justify-center px-0 h-10 w-10 mx-auto" : "px-2.5 py-2 min-h-[42px]"
+              } ${
+                activeTab === "writing-duel"
+                  ? "bg-orange-500 text-white border-orange-500 shadow-sm"
+                  : "bg-orange-50/60 text-slate-800 border-orange-200/80 hover:bg-orange-50 hover:border-orange-300"
+              }`}
+            >
+              <div
+                className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                  activeTab === "writing-duel"
+                    ? "bg-white/20 text-white"
+                    : "bg-orange-100 text-orange-700 group-hover:bg-orange-500 group-hover:text-white"
+                }`}
+              >
+                <Swords className="w-4 h-4" />
+              </div>
+              {!isCollapsed && (
+                <span className="truncate whitespace-nowrap">تحدي الكتابة</span>
               )}
             </button>
           </div>

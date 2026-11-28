@@ -19,6 +19,7 @@ import { getSupabase, SUPABASE_SQL_SCHEMA } from "./src/supabaseClient";
 import { formatSubtitleTrackProtocol } from "./src/utils/subtitleNaming";
 import { GoogleGenAI, Type } from "@google/genai";
 import { authMiddleware, registerAuthRoutes, loadUsers, syncUsersWithSupabase } from "./serverAuth";
+import { registerWritingDuelRoutes, attachWritingDuelWebSocket } from "./serverWritingDuel";
 
 // ─── Crash & Unhandled Rejection Immunity ───────────────────────────────────────
 // Prevents server crashes from remote sockets (e.g. Gradio / Python / Whisper server disconnecting mid-stream)
@@ -11389,6 +11390,8 @@ ${structureDirective}
     }
   });
 
+  registerWritingDuelRoutes(app);
+
   const httpServer = http.createServer(app);
   const disableHmr =
     process.env.DISABLE_HMR === "true" ||
@@ -11594,6 +11597,7 @@ ${structureDirective}
 
   const tlsCreds = await getOrCreateLocalTlsCredentials();
   const httpsServer = tlsCreds ? https.createServer({ key: tlsCreds.private, cert: tlsCreds.cert }, app) : null;
+  attachWritingDuelWebSocket(httpServer, httpsServer);
 
   const onListening = () => {
     console.log(`Server is running at http://localhost:${PORT}`);

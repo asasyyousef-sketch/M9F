@@ -3818,82 +3818,97 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     }
   }, [activeCues, currentTime, handleSeek, smoothPlay, triggerHud]);
 
-  // Jump to Previous Sentence ([)
+  const lastJumpedCueRef = useRef<{ idx: number; startTime: number } | null>(null);
+
+  const resolveCurrentCueIndex = useCallback((time: number): number => {
+    if (!activeCues || activeCues.length === 0) return -1;
+    const recent = lastJumpedCueRef.current;
+    if (
+      recent &&
+      recent.idx >= 0 &&
+      recent.idx < activeCues.length &&
+      Math.abs(time - recent.startTime) < 0.08
+    ) {
+      return recent.idx;
+    }
+    const strictIdx = activeCues.findIndex((c) => time >= c.startTime && time < c.endTime);
+    if (strictIdx !== -1) return strictIdx;
+    return activeCues.findIndex((c) => time >= c.startTime && time <= c.endTime);
+  }, [activeCues]);
+
+  // Jump to Previous Sentence (↑ / [)
   const jumpToPreviousSentence = useCallback((keepPlayingState: boolean = true) => {
     const el = getMediaElement();
     const time = el ? el.currentTime : currentTime;
     const isCurrentlyPlaying = el ? !el.paused : isPlaying;
 
     if (!activeCues || activeCues.length === 0) {
+      lastJumpedCueRef.current = null;
       skipSeconds(-5);
       return;
     }
 
-    const currentIdx = activeCues.findIndex(
-      (c) => time >= c.startTime && time <= c.endTime
-    );
+    const currentIdx = resolveCurrentCueIndex(time);
 
-    let targetCue: SubtitleCue;
+    let targetIdx = -1;
     if (currentIdx > 0) {
-      // Always jump directly to the previous sentence
-      targetCue = activeCues[currentIdx - 1];
+      targetIdx = currentIdx - 1;
     } else if (currentIdx === 0) {
-      targetCue = activeCues[0];
+      targetIdx = 0;
     } else {
-      const prevCues = activeCues.filter((c) => c.startTime < time);
-      if (prevCues.length > 0) {
-        targetCue = prevCues[prevCues.length - 1];
-      } else {
-        targetCue = activeCues[0];
+      for (let i = activeCues.length - 1; i >= 0; i--) {
+        if (activeCues[i].startTime < time) {
+          targetIdx = i;
+          break;
+        }
       }
+      if (targetIdx === -1) targetIdx = 0;
     }
 
+    const targetCue = activeCues[targetIdx];
     if (targetCue) {
+      lastJumpedCueRef.current = { idx: targetIdx, startTime: targetCue.startTime };
       singleSentencePlaybackEndRef.current = null;
       handleSeek(targetCue.startTime);
-      // Only call smoothPlay if currently paused but playback state was active;
-      // if already playing, changing currentTime continues playback without interruption!
       if (isCurrentlyPlaying && keepPlayingState && el?.paused) {
         smoothPlay();
       }
-      triggerHud("الجملة السابقة", "[");
+      triggerHud("الجملة السابقة", "↑");
     }
-  }, [activeCues, currentTime, handleSeek, isPlaying, smoothPlay, skipSeconds, triggerHud]);
+  }, [activeCues, currentTime, handleSeek, isPlaying, resolveCurrentCueIndex, smoothPlay, skipSeconds, triggerHud]);
 
-  // Jump to Next Sentence (])
+  // Jump to Next Sentence (↓ / ])
   const jumpToNextSentence = useCallback((keepPlayingState: boolean = true) => {
     const el = getMediaElement();
     const time = el ? el.currentTime : currentTime;
     const isCurrentlyPlaying = el ? !el.paused : isPlaying;
 
     if (!activeCues || activeCues.length === 0) {
+      lastJumpedCueRef.current = null;
       skipSeconds(5);
       return;
     }
 
-    const currentIdx = activeCues.findIndex(
-      (c) => time >= c.startTime && time <= c.endTime
-    );
+    const currentIdx = resolveCurrentCueIndex(time);
 
-    let targetCue: SubtitleCue | null = null;
+    let targetIdx = -1;
     if (currentIdx >= 0 && currentIdx < activeCues.length - 1) {
-      targetCue = activeCues[currentIdx + 1];
+      targetIdx = currentIdx + 1;
     } else if (currentIdx === -1) {
-      const nextCue = activeCues.find((c) => c.startTime > time);
-      if (nextCue) targetCue = nextCue;
+      targetIdx = activeCues.findIndex((c) => c.startTime > time);
     }
 
+    const targetCue = targetIdx >= 0 ? activeCues[targetIdx] : null;
     if (targetCue) {
+      lastJumpedCueRef.current = { idx: targetIdx, startTime: targetCue.startTime };
       singleSentencePlaybackEndRef.current = null;
       handleSeek(targetCue.startTime);
-      // Only call smoothPlay if currently paused but playback state was active;
-      // if already playing, changing currentTime continues playback without interruption!
       if (isCurrentlyPlaying && keepPlayingState && el?.paused) {
         smoothPlay();
       }
-      triggerHud("الجملة التالية", "]");
+      triggerHud("الجملة التالية", "↓");
     }
-  }, [activeCues, currentTime, handleSeek, isPlaying, smoothPlay, skipSeconds, triggerHud]);
+  }, [activeCues, currentTime, handleSeek, isPlaying, resolveCurrentCueIndex, smoothPlay, skipSeconds, triggerHud]);
 
   // Shadowing Studio Modal Handlers
   const handleOpenShadowing = useCallback((targetCue: SubtitleCue) => {
@@ -4007,9 +4022,10 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
     };
   }, [currentFile, playbackRate, isLooping, volume, isMuted, voiceClarifier, isPlaying, duration, smoothPause, syncAudioGain]);
 
-  // Keyboard Shortcuts ([ = Prev Sentence, ] = Next Sentence, R = Replay Sentence Only, Space = Play/Pause, + Pro controls)
+  // Keyboard Shortcuts (↑/[ = Prev Sentence, ↓/] = Next Sentence, ←/→ = Seek ±5s, R = Replay Sentence Only, Space = Play/Pause)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isShadowingStudioOpenRef.current) return;
       // Don't intercept when user is typing in input, textarea, or select
       const targetTag = (e.target as HTMLElement)?.tagName;
       if (["INPUT", "TEXTAREA", "SELECT"].includes(targetTag) || (e.target as HTMLElement)?.isContentEditable) {
@@ -4039,26 +4055,38 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
         }
       } else if (e.key === "j" || e.key === "J") {
         e.preventDefault();
+        lastJumpedCueRef.current = null;
         singleSentencePlaybackEndRef.current = null;
         skipSeconds(-10);
       } else if (e.key === "l" || e.key === "L") {
         e.preventDefault();
+        lastJumpedCueRef.current = null;
         singleSentencePlaybackEndRef.current = null;
         skipSeconds(10);
-      } else if (e.code === "ArrowLeft") {
+      } else if (e.code === "ArrowLeft" || e.key === "ArrowLeft") {
         e.preventDefault();
+        lastJumpedCueRef.current = null;
         singleSentencePlaybackEndRef.current = null;
         skipSeconds(-5);
-      } else if (e.code === "ArrowRight") {
+      } else if (e.code === "ArrowRight" || e.key === "ArrowRight") {
         e.preventDefault();
+        lastJumpedCueRef.current = null;
         singleSentencePlaybackEndRef.current = null;
         skipSeconds(5);
-      } else if (e.code === "ArrowUp") {
+      } else if (e.code === "ArrowUp" || e.key === "ArrowUp") {
         e.preventDefault();
-        handleVolumeChange(Math.min(1, volume + 0.05));
-      } else if (e.code === "ArrowDown") {
+        if (e.shiftKey) {
+          handleVolumeChange(Math.min(1, volume + 0.05));
+        } else {
+          jumpToPreviousSentence();
+        }
+      } else if (e.code === "ArrowDown" || e.key === "ArrowDown") {
         e.preventDefault();
-        handleVolumeChange(Math.max(0, volume - 0.05));
+        if (e.shiftKey) {
+          handleVolumeChange(Math.max(0, volume - 0.05));
+        } else {
+          jumpToNextSentence();
+        }
       } else if (/^[0-9]$/.test(e.key)) {
         e.preventDefault();
         singleSentencePlaybackEndRef.current = null;
@@ -5932,7 +5960,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           <button
                             onClick={() => jumpToPreviousSentence(true)}
                             className="h-7 w-7 sm:h-8 sm:w-8 flex items-center justify-center text-slate-300 hover:text-white active:bg-slate-700 rounded-md transition-colors cursor-pointer"
-                            title="الجملة السابقة ([)"
+                            title="الجملة السابقة (↑ / [)"
                           >
                             <SkipBack className="w-3.5 h-3.5 text-indigo-400" />
                           </button>
@@ -5965,7 +5993,7 @@ export const MediaPlayerWorkspace: React.FC<MediaPlayerWorkspaceProps> = ({
                           <button
                             onClick={() => jumpToNextSentence(true)}
                             className="h-7 w-7 sm:h-8 sm:w-8 flex items-center justify-center text-slate-300 hover:text-white active:bg-slate-700 rounded-md transition-colors cursor-pointer"
-                            title="الجملة التالية (])"
+                            title="الجملة التالية (↓ / ])"
                           >
                             <SkipForward className="w-3.5 h-3.5 text-indigo-400" />
                           </button>

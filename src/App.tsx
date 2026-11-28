@@ -9,6 +9,7 @@ import { BookReaderWorkspace } from "./components/BookReaderWorkspace";
 import { NotesWorkspace } from "./components/NotesWorkspace";
 import { ShadowingWorkspace } from "./components/ShadowingWorkspace";
 import { VerbsWorkspace } from "./components/VerbsWorkspace";
+import { WritingDuelWorkspace } from "./components/WritingDuelWorkspace";
 import {
   CreateFolderModal,
   AddCardModal,
@@ -129,8 +130,8 @@ function MainStudyApp() {
   // Mobile sidebar visibility state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Tab navigation view state: "library" | "books" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs"
-  const [viewMode, setViewMode] = useState<"library" | "books" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs">("library");
+  // Tab navigation view state: "library" | "books" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs" | "writing-duel"
+  const [viewMode, setViewMode] = useState<"library" | "books" | "ai" | "trash" | "corrector" | "media" | "notes" | "shadowing" | "verbs" | "writing-duel">("library");
   const [pendingBookMedia, setPendingBookMedia] = useState<Partial<MediaFile> | null>(null);
   const [bookReturnContext, setBookReturnContext] = useState<MediaBookContext | null>(null);
 
@@ -1132,6 +1133,11 @@ function MainStudyApp() {
     setViewMode("verbs");
   }, []);
 
+  const handleSelectWritingDuel = useCallback(() => {
+    setActiveReview(null);
+    setViewMode("writing-duel");
+  }, []);
+
   const handleDataReloaded = useCallback((newFolders: Folder[], newCards: Flashcard[]) => {
     setFolders(newFolders);
     setCards(newCards);
@@ -1478,6 +1484,7 @@ function MainStudyApp() {
           onSelectNotes={handleSelectNotes}
           onSelectShadowing={handleSelectShadowing}
           onSelectVerbs={handleSelectVerbs}
+          onSelectWritingDuel={handleSelectWritingDuel}
           onDataReloaded={handleDataReloaded}
         />
 
@@ -1517,6 +1524,11 @@ function MainStudyApp() {
           />
         ) : viewMode === "verbs" ? (
           <VerbsWorkspace
+            onToggleSidebar={handleToggleSidebar}
+            onBackToLibrary={handleHomeClick}
+          />
+        ) : viewMode === "writing-duel" ? (
+          <WritingDuelWorkspace
             onToggleSidebar={handleToggleSidebar}
             onBackToLibrary={handleHomeClick}
           />

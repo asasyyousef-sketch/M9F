@@ -237,23 +237,27 @@ function getBearerToken(req: any): string | null {
 }
 
 /**
+ * Verifies a session bearer token and returns the active UserSession or null.
+ */
+export function verifySessionToken(token: string | null | undefined): UserSession | null {
+  if (!token || typeof token !== "string") return null;
+  const trimmed = token.trim();
+  if (!trimmed || !activeSessions.has(trimmed)) return null;
+  const session = activeSessions.get(trimmed)!;
+  if (session.expiresAt > Date.now() && !suspendedUserIds.has(session.userId)) {
+    return session;
+  }
+  activeSessions.delete(trimmed);
+  persistSessions();
+  return null;
+}
+
+/**
  * Express middleware to extract and verify the session token from the Authorization header.
  */
 export function authMiddleware(req: any, _res: any, next: any) {
   const token = getBearerToken(req);
-
-  if (token && activeSessions.has(token)) {
-    const session = activeSessions.get(token)!;
-    if (session.expiresAt > Date.now() && !suspendedUserIds.has(session.userId)) {
-      req.user = session;
-      return next();
-    } else {
-      activeSessions.delete(token);
-      persistSessions();
-    }
-  }
-
-  req.user = null;
+  req.user = verifySessionToken(token);
   next();
 }
 
